@@ -50,8 +50,8 @@ final class RefusalTest extends TestCase
      */
     public function testARefusalDescribesWhatItNames(): void
     {
-        self::assertSame('tenant_tree', (new Refusal(RefusalReason::TENANT_TREE))->describe());
-        self::assertSame('record_attachment (statement shared[4])', (new Refusal(RefusalReason::RECORD_ATTACHMENT, 'shared[4]'))->describe());
+        self::assertSame('too_many_scopes', (new Refusal(RefusalReason::TOO_MANY_SCOPES))->describe());
+        self::assertSame('too_many_attachments (statement shared[4])', (new Refusal(RefusalReason::TOO_MANY_ATTACHMENTS, 'shared[4]'))->describe());
         self::assertSame('scope_removed (detail call it first)', (new Refusal(RefusalReason::SCOPE_REMOVED, null, null, null, 'call it first'))->describe());
     }
 }

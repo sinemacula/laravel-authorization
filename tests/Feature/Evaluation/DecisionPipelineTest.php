@@ -17,11 +17,8 @@ use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
-use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
-use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
-use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
@@ -412,17 +409,19 @@ final class DecisionPipelineTest extends TestCase
         $user    = StubIdentity::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
 
-        self::resourcePolicies()->attach(self::stored('record', [['effect' => 'deny', 'actions' => ['posts:view']]]), [ScopedPost::class, '1']);
+        $user->givePermission(Permission::query()->create(['name' => 'posts:view']));
 
-        try {
-            $this->pipeline()->queryAuthorizer()->compile($subject, new ScopedPost, 'posts:view');
-
-            self::fail('The record attachment was not refused.');
-        } catch (QueryScopeRefusedException $exception) {
-            self::assertSame([RefusalReason::RECORD_ATTACHMENT], $exception->reasons());
+        foreach ([1, 2] as $id) {
+            ScopedPost::query()->create(['id' => $id, 'title' => 'post']);
         }
 
-        self::assertSame(QueryAuthorizer::NO_ROW, $this->pipeline()->withPolicies([])->queryAuthorizer()->compile($subject, new ScopedPost, 'posts:view'));
+        self::resourcePolicies()->attach(self::stored('record', [['effect' => 'deny', 'actions' => ['posts:view']]]), [ScopedPost::class, '1']);
+
+        $condition = $this->pipeline()->queryAuthorizer()->compile($subject, new ScopedPost, 'posts:view');
+
+        self::assertStringContainsString('EXISTS', $condition);
+        self::assertSame([2], ScopedPost::query()->whereRaw($condition)->pluck('id')->all());
+        self::assertStringNotContainsString('EXISTS', $this->pipeline()->withPolicies([])->queryAuthorizer()->compile($subject, new ScopedPost, 'posts:view'));
     }
 
     /**

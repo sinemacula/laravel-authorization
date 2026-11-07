@@ -392,35 +392,42 @@ final class ResourcePolicyResolverTest extends TestCase
     }
 
     /**
-     * A policy attached to a record of the type naming the action is found, in
-     * any tenant and for any application, whatever its principals; one attached
-     * to the type alone, to another type's records, or naming another action is
-     * not; a type longer than the table stores has none, one as long as it
-     * stores is read, and a document that cannot be read throws.
+     * The policies attached to records of the type that hold in the current
+     * scope and name the action are read, each once, as attached to the type's
+     * records; one attached to the type alone, to another type's records, in
+     * another tenant or for another application, or naming another action is
+     * not; a type longer than the table stores has none, and a document that
+     * cannot be read throws.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testAPolicyAttachedToARecordOfTheTypeIsFound(): void
+    public function testThePoliciesAttachedToRecordsInTheScopeAreRead(): void
     {
         $service  = self::service();
         $resolver = new ResourcePolicyResolver;
         $long     = \str_repeat('p', Reference::MAX_BYTES);
+        $names    = static fn (array $policies): array => \array_map(static fn (EvaluationPolicy $policy): string => $policy->name . ' ' . $policy->resource, $policies);
 
         $service->attach(self::sharing('type'), 'posts');
         $service->attach(self::sharing('other'), ['comments', '1']);
-        $service->attach(self::sharing('edit', 'posts:edit'), ['posts', '1']);
+        $edit = self::sharing('edit', 'posts:edit');
 
-        self::assertFalse($resolver->hasRecordPolicyFor('posts', 'posts:read'));
-        self::assertTrue($resolver->hasRecordPolicyFor('posts', 'posts:edit'));
-
+        $service->attach($edit, ['posts', '1']);
+        $service->attach($edit, ['posts', '3']);
         $service->attach(self::sharing('read'), ['posts', '2'], new Reference('teams', '5'), true, 'admin');
         $service->attach(self::sharing('long'), [$long, '1']);
 
-        self::assertTrue($resolver->hasRecordPolicyFor('posts', 'posts:read'));
-        self::assertTrue($resolver->hasRecordPolicyFor($long, 'posts:read'));
-        self::assertFalse($resolver->hasRecordPolicyFor($long . 'p', 'posts:read'));
+        self::assertSame([], $resolver->recordPoliciesFor('posts', 'posts:read', 10));
+        self::assertSame(['edit posts:*'], $names($resolver->recordPoliciesFor('posts', 'posts:edit', 10)));
+        $read   = static fn (): array => $resolver->recordPoliciesFor('posts', 'posts:read', 10);
+        $inTeam = static fn (?string $application): array => TenantScope::within(new Reference('teams', '5'), $application, $read);
+
+        self::assertSame([], $inTeam(null));
+        self::assertSame(['read posts:*'], $names($inTeam('admin')));
+        self::assertCount(1, $resolver->recordPoliciesFor($long, 'posts:read', 10));
+        self::assertSame([], $resolver->recordPoliciesFor($long . 'p', 'posts:read', 10));
 
         $id = (string) Str::uuid();
 
@@ -429,18 +436,18 @@ final class ResourcePolicyResolverTest extends TestCase
 
         $this->expectException(InvalidPolicyDocumentException::class);
 
-        $resolver->hasRecordPolicyFor('comments', 'posts:edit');
+        $resolver->recordPoliciesFor('comments', 'posts:edit', 10);
     }
 
     /**
      * The attached policies are read a page at a time, on the write connection,
-     * and none after a page holding one that names the action.
+     * and none after one more than the limit has been found.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testRecordPoliciesAreReadAPageAtATimeUntilOneNamesTheAction(): void
+    public function testRecordPoliciesAreReadAPageAtATimeUpToOneOverTheLimit(): void
     {
         $service = self::service();
 
@@ -458,14 +465,14 @@ final class ResourcePolicyResolverTest extends TestCase
             $pages[] = \strtolower($query->sql);
         });
 
-        self::assertTrue((new ResourcePolicyResolver)->hasRecordPolicyFor('posts', 'posts:read'));
+        self::assertCount(4, (new ResourcePolicyResolver)->recordPoliciesFor('posts', 'posts:read', 3));
         self::assertCount(1, $pages);
         self::assertStringContainsString('limit 100', $pages[0]);
         self::assertTrue(QueryRecorder::recorded()[0]->useWritePdo);
 
         $pages->exchangeArray([]);
 
-        self::assertFalse((new ResourcePolicyResolver)->hasRecordPolicyFor('posts', 'posts:edit'));
+        self::assertSame([], (new ResourcePolicyResolver)->recordPoliciesFor('posts', 'posts:edit', 3));
         self::assertCount(2, $pages);
 
         DB::getEventDispatcher()?->forget(QueryExecuted::class);

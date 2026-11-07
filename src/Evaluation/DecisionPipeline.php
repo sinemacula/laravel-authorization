@@ -198,8 +198,10 @@ final class DecisionPipeline
     /**
      * Return the compiler that scopes a query to the records this pipeline
      * would allow (AUTHZ-10.1), with this pipeline's sources: its context
-     * factory and, unless a `withPolicies()` override replaces them, its
-     * resource policies, whose record attachments it must see.
+     * factory, its guardrails, which it reads for the tenant chain of a record
+     * admitted from outside the scope, and, unless a `withPolicies()` override
+     * replaces them, its resource policies, whose record attachments it must
+     * see.
      *
      * @return \SineMacula\Laravel\Authorization\Query\QueryAuthorizer
      *
@@ -207,7 +209,7 @@ final class DecisionPipeline
      */
     public function queryAuthorizer(): QueryAuthorizer
     {
-        return new QueryAuthorizer($this, $this->contexts, $this->policyOverride === null ? $this->resourcePolicies : null);
+        return new QueryAuthorizer($this, $this->contexts, $this->policyOverride === null ? $this->resourcePolicies : null, $this->guardrails);
     }
 
     /**

@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Query\AuthorizedQuery;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
+use SineMacula\Laravel\Authorization\Query\Reentrancy;
 use SineMacula\Laravel\Authorization\Query\Refusal;
 use Tests\Concerns\ScopesQueries;
 use Tests\Fixtures\QueryScoping\ScopedPost;
@@ -69,10 +70,10 @@ final class AuthorizedQueryTest extends TestCase
         self::assertSame([], $builder->getBindings());
 
         $refused = self::refusalOf(static fn (): AuthorizedQuery => AuthorizedQuery::compiled(new ScopedPost, 'posts:view', static function (): string {
-            throw QueryScopeRefusedException::of('posts:view', 'posts', new Refusal(RefusalReason::TENANT_TREE));
+            throw QueryScopeRefusedException::of('posts:view', 'posts', new Refusal(RefusalReason::TOO_MANY_SCOPES));
         }));
 
-        self::assertSame([RefusalReason::TENANT_TREE], $refused->reasons());
+        self::assertSame([RefusalReason::TOO_MANY_SCOPES], $refused->reasons());
     }
 
     /**
@@ -248,6 +249,32 @@ final class AuthorizedQueryTest extends TestCase
         Relation::morphMap(['post' => ScopedPost::class]);
 
         self::assertSame('post', self::refusalOf(static fn () => self::scope()->guard(ScopedPost::query()->getQuery()))->resourceType);
+    }
+
+    /**
+     * Every compile is marked as deciding a query scope, the one when the scope
+     * is made and each the grammar asks for, and the mark is gone after.
+     *
+     * @return void
+     */
+    public function testEveryCompileIsMarkedAsDeciding(): void
+    {
+        /** @var \ArrayObject<int, bool> $marks */
+        $marks   = new \ArrayObject;
+        $compile = static function () use ($marks): string {
+            $marks[] = Reentrancy::isDeciding();
+
+            return '1 = 1';
+        };
+
+        $scope   = AuthorizedQuery::compiled(new ScopedPost, 'posts:view', $compile);
+        $builder = ScopedPost::query()->withGlobalScope($scope->identifier, $scope);
+
+        $scope->holdPlaceOn($builder->getQuery());
+        $builder->toSql();
+
+        self::assertSame([true, true], $marks->getArrayCopy());
+        self::assertFalse(Reentrancy::isDeciding());
     }
 
     /**

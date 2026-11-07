@@ -141,6 +141,58 @@ final class MySqlDialectTest extends TestCase
     }
 
     /**
+     * A column compares bytes when it has no collation, `utf8mb4_0900_bin` or
+     * `binary`; a case-insensitive or padding one does not.
+     *
+     * @return void
+     */
+    public function testAnExactCollationComparesBytesWithoutPadding(): void
+    {
+        $dialect    = new MySqlDialect;
+        $connection = \Mockery::mock(Connection::class);
+
+        self::assertTrue($dialect->isExactCollation($connection, 'posts', ['collation' => null]));
+        self::assertTrue($dialect->isExactCollation($connection, 'posts', ['collation' => 'utf8mb4_0900_bin']));
+        self::assertTrue($dialect->isExactCollation($connection, 'posts', ['collation' => 'binary']));
+        self::assertFalse($dialect->isExactCollation($connection, 'posts', ['collation' => 'utf8mb4_unicode_ci']));
+        self::assertFalse($dialect->isExactCollation($connection, 'posts', ['collation' => 'utf8mb4_bin']));
+    }
+
+    /**
+     * An unsigned `BIGINT` key is not exact; every other integer type is.
+     *
+     * @return void
+     */
+    public function testAnUnsignedBigintKeyIsNotExact(): void
+    {
+        $dialect    = new MySqlDialect;
+        $connection = \Mockery::mock(Connection::class);
+
+        self::assertFalse($dialect->isExactInteger($connection, 'posts', ['type' => 'bigint unsigned']));
+        self::assertTrue($dialect->isExactInteger($connection, 'posts', ['type' => 'bigint']));
+        self::assertTrue($dialect->isExactInteger($connection, 'posts', ['type' => 'int unsigned']));
+        self::assertTrue($dialect->isExactInteger($connection, 'posts', []));
+    }
+
+    /**
+     * Text images, byte literals, a prefix and an attached key's text, the last
+     * under the attachment column's own utf8mb4 collation.
+     *
+     * @return void
+     */
+    public function testTheTextFragments(): void
+    {
+        $dialect = new MySqlDialect;
+
+        self::assertSame('CAST(CAST(k AS CHAR CHARACTER SET utf8mb4) AS BINARY)', $dialect->textImage('k'));
+        self::assertSame('X\'6162\'', $dialect->bytes('ab'));
+        self::assertSame('LEFT(CAST(k AS BINARY), 2) = X\'6162\'', $dialect->startsWith('k', 'ab'));
+        self::assertSame('a = CAST(k AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci', $dialect->equalsKeyText('a', 'k', ['collation' => 'utf8mb4_unicode_ci'], false));
+        self::assertNull($dialect->equalsKeyText('a', 'k', ['collation' => 'latin1_swedish_ci'], true));
+        self::assertNull($dialect->equalsKeyText('a', 'k', ['collation' => 'utf8mb4_x; drop'], true));
+    }
+
+    /**
      * Return a connection reporting the character sets.
      *
      * @param  array<string, string|null>  $sets

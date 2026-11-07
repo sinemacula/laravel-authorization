@@ -7,48 +7,50 @@ namespace SineMacula\Laravel\Authorization\Query;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
-use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\InterpolationScope;
-use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
-use SineMacula\Laravel\Authorization\Evaluation\StatementEntries;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Evaluation\StatementValidator;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Subject;
 
 /**
- * Tells whether the statements one class of rows is decided from can be
- * compiled, before the pipeline weighs them (AUTHZ-10.2, N65, N68).
+ * Compiles the statements one class of rows is decided from, before they are
+ * weighed (AUTHZ-10.2, N65): for each statement a check would weigh, the
+ * condition a row meets when the statement matches it, which an allow needs,
+ * and when it applies to it, which a deny needs.
  *
- * A statement is material when a check would weigh it: it names the action,
- * and, for an allow (a guardrail's or a boundary's included), it applies to the
- * subject, as the policy evaluator tells (`PolicyEvaluator::isForSubject()`).
- * The scope compiles a query only when every material statement decides every
- * row of the class alike, so the decision the pipeline makes for the whole type
- * is the decision `check()` makes for each row. A material statement is
- * refused, with no pruning, when:
+ * A statement is weighed when it names the action, and, for an allow (a
+ * guardrail's or a boundary's included), it applies to the subject, as the
+ * policy evaluator tells (`PolicyEvaluator::isForSubject()`); the caller asks
+ * only about those. Its outcome on a row is its target's on the row's
+ * identifier joined with its conditions', as `Statement::assess()` joins them:
+ * the conditions are assessed once, through `Statement::assess()` itself on the
+ * statement without its resources, since they never read the row; the target is
+ * compiled from its resource patterns, each resolved as `check()` resolves it
+ * and compiled to a condition on the row's key (see `ResourcePatterns` and
+ * `KeyConditions`). A pattern whose reference cannot be resolved, or resolves
+ * to a NUL byte, makes the target undecidable unless another covers the row, as
+ * `check()` finds it.
+ *
+ * A statement is refused, with no pruning, when:
  *
  * - it reads the `resource` namespace, in a condition, an operand or a pattern
  *   (`resource_namespace`);
  * - it reads a namespace whose source is not marked `ScopeInvariant`, or states
  *   an authentication requirement the bound checker, not so marked, would judge
  *   (`scope_variant_source`);
- * - a resource pattern, resolved as `check()` resolves it, does not cover every
- *   record of the type (`resource_pattern`, see `ResourcePatterns`);
- * - it cannot be evaluated (`invalid_statement`).
+ * - a resource pattern cannot be compared with a key (`resource_pattern`), or
+ *   the key cannot be compared with it (`column_type`, `column_collation`);
+ * - it cannot be evaluated, and its target names any row (`invalid_statement`).
  *
- * A pattern whose reference cannot be resolved, or resolves to a NUL byte,
- * decides every row alike, as `check()` finds it undecidable for each. The
- * screen also tells whether a material statement has a pattern that resolves,
- * which `fnmatch()` matches against each row's identifier, so the scope can
- * leave out the rows whose identifier it would refuse as too long.
+ * The screen also tells whether a statement has a pattern that resolves, which
+ * `fnmatch()` matches against each row's identifier, so the scope can leave out
+ * the rows whose identifier it would refuse as too long.
  *
  * Every refusal is kept, once, across every class, so they are thrown together.
- *
- * @phpstan-import-type StatementEntry from \SineMacula\Laravel\Authorization\Evaluation\StatementEntries
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,9 +62,6 @@ final class StatementScreen
     /** @var array<string, \SineMacula\Laravel\Authorization\Query\Refusal> Every refusal found, once each. */
     private array $refusals = [];
 
-    /** @var \SineMacula\Laravel\Authorization\Evaluation\StatementEntries Each policy's statements, worked out once. */
-    private readonly StatementEntries $entries;
-
     /** @var \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator Resolves the patterns as `check()` does. */
     private readonly ContextInterpolator $interpolator;
 
@@ -70,7 +69,7 @@ final class StatementScreen
      * Create a new statement screen.
      *
      * @param  string  $action
-     * @param  string  $type
+     * @param  \SineMacula\Laravel\Authorization\Query\ResourceShape  $shape
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  \SineMacula\Laravel\Authorization\Context\CheckContextFactory|null  $contexts
      */
@@ -79,8 +78,8 @@ final class StatementScreen
         /** The action the query is scoped to. */
         private readonly string $action,
 
-        /** The morph type of the model queried. */
-        private readonly string $type,
+        /** The model queried. */
+        private readonly ResourceShape $shape,
 
         /** The subject the query is scoped for. */
         private readonly Subject $subject,
@@ -88,29 +87,51 @@ final class StatementScreen
         /** Makes each check's context, and says which of its namespaces depend on the request alone; null for none. */
         private readonly ?CheckContextFactory $contexts = null,
     ) {
-        $this->entries      = new StatementEntries;
         $this->interpolator = new ContextInterpolator;
     }
 
     /**
-     * Screen every material statement of the sources, keeping a refusal for
-     * each that cannot be compiled, and return those with a resource pattern
-     * that resolves, which `fnmatch()` matches against each row's identifier.
+     * Return the condition a row meets when the statement, one a check would
+     * weigh, matches it, the condition it meets when the statement applies to
+     * it (matches it or cannot be decided on it), and whether the statement has
+     * a resource pattern that resolves. A statement that is refused, and one
+     * that never bears on a row, matches and applies to none.
      *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckSources  $sources
-     * @param  string  $identifier
-     * @return list<\SineMacula\Laravel\Authorization\Evaluation\StatementReference>
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\StatementReference  $reference
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @return array{string, string, bool}
      */
-    public function screen(CheckSources $sources, string $identifier): array
+    public function terms(StatementReference $reference, Statement $statement, CheckContext $context): array
     {
-        $patterned = [];
+        $refusal = $this->readRefusalOf($reference, $statement);
 
-        foreach ($this->materialOf($sources) as [$reference, $statement]) {
-            $resolved  = $this->screenStatement($reference, $statement, $sources->context, $identifier);
-            $patterned = $resolved === [] ? $patterned : [...$patterned, $reference];
+        if ($refusal !== null) {
+            $this->refuse($refusal);
+
+            return [QueryAuthorizer::NO_ROW, QueryAuthorizer::NO_ROW, false];
         }
 
-        return $patterned;
+        $patterns = $statement->notResources ?? $statement->resources;
+        $resolved = $this->resolvedPatternsOf($patterns ?? [], new InterpolationScope($this->interpolator, null, $context));
+        $targets  = $this->targetsOf($reference, $resolved);
+
+        if ($targets === null) {
+            return [QueryAuthorizer::NO_ROW, QueryAuthorizer::NO_ROW, $resolved !== []];
+        }
+
+        $isUnresolved = \count($resolved) < \count($patterns ?? []);
+        $outcome      = self::isNamingAny($statement, $targets, $isUnresolved) ? $this->conditionsOf($statement, $context) : MatchOutcome::DOES_NOT_MATCH;
+
+        if ($outcome === MatchOutcome::INVALID) {
+            $this->refuse(Refusal::ofStatement(RefusalReason::INVALID_STATEMENT, $reference));
+        }
+
+        $terms = $outcome === MatchOutcome::DOES_NOT_MATCH || $outcome === MatchOutcome::INVALID
+            ? [QueryAuthorizer::NO_ROW, QueryAuthorizer::NO_ROW]
+            : $this->targetTerms($reference, $statement, $targets, $isUnresolved, $outcome);
+
+        return [...$terms, $resolved !== []];
     }
 
     /**
@@ -135,78 +156,126 @@ final class StatementScreen
     }
 
     /**
-     * Return every statement of the sources a check would weigh: each deny that
-     * names the action, and each allow, a guardrail's and a boundary's
-     * included, that names it and applies to the subject.
+     * Return which records each resolved pattern names, or null, keeping a
+     * refusal, when one cannot be compared with a key.
      *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckSources  $sources
-     * @return list<StatementEntry>
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\StatementReference  $reference
+     * @param  list<string>  $resolved
+     * @return list<\SineMacula\Laravel\Authorization\Query\KeyTarget>|null
      */
-    private function materialOf(CheckSources $sources): array
+    private function targetsOf(StatementReference $reference, array $resolved): ?array
     {
-        $gathered = $this->entries->of($sources->policies, $sources->boundaries, $sources->guardrails);
-        $allows   = [$gathered['allow']];
+        $targets = \array_map(fn (string $pattern): ?KeyTarget => ResourcePatterns::targetOf($pattern, $this->shape->type), $resolved);
 
-        foreach ([...$gathered['guardrails'] ?? [], ...$gathered['boundaries']] as [$entries]) {
-            $allows[] = $entries;
+        if (\in_array(null, $targets, true)) {
+            $this->refuse(Refusal::ofStatement(RefusalReason::RESOURCE_PATTERN, $reference));
+
+            return null;
         }
 
-        $isDenying = fn (array $entry): bool => $entry[1]->coversAction($this->action);
-        $isWeighed = fn (array $entry): bool => $entry[1]->coversAction($this->action) && PolicyEvaluator::isForSubject($entry[0], $entry[1], $sources->context);
-
-        return [...\array_values(\array_filter($gathered['deny'], $isDenying)), ...\array_values(\array_filter(\array_merge(...$allows), $isWeighed))];
+        /** @var list<\SineMacula\Laravel\Authorization\Query\KeyTarget> */
+        return $targets;
     }
 
     /**
-     * Screen one material statement, keeping a refusal when it cannot be
-     * compiled, and return its resource patterns that resolve. Its patterns are
-     * resolved only once nothing it reads is refused, so a refused namespace is
-     * never built.
+     * Determine whether the statement's target can name any row, so `check()`
+     * would go on to its conditions: one without resources names every row;
+     * `resources` name a row when a pattern names any or cannot be resolved;
+     * `not_resources` name the rows none of them covers, which is none only
+     * when one names every row.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @param  list<\SineMacula\Laravel\Authorization\Query\KeyTarget>  $targets
+     * @param  bool  $isUnresolved
+     * @return bool
+     */
+    private static function isNamingAny(Statement $statement, array $targets, bool $isUnresolved): bool
+    {
+        $isEvery = \array_filter($targets, static fn (KeyTarget $target): bool => $target->isAll())   !== [];
+        $isSome  = \array_filter($targets, static fn (KeyTarget $target): bool => !$target->isNone()) !== [];
+
+        return match (true) {
+            $statement->notResources !== null => !$isEvery,
+            $statement->resources    !== null => $isSome || $isUnresolved,
+            default                           => true,
+        };
+    }
+
+    /**
+     * Return how the statement's conditions bear on every row, assessed once by
+     * `Statement::assess()` on the statement without its resources, which the
+     * conditions never read.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome
+     */
+    private function conditionsOf(Statement $statement, CheckContext $context): MatchOutcome
+    {
+        $unbounded = new Statement($statement->effect, $statement->actions, null, $statement->conditions, $statement->sid, $statement->notActions, null, $statement->principals);
+
+        return $unbounded->assess($this->action, null, $context, $this->interpolator)->outcome;
+    }
+
+    /**
+     * Return the condition a row meets when the statement matches it and when
+     * it applies to it, from what its patterns name and whether one could not
+     * be resolved, its conditions holding or undecidable on every row; a
+     * statement whose target holds on a row takes its conditions' outcome
+     * there, and one whose target is undecidable on it is undecidable.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\StatementReference  $reference
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
-     * @param  string  $identifier
-     * @return list<string>
+     * @param  list<\SineMacula\Laravel\Authorization\Query\KeyTarget>  $targets
+     * @param  bool  $isUnresolved
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome  $outcome
+     * @return array{string, string}
      */
-    private function screenStatement(StatementReference $reference, Statement $statement, CheckContext $context, string $identifier): array
+    private function targetTerms(StatementReference $reference, Statement $statement, array $targets, bool $isUnresolved, MatchOutcome $outcome): array
     {
-        $refusal = $this->readRefusalOf($reference, $statement);
+        $covered = Conditions::any(\array_map(fn (KeyTarget $target): string => $this->keyCondition($reference, $target), $targets));
+        $unknown = $isUnresolved ? QueryAuthorizer::EVERY_ROW : QueryAuthorizer::NO_ROW;
 
-        if ($refusal !== null) {
-            $this->refuse($refusal);
-
-            return [];
-        }
-
-        $resolved = $this->resolvedPatternsOf($statement, new InterpolationScope($this->interpolator, $identifier, $context));
-        $isWhole  = \array_filter($resolved, fn (string $pattern): bool => !ResourcePatterns::coversEveryRecord($pattern, $this->type)) === [];
-        $outcome  = $isWhole ? $statement->assess($this->action, $identifier, $context, $this->interpolator)->outcome : null;
-        $reason   = match ($outcome) {
-            null                  => RefusalReason::RESOURCE_PATTERN,
-            MatchOutcome::INVALID => RefusalReason::INVALID_STATEMENT,
-            default               => null,
+        [$matches, $applies] = match (true) {
+            $statement->notResources !== null => [Conditions::all([Conditions::not($covered), Conditions::not($unknown)]), Conditions::not($covered)],
+            $statement->resources    !== null => [$covered, Conditions::any([$covered, $unknown])],
+            default                           => [QueryAuthorizer::EVERY_ROW, QueryAuthorizer::EVERY_ROW],
         };
 
-        if ($reason !== null) {
-            $this->refuse(Refusal::ofStatement($reason, $reference));
-        }
-
-        return $resolved;
+        return [$outcome === MatchOutcome::MATCHES ? $matches : QueryAuthorizer::NO_ROW, $applies];
     }
 
     /**
-     * Return the statement's resource patterns, resolved as `check()` resolves
-     * them, leaving out each whose reference cannot be resolved or resolves to
-     * a NUL byte, which never reaches `fnmatch()`.
+     * Return the condition a row's key meets when the target names its record,
+     * keeping a refusal when the key cannot be compared with it.
      *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\StatementReference  $reference
+     * @param  \SineMacula\Laravel\Authorization\Query\KeyTarget  $target
+     * @return string
+     */
+    private function keyCondition(StatementReference $reference, KeyTarget $target): string
+    {
+        [$condition, $reason] = KeyConditions::of($this->shape, $target);
+
+        if ($reason !== null) {
+            $this->refuse($reason === RefusalReason::RESOURCE_PATTERN ? Refusal::ofStatement($reason, $reference) : new Refusal($reason, null, null, $this->shape->keyName));
+        }
+
+        return $condition;
+    }
+
+    /**
+     * Return the resource patterns, resolved as `check()` resolves them,
+     * leaving out each whose reference cannot be resolved or resolves to a NUL
+     * byte, which never reaches `fnmatch()`.
+     *
+     * @param  array<int, string>  $patterns
      * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
      * @return list<string>
      */
-    private function resolvedPatternsOf(Statement $statement, InterpolationScope $scope): array
+    private function resolvedPatternsOf(array $patterns, InterpolationScope $scope): array
     {
-        $resolved = \array_map(static fn (string $pattern): ?string => $scope->pattern($pattern), $statement->notResources ?? $statement->resources ?? []);
+        $resolved = \array_map(static fn (string $pattern): ?string => $scope->pattern($pattern), $patterns);
 
         return \array_values(\array_filter($resolved, static fn (?string $pattern): bool => $pattern !== null && !\str_contains($pattern, "\0")));
     }

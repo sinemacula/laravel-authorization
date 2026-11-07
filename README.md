@@ -102,8 +102,8 @@ must each allow the check, then an explicit allow or a permission held allows it
 - **Query scoping**: `whereAuthorized()` restricts an Eloquent query to exactly the rows `check()` would allow, by
   adding one condition the database evaluates, compiled again every time the query runs, so pagination, counts and
   chunks stay correct; a query it cannot scope exactly is refused with a dedicated exception, never filtered after
-  loading. This release compiles policies over a whole type, for tenantless models and, under the flat tenant tree,
-  the rows of no tenant and of the active one.
+  loading. It compiles literal ids and key prefixes, tenant subtrees under any tenant tree, platform-wide grants and
+  policies attached to records, and a model-level `AuthorizedScope` applies it to every query of a model.
 - **A programmatic API**: `can`, `cannot`, `authorize`, `check`, `any`, `all` and `explain`, through the
   `Authorization` facade or an injected `AuthorizationManager`, about the current subject or one named with `for()` or
   `forUser()`, and a trait through which a Laravel policy class decides the abilities the Gate hook leaves to it.
@@ -430,7 +430,9 @@ created (`OwnerChangedException`): to move one, create it in the new tenant and 
 
 Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class
 implementing `SineMacula\Laravel\Authorization\Contracts\TenantTree` as `tenant_tree` in `config/authorization.php`,
-answering a tenant's ancestors, whether one tenant is within another, and a tenant's subtree as a query. The default is
+answering a tenant's ancestors, whether one tenant is within another, and a tenant's subtree as a query. The subtree
+query selects exactly the `tenant_type` and `tenant_id` of every tenant within, whatever the tenant scope, and
+[query scoping](#query-scoping) nests it whole, so it runs on the connection of the models it scopes. The default is
 a flat set of tenants. With a tree, a grant in a tenant also applies in every tenant below it, unless it is limited to
 that tenant, and a tenant sees the roles, permissions and policies its ancestors own as well as its own and the
 platform's; the nearest owner's wins a lookup by name. Granting again with the other reach changes it, reported as
@@ -1892,31 +1894,62 @@ changes them once a record is loaded. The scope refuses every breach it can dete
 
 #### What compiles
 
-This release compiles statements over the whole type, so no record's key is ever compared:
+The scope compiles every statement it can compare with each row's key in SQL exactly as `check()` matches it:
 
 - the actions and `not_actions` of every statement;
-- resources absent, or `resources` and `not_resources` whose every pattern, resolved as `check()` resolves it, is `*`,
-  `T:*` (`T` being the model's morph type) or a literal prefix of `T:` and then `*`, so it covers every record of the
-  type;
+- resources absent, or `resources` and `not_resources` whose patterns, resolved as `check()` resolves them, are `*`,
+  a literal, or a literal and then `*`: a literal naming a record of the type (`T:5`, `T:abc`, `T` being the model's
+  morph type) compares the key, a literal and then `*` longer than `T:` (`T:ab*`) compares the start of the key's
+  text byte for byte, and any other names every record of the type or none. A key that is `*` or ends in `:*` is
+  matched on the whole identifier, as `check()` matches it, so `T:${input.k}` with a `*` substituted names no record;
+- an integer key equals only an integer's canonical decimal text within 64 bits (`-0`, `+1`, `01` and `1.0` name no
+  record), a uuid key on PostgreSQL only a uuid's canonical lower-case text, and a string key a value byte for byte;
 - conditions on `input`, on the subject's namespace, built-in keys included, when the subject's type has no attribute
   provider or one marked `ScopeInvariant`, and on the namespaces of sources marked `ScopeInvariant`, the package's
   defaults included, and authentication requirements a checker so marked judges;
 - the permissions held, the subject's and its identity's policies, its roles' policies, permission boundaries,
   guardrails (except for `authorization:guardrails:manage`), session caps and the policies attached to the model's
-  type, whose allows apply to the subjects their `principals` name, by reference or by role, and whose denies apply to
-  everyone;
-- tenantless models, and tenant-bearing models under the flat tenant tree when the subject holds no platform-wide grant
-  of the action: the rows of no tenant are decided in the request's scope, the rows of the active tenant in its own,
-  and the rows of any other tenant, which `check()` denies as `tenant_scope`, are left out;
-- rows whose key cannot identify a record (null, empty or holding a NUL byte), rows of no tenant whose tenant columns
-  hold something other than a string, an integer or null (a real number SQLite keeps in an integer column), and, when
-  a statement matches a pattern against the identifier, rows whose identifier is too long for `fnmatch()`, are left
-  out, as `check()` denies or throws on them.
+  type or to its records, whose allows apply to the subjects their `principals` name, by reference or by role, and
+  whose denies apply to everyone; a policy attached to a record weighs on that record alone, compared in SQL under
+  the attachment column's own collation, and a `withPolicies()` override reads no attachment;
+- tenantless models, and tenant-bearing models under any tenant tree: the rows of no tenant are decided in the
+  request's scope; the rows within the active tenant's subtree in their own tenant's scope, every grant there, above
+  them reaching below, or platform-wide counting; and, when the subject holds the action through a platform-wide
+  grant for the request's application, every other tenant's rows at platform scope, each still capped by its own
+  tenant chain's guardrails and denied by the denies attached in its tenant chain. Without that grant `check()` denies
+  those rows as `tenant_scope`, and they are left out;
+- rows whose key cannot identify a record (null, empty or holding a NUL byte), rows whose tenant columns hold something
+  other than a string, an integer or null (a real number SQLite keeps in an integer column) or a part over 191 bytes,
+  and, when a statement matches a pattern against the identifier, rows whose identifier is too long for `fnmatch()`,
+  are left out, as `check()` denies or throws on them.
 
-A statement gathered for the type is refused only when a check would weigh it: it names the action and, for an allow,
-applies to the subject. A policy attached to a record of the type refuses as soon as it names the action, whatever its
-principals, and a document that cannot be read always refuses. Everything else that could change a decision refuses,
-with no pruning:
+A tree other than the flat one is read through `TenantTree::subtree()`, nested in the condition whole, so it must run
+on the model's connection; its contract is that `subtree(T)` selects exactly the string forms (`tenant_type`,
+`tenant_id`) of every tenant within `T`, whatever the tenant scope. The rows are split into classes at the tenants the
+decision's sources sit at: the subject's grants, policies and boundaries, its roles', the guardrails and the type's
+attached policies. Each class is decided once, every time the query runs, so the number of tenants and classes is
+bounded:
+
+```php
+// config/authorization.php
+'query_scoping' => [
+    'max_anchors'     => 64, // tenants the sources may sit at, over which `too_many_scopes`
+    'max_scopes'      => 16, // classes one query is decided in, over which `too_many_scopes`
+    'max_attachments' => 64, // policies one class reads attached to records, over which `too_many_attachments`
+],
+```
+
+The comparisons are exact only where the database compares bytes as PHP does. When the rows are cut below a tenant
+or admitted from outside the active tenant's subtree, the tenant columns of every authorization table must compare
+bytes: no collation or `BINARY` on SQLite, a deterministic collation on PostgreSQL, and `utf8mb4_0900_bin` or `binary`
+on MySQL, as the package's migrations create them. A string key compared with a value must compare bytes the same
+way. An integer key compared with a value must hold only integers PHP reads as they are: on SQLite it must be the
+table's rowid (`INTEGER PRIMARY KEY`), and on MySQL it must not be an unsigned `BIGINT`. The column of an attached
+record's key must compare bytes on SQLite and PostgreSQL; on MySQL its own utf8mb4 collation is followed.
+
+A statement gathered for the type is refused only when a check would weigh it: it names the action, its target can
+name a row and, for an allow, it applies to the subject. A document that cannot be read always refuses. Everything
+else that could change a decision refuses, with no pruning:
 
 | Reason                                                   | Refused                                                                                                                                              |
 |----------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1925,16 +1958,41 @@ with no pruning:
 | `model_override`                                         | An override of `getMorphClass`, `newFromBuilder`, `getKey`, `getKeyName`, `getAttribute`, `getAttributes`, `getAttributeValue` or `setRawAttributes` |
 | `model_listener`                                         | A `retrieved` listener or observer, or a model dispatching its own event when retrieved                                                              |
 | `column_accessor`, `column_cast`                         | An accessor, or a cast other than the key's own kind, on the key or a tenant column                                                                  |
-| `column_type`                                            | A key or tenant column missing, or of a type that cannot be compared exactly                                                                         |
+| `column_type`                                            | A key or tenant column missing, or of a type that cannot be compared exactly; an integer key PHP may read otherwise, once it is compared             |
+| `column_collation`                                       | A string key compared under a collation that is not exact, or an authorization table's tenant column so, once rows are cut below or admitted         |
 | `connection_charset`, `driver`                           | A connection that is not UTF-8, or not SQLite, PostgreSQL or MySQL                                                                                   |
 | `tenant_resolver`                                        | A resource tenant resolver bound in place of the package's                                                                                           |
-| `tenant_tree`, `platform_admission`                      | A tenant tree that is not flat, or a platform-wide grant of the action, for a tenant-bearing model                                                   |
-| `resource_pattern`                                       | Any other pattern: a record's id, another type's pattern, `T:\*`, `T:4*`, `?`, `[`                                                                   |
+| `subtree_connection`                                     | A tenant tree whose subtree query runs on another connection than the model's                                                                        |
+| `attachment_connection`, `attachment_collation`          | Policies attached to records kept on another connection, or whose key column cannot be compared with the key, once one is attached                   |
+| `too_many_scopes`, `too_many_attachments`                | More tenants, classes or record attachments than `authorization.query_scoping` allows                                                                |
+| `resource_pattern`                                       | A pattern with `?` or `[`, more than one `*` or one before its end, or an integer id beyond 64 bits                                                  |
 | `resource_namespace`, `scope_variant_source`             | A statement reading the resource, or a source not marked `ScopeInvariant`                                                                            |
-| `record_attachment`                                      | A policy attached to a record of the type that names the action, whatever its principals (unless `withPolicies()` replaces them)                     |
 | `invalid_statement`, `invalid_policy`                    | A statement that cannot be evaluated, or a document that cannot be read                                                                              |
 | `query_union`, `query_from`, `query_or`, `query_changed` | A query that would escape the condition                                                                                                              |
 | `scope_removed`                                          | A scope removed after the call, or never applied: called inside a `where` group or a relation's definition, or run past its scopes                   |
+| `reentrant`                                              | The model-level scope on the subject's model, or on a model the decision reads                                                                       |
+
+#### The model-level scope
+
+`AuthorizedScope` keeps every query of a model to the rows the current subject may take an action on, added in the
+model's `booted()`:
+
+```php
+use SineMacula\Laravel\Authorization\Scopes\AuthorizedScope;
+
+protected static function booted(): void
+{
+    static::addGlobalScope(new AuthorizedScope('posts:view'));
+}
+```
+
+It shares `whereAuthorized()`'s compiler and behaves as it does: it is compiled every time a query of the model runs,
+for the subject `check()` would decide about then, with no decision cached; a refusal throws from the call that runs
+the query; and its condition is grouped and guarded the same way. `withoutGlobalScope(AuthorizedScope::class)` opts a
+query out, and it then runs unscoped with no refusal, since that is the application's explicit choice; removing a
+`whereAuthorized()` scope, by contrast, refuses as `scope_removed`. It must never be on the subject's own model, nor on
+a model the decision reads while deciding (the grants, roles, policies and tenants): such a query refuses as
+`reentrant` rather than recurse.
 
 #### The exception
 

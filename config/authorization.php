@@ -237,6 +237,34 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Query scoping
+    |---------------------------------------------------------------------------
+    |
+    | `whereAuthorized()` and the model-level `AuthorizedScope` keep a query to
+    | the rows `check()` allows, splitting the rows into classes that are each
+    | decided once, every time the query runs. These limits bound that work,
+    | and a query over any of them is refused rather than slowed down.
+    |
+    | `max_anchors` is the most tenants the subject's grants, policies and
+    | boundaries, the guardrails and the type's attached policies may sit at
+    | when the rows are cut by tenant (a tenant tree with subtrees, or rows a
+    | platform-wide grant admits from other tenants); over it, the query is
+    | refused as `too_many_scopes`. `max_scopes` is the most classes of rows
+    | one query may be decided in; over it, `too_many_scopes` too.
+    | `max_attachments` is the most policies attached to records of the type
+    | that one class reads; over it, `too_many_attachments`. Each is a whole
+    | number of at least 1.
+    |
+    */
+
+    'query_scoping' => [
+        'max_anchors'     => (int) env('AUTHORIZATION_QUERY_SCOPING_MAX_ANCHORS', 64),
+        'max_scopes'      => (int) env('AUTHORIZATION_QUERY_SCOPING_MAX_SCOPES', 16),
+        'max_attachments' => (int) env('AUTHORIZATION_QUERY_SCOPING_MAX_ATTACHMENTS', 64),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
     | Context
     |---------------------------------------------------------------------------
     |

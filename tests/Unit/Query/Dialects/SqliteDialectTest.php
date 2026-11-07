@@ -125,6 +125,62 @@ final class SqliteDialectTest extends TestCase
     }
 
     /**
+     * A column compares bytes when it declares no collation or `BINARY`.
+     *
+     * @return void
+     */
+    public function testAnExactCollationIsNoneOrBinary(): void
+    {
+        $dialect    = new SqliteDialect;
+        $connection = \Mockery::mock(Connection::class);
+
+        self::assertTrue($dialect->isExactCollation($connection, 'posts', ['collation' => null]));
+        self::assertTrue($dialect->isExactCollation($connection, 'posts', ['collation' => 'BINARY']));
+        self::assertFalse($dialect->isExactCollation($connection, 'posts', ['collation' => 'nocase']));
+        self::assertFalse($dialect->isExactCollation($connection, 'posts', ['collation' => 'rtrim']));
+    }
+
+    /**
+     * An integer key is exact only as the rowid of a table that has one.
+     *
+     * @return void
+     */
+    public function testAnExactIntegerKeyIsTheRowid(): void
+    {
+        $dialect = new SqliteDialect;
+        $table   = static function (string $sql): Connection {
+            $connection = \Mockery::mock(Connection::class);
+
+            $connection->shouldReceive('getTablePrefix')->andReturn('app_');
+            $connection->shouldReceive('selectOne')->with('select sql from sqlite_master where type = \'table\' and name = ?', ['app_posts'])->andReturn((object) ['sql' => $sql]);
+
+            return $connection;
+        };
+
+        self::assertTrue($dialect->isExactInteger($table('create table posts (id integer primary key)'), 'posts', ['auto_increment' => true]));
+        self::assertFalse($dialect->isExactInteger($table('create table posts (id integer primary key) without rowid'), 'posts', ['auto_increment' => true]));
+        self::assertFalse($dialect->isExactInteger(\Mockery::mock(Connection::class), 'posts', ['auto_increment' => false]));
+    }
+
+    /**
+     * Text images, byte literals, a prefix and an attached key's text are
+     * compared through blobs and `BINARY`.
+     *
+     * @return void
+     */
+    public function testTheTextFragments(): void
+    {
+        $dialect = new SqliteDialect;
+
+        self::assertSame('CAST(k AS BLOB)', $dialect->textImage('k'));
+        self::assertSame('X\'6162\'', $dialect->bytes('ab'));
+        self::assertSame('X\'\'', $dialect->bytes(''));
+        self::assertSame('substr(CAST(k AS BLOB), 1, 2) = X\'6162\'', $dialect->startsWith('k', 'ab'));
+        self::assertSame('a = CAST(k AS TEXT) COLLATE BINARY', $dialect->equalsKeyText('a', 'k', [], true));
+        self::assertNull($dialect->equalsKeyText('a', 'k', [], false));
+    }
+
+    /**
      * Return a connection whose one row is the given.
      *
      * @param  array<string, string>  $row

@@ -18,6 +18,8 @@ use SineMacula\Laravel\Authorization\Query\ResourceShape;
 use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Support\ResourceTenancy;
 use Tests\Fixtures\QueryScoping\AbstractQueryablePost;
+use Tests\Fixtures\QueryScoping\FoldedDocument;
+use Tests\Fixtures\QueryScoping\LooseKeyedPost;
 use Tests\Fixtures\QueryScoping\ScopedDocument;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\Fixtures\QueryScoping\ScopedTicket;
@@ -266,6 +268,29 @@ final class ResourceShapeTest extends TestCase
         Relation::morphMap([\str_repeat('m', \PHP_MAXPATHLEN - 66) => ScopedPost::class], false);
 
         self::assertSame(\PHP_MAXPATHLEN - 66, \strlen(self::shapeOf(new ScopedPost)->type));
+    }
+
+    /**
+     * The shape says whether its key can be compared with a value: a rowid or
+     * any PostgreSQL integer can, a loose integer key cannot (`column_type`); a
+     * string key under a collation that folds case is told apart; and the
+     * connection and the key's bare name are kept.
+     *
+     * @return void
+     */
+    public function testTheShapeTellsWhetherItsKeyCanBeCompared(): void
+    {
+        $inspector = new SchemaInspector;
+        $post      = ResourceShape::of(new ScopedPost, 'posts:view', $inspector);
+        $loose     = ResourceShape::of(new LooseKeyedPost, 'posts:view', $inspector);
+        $folded    = ResourceShape::of(new FoldedDocument, 'posts:view', $inspector);
+        $document  = ResourceShape::of(new ScopedDocument, 'posts:view', $inspector);
+
+        self::assertSame([null, true, 'id'], [$post->keyRefusal, $post->isKeyCollationExact, $post->keyName]);
+        self::assertSame(DB::connection()->getDriverName() === 'pgsql' ? null : RefusalReason::COLUMN_TYPE, $loose->keyRefusal);
+        self::assertSame([null, false, 'code'], [$folded->keyRefusal, $folded->isKeyCollationExact, $folded->keyName]);
+        self::assertTrue($document->isKeyCollationExact);
+        self::assertSame(DB::connection()->getName(), $post->connection?->getName());
     }
 
     /**

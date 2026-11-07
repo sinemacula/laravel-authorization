@@ -193,4 +193,100 @@ final readonly class PostgresDialect implements Dialect
             default                                                           => QueryAuthorizer::NO_ROW,
         };
     }
+
+    /**
+     * Determine whether the column compares byte for byte: it has no collation,
+     * or a deterministic one, under which only equal bytes are equal.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $table
+     * @param  array<string, mixed>  $column
+     * @return bool
+     */
+    #[\Override]
+    public function isExactCollation(Connection $connection, string $table, array $column): bool
+    {
+        $name     = \is_string($column['name'] ?? null) ? $column['name'] : '';
+        $quoted   = static fn (string $part): string => '"' . \str_replace('"', '""', $part) . '"';
+        $relation = \implode('.', \array_map($quoted, \explode('.', $connection->getTablePrefix() . $table)));
+        $row      = $connection->selectOne(
+            'select c.collisdeterministic as exact from pg_catalog.pg_attribute a join pg_catalog.pg_collation c on c.oid = a.attcollation'
+            . ' where a.attrelid = to_regclass(CAST(? AS text)) and a.attname = ? and a.attnum > 0',
+            [$relation, $name],
+        );
+
+        return $row === null || (bool) ((array) $row)['exact'];
+    }
+
+    /**
+     * Determine whether an integer key column holds only integers PHP reads as
+     * they are, which every PostgreSQL integer type does.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $table
+     * @param  array<string, mixed>  $column
+     * @return bool
+     */
+    #[\Override]
+    public function isExactInteger(Connection $connection, string $table, array $column): bool
+    {
+        return true;
+    }
+
+    /**
+     * Return the UTF-8 bytes of the expression's text: an integer's decimal
+     * digits, a uuid's canonical lower-case form, and text as it is.
+     *
+     * @param  string  $expression
+     * @return string
+     */
+    #[\Override]
+    public function textImage(string $expression): string
+    {
+        return "convert_to(CAST({$expression} AS TEXT), 'UTF8')";
+    }
+
+    /**
+     * Return a `bytea` of the value's bytes.
+     *
+     * @param  string  $value
+     * @return string
+     */
+    #[\Override]
+    public function bytes(string $value): string
+    {
+        return 'decode(\'' . \bin2hex($value) . '\', \'hex\')';
+    }
+
+    /**
+     * Return the condition a row's column meets when the UTF-8 bytes of its
+     * text start with the value's.
+     *
+     * @param  string  $column
+     * @param  string  $value
+     * @return string
+     */
+    #[\Override]
+    public function startsWith(string $column, string $value): string
+    {
+        return 'substring(' . $this->textImage($column) . ' from 1 for ' . \strlen($value) . ') = ' . $this->bytes($value);
+    }
+
+    /**
+     * Return the condition an attachment's key column meets when it holds the
+     * key's text, compared byte for byte, as its deterministic collation
+     * compares it; or null when the collation is nondeterministic, which no
+     * comparison here can follow without overriding it.
+     *
+     * @param  string  $attached
+     * @param  string  $key
+     * @param  array<string, mixed>  $column
+     * @param  bool  $isExact
+     * @return string|null
+     */
+    #[\Override]
+    public function equalsKeyText(string $attached, string $key, array $column, bool $isExact): ?string
+    {
+        return $isExact ? "convert_to({$attached}, 'UTF8') = " . $this->textImage($key) : null;
+    }
 }

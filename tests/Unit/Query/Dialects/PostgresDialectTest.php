@@ -169,6 +169,48 @@ final class PostgresDialectTest extends TestCase
     }
 
     /**
+     * A column compares bytes when it has no collation or a deterministic one,
+     * as the catalogue says for the quoted table.
+     *
+     * @return void
+     */
+    public function testAnExactCollationIsDeterministic(): void
+    {
+        $dialect = new PostgresDialect;
+        $column  = static function (?object $row): Connection {
+            $connection = \Mockery::mock(Connection::class);
+            $catalogue  = \Mockery::on(static fn (string $query): bool => \str_contains($query, 'collisdeterministic') && \str_contains($query, 'to_regclass'));
+
+            $connection->shouldReceive('getTablePrefix')->andReturn('');
+            $connection->shouldReceive('selectOne')->with($catalogue, ['"app"."Posts"', 'code'])->andReturn($row);
+
+            return $connection;
+        };
+
+        self::assertTrue($dialect->isExactCollation($column((object) ['exact' => true]), 'app.Posts', ['name' => 'code']));
+        self::assertFalse($dialect->isExactCollation($column((object) ['exact' => false]), 'app.Posts', ['name' => 'code']));
+        self::assertTrue($dialect->isExactCollation($column(null), 'app.Posts', ['name' => 'code']));
+        self::assertTrue($dialect->isExactInteger(\Mockery::mock(Connection::class), 'posts', []));
+    }
+
+    /**
+     * Text images, byte literals, a prefix and an attached key's text are
+     * compared through the UTF-8 bytes of their text.
+     *
+     * @return void
+     */
+    public function testTheTextFragments(): void
+    {
+        $dialect = new PostgresDialect;
+
+        self::assertSame('convert_to(CAST(k AS TEXT), \'UTF8\')', $dialect->textImage('k'));
+        self::assertSame('decode(\'6162\', \'hex\')', $dialect->bytes('ab'));
+        self::assertSame('substring(convert_to(CAST(k AS TEXT), \'UTF8\') from 1 for 2) = decode(\'6162\', \'hex\')', $dialect->startsWith('k', 'ab'));
+        self::assertSame('convert_to(a, \'UTF8\') = convert_to(CAST(k AS TEXT), \'UTF8\')', $dialect->equalsKeyText('a', 'k', [], true));
+        self::assertNull($dialect->equalsKeyText('a', 'k', [], false));
+    }
+
+    /**
      * Return a connection reporting the encodings.
      *
      * @param  string  $server

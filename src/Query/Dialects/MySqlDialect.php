@@ -154,4 +154,99 @@ final readonly class MySqlDialect implements Dialect
             default                                                                                   => QueryAuthorizer::NO_ROW,
         };
     }
+
+    /**
+     * Determine whether the column compares byte for byte: it has no collation,
+     * or `utf8mb4_0900_bin`, which compares bytes and does not pad, or
+     * `binary`.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $table
+     * @param  array<string, mixed>  $column
+     * @return bool
+     */
+    #[\Override]
+    public function isExactCollation(Connection $connection, string $table, array $column): bool
+    {
+        $collation = $column['collation'] ?? null;
+
+        return $collation === null || (\is_string($collation) && \in_array(\strtolower($collation), ['utf8mb4_0900_bin', 'binary'], true));
+    }
+
+    /**
+     * Determine whether an integer key column holds only integers PHP reads as
+     * they are: every type but an unsigned `BIGINT`, whose values beyond PHP's
+     * largest integer PHP would read otherwise.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $table
+     * @param  array<string, mixed>  $column
+     * @return bool
+     */
+    #[\Override]
+    public function isExactInteger(Connection $connection, string $table, array $column): bool
+    {
+        $type = \is_string($column['type'] ?? null) ? \strtolower($column['type']) : '';
+
+        return !(\str_starts_with($type, 'bigint') && \str_contains($type, 'unsigned'));
+    }
+
+    /**
+     * Return the bytes of the expression's text as a utf8mb4 string: an
+     * integer's decimal digits, and text as PHP reads it.
+     *
+     * @param  string  $expression
+     * @return string
+     */
+    #[\Override]
+    public function textImage(string $expression): string
+    {
+        return "CAST(CAST({$expression} AS CHAR CHARACTER SET utf8mb4) AS BINARY)";
+    }
+
+    /**
+     * Return a binary string literal of the value's bytes.
+     *
+     * @param  string  $value
+     * @return string
+     */
+    #[\Override]
+    public function bytes(string $value): string
+    {
+        return 'X\'' . \bin2hex($value) . '\'';
+    }
+
+    /**
+     * Return the condition a row's column meets when its bytes start with the
+     * value's.
+     *
+     * @param  string  $column
+     * @param  string  $value
+     * @return string
+     */
+    #[\Override]
+    public function startsWith(string $column, string $value): string
+    {
+        return "LEFT(CAST({$column} AS BINARY), " . \strlen($value) . ') = ' . $this->bytes($value);
+    }
+
+    /**
+     * Return the condition an attachment's key column meets when it holds the
+     * key's text, compared under the column's own utf8mb4 collation, as the
+     * resolver's comparison with that text is; or null when the column has no
+     * utf8mb4 collation.
+     *
+     * @param  string  $attached
+     * @param  string  $key
+     * @param  array<string, mixed>  $column
+     * @param  bool  $isExact
+     * @return string|null
+     */
+    #[\Override]
+    public function equalsKeyText(string $attached, string $key, array $column, bool $isExact): ?string
+    {
+        $collation = \is_string($column['collation'] ?? null) ? \strtolower($column['collation']) : '';
+
+        return \preg_match('/\Autf8mb4_[a-z0-9_]+\z/', $collation) === 1 ? "{$attached} = CAST({$key} AS CHAR CHARACTER SET utf8mb4) COLLATE {$collation}" : null;
+    }
 }

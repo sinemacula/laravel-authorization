@@ -109,4 +109,28 @@ final class SchemaInspectorTest extends TestCase
         self::assertTrue((new SchemaInspector)->isUtf8($connection, $real));
         self::assertInstanceOf(Connection::class, $connection);
     }
+
+    /**
+     * Whether a column compares bytes and whether an integer key holds only
+     * what PHP reads are asked of the dialect once per column; a column the
+     * table lacks is neither.
+     *
+     * @return void
+     */
+    public function testAColumnsExactnessIsAskedOnce(): void
+    {
+        $connection = DB::connection();
+        $dialect    = \Mockery::mock(Dialect::class);
+        $inspector  = new SchemaInspector;
+
+        $dialect->shouldReceive('isExactCollation')->once()->andReturn(false);
+        $dialect->shouldReceive('isExactInteger')->once()->andReturn(true);
+
+        self::assertFalse($inspector->isExactCollation($connection, $dialect, 'scoped_documents', 'code'));
+        self::assertFalse($inspector->isExactCollation($connection, $dialect, 'scoped_documents', 'code'));
+        self::assertTrue($inspector->isExactInteger($connection, $dialect, 'scoped_posts', 'id'));
+        self::assertTrue($inspector->isExactInteger($connection, $dialect, 'scoped_posts', 'id'));
+        self::assertFalse($inspector->isExactCollation($connection, $dialect, 'scoped_documents', 'missing'));
+        self::assertFalse($inspector->isExactInteger($connection, $dialect, 'scoped_posts', 'missing'));
+    }
 }

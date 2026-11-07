@@ -24,6 +24,10 @@ use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
  * `whereHas()` take it), so no decision is ever reused. A refusal at execution
  * throws from the call that runs the query.
  *
+ * Every compile is marked as deciding a query scope (`Reentrancy`), so a
+ * model-level scope (`Scopes\AuthorizedScope`) applied while it decides refuses
+ * rather than recursing.
+ *
  * The call holds the scope's place on the builder with a condition of its own
  * type, which the grammar compiles through a macro; where the scope is never
  * applied (it was removed, or the builder was nested in a `where` group, merged
@@ -108,7 +112,7 @@ final readonly class AuthorizedQuery implements Scope
      */
     public static function compiled(Model $model, string $action, \Closure $compile): self
     {
-        $compile();
+        Reentrancy::guarded($compile);
 
         return new self($action, $model->getTable(), $model->getMorphClass(), $compile);
     }
@@ -224,7 +228,7 @@ final readonly class AuthorizedQuery implements Scope
         $this->refuseWhen($isApplied ? self::escapeOf($query, false) : RefusalReason::SCOPE_REMOVED);
         $this->assertScopable($query);
 
-        return '(' . ($this->compile)() . ')';
+        return '(' . Reentrancy::guarded($this->compile) . ')';
     }
 
     /**
