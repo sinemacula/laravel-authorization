@@ -10,7 +10,6 @@ use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Subject;
-use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
@@ -26,22 +25,20 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 final class FurtherChecksTest extends TestCase
 {
     /**
-     * The checks carry the subject and the origin, decide each further check
-     * through the pipeline's callback, on the resource given or none, and
-     * gather each check's sources through the other.
+     * The checks carry the subject, decide each further check through the
+     * pipeline's callback, on the resource given or none, and gather each
+     * check's sources through the other.
      *
      * @return void
      */
     public function testItAsksThePipeline(): void
     {
         $subject  = new Subject(new \stdClass);
-        $origin   = new Reference('tenant', 'a');
         $decision = Decision::allow(DecisionStage::ALLOW);
         $resource = ResourceReference::record('post', '1');
         $asked    = [];
         $checks   = new FurtherChecks(
             $subject,
-            $origin,
             static function (string $action, ?ResourceReference $on) use (&$asked, $decision): Decision {
                 $asked[] = [$action, $on];
 
@@ -55,7 +52,6 @@ final class FurtherChecksTest extends TestCase
         );
 
         self::assertSame($subject, $checks->subject);
-        self::assertSame($origin, $checks->origin);
         self::assertSame($decision, $checks->decide('posts:edit', $resource));
         self::assertSame($decision, $checks->decide('posts:read'));
         self::assertNull($checks->sources('posts:edit'));

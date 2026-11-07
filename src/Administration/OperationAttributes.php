@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *
  * - `action`: the administration action, such as `authorization:role.grant`;
  * - `narrowing`: whether the change can only narrow what anyone may do;
+ * - `unchanged`: set when the change changes nothing, missing otherwise;
  * - `target_type`, `target_id`: the record acted on, by morph type and key;
  * - `role`, `permission`, `policy`: the name of the record acted on, under its
  *   kind;
@@ -55,6 +56,7 @@ final readonly class OperationAttributes implements ResourceAttributeProvider
         return [
             'action'             => ContextKeyType::STRING,
             'narrowing'          => ContextKeyType::BOOL,
+            'unchanged'          => ContextKeyType::BOOL,
             'target_type'        => ContextKeyType::STRING,
             'target_id'          => ContextKeyType::STRING,
             'role'               => ContextKeyType::STRING,

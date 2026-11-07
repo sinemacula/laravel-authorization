@@ -5,11 +5,13 @@ declare(strict_types = 1);
 namespace Tests\Feature\Administration;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\OperationConstraints;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -29,6 +31,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
+use Tests\Feature\Stubs\StubTenantTree;
+use Tests\Fixtures\BulkChecks\FailingTenantTree;
 use Tests\TestCase;
 
 /**
@@ -64,7 +68,7 @@ final class OperationConstraintsTest extends TestCase
         $denied     = Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
         $operation  = self::roleGrant()->toResourceReference();
         $descriptor = self::permissionGrant(self::user('user'))->grantable()->toResourceReference();
-        $checks     = $this->checks(self::user('admin'), null, self::unexpected(...));
+        $checks     = $this->checks(self::user('admin'), self::unexpected(...));
 
         self::assertSame($denied, OperationConstraints::weigh($denied, PackagePermissions::ROLE_GRANT, $operation, $checks));
         self::assertSame($allowed, OperationConstraints::weigh($allowed, PackagePermissions::ROLE_GRANT, null, $checks));
@@ -91,7 +95,7 @@ final class OperationConstraintsTest extends TestCase
         $allowed  = Decision::allow(DecisionStage::ALLOW, [], [$step])->withFreshness($fresh);
         $role     = Role::query()->create(['name' => 'editor']);
         $edit     = Permission::query()->create(['name' => 'posts:edit']);
-        $checks   = $this->checks(self::user('admin'), null, self::unexpected(...));
+        $checks   = $this->checks(self::user('admin'), self::unexpected(...));
         $grant    = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $role, $edit, GrantScope::platform());
         $revoke   = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $role, $edit, GrantScope::platform());
         $decision = OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_GRANT, $grant->toResourceReference(), $checks);
@@ -125,7 +129,7 @@ final class OperationConstraintsTest extends TestCase
         $allowed  = Decision::allow(DecisionStage::ALLOW);
         $revoke   = self::revoke(self::user('user'))->actedBy(new Reference('support', '9'))->toResourceReference();
         $resource = null;
-        $refusing = $this->checks(self::senior('admin'), null, static function (string $action, ?ResourceReference $on) use (&$resource): Decision {
+        $refusing = $this->checks(self::senior('admin'), static function (string $action, ?ResourceReference $on) use (&$resource): Decision {
             $resource = $on;
 
             return Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
@@ -135,37 +139,42 @@ final class OperationConstraintsTest extends TestCase
         self::assertSame(PackagePermissions::ADMINISTRATION_IMPERSONATED, $this->asked[0][0]);
         self::assertSame($revoke, $resource);
 
-        $allowing = $this->checks(self::senior('admin'), null, static fn (): Decision => $allowed);
+        $allowing = $this->checks(self::senior('admin'), static fn (): Decision => $allowed);
 
         self::assertTrue(OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_REVOKE, $revoke, $allowing)->isAllowed());
     }
 
     /**
-     * A change to a grant row is made from the tenant that holds it, the
-     * platform's from the platform, or refused as not the owner's before any
-     * further check; a change that changes nothing edits nothing.
+     * No owner stands in the way of a change to a grant row (N79): a revocation
+     * of a tenant's row, or of a platform-wide one, passes the stage whatever
+     * tenant the check is made from, the action's own decision having admitted
+     * it; and a change that fails both the scope and the rank rule is refused
+     * as out of scope, the first constraint weighed.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testOnlyTheOwnerChangesAGrantRow(): void
+    public function testNoOwnerStandsInTheWayOfAGrantRow(): void
     {
         $allowed = Decision::allow(DecisionStage::ALLOW);
         $tenant  = new Reference('tenant', 'a');
         $user    = self::user('user');
-        $admin   = self::senior('admin');
         $edit    = Permission::query()->create(['name' => 'posts:edit']);
         $revoke  = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $user, $edit, new GrantScope($tenant))->toResourceReference();
-        $kept    = OperationResource::unchanged(PackagePermissions::PERMISSION_REVOKE, $user, null, new GrantScope($tenant))->toResourceReference();
+        $wide    = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $user, $edit, GrantScope::platform())->toResourceReference();
+        $checks  = $this->checks(self::senior('admin'), self::unexpected(...));
 
-        $platform = $this->checks($admin, null, self::unexpected(...));
-        $other    = $this->checks($admin, new Reference('tenant', 'b'), self::unexpected(...));
+        self::assertTrue(OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_REVOKE, $revoke, $checks)->isAllowed());
+        $elsewhere = static fn (): Decision => OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_REVOKE, $wide, $checks);
 
-        self::assertSame(DecisionReason::ADMINISTRATION_OWNER, self::weigh(PackagePermissions::PERMISSION_REVOKE, $revoke, $platform)->reason);
-        self::assertSame(DecisionReason::ADMINISTRATION_OWNER, self::weigh(PackagePermissions::PERMISSION_REVOKE, $revoke, $other)->reason);
-        self::assertTrue(OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_REVOKE, $revoke, $this->checks($admin, $tenant, self::unexpected(...)))->isAllowed());
-        self::assertTrue(OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_REVOKE, $kept, $this->checks($admin, null, self::unexpected(...)))->isAllowed());
+        self::assertTrue(TenantScope::within(new Reference('tenant', 'b'), null, $elsewhere)->isAllowed());
+
+        $reader  = Policy::create(['name' => 'reader', 'document' => ['statements' => []]]);
+        $grant   = OperationResource::grant(PackagePermissions::POLICY_ATTACH, self::senior('peer'), $reader, new GrantScope($tenant));
+        $denying = $this->checks(self::senior('admin'), static fn (): Decision => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, self::weigh(PackagePermissions::POLICY_ATTACH, $grant->toResourceReference(), $denying)->reason);
     }
 
     /**
@@ -188,17 +197,17 @@ final class OperationConstraintsTest extends TestCase
         $grant    = OperationResource::grant(PackagePermissions::POLICY_ATTACH, $user, $reader, new GrantScope($tenant, 'admin'));
         $node     = OperationResource::grant(PackagePermissions::POLICY_ATTACH, $user, $reader, new GrantScope($tenant, null, false));
         $platform = OperationResource::grant(PackagePermissions::POLICY_ATTACH, $user, $reader, GrantScope::platform());
-        $denying  = $this->checks(self::senior('admin'), $tenant, static fn (): Decision => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT));
+        $denying  = $this->checks(self::senior('admin'), static fn (): Decision => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT));
 
         self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, self::weigh(PackagePermissions::POLICY_ATTACH, $grant->toResourceReference(), $denying)->reason);
         self::assertSame([PackagePermissions::POLICY_ATTACH, 'admin', true, ['tenant', 'a']], $this->asked[0]);
 
-        $allowing = $this->checks(self::senior('admin'), $tenant, static fn (): Decision => $allowed);
+        $allowing = $this->checks(self::senior('admin'), static fn (): Decision => $allowed);
 
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::weigh(PackagePermissions::POLICY_ATTACH, $node->toResourceReference(), $allowing)->reason);
         self::assertSame([PackagePermissions::POLICY_ATTACH, null, false, ['tenant', 'a']], $this->asked[1]);
 
-        $platformChecks = $this->checks(self::senior('admin'), null, static fn (): Decision => $allowed);
+        $platformChecks = $this->checks(self::senior('admin'), static fn (): Decision => $allowed);
 
         OperationConstraints::weigh($allowed, PackagePermissions::POLICY_ATTACH, $platform->toResourceReference(), $platformChecks);
 
@@ -221,9 +230,9 @@ final class OperationConstraintsTest extends TestCase
         $peer     = self::revoke(self::senior('peer'))->toResourceReference();
         $junior   = self::revoke(self::user('junior'))->toResourceReference();
         $external = self::revoke(new Reference('external', '1'))->toResourceReference();
-        $checks   = $this->checks(self::senior('admin'), null, self::unexpected(...));
-        $unranked = $this->checks(self::user('unranked'), null, self::unexpected(...));
-        $object   = $this->checks(new Subject(new \stdClass), null, self::unexpected(...));
+        $checks   = $this->checks(self::senior('admin'), self::unexpected(...));
+        $unranked = $this->checks(self::user('unranked'), self::unexpected(...));
+        $object   = $this->checks(new Subject(new \stdClass), self::unexpected(...));
         $roleless = self::revoke(StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'tenant-a']))->toResourceReference();
 
         self::assertSame(DecisionReason::ADMINISTRATION_RANK, OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_REVOKE, $peer, $checks)->reason);
@@ -239,30 +248,116 @@ final class OperationConstraintsTest extends TestCase
     }
 
     /**
-     * Rank is compared in the grant's own scope: a role the grantee holds in
-     * another tenant never counts.
+     * The actor is ranked in the grant's own tenant and application: a senior
+     * role it holds only in another tenant, or only in another application,
+     * never makes it senior there.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testRankIsComparedInTheGrantsScope(): void
+    public function testTheActorIsRankedInTheGrantsOwnScope(): void
     {
-        $allowed = Decision::allow(DecisionStage::ALLOW);
-        $tenant  = new Reference('tenant', 'a');
-        $user    = self::user('user');
-        $checks  = $this->checks(self::senior('admin'), $tenant, self::unexpected(...));
+        $tenant = new Reference('tenant', 'a');
+        $actor  = self::user('admin');
+        $user   = self::rankedUser('user', 5);
+        $top    = Role::query()->create(['name' => 'top', 'rank' => 1]);
 
-        GrantService::instance()?->grantRole($user, Role::query()->create(['name' => 'elsewhere', 'rank' => 0]), tenant: new Reference('tenant', 'b'));
+        GrantService::instance()?->grantRole($actor, $top, tenant: $tenant, application: 'admin');
 
-        $revoke = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $user, Permission::query()->create(['name' => 'posts:edit']), new GrantScope($tenant));
+        $checks = $this->checks($actor, self::unexpected(...));
+        $edit   = Permission::query()->create(['name' => 'posts:edit']);
+        $revoke = static fn (GrantScope $scope): ResourceReference => OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $user, $edit, $scope)->toResourceReference();
 
-        self::assertTrue(OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_REVOKE, $revoke->toResourceReference(), $checks)->isAllowed());
+        self::assertTrue(self::weigh(PackagePermissions::PERMISSION_REVOKE, $revoke(new GrantScope($tenant, 'admin')), $checks)->isAllowed());
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::weigh(PackagePermissions::PERMISSION_REVOKE, $revoke(new GrantScope($tenant)), $checks)->reason);
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::weigh(PackagePermissions::PERMISSION_REVOKE, $revoke(new GrantScope($tenant, 'billing')), $checks)->reason);
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::weigh(PackagePermissions::PERMISSION_REVOKE, $revoke(new GrantScope(null, 'admin')), $checks)->reason);
+    }
+
+    /**
+     * The grantee is ranked across the whole reach of the change: the most
+     * senior rank it holds there counts, held in the grant's tenant, in any
+     * application for a grant to every application, in a tenant below for a
+     * grant reaching below, and in any tenant for a platform-wide grant; a role
+     * held outside the reach, or one with no rank, never counts.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheGranteeIsRankedAcrossTheWholeReach(): void
+    {
+        [$parent, $child, $other] = [new Reference('tenant', 'parent'), new Reference('tenant', 'child'), new Reference('tenant', 'other')];
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put($child, $parent));
+
+        $checks = $this->checks(self::senior('admin'), self::unexpected(...));
+        $edit   = Permission::query()->create(['name' => 'posts:edit']);
+        $rank   = static fn (StubIdentity $user, GrantScope $scope): ?DecisionReason => self::weigh(
+            PackagePermissions::PERMISSION_REVOKE,
+            OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $user, $edit, $scope)->toResourceReference(),
+            $checks,
+        )->reason;
+
+        $local = self::user('local');
+
+        GrantService::instance()?->grantRole($local, Role::query()->create(['name' => 'local-top', 'rank' => 0]), tenant: $parent);
+        GrantService::instance()?->grantRole($local, Role::query()->create(['name' => 'unranked']));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $rank($local, new GrantScope($parent)));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $rank($local, GrantScope::platform()));
+        self::assertNull($rank($local, new GrantScope($other)));
+
+        $app = self::user('app');
+
+        GrantService::instance()?->grantRole($app, Role::query()->create(['name' => 'app-top', 'rank' => 0]), application: 'admin');
+
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $rank($app, GrantScope::platform()));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $rank($app, new GrantScope(null, 'admin')));
+        self::assertNull($rank($app, new GrantScope(null, 'billing')));
+
+        $below = self::user('below');
+
+        GrantService::instance()?->grantRole($below, Role::query()->create(['name' => 'child-top', 'rank' => 0]), tenant: $child, includeSubtree: false);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $rank($below, new GrantScope($parent)));
+        self::assertNull($rank($below, new GrantScope($parent, null, false)));
+        self::assertNull($rank($below, new GrantScope($other)));
+
+        $expired = self::user('expired');
+
+        GrantService::instance()?->grantRole($expired, Role::query()->create(['name' => 'expired-top', 'rank' => 0]), Carbon::now()->addMinute());
+        Carbon::setTestNow(Carbon::now()->addHour());
+
+        self::assertNull($rank($expired, GrantScope::platform()));
+
+        Carbon::setTestNow();
+    }
+
+    /**
+     * A reach that cannot be read leaves the grantee's rank unknown, so the
+     * change is refused as uncomparable.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAReachThatCannotBeReadIsUncomparable(): void
+    {
+        $this->app?->instance(TenantTree::class, new FailingTenantTree(failing: ['a']));
+
+        $checks = $this->checks(self::senior('admin'), self::unexpected(...));
+        $edit   = Permission::query()->create(['name' => 'posts:edit']);
+        $revoke = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, self::user('user'), $edit, new GrantScope(new Reference('tenant', 'a')));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE, self::weigh(PackagePermissions::PERMISSION_REVOKE, $revoke->toResourceReference(), $checks)->reason);
     }
 
     /**
      * A role grant is weighed against the rank it would give the grantee, and a
-     * role grant that only shortens one held is not.
+     * role grant that only shortens one held is not; nor is a revocation of a
+     * senior role the grantee does not hold.
      *
      * @return void
      *
@@ -273,7 +368,7 @@ final class OperationConstraintsTest extends TestCase
         $allowed = Decision::allow(DecisionStage::ALLOW);
         $user    = self::user('user');
         $senior  = Role::query()->create(['name' => 'senior', 'rank' => 0]);
-        $checks  = $this->checks(self::senior('admin'), null, static fn (): Decision => $allowed);
+        $checks  = $this->checks(self::senior('admin'), static fn (): Decision => $allowed);
         $grant   = OperationResource::grant(PackagePermissions::ROLE_GRANT, $user, $senior, GrantScope::platform());
 
         self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::weigh(PackagePermissions::ROLE_GRANT, $grant->toResourceReference(), $checks)->reason);
@@ -286,6 +381,10 @@ final class OperationConstraintsTest extends TestCase
 
         self::assertTrue($again->isNarrowing);
         self::assertTrue(OperationConstraints::weigh($allowed, PackagePermissions::ROLE_GRANT, $again->toResourceReference(), $checks)->isAllowed());
+
+        $revoke = OperationResource::revoke(PackagePermissions::ROLE_REVOKE, $user, $senior, GrantScope::platform());
+
+        self::assertTrue(self::weigh(PackagePermissions::ROLE_REVOKE, $revoke->toResourceReference(), $checks)->isAllowed());
     }
 
     /**
@@ -304,13 +403,21 @@ final class OperationConstraintsTest extends TestCase
         $grant   = OperationResource::grant(PackagePermissions::ROLE_GRANT, $admin, Role::query()->create(['name' => 'editor']), GrantScope::platform())->toResourceReference();
         $revoke  = self::revoke($admin)->toResourceReference();
         $denied  = Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
-        $refused = $this->checks($admin, null, static fn (string $action): Decision => $action === PackagePermissions::ROLE_GRANT ? $allowed : $denied);
+        $asked   = null;
+        $refused = $this->checks($admin, static function (string $action, ?ResourceReference $on) use ($allowed, $denied, &$asked): Decision {
+            if ($action === PackagePermissions::ADMINISTRATION_SELF) {
+                $asked = $on;
+            }
+
+            return $action === PackagePermissions::ROLE_GRANT ? $allowed : $denied;
+        });
 
         self::assertSame(DecisionReason::ADMINISTRATION_SELF, OperationConstraints::weigh($allowed, PackagePermissions::ROLE_GRANT, $grant, $refused)->reason);
+        self::assertSame($grant, $asked);
         self::assertTrue(OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_REVOKE, $revoke, $refused)->isAllowed());
         self::assertSame([PackagePermissions::ROLE_GRANT, PackagePermissions::ADMINISTRATION_SELF], \array_column($this->asked, 0));
 
-        $identity = $this->checks(new Subject(new \stdClass, $admin), null, static fn (): Decision => $allowed);
+        $identity = $this->checks(new Subject(new \stdClass, $admin), static fn (): Decision => $allowed);
 
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, OperationConstraints::weigh($allowed, PackagePermissions::ROLE_GRANT, $grant, $identity)->reason);
         self::assertSame(
@@ -334,14 +441,18 @@ final class OperationConstraintsTest extends TestCase
         $user    = self::user('user');
         $denied  = Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
         $refuse  = static fn (string $action): Decision => $action === PackagePermissions::PERMISSION_GRANTABLE ? $denied : $allowed;
-        $checks  = $this->checks(self::senior('admin'), null, $refuse);
+        $checks  = $this->checks(self::senior('admin'), $refuse);
 
         $grant = self::permissionGrant($user)->toResourceReference();
 
         self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, self::weigh(PackagePermissions::PERMISSION_GRANT, $grant, $checks)->reason);
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::weigh(PackagePermissions::ROLE_GRANT, self::roleGrant()->toResourceReference(), $checks)->reason);
 
-        $grantable = $this->checks(self::senior('granter'), null, static fn (): Decision => $allowed);
+        $granter = self::senior('granter');
+
+        GrantService::instance()?->grantPermission($granter, Permission::query()->create(['name' => PackagePermissions::PERMISSION_GRANTABLE]));
+
+        $grantable = $this->checks($granter, static fn (): Decision => $allowed);
 
         self::assertTrue(OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_GRANT, self::permissionGrant($user)->toResourceReference(), $grantable)->isAllowed());
     }
@@ -400,16 +511,14 @@ final class OperationConstraintsTest extends TestCase
     }
 
     /**
-     * Return further checks for the actor, made from the origin, deciding each
-     * check through the callback and recording what was asked, in the scope in
-     * place.
+     * Return further checks for the actor, deciding each check through the
+     * callback and recording what was asked, in the scope in place.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubIdentity  $actor
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $origin
      * @param  \Closure(string, \SineMacula\Laravel\Authorization\Support\ResourceReference|null): \SineMacula\Laravel\Authorization\Evaluation\Decision  $decide
      * @return \SineMacula\Laravel\Authorization\Administration\FurtherChecks
      */
-    private function checks(StubIdentity|Subject $actor, ?Reference $origin, \Closure $decide): FurtherChecks
+    private function checks(StubIdentity|Subject $actor, \Closure $decide): FurtherChecks
     {
         $record = function (string $action, ?ResourceReference $on) use ($decide): Decision {
             $this->asked[] = [$action, TenantScope::currentApplication(), TenantScope::isBelowTenant(), TenantScope::currentTenant()];
@@ -417,7 +526,7 @@ final class OperationConstraintsTest extends TestCase
             return $decide($action, $on);
         };
 
-        return new FurtherChecks($actor instanceof Subject ? $actor : new Subject($actor, $actor), $origin, $record, static fn (): null => null);
+        return new FurtherChecks($actor instanceof Subject ? $actor : new Subject($actor, $actor), $record, static fn (): null => null);
     }
 
     /**
@@ -444,6 +553,24 @@ final class OperationConstraintsTest extends TestCase
         $user = self::user($id);
 
         GrantService::instance()?->grantRole($user, Role::query()->firstOrCreate(['name' => 'chief'], ['rank' => 1]));
+
+        return $user;
+    }
+
+    /**
+     * Return the identity with the id, holding a platform role of the rank.
+     *
+     * @param  string  $id
+     * @param  int  $rank
+     * @return \Tests\Feature\Stubs\StubIdentity
+     *
+     * @throws \Throwable
+     */
+    private static function rankedUser(string $id, int $rank): StubIdentity
+    {
+        $user = self::user($id);
+
+        GrantService::instance()?->grantRole($user, Role::query()->firstOrCreate(['name' => 'rank-' . $rank], ['rank' => $rank]));
 
         return $user;
     }

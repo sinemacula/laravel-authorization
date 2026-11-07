@@ -31,6 +31,8 @@ final class OperationGrantee
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @return bool
+     *
+     * @phpstan-assert-if-true \SineMacula\Laravel\Authorization\Administration\OperationChange $operation->change
      */
     public static function isSubject(OperationResource $operation): bool
     {

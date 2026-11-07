@@ -8,33 +8,38 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
+use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\HeldPermissions;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
 /**
- * How long a subject holds a permission in the current scope, through its
- * grants, for the possession route of a delegated grant (N77): until the latest
- * any grant that carries the permission lasts.
+ * How long a subject holds a permission, or a policy, in the current scope,
+ * through its grants, for the possession and grantable routes of a delegated
+ * grant (N77): until the latest any grant that carries it lasts.
  *
  * The grants are those the decision resolves in the scope in place (its tenant
  * chain, whether it stands below its tenant, and its application, see
  * `TenantChain`), live now, read on the write connection: the subject's, and
  * its identity's when the identity grants to it. A grant carries the permission
  * when the name it grants covers it by the wildcard rules (see
- * `HeldPermissions`), so holding `posts:*` carries `posts:edit`. A direct grant
- * lasts until it expires; a role's lasts until the earlier of the role's grant
- * and the role's own grant of the permission, its ancestors' included when the
- * hierarchy is enabled, as far as the tenant scope shows them. A chain of roles
- * that cannot be read carries nothing, so a lifetime it cannot prove is never
- * claimed.
+ * `HeldPermissions`), so holding `posts:*` carries `posts:edit`; a policy is
+ * carried by its attachments. A direct grant or attachment lasts until it
+ * expires; a role's lasts until the earlier of the role's grant and the role's
+ * own grant of the permission, or attachment of the policy, its ancestors'
+ * included when the hierarchy is enabled, as far as the tenant scope shows
+ * them. A chain of roles that cannot be read carries nothing, so a lifetime it
+ * cannot prove is never claimed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,6 +59,42 @@ final class HeldLifetime
      */
     public static function of(Subject $subject, string $permission): ?int
     {
+        $direct  = static fn (Model $grantee): ?int => self::direct($grantee, $permission);
+        $carried = static fn (array $roles): array => self::carried($roles, $permission);
+
+        return self::across($subject, $direct, $carried);
+    }
+
+    /**
+     * Return the Unix time until which the policy with the key is attached to
+     * the subject in the current scope, directly or through a role,
+     * `PHP_INT_MAX` for an attachment that never expires, or null when it is
+     * not attached, or while the subject or its identity is inactive.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  string  $policy
+     * @return int|null
+     */
+    public static function ofPolicy(Subject $subject, string $policy): ?int
+    {
+        $direct  = static fn (Model $grantee): ?int => self::attached($grantee, $policy);
+        $carried = static fn (array $roles): array => self::attachedToRoles($roles, $policy);
+
+        return self::across($subject, $direct, $carried);
+    }
+
+    /**
+     * Return the latest lifetime the subject's grantees hold through their
+     * direct grants and their roles, or null while the subject or its identity
+     * is inactive.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  \Closure(\Illuminate\Database\Eloquent\Model): (int|null)  $direct
+     * @param  \Closure(list<string>): array<string, int>  $carried
+     * @return int|null
+     */
+    private static function across(Subject $subject, \Closure $direct, \Closure $carried): ?int
+    {
         if (SubjectGrants::isInactive($subject)) {
             return null;
         }
@@ -65,7 +106,7 @@ final class HeldLifetime
                 continue;
             }
 
-            $until = self::later($until, self::direct($grantee, $permission), self::throughRoles($grantee, $permission));
+            $until = self::later($until, $direct($grantee), self::throughRoles($grantee, $carried));
         }
 
         return $until;
@@ -99,21 +140,44 @@ final class HeldLifetime
     }
 
     /**
-     * Return until when the grantee's roles carry the permission, or null when
-     * none does or their chain cannot be read.
+     * Return until when the policy with the key is attached to the grantee
+     * directly, or null when it is not.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $grantee
-     * @param  string  $permission
+     * @param  string  $policy
      * @return int|null
      */
-    private static function throughRoles(Model $grantee, string $permission): ?int
+    private static function attached(Model $grantee, string $policy): ?int
+    {
+        if (!$grantee instanceof SupportsPolicies || !\method_exists($grantee, 'policies')) {
+            return null;
+        }
+
+        $until = null;
+
+        foreach (self::held($grantee->policies()->whereKey($policy)) as $held) {
+            $until = self::later($until, self::expiryOf($held));
+        }
+
+        return $until;
+    }
+
+    /**
+     * Return until when the grantee's roles carry what the callback reads for
+     * them, or null when none does or their chain cannot be read.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $grantee
+     * @param  \Closure(list<string>): array<string, int>  $carried
+     * @return int|null
+     */
+    private static function throughRoles(Model $grantee, \Closure $carried): ?int
     {
         if (!$grantee instanceof SupportsRoles || !\method_exists($grantee, 'roles')) {
             return null;
         }
 
         /** @var list<\SineMacula\Laravel\Authorization\Models\Role> $roles */
-        $roles = \array_values(self::held($grantee->roles())->all());
+        $roles = self::held($grantee->roles())->all();
 
         try {
             $chains = self::chains($roles);
@@ -121,13 +185,13 @@ final class HeldLifetime
             return null;
         }
 
-        $carried = self::carried(\array_values(\array_unique(\array_merge([], ...\array_values($chains)))), $permission);
-        $until   = null;
+        $carrying = $carried(\array_merge([], ...\array_values($chains)));
+        $until    = null;
 
         foreach ($roles as $role) {
-            $carrying = \array_intersect_key($carried, \array_flip($chains[$role->id]));
+            $carries = \array_intersect_key($carrying, \array_flip($chains[$role->id]));
 
-            $until = self::later($until, $carrying === [] ? null : \min(self::expiryOf($role), \max($carrying)));
+            $until = self::later($until, $carries === [] ? null : \min(self::expiryOf($role), \max($carries)));
         }
 
         return $until;
@@ -168,10 +232,6 @@ final class HeldLifetime
      */
     private static function carried(array $roles, string $permission): array
     {
-        if ($roles === []) {
-            return [];
-        }
-
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
         $class = config('authorization.models.permission', Permission::class);
 
@@ -194,10 +254,47 @@ final class HeldLifetime
 
             $until = UtcDateTime::toUtc($read['expires_at'])?->getTimestamp() ?? \PHP_INT_MAX;
 
-            $carried[$read['role_id']] = \max($carried[$read['role_id']] ?? 0, $until);
+            $carried[$read['role_id']] = \max($carried[$read['role_id']] ?? $until, $until);
         }
 
         return $carried;
+    }
+
+    /**
+     * Return, for each of the roles the policy with the key is attached to,
+     * live, in the current scope, until when the latest such attachment lasts,
+     * keyed by the role, in one query.
+     *
+     * @param  list<string>  $roles
+     * @param  string  $policy
+     * @return array<string, int>
+     */
+    private static function attachedToRoles(array $roles, string $policy): array
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
+        $class = config('authorization.models.role', Role::class);
+
+        /** @var string $table */
+        $table = config('authorization.tables.authorizable_policies', 'authorizable_policies');
+        $query = AuthorizationConnection::connection()->table($table)->useWritePdo()
+            ->where($table . '.authorizable_type', (new $class)->getMorphClass())
+            ->whereIn($table . '.authorizable_id', $roles)
+            ->where($table . '.policy_id', $policy);
+
+        TenantScope::currentChain()->grants($query, $table);
+        GrantApplications::only($query, $table, TenantScope::currentApplication());
+
+        $attached = [];
+
+        foreach (LiveGrants::only($query, $table)->get([$table . '.authorizable_id as role_id', $table . '.expires_at as expires_at']) as $row) {
+            /** @var array{role_id: string, expires_at: string|null} $read */
+            $read  = (array) $row;
+            $until = UtcDateTime::toUtc($read['expires_at'])?->getTimestamp() ?? \PHP_INT_MAX;
+
+            $attached[$read['role_id']] = \max($attached[$read['role_id']] ?? $until, $until);
+        }
+
+        return $attached;
     }
 
     /**
@@ -249,8 +346,6 @@ final class HeldLifetime
      */
     private static function later(?int ...$times): ?int
     {
-        $known = \array_filter($times, static fn (?int $time): bool => $time !== null);
-
-        return $known === [] ? null : \max($known);
+        return \max([null, ...$times]);
     }
 }

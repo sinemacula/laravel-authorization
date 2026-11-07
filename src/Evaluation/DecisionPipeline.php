@@ -17,10 +17,8 @@ use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
-use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
-use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceScope;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
@@ -148,10 +146,7 @@ final class DecisionPipeline
             return Decision::deny(DecisionReason::RESOURCE_UNRESOLVED, DecisionStage::RESOURCE);
         }
 
-        // An administration check weighs the tenant it is made from, which the
-        // operation's own tenant replaces once the tenant stage admits it.
-        $origin = $resource?->source instanceof OperationResource ? TenantScope::currentChain()->tenant() : null;
-        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource, $context, $attributes, $origin);
+        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource, $context, $attributes);
 
         return $resource === null ? $decide() : ResourceScope::decide($subject, $action, $resource, $decide);
     }
@@ -329,20 +324,19 @@ final class DecisionPipeline
      *
      * An allow of an administration action on an operation resource of that
      * action then passes the operation's constraints, at the administration
-     * stage, which can only refuse it (see `OperationConstraints`), given the
-     * tenant the check is made from; a further check they need is decided here,
-     * as this one is up to the allow, in the scope in place when they ask, and
-     * never through the administration stage again.
+     * stage, which can only refuse it (see `OperationConstraints`); a further
+     * check they need is decided here, as this one is up to the allow, in the
+     * scope in place when they ask, and never through the administration stage
+     * again.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @param  array<string, mixed>  $context
      * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $origin
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes, ?Reference $origin): Decision
+    private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes): Decision
     {
         $decision = $this->decideAlone($subject, $action, $resource, $context, $attributes);
 
@@ -352,8 +346,7 @@ final class DecisionPipeline
 
         $checks = new FurtherChecks(
             $subject,
-            $origin,
-            fn (string $further, ?ResourceReference $on): Decision => $this->decideAlone($subject, $further, $on, $context, $on === $resource ? $attributes : null),
+            fn (string $further, ?ResourceReference $on): Decision => $this->decideAlone($subject, $further, $on, $context, $attributes),
             fn (string $further): ?CheckSources => $this->sourcesOrNone($subject, $further, $context),
         );
 

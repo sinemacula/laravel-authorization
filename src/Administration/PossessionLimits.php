@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Administration;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
@@ -12,13 +13,13 @@ use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
+use SineMacula\Laravel\Authorization\Models\Policy as StoredPolicy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
-use SineMacula\Laravel\Authorization\Support\InlinePolicies;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
-use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * Whether anything that caps or denies a subject could limit a permission
@@ -32,22 +33,28 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  *   policies, the boundaries, the guardrails and the session caps, a custom
  *   policy resolver's included;
  * - as stored, on the write connection, outside every tenant scope, whatever
- *   their application and expiry: the policies attached to the subject's
+ *   their application and expiry, each held, attached or set in a tenant of the
+ *   grant's reach (see `GrantReach`): the policies attached to the subject's
  *   principal and identity, and to every role either holds and the roles above
  *   them, the policies attached to any resource, the boundaries of the
- *   principal and the identity, and the guardrails; each held, attached or set
- *   in a tenant of the grant's reach: the platform, the grant's tenant and its
- *   ancestors, and, for a grant reaching below its tenant, every tenant below
- *   it; for a platform-wide grant, every tenant.
+ *   principal and the identity, and the guardrails.
+ *
+ * Each table is read in one query, the reach and the grantees in it, and every
+ * policy found is read in one more, so what is read grows with what applies in
+ * the reach, never with the policies, boundaries or guardrails of other
+ * tenants. A tree, a row or a document that cannot be read limits the
+ * permission.
  *
  * The permission is limited when any deny statement among them names an action
  * the permission covers, with conditions, resource patterns or none; when a
  * boundary or a guardrail has no allow statement naming every action the
- * permission covers, with no condition and on every resource; when a session
- * cap does not cover every action it covers; and when a document cannot be
- * read. Patterns are compared as `fnmatch()` compares names, the only wildcard
- * being `*`: a deny of `posts:edit` limits a grant of `posts:*`, and a cap of
- * `posts:*` covers a grant of `posts:edit`.
+ * permission covers, with no condition and on every resource; and when a
+ * session cap does not cover every action it covers. Patterns are compared as
+ * `fnmatch()` compares names: a deny of `posts:edit` limits a grant of
+ * `posts:*`, and a cap of `posts:*` covers a grant of `posts:edit`. Two
+ * patterns that both hold wildcards, one of them `?` or a `[...]` class, are
+ * taken to overlap, and a pattern holding `?` or a class never covers a grant
+ * of a wildcard, since whether they would cannot be told simply.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -58,19 +65,19 @@ final class PossessionLimits
 {
     /**
      * Determine whether anything that applies to the subject anywhere in the
-     * operation's reach could limit the permission.
+     * grant's reach could limit the permission.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $permission
-     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckSources  $sources
      * @return bool
      */
-    public static function isLimited(Subject $subject, string $permission, OperationResource $operation, CheckSources $sources): bool
+    public static function isLimited(Subject $subject, string $permission, GrantScope $scope, CheckSources $sources): bool
     {
         try {
-            [$denying, $capping] = self::stored($subject, $operation);
-        } catch (InvalidPolicyDocumentException) {
+            [$denying, $capping] = self::stored($subject, GrantReach::of($scope));
+        } catch (\Throwable) {
             return true;
         }
 
@@ -83,9 +90,11 @@ final class PossessionLimits
 
     /**
      * Determine whether two action patterns name an action in common. A pattern
-     * without `*` names itself alone; two with one each overlap when the text
-     * before the first `*` of one starts the other's, and the text after the
-     * last `*` of one ends the other's.
+     * with no wildcard names itself alone, so it overlaps another it matches;
+     * two whose only wildcard is `*` overlap when the text before the first `*`
+     * of one starts the other's, and the text after the last `*` of one ends
+     * the other's; any other two, one holding `?` or a `[...]` class, are taken
+     * to overlap.
      *
      * @param  string  $pattern
      * @param  string  $other
@@ -93,8 +102,12 @@ final class PossessionLimits
      */
     public static function isOverlapping(string $pattern, string $other): bool
     {
-        if (!\str_contains($pattern, '*') || !\str_contains($other, '*')) {
+        if (!self::isWildcard($pattern) || !self::isWildcard($other)) {
             return \fnmatch($pattern, $other, \FNM_NOESCAPE) || \fnmatch($other, $pattern, \FNM_NOESCAPE);
+        }
+
+        if (self::hasClass($pattern) || self::hasClass($other)) {
+            return true;
         }
 
         [$head, $tail]           = self::ends($pattern);
@@ -104,19 +117,18 @@ final class PossessionLimits
     }
 
     /**
-     * Return the policies stored for the subject in the operation's reach that
-     * may deny (its policies, its roles' and every resource's), and those that
-     * cap (its boundaries and the guardrails), hydrated.
+     * Return the policies stored for the subject in the reach that may deny
+     * (its policies, its roles' and every resource's), and those that cap (its
+     * boundaries and the guardrails), hydrated.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
-     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  \SineMacula\Laravel\Authorization\Administration\GrantReach  $reach
      * @return array{list<\SineMacula\Laravel\Authorization\Evaluation\Policy>, list<\SineMacula\Laravel\Authorization\Evaluation\Policy>}
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
-    private static function stored(Subject $subject, OperationResource $operation): array
+    private static function stored(Subject $subject, GrantReach $reach): array
     {
-        $reach    = self::reach($operation);
         $grantees = [];
 
         foreach ([$subject->subject, $subject->identity] as $side) {
@@ -132,23 +144,25 @@ final class PossessionLimits
         $roles = \array_keys(RoleGraph::reach(self::keys('authorizable_roles', 'role_id', $grantees, $reach)));
         $held  = [...$grantees, ...\array_map(static fn (string $key): Reference => new Reference((new $role)->getMorphClass(), $key), $roles)];
 
-        $denying = [...self::keys('authorizable_policies', 'policy_id', $held, $reach), ...self::keys('resource_policies', 'policy_id', null, $reach)];
-        $capping = [...self::keys('authorizable_boundaries', 'policy_id', $grantees, $reach), ...self::keys('guardrails', 'policy_id', null, $reach)];
+        $denying  = [...self::keys('authorizable_policies', 'policy_id', $held, $reach), ...self::keys('resource_policies', 'policy_id', null, $reach)];
+        $capping  = [...self::keys('authorizable_boundaries', 'policy_id', $grantees, $reach), ...self::keys('guardrails', 'policy_id', null, $reach)];
+        $policies = self::hydrated([...$denying, ...$capping]);
 
-        return [self::hydrated($denying), self::hydrated($capping)];
+        return [self::pick($policies, $denying), self::pick($policies, $capping)];
     }
 
     /**
-     * Return the distinct keys in the column of the rows of the table that the
-     * grantees hold, or of every row for no grantees, in a tenant of the reach.
+     * Return the distinct keys in the column of the rows of the table held in a
+     * tenant of the reach, or platform-wide: the rows the grantees hold, or
+     * every row for no grantees, in one query.
      *
      * @param  string  $table
      * @param  string  $column
      * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>|null  $grantees
-     * @param  \Closure(\SineMacula\Laravel\Authorization\Support\Reference|null): bool  $reach
+     * @param  \SineMacula\Laravel\Authorization\Administration\GrantReach  $reach
      * @return list<string>
      */
-    private static function keys(string $table, string $column, ?array $grantees, \Closure $reach): array
+    private static function keys(string $table, string $column, ?array $grantees, GrantReach $reach): array
     {
         if ($grantees === []) {
             return [];
@@ -156,71 +170,62 @@ final class PossessionLimits
 
         /** @var string $name */
         $name  = config('authorization.tables.' . $table, $table);
-        $query = AuthorizationConnection::connection()->table($name)->useWritePdo();
+        $query = $reach->constrain(AuthorizationConnection::connection()->table($name)->useWritePdo(), $name);
 
-        $query->where(static function ($query) use ($grantees): void {
-            foreach ($grantees ?? [] as $grantee) {
-                $query->orWhere(static fn ($row) => $row->where('authorizable_type', $grantee->type)->where('authorizable_id', $grantee->id));
-            }
-        });
-
-        $keys = [];
-
-        foreach ($query->get([$column . ' as granted', 'tenant_type', 'tenant_id']) as $row) {
-            /** @var array{granted: int|string, tenant_type: string|null, tenant_id: int|string|null} $columns */
-            $columns = (array) $row;
-            $tenant  = $columns['tenant_type'] === null ? null : new Reference($columns['tenant_type'], (string) $columns['tenant_id']);
-
-            if (!$reach($tenant)) {
-                continue;
-            }
-
-            $keys[(string) $columns['granted']] = (string) $columns['granted'];
+        if ($grantees !== null) {
+            $query->where(static function (QueryBuilder $query) use ($grantees, $name): void {
+                foreach ($grantees as $grantee) {
+                    $query->orWhere(static fn (QueryBuilder $row): QueryBuilder => $row
+                        ->where($name . '.authorizable_type', $grantee->type)
+                        ->where($name . '.authorizable_id', $grantee->id));
+                }
+            });
         }
 
-        return \array_values($keys);
+        /** @var list<string> */
+        return $query->distinct()->pluck($name . '.' . $column)->all();
     }
 
     /**
-     * Return whether a row held in a tenant, or platform-wide, is in the
-     * operation's reach: a platform-wide row always is, every row is for a
-     * platform-wide grant, and otherwise a row of the grant's tenant or one of
-     * its ancestors, or, for a grant reaching below its tenant, of a tenant
-     * below it.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
-     * @return \Closure(\SineMacula\Laravel\Authorization\Support\Reference|null): bool
-     */
-    private static function reach(OperationResource $operation): \Closure
-    {
-        $tenant = $operation->tenant;
-        $below  = $operation->change?->scope->includeSubtree ?? true;
-        $chain  = \array_map(static fn (Reference $link): string => $link->type . "\0" . $link->id, TenantChain::of($tenant, TenantChain::tree())->tenants);
-
-        return static fn (?Reference $row): bool => $row === null
-            || $tenant                                   === null
-            || \in_array($row->type . "\0" . $row->id, $chain, true)
-            || ($below && TenantChain::isWithin($row, $tenant));
-    }
-
-    /**
-     * Return the stored policies with the keys, hydrated; one that is gone, or
-     * whose document cannot be read, throws.
+     * Return the stored policies with the keys, hydrated, keyed by their keys,
+     * read in one query; one that is gone, or whose document cannot be read,
+     * throws.
      *
      * @param  list<string>  $keys
-     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     * @return array<string, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
     private static function hydrated(array $keys): array
     {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
+        $class    = config('authorization.models.policy', StoredPolicy::class);
+        $model    = new $class;
         $policies = [];
 
-        foreach ($keys as $key) {
-            $policies[] = PolicyDocument::hydrate(InlinePolicies::stored($key) ?? throw new InvalidPolicyDocumentException($key, 'the policy is gone'));
+        foreach ($class::query()->withoutGlobalScopes()->useWritePdo()->whereKey($keys)->get([$model->getKeyName(), 'name', 'owner_type', 'owner_id', 'document']) as $stored) {
+            /** @var int|string $key */
+            $key = $stored->getKey();
+
+            $policies['policy:' . $key] = PolicyDocument::hydrate($stored);
         }
 
         return $policies;
+    }
+
+    /**
+     * Return the hydrated policies with the keys, in their order; a key with no
+     * policy throws, as a policy that is gone limits.
+     *
+     * @param  array<string, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
+     * @param  list<string>  $keys
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     */
+    private static function pick(array $policies, array $keys): array
+    {
+        return \array_map(static fn (string $key): Policy => $policies['policy:' . $key] ?? throw new InvalidPolicyDocumentException($key, 'the policy is gone'), $keys);
     }
 
     /**
@@ -349,7 +354,9 @@ final class PossessionLimits
 
     /**
      * Determine whether one of the patterns covers every action the permission
-     * covers: it matches the permission's name taken literally.
+     * covers: it matches the permission's name taken literally. A pattern
+     * holding `?` or a `[...]` class could match a `*` of the name as one
+     * character, so it covers a name without a wildcard alone.
      *
      * @param  list<string>  $patterns
      * @param  string  $permission
@@ -357,7 +364,15 @@ final class PossessionLimits
      */
     private static function isCoveredByAny(array $patterns, string $permission): bool
     {
-        return SessionCaps::covers($patterns, $permission);
+        foreach ($patterns as $pattern) {
+            $isSound = !self::hasClass($pattern) || !self::isWildcard($permission);
+
+            if ($isSound && SessionCaps::covers([$pattern], $permission)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -388,5 +403,29 @@ final class PossessionLimits
     private static function ends(string $pattern): array
     {
         return [\substr($pattern, 0, (int) \strpos($pattern, '*')), \substr($pattern, (int) \strrpos($pattern, '*') + 1)];
+    }
+
+    /**
+     * Determine whether the pattern holds a wildcard: `*`, `?` or a `[...]`
+     * class.
+     *
+     * @param  string  $pattern
+     * @return bool
+     */
+    private static function isWildcard(string $pattern): bool
+    {
+        return \strpbrk($pattern, '*?[') !== false;
+    }
+
+    /**
+     * Determine whether the pattern holds a wildcard of one character: `?` or a
+     * `[...]` class.
+     *
+     * @param  string  $pattern
+     * @return bool
+     */
+    private static function hasClass(string $pattern): bool
+    {
+        return \strpbrk($pattern, '?[') !== false;
     }
 }

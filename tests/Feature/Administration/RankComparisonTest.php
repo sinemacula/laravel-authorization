@@ -10,8 +10,11 @@ use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\RankComparison;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
 use Tests\Feature\Stubs\StubIdentity;
@@ -282,6 +285,92 @@ final class RankComparisonTest extends TestCase
         self::assertTrue(RankComparison::isComparable(new Subject(new \stdClass, $identity)));
         self::assertFalse(RankComparison::isComparable(new Subject(new \stdClass)));
         self::assertNull(RankComparison::rankOf(new Subject(new \stdClass)));
+    }
+
+    /**
+     * A senior principal acting through a junior granting identity keeps its
+     * principal's rank.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASeniorPrincipalKeepsItsRankThroughAJuniorIdentity(): void
+    {
+        $principal = self::holding('senior-principal', 1);
+        $identity  = self::holding('junior-identity', 5);
+        $middle    = self::holding('mid', 3);
+
+        self::assertSame(1, RankComparison::rankOf(new Subject($principal, $identity)));
+        self::assertTrue(RankComparison::canActOn(new Subject($principal, $identity), $middle));
+    }
+
+    /**
+     * Roles are read on the write connection, so a replica that lags never
+     * makes a screen and the service compare different rows.
+     *
+     * @return void
+     *
+     * @throws \LogicException
+     */
+    public function testRolesAreReadOnTheWriteConnection(): void
+    {
+        $actor  = self::holding('actor', 1);
+        $target = self::holding('target', 4);
+
+        /** @var \Illuminate\Database\Connection $connection */
+        $connection = $actor->getConnection();
+
+        $connection->setReadPdo(static fn (): never => throw new \LogicException('The read connection was used.'));
+
+        try {
+            self::assertTrue(RankComparison::canActOn($this->fresh($actor), $this->fresh($target)));
+            self::assertSame(4, RankComparison::rankAcross($target, GrantScope::platform()));
+        } finally {
+            $connection->setReadPdo(null);
+        }
+    }
+
+    /**
+     * Across a grant's reach, the target's most senior live, ranked role
+     * counts: held platform-wide, in a tenant of the reach, and, for a grant to
+     * every application, in any application; an expired role, one of another
+     * holder, one without a rank and one outside the reach never count.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheTargetsRankIsReadAcrossTheReach(): void
+    {
+        $target = self::holding('target', 7, null);
+        $tenant = new Reference('tenant', 'a');
+        $grants = GrantService::instance();
+
+        self::assertSame(7, RankComparison::rankAcross($target, GrantScope::platform()));
+        self::assertNull(RankComparison::rankAcross(self::holding('nobody', null), GrantScope::platform()));
+
+        $grants?->grantRole(self::holding('other'), Role::create(['name' => 'theirs', 'rank' => 0]));
+        $grants?->grantRole(new Reference('stub-other', 'target'), Role::create(['name' => 'same-key', 'rank' => 0]));
+        $grants?->grantRole($target, Role::create(['name' => 'gone', 'rank' => 0]), Carbon::now()->addMinute());
+
+        Carbon::setTestNow(Carbon::now()->addHour());
+
+        self::assertSame(7, RankComparison::rankAcross($target, GrantScope::platform()));
+
+        $grants?->grantRole($target, Role::create(['name' => 'local', 'rank' => 3]), tenant: $tenant);
+        $grants?->grantRole($target, Role::create(['name' => 'billing', 'rank' => 2]), application: 'billing');
+
+        self::assertSame(2, RankComparison::rankAcross($target, GrantScope::platform()));
+        self::assertSame(3, RankComparison::rankAcross($target, new GrantScope($tenant, 'admin')));
+        self::assertSame(2, RankComparison::rankAcross($target, new GrantScope($tenant, 'billing')));
+        self::assertSame(7, RankComparison::rankAcross($target, new GrantScope(new Reference('tenant', 'b'), 'admin')));
+
+        $owned = Role::query()->withoutGlobalScopes()->create(['name' => 'owned', 'rank' => 1, 'tenant_type' => 'tenant', 'tenant_id' => 'a']);
+
+        $grants?->grantRole($target, $owned, tenant: $tenant);
+
+        self::assertSame(1, RankComparison::rankAcross($target, new GrantScope($tenant, 'admin')));
     }
 
     /**

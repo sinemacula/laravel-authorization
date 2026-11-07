@@ -406,16 +406,16 @@ final class DecisionPipelineTest extends TestCase
     }
 
     /**
-     * The administration stage weighs the tenant the check is made from, not
-     * the operation's own: a revocation in a tenant is allowed from it, and
-     * refused as not the owner's from the platform, where a platform-wide grant
-     * admits it.
+     * A change to a grant row is decided in the row's tenant, whatever tenant
+     * the check is made from: an actor whose platform-wide authority reaches
+     * the row revokes it from the row's tenant and from the platform alike, no
+     * owner standing in the way (N79).
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testTheStageWeighsTheTenantTheCheckIsMadeFrom(): void
+    public function testAGrantRowIsDecidedInItsOwnTenant(): void
     {
         $admin   = StubIdentity::create(['id' => 'admin-1']);
         $user    = StubIdentity::create(['id' => 'user-1']);
@@ -430,7 +430,7 @@ final class DecisionPipelineTest extends TestCase
         $decide = fn (): Decision => $this->pipeline()->decide($subject, PackagePermissions::PERMISSION_REVOKE, $revoke, []);
 
         self::assertTrue(TenantScope::within($tenant, null, $decide)->isAllowed());
-        self::assertSame(DecisionReason::ADMINISTRATION_OWNER, $decide()->reason);
+        self::assertTrue($decide()->isAllowed());
     }
 
     /**

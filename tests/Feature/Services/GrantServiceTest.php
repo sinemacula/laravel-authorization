@@ -1620,8 +1620,7 @@ final class GrantServiceTest extends TestCase
      * actor that holds the action only in the tenant the request is in is
      * refused it, a revocation of a role that denies nothing included, as a
      * screen asking the same is, and one that holds it platform-wide makes it
-     * from the platform, but not from the tenant, which does not own the
-     * platform's grant.
+     * from the tenant: its authority reaches the platform's grant.
      *
      * @return void
      *
@@ -1652,10 +1651,6 @@ final class GrantServiceTest extends TestCase
 
         self::assertSame([$screen->effect, $screen->reason], [$refuse->getDecision()?->effect, $refuse->getDecision()?->reason]);
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->revokeRole($user, $role, ActingContext::for($local)));
-        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_OWNER, static fn (): int => self::service()->revokePermission($user, $edit, ActingContext::for($wide)));
-
-        $this->actAsTenant(null);
-
         self::assertSame(1, self::service()->revokePermission($user, $edit, ActingContext::for($wide)));
     }
 
@@ -1690,9 +1685,7 @@ final class GrantServiceTest extends TestCase
     /**
      * Revoking a role whose ancestor, owned by a tenant the request's scope
      * does not show, has a deny attached is not narrowing, so it is refused as
-     * unprovable from the tenant that holds the grant, however its scope hides
-     * the ancestor; from any other tenant, or the platform, it is refused as
-     * not the owner's first.
+     * unprovable however the actor's scope hides the ancestor.
      *
      * @return void
      *
@@ -1700,21 +1693,18 @@ final class GrantServiceTest extends TestCase
      */
     public function testRevokingARoleWithAHiddenDenyingAncestorIsUnprovable(): void
     {
-        [$parent, $child, $below] = \array_map(self::createTenant(...), ['parent', 'child', 'below']);
+        [$parent, $child] = \array_map(self::createTenant(...), ['parent', 'child']);
 
-        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent))->put(Reference::of($below), Reference::of($child)));
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent)));
 
         $user       = self::user();
         $admin      = StubIdentity::create(['id' => 'parent-admin']);
-        $restricted = Role::query()->withoutGlobalScopes()->create(['name' => 'restricted', ...self::ownedBy($below)]);
-        $editor     = Role::query()->withoutGlobalScopes()->create(['name' => 'editor', ...self::ownedBy($child)]);
+        $restricted = Role::query()->withoutGlobalScopes()->create(['name' => 'restricted', ...self::ownedBy($child)]);
+        $editor     = Role::query()->withoutGlobalScopes()->create(['name' => 'editor', 'parent_id' => $restricted->id, ...self::ownedBy($child)]);
         $deny       = Policy::create(['name' => 'deny', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:*']]]]]);
         $revoke     = Permission::query()->create(['name' => PackagePermissions::ROLE_REVOKE]);
 
-        // A parent the role model refuses, as stored data may still hold it.
-        DB::table('roles')->where('id', $editor->id)->update(['parent_id' => $restricted->id]);
-
-        self::service()->attachPolicy($restricted, $deny, tenant: $below);
+        self::service()->attachPolicy($restricted, $deny, tenant: $child);
         self::service()->grantRole($user, $editor, tenant: $child);
         self::service()->grantPermission($admin, $revoke, tenant: $parent);
         self::service()->grantPermission($admin, $revoke);
@@ -1722,18 +1712,15 @@ final class GrantServiceTest extends TestCase
 
         $unprovable = DecisionReason::ADMINISTRATION_UNPROVABLE;
 
-        $this->actAsTenant($child);
+        $this->actAsTenant($parent);
 
         self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->revokeRole($user, $editor, ActingContext::for($admin), $child));
         self::assertDelegatedRefusal($unprovable, static fn (): SyncResult => self::service()->syncRoles($user, [], actor: ActingContext::for($admin), tenant: $child));
 
-        $this->actAsTenant($parent);
-
-        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_OWNER, static fn (): int => self::service()->revokeRole($user, $editor, ActingContext::for($admin), $child));
-
         $this->actAsTenant(null);
 
-        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_OWNER, static fn (): int => self::service()->revokeAll($user, ActingContext::for($admin)));
+        self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->revokeRole($user, $editor, ActingContext::for($admin), $child));
+        self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->revokeAll($user, ActingContext::for($admin)));
     }
 
     /**

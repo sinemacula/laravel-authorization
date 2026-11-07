@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\HeldLifetime;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -18,11 +19,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Feature\Stubs\UndeclaredGrantsGrantee;
 use Tests\TestCase;
 
 /**
- * Feature tests for `HeldLifetime`, how long a subject holds a permission in
- * the current scope.
+ * Feature tests for `HeldLifetime`, how long a subject holds a permission, or a
+ * policy, in the current scope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -197,6 +199,111 @@ final class HeldLifetimeTest extends TestCase
 
         self::assertNull(HeldLifetime::of(self::subject($user), 'posts:edit'));
         self::assertSame(\PHP_INT_MAX, TenantScope::within($tenant, null, static fn (): ?int => HeldLifetime::of(self::subject($user), 'posts:edit')));
+    }
+
+    /**
+     * A grantee that does not declare the contracts of its relations holds
+     * nothing through them, though it has the relations and rows in them.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGranteeWithoutTheContractsHoldsNothing(): void
+    {
+        $bare   = UndeclaredGrantsGrantee::query()->create(['id' => 'bare']);
+        $editor = Role::create(['name' => 'editor']);
+        $policy = Policy::create(['name' => 'reader', 'document' => ['statements' => []]]);
+        $named  = new Reference($bare->getMorphClass(), 'bare');
+
+        self::roles()->grantPermission($editor, self::permission('posts:edit'));
+        self::grants()->grantPermission($named, self::permission('posts:edit'));
+        self::grants()->grantRole($named, $editor);
+        self::grants()->attachPolicy($named, $policy);
+        self::grants()->attachPolicy($editor, $policy);
+
+        self::assertSame(2, DB::table('authorizable_permissions')->count() + DB::table('authorizable_roles')->count());
+        self::assertNull(HeldLifetime::of(self::subject($bare), 'posts:edit'));
+        self::assertNull(HeldLifetime::ofPolicy(self::subject($bare), $policy->id));
+    }
+
+    /**
+     * A policy is held until the latest of its attachments lasts: one directly
+     * to the grantee, until it expires, and one to a role, until the earlier of
+     * the role's grant and the attachment, its ancestors' included; one that
+     * has expired, held in another scope, or of another policy does not count.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyIsHeldUntilItsLatestAttachmentLasts(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $staff  = Role::create(['name' => 'staff']);
+        $editor = Role::create(['name' => 'editor', 'parent_id' => $staff->id]);
+        $policy = Policy::create(['name' => 'delegates', 'document' => ['statements' => []]]);
+        $other  = Policy::create(['name' => 'other', 'document' => ['statements' => []]]);
+
+        self::assertNull(HeldLifetime::ofPolicy(self::subject($user), $policy->id));
+
+        self::grants()->attachPolicy($user, $other);
+        self::grants()->attachPolicy($user, $policy, Carbon::now()->addDay());
+        self::grants()->attachPolicy($user, $policy, Carbon::now()->addDays(9), tenant: new Reference('tenant', 'a'));
+
+        self::assertSame(Carbon::now()->addDay()->getTimestamp(), HeldLifetime::ofPolicy(self::subject($user), $policy->id));
+
+        self::grants()->grantRole($user, $editor, Carbon::now()->addDays(4));
+        self::grants()->attachPolicy($staff, $policy, Carbon::now()->addDays(3));
+        self::grants()->attachPolicy($editor, $policy, Carbon::now()->addDays(2));
+
+        self::assertSame(Carbon::now()->addDays(3)->getTimestamp(), HeldLifetime::ofPolicy(self::subject($user), $policy->id));
+
+        self::grants()->attachPolicy($editor, $policy);
+
+        self::assertSame(Carbon::now()->addDays(4)->getTimestamp(), HeldLifetime::ofPolicy(self::subject($user), $policy->id));
+
+        Carbon::setTestNow(Carbon::now()->addDays(5));
+
+        self::assertNull(HeldLifetime::ofPolicy(self::subject($user), $policy->id));
+        self::assertSame(\PHP_INT_MAX, HeldLifetime::ofPolicy(self::subject($user), $other->id));
+    }
+
+    /**
+     * A policy attached to a role in another tenant, or for another
+     * application, does not count where it does not hold, nor once it has
+     * expired, nor one attached to another kind of grantee with the role's key.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARolesAttachmentCountsInItsOwnScope(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $editor = Role::create(['name' => 'editor']);
+        $policy = Policy::create(['name' => 'delegates', 'document' => ['statements' => []]]);
+        $tenant = new Reference('tenant', 'a');
+
+        self::grants()->grantRole($user, $editor);
+        self::grants()->attachPolicy($editor, $policy, tenant: $tenant);
+        self::grants()->attachPolicy($editor, $policy, application: 'admin');
+
+        self::assertNull(HeldLifetime::ofPolicy(self::subject($user), $policy->id));
+        self::assertSame(\PHP_INT_MAX, TenantScope::within($tenant, null, static fn (): ?int => HeldLifetime::ofPolicy(self::subject($user), $policy->id)));
+        self::assertSame(\PHP_INT_MAX, TenantScope::within(null, 'admin', static fn (): ?int => HeldLifetime::ofPolicy(self::subject($user), $policy->id)));
+
+        $writer = Role::create(['name' => 'writer']);
+
+        self::grants()->grantRole($user, $writer);
+        self::grants()->attachPolicy($writer, $policy, Carbon::now()->addMinute());
+        self::grants()->attachPolicy(new Reference('other-type', $writer->id), $policy);
+
+        self::assertSame(Carbon::now()->addMinute()->getTimestamp(), HeldLifetime::ofPolicy(self::subject($user), $policy->id));
+
+        Carbon::setTestNow(Carbon::now()->addHour());
+
+        self::assertNull(HeldLifetime::ofPolicy(self::subject($user), $policy->id));
     }
 
     /**

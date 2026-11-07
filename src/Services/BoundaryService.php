@@ -85,9 +85,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * `AuthorizationException`, leaving nothing written. A removal that finds no
  * boundary decides nothing. Setting a boundary can replace a stricter one and
  * removing one lifts its cap, so either may widen what the grantee may do: once
- * the owner and rank rules pass (see `OperationConstraints`), both wait for the
- * rules of the later parts of BL-65 and are refused as
- * `administration.unprovable`.
+ * the rank rule passes (see `OperationConstraints`), both wait for the rules of
+ * the later parts of BL-65 and are refused as `administration.unprovable`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -110,13 +109,8 @@ final class BoundaryService
      *
      * @throws \Throwable
      */
-    public function set(
-        Model|Reference $grantee,
-        Policy $policy,
-        Model|Reference|null $tenant = null,
-        bool $includeSubtree = true,
-        ?ActingContext $actor = null,
-    ): GrantOutcome {
+    public function set(Model|Reference $grantee, Policy $policy, Model|Reference|null $tenant = null, bool $includeSubtree = true, ?ActingContext $actor = null): GrantOutcome
+    {
         $reference = self::grantee($grantee);
         $named     = GrantScopes::named($tenant);
 

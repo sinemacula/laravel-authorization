@@ -9,10 +9,10 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Administration\GrantReach;
 use SineMacula\Laravel\Authorization\Administration\HeldLifetime;
 use SineMacula\Laravel\Authorization\Administration\OperationConstraints;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
-use SineMacula\Laravel\Authorization\Administration\OwnerConstraint;
 use SineMacula\Laravel\Authorization\Administration\Possession;
 use SineMacula\Laravel\Authorization\Administration\PossessionLimits;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
@@ -38,9 +38,9 @@ use Tests\TestCase;
 
 /**
  * Feature tests for delegated direct grants (BL-65 part 2, AUTHZ-11.1,
- * AUTHZ-3.5): rank, self, the administered scope, the owner, possession and
- * explicit grantability, expiry and atomic batches, each decided by a screen
- * exactly as the grant service decides it.
+ * AUTHZ-3.5): rank, self, the administered scope, possession and explicit
+ * grantability, expiry and atomic batches, each decided by a screen exactly as
+ * the grant service decides it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,7 +53,7 @@ use Tests\TestCase;
 #[CoversClass(Possession::class)]
 #[CoversClass(PossessionLimits::class)]
 #[CoversClass(HeldLifetime::class)]
-#[CoversClass(OwnerConstraint::class)]
+#[CoversClass(GrantReach::class)]
 final class DelegatedGrantsTest extends TestCase
 {
     use ActsAsTenant, AssertsDelegatedRefusals;
@@ -231,14 +231,15 @@ final class DelegatedGrantsTest extends TestCase
 
     /**
      * A platform-wide grant needs platform authority, which the grant's own
-     * decision at platform scope asks for, and is made from the platform: one
-     * made from a tenant edits a record the tenant does not own.
+     * decision at platform scope asks for, and an actor holding it makes the
+     * grant from a tenant as from the platform: its authority reaches the
+     * platform's row (N79).
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testAPlatformGrantNeedsPlatformAuthorityFromThePlatform(): void
+    public function testAPlatformGrantNeedsPlatformAuthority(): void
     {
         [$parent] = $this->tree();
 
@@ -251,20 +252,63 @@ final class DelegatedGrantsTest extends TestCase
 
         $this->actAsTenant($parent);
 
-        self::assertGrant(DecisionReason::ADMINISTRATION_OWNER, $wide, self::user('other'), 'posts:edit');
+        self::assertGrant(DecisionReason::NO_MATCH, $local, self::user('other'), 'posts:edit');
+        self::assertGrant(null, $wide, self::user('other'), 'posts:edit');
     }
 
     /**
-     * A grant row held in an ancestor of the tenant the request is in cannot be
-     * edited from it, even by an actor allowed there by a platform-wide grant:
-     * only the owner edits; an ancestor's permission is still granted to a
-     * grantee in the tenant itself, which edits the tenant's own row alone.
+     * Who may change a grant row is the administered scope (N79): an actor
+     * whose authority for the action reaches the row's tenant, from a parent
+     * over its subtree, changes it from its own context, and one call clears a
+     * grantee's rows across the tenants it administers; a parent's node-only
+     * authority reaches no child, and a tenant's no platform-wide row, nor a
+     * tenant outside its own.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testAnAncestorsRecordsCannotBeEditedFromADescendant(): void
+    public function testTheAdministeredScopeDecidesWhoChangesAGrantRow(): void
+    {
+        [$parent, $child] = $this->tree();
+
+        $other   = self::createTenant('other');
+        $subtree = self::actor('subtree', ['authorization:*' => ['tenant' => $parent]]);
+        $node    = self::actor('node', ['authorization:*' => ['tenant' => $parent, 'subtree' => false]]);
+        $user    = self::user('user');
+        $edit    = self::permission('posts:edit');
+
+        self::grants()->grantPermission($user, $edit, tenant: $child);
+        self::grants()->grantPermission($user, self::permission('posts:read'), tenant: $parent);
+        self::grants()->grantPermission($user, self::permission('posts:wide'));
+
+        $this->actAsTenant($parent);
+
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::grants()->revokePermission($user, $edit, $node, $child));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::grants()->revokePermission($user, 'posts:wide', $subtree));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::grants()->revokeAll($user, $subtree));
+        self::assertSame(1, self::grants()->revokePermission($user, $edit, $subtree, $child));
+
+        self::grants()->revokePermission($user, 'posts:wide');
+        self::grants()->grantPermission($user, $edit, tenant: $child);
+
+        self::assertSame(2, self::grants()->revokeAll($user, $subtree));
+        self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', 'user')->count());
+
+        self::grants()->grantPermission($user, $edit, tenant: $other);
+
+        self::assertDelegatedRefusal(DecisionReason::TENANT_SCOPE, static fn (): int => self::grants()->revokeAll($user, $subtree));
+    }
+
+    /**
+     * An ancestor's permission is still granted to a grantee in the tenant
+     * itself, which writes the tenant's own row alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAncestorsPermissionIsGrantedInATenant(): void
     {
         [$parent, $child] = $this->tree();
 
@@ -272,12 +316,8 @@ final class DelegatedGrantsTest extends TestCase
         $user   = self::user('user');
         $shared = Permission::query()->withoutGlobalScopes()->create(['name' => 'posts:share', ...self::ownedBy($parent)]);
 
-        self::grants()->grantPermission($user, $shared, tenant: $parent);
-
         $this->actAsTenant($child);
 
-        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_OWNER, static fn (): int => self::grants()->revokePermission($user, $shared, $actor, $parent));
-        self::assertGrant(DecisionReason::ADMINISTRATION_OWNER, $actor, $user, 'posts:edit', ['tenant' => $parent]);
         self::assertGrant(null, $actor, $user, $shared, ['tenant' => $child]);
     }
 
@@ -454,6 +494,135 @@ final class DelegatedGrantsTest extends TestCase
         $descriptor = OperationResource::grant(Actions::PERMISSION_GRANT, $user, self::permission('posts:edit'), GrantScope::platform())->grantable();
 
         self::assertTrue($actor->decide(Actions::PERMISSION_GRANTABLE, $descriptor)->isAllowed());
+    }
+
+    /**
+     * The grantable right is decided across the grant's whole reach: a right
+     * held for one application allows no grant to every application, nor to
+     * another application, whatever application the request is in, and a right
+     * held at a tenant's node alone allows no grant to its subtree.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheGrantableRightMustCoverTheWholeReach(): void
+    {
+        [$parent] = $this->tree();
+
+        $app = self::actor('app', [...self::granting(), Actions::PERMISSION_GRANTABLE => ['application' => 'admin']]);
+
+        self::assertGrant(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $app, self::user('user'), 'posts:edit', ['on' => 'admin']);
+        self::assertGrant(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $app, self::user('user'), 'posts:edit', ['on' => 'admin', 'application' => 'billing']);
+        self::assertGrant(null, $app, self::user('user'), 'posts:edit', ['on' => 'admin', 'application' => 'admin']);
+
+        $node = self::actor('node', [...self::granting(), Actions::PERMISSION_GRANTABLE => ['tenant' => $parent, 'subtree' => false]]);
+
+        $this->actAsTenant($parent);
+
+        self::assertGrant(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $node, self::user('other'), 'posts:edit', ['tenant' => $parent]);
+        self::assertGrant(null, $node, self::user('other'), 'posts:edit', ['tenant' => $parent, 'subtree' => false]);
+    }
+
+    /**
+     * The grantable right must last as long as the grant: one held for a day
+     * allows a grant for an hour, and refuses a permanent one.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheGrantableRightMustOutlastTheGrant(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-07 12:00:00', 'UTC'));
+
+        $actor = self::actor('admin', [...self::granting(), Actions::PERMISSION_GRANTABLE => ['expires' => Carbon::now()->addDay()]]);
+
+        self::assertGrant(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $actor, self::user('user'), 'posts:edit');
+        self::assertGrant(null, $actor, self::user('user'), 'posts:edit', ['expires' => Carbon::now()->addHour()]);
+    }
+
+    /**
+     * A deny or a boundary exclusion written with `?` or a class could limit a
+     * wildcard grant, so it fails the possession route.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAWildcardDenyOfOneCharacterFailsPossession(): void
+    {
+        foreach (['[p]osts:edit', 'p?sts:edit'] as $index => $pattern) {
+            $actor = self::actor('denied-' . $index, [...self::granting(), 'posts:*' => []]);
+
+            StubIdentity::query()->findOrFail('denied-' . $index)->attachPolicy(self::document('deny-' . $index, [['effect' => 'deny', 'actions' => [$pattern]]]));
+
+            self::assertGrant(DecisionReason::ADMINISTRATION_UNPROVABLE, $actor, self::user('user'), 'posts:*');
+        }
+
+        $bounded = self::actor('bounded', [...self::granting(), 'posts:*' => []]);
+
+        BoundaryService::instance()?->set(StubIdentity::query()->findOrFail('bounded'), self::document('bound', [
+            ['effect' => 'allow', 'not_actions' => ['[p]osts:edit']],
+        ]));
+
+        self::assertGrant(DecisionReason::ADMINISTRATION_UNPROVABLE, $bounded, self::user('user'), 'posts:*');
+    }
+
+    /**
+     * The grantee is ranked across the whole reach of the change: a role it
+     * holds in one application alone counts against a change to every
+     * application, and one it holds at a child alone against a grant reaching
+     * the child from its parent.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheGranteeIsRankedAcrossTheReach(): void
+    {
+        [$parent, $child] = $this->tree();
+
+        $actor = self::actor('admin', ['authorization:*' => [], 'posts:*' => []], 5);
+        $user  = self::user('user');
+
+        self::grants()->grantRole($user, Role::query()->create(['name' => 'admin-only', 'rank' => 1]), application: 'admin');
+        self::grants()->grantPermission($user, self::permission('posts:read'));
+
+        self::assertRevoke(DecisionReason::ADMINISTRATION_RANK, $actor, $user, 'posts:read');
+        self::assertGrant(DecisionReason::ADMINISTRATION_RANK, $actor, $user, 'posts:edit');
+
+        $other = self::user('other');
+
+        self::grants()->grantRole($other, Role::query()->create(['name' => 'child-only', 'rank' => 1]), tenant: $child, includeSubtree: false);
+
+        $this->actAsTenant($parent);
+
+        self::assertGrant(DecisionReason::ADMINISTRATION_RANK, $actor, $other, 'posts:edit', ['tenant' => $parent]);
+        self::assertGrant(null, $actor, $other, 'posts:edit', ['tenant' => $parent, 'subtree' => false]);
+    }
+
+    /**
+     * The self right is decided on the operation, so a policy may allow the
+     * actor to grant itself one permission alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheSelfRightIsDecidedOnTheOperation(): void
+    {
+        $actor = self::actor('admin', [...self::granting(), 'posts:*' => []]);
+
+        StubIdentity::query()->findOrFail('admin')->attachPolicy(self::document('self', [[
+            'effect'     => 'allow',
+            'actions'    => [Actions::ADMINISTRATION_SELF],
+            'resources'  => [OperationResource::TYPE . ':*'],
+            'conditions' => ['eq' => ['resource.permission' => 'posts:edit']],
+        ]]));
+
+        self::assertGrant(null, $actor, self::user('admin'), 'posts:edit');
+        self::assertGrant(DecisionReason::ADMINISTRATION_SELF, $actor, self::user('admin'), 'posts:delete');
     }
 
     /**

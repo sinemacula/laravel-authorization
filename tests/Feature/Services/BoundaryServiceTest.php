@@ -206,10 +206,9 @@ final class BoundaryServiceTest extends TestCase
     /**
      * A delegated boundary change is decided under its action before anything
      * is written: setting a boundary, and removing one, widen authority, so an
-     * actor allowed every action is refused as unprovable, or, removing a
-     * tenant's boundary from the platform, as not its owner, and one without
-     * the action as no match, or as out of scope for a tenant's boundary when
-     * no tenant is active.
+     * actor allowed every action is refused as unprovable, and one without the
+     * action as no match, or as out of scope for a tenant's boundary when no
+     * tenant is active.
      *
      * @return void
      *
@@ -233,9 +232,9 @@ final class BoundaryServiceTest extends TestCase
         $unprovable = DecisionReason::ADMINISTRATION_UNPROVABLE;
 
         self::assertDelegatedRefusal($unprovable, static fn (): GrantOutcome => self::service()->set($user, $other, actor: $admin));
-        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_OWNER, static fn (): bool => self::service()->remove($user, $tenant, $admin));
+        self::assertDelegatedRefusal($unprovable, static fn (): bool => self::service()->remove($user, $tenant, $admin));
         self::assertDelegatedRefusal($unprovable, static fn (): bool => self::service()->remove($user, actor: $admin));
-        self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->removeAll($platform, $admin));
+        self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->removeAll($user, $admin));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): GrantOutcome => self::service()->set($user, $other, actor: $nobody));
         self::assertDelegatedRefusal(DecisionReason::TENANT_SCOPE, static fn (): bool => self::service()->remove($user, $tenant, $nobody));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): bool => self::service()->remove($user, actor: $nobody));

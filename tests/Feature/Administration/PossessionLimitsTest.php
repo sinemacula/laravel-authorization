@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
-use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Administration\PossessionLimits;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
@@ -28,6 +27,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenantTree;
+use Tests\Fixtures\BulkChecks\FailingTenantTree;
 use Tests\TestCase;
 
 /**
@@ -64,10 +64,17 @@ final class PossessionLimitsTest extends TestCase
         yield 'two patterns, one inside the other' => ['*', 'a*b', true];
         yield 'a suffix the other ends' => ['*b', 'a*ab', true];
         yield 'a prefix and a suffix that clash' => ['a*', 'b*', false];
+        yield 'suffixes differing before their last character' => ['*ab', '*bb', false];
+        yield 'a class matching a name' => ['[p]osts:edit', 'posts:edit', true];
+        yield 'a class matching another name' => ['[p]osts:edit', 'posts:read', false];
+        yield 'a class against a pattern' => ['[p]osts:edit', 'posts:*', true];
+        yield 'a single wildcard against a pattern' => ['p?sts:edit', 'posts:*', true];
+        yield 'a single wildcard against an unrelated pattern' => ['p?sts:*', 'billing:*', true];
     }
 
     /**
-     * Two patterns overlap exactly when some action matches both.
+     * Two patterns overlap exactly when some action matches both, and two that
+     * both hold wildcards, one of them `?` or a class, are taken to overlap.
      *
      * @param  string  $pattern
      * @param  string  $other
@@ -111,12 +118,17 @@ final class PossessionLimitsTest extends TestCase
         self::assertFalse(self::limits('posts:edit', $deny(['not_actions' => ['posts:*']])));
         self::assertFalse(self::limits('posts:edit', $deny(['actions' => ['posts:read']])));
         self::assertFalse(self::limits('posts:edit', ['policies' => [self::policy([['effect' => 'allow', 'actions' => ['billing:*']]])]]));
+        self::assertTrue(self::limits('posts:*', $deny(['actions' => ['[p]osts:edit']])));
+        self::assertTrue(self::limits('posts:*', $deny(['actions' => ['p?sts:edit']])));
+        self::assertFalse(self::limits('posts:read', $deny(['actions' => ['[p]osts:edit']])));
     }
 
     /**
      * Every boundary and guardrail must allow every action the permission
      * covers, with no condition, on every resource: a cap allowing it on some
-     * resources only, under a condition, or not at all, limits it.
+     * resources only, under a condition, or not at all, limits it; a pattern
+     * holding `?` or a class covers no wildcard, and excludes one it could
+     * overlap.
      *
      * @return void
      */
@@ -136,6 +148,10 @@ final class PossessionLimitsTest extends TestCase
         self::assertTrue(self::limits('posts:edit', $cap(['not_actions' => ['posts:e*']])));
         self::assertTrue(self::limits('posts:edit', $cap(['actions' => ['posts:read']], 'guardrails')));
         self::assertTrue(self::limits('posts:edit', ['boundaries' => [self::policy([['effect' => 'deny', 'actions' => ['billing:*']]])]]));
+        self::assertTrue(self::limits('posts:*', $cap(['not_actions' => ['[p]osts:edit']])));
+        self::assertTrue(self::limits('posts:*', $cap(['actions' => ['p?sts:*']])));
+        self::assertTrue(self::limits('posts:*', $cap(['actions' => ['posts:[!x]*']])));
+        self::assertFalse(self::limits('posts:edit', $cap(['actions' => ['p?sts:*']])));
     }
 
     /**
@@ -150,6 +166,8 @@ final class PossessionLimitsTest extends TestCase
         self::assertTrue(self::limits('posts:edit', ['session' => [['credential', ['posts:*']], ['capped[1]', ['posts:read']]]]));
         self::assertTrue(self::limits('posts:*', ['session' => [['credential', ['posts:edit']]]]));
         self::assertTrue(self::limits('posts:edit', ['session' => [['credential:missing', []]]]));
+        self::assertTrue(self::limits('posts:*', ['session' => [['credential', ['posts:?*']]]]));
+        self::assertFalse(self::limits('posts:edit', ['session' => [['credential', ['posts:?dit']]]]));
     }
 
     /**
@@ -249,6 +267,68 @@ final class PossessionLimitsTest extends TestCase
     }
 
     /**
+     * Only the subject's own stored rows count: a deny, a role and a boundary
+     * of another identity never limit it, and a subject with no stored grantee
+     * reads none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnotherGranteesRowsNeverLimit(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-1']);
+        $other = StubIdentity::create(['id' => 'other']);
+        $role  = Role::create(['name' => 'theirs']);
+
+        self::grants()->grantRole($other, $role);
+        self::grants()->attachPolicy($other, self::denying('other-deny', 'posts:edit'));
+        self::grants()->attachPolicy($role, self::denying('role-deny', 'posts:edit'));
+        BoundaryService::instance()?->set($other, self::allowing('other-bound', 'posts:read'));
+
+        self::assertFalse(self::limits('posts:edit', subject: new Subject($user, $user)));
+        self::assertFalse(self::limits('posts:edit'));
+
+        self::grants()->attachPolicy($user, self::denying('own-deny', 'posts:edit'));
+
+        self::assertTrue(self::limits('posts:edit', subject: new Subject($user, $user)));
+    }
+
+    /**
+     * A role held only outside the grant's reach never limits it, though it
+     * limits a platform-wide grant, which reaches every tenant.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleHeldOutsideTheReachNeverLimits(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-9']);
+        $role = Role::create(['name' => 'away']);
+
+        self::grants()->grantRole($user, $role, tenant: new Reference('tenant', 'other'));
+        self::grants()->attachPolicy($role, self::denying('away-deny', 'posts:edit'));
+
+        self::assertFalse(self::limits('posts:edit', subject: new Subject($user, $user), scope: new GrantScope(new Reference('tenant', 'a'), null, false)));
+        self::assertTrue(self::limits('posts:edit', subject: new Subject($user, $user)));
+    }
+
+    /**
+     * A tree that cannot be read for the grant's tenant limits every
+     * permission, so the reach is never guessed.
+     *
+     * @return void
+     */
+    public function testATreeThatCannotBeReadLimits(): void
+    {
+        $this->app?->instance(TenantTree::class, new FailingTenantTree(failing: ['a']));
+
+        self::assertTrue(self::limits('posts:edit', scope: new GrantScope(new Reference('tenant', 'a'))));
+        self::assertFalse(self::limits('posts:edit', scope: new GrantScope(new Reference('tenant', 'b'), null, false)));
+    }
+
+    /**
      * Determine whether anything limits the permission for the subject, given
      * the check's sources, for a grant in the scope, platform-wide unless one
      * is given.
@@ -262,9 +342,7 @@ final class PossessionLimitsTest extends TestCase
     private static function limits(string $permission, array $sources = [], ?Subject $subject = null, ?GrantScope $scope = null): bool
     {
         $subject ??= new Subject(new \stdClass);
-        $grantee   = StubIdentity::query()->firstOrCreate(['id' => 'grantee']);
-        $target    = Permission::query()->firstOrCreate(['name' => $permission]);
-        $operation = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $grantee, $target, $scope ?? GrantScope::platform());
+
         /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> $policies */
         $policies = $sources['policies'] ?? [];
 
@@ -279,7 +357,7 @@ final class PossessionLimitsTest extends TestCase
 
         $checked = new CheckSources($policies, $guardrails, $boundaries, new CheckContext, static fn (): ?string => null, new SessionCaps($session));
 
-        return PossessionLimits::isLimited($subject, $permission, $operation, $checked);
+        return PossessionLimits::isLimited($subject, $permission, $scope ?? GrantScope::platform(), $checked);
     }
 
     /**

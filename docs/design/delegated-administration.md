@@ -3,7 +3,7 @@
 Granting, revoking and editing roles, permissions and policies are themselves actions this package checks (AUTHZ-11.1).
 This note gives the whole design of delegated administration, built in four parts (N78), and marks what this release
 enforces: the action catalogue, the acting context, the operation resources decided through `check()` and the audit
-correlation (part 1), and the owner, scope, rank, self, expiry and possession rules of direct grants, with atomic
+correlation (part 1), and the scope, rank, self, expiry and possession rules of direct grants, with atomic
 batches (part 2). Parts 3 and 4 are listed as **Not yet**: until each lands, what it would prove is refused, so
 delegated administration never grants anything it cannot justify.
 
@@ -43,7 +43,10 @@ delegated administration never grants anything it cannot justify.
    actor's scope, an ancestor of the request's tenant included, is `tenant_scope`. A change with no tenant, to a
    platform-wide grant, a platform role or a platform-owned record, is decided at platform scope
    (`Support\ResourceScope`), where only a platform-wide grant of the action counts, so an actor holding the action only
-   in a tenant is refused it. Nothing is attached to one operation, so only the resource policies attached to the type
+   in a tenant is refused it. Who may change a grant row is therefore the scope the actor administers (N79): an actor
+   whose authority for the action reaches the row's tenant, from a parent by authority over its subtree or from the
+   platform, changes it from its own context, and one `revokeAll()` clears a grantee's rows across every tenant the
+   actor administers. Nothing is attached to one operation, so only the resource policies attached to the type
    `authorization:operation` are read for it, under one cache entry every operation shares. Its attributes reach
    policies under `resource` through the package's `Administration\OperationAttributes` provider, which no configured
    provider replaces: the action, whether it only narrows, whether it changes nothing, the target, its name under its
@@ -60,12 +63,14 @@ delegated administration never grants anything it cannot justify.
    decides the change it was asked for (`OperationResource::unchanged()`, or the revocation of the first candidate of a
    name the grantee does not hold): a removal of what is not held, a sync of what is held live, and `revokeAll()`,
    `removeAll()` or `detachAll()` of a grantee or record holding nothing, each of whose actions is decided at platform
-   scope. Such a change only narrows, so an actor allowed the action makes it, and one not allowed it is refused whether
-   or not anything was there, so a refusal never tells it what a grantee holds.
+   scope. Such a change only narrows, so it needs no scope, self or possession right: an actor allowed the action makes
+   it, writing nothing, once the rank rule passes for a change to another identity or principal. An actor not allowed
+   the action, or not senior to the grantee, is refused whether or not anything was there, so a refusal never tells it
+   what a grantee holds. Policies read it as `resource.unchanged`.
 
 8. **What cannot be proved is refused (in this release).** Once the action is allowed, a change that may widen what
    anyone may do and that no rule of this release proves is refused as `administration.unprovable`. A change that can
-   only narrow (`Administration\Narrowing`) is allowed once the owner and rank rules pass: revoking a permission,
+   only narrow (`Administration\Narrowing`) is allowed once the rank rule passes: revoking a permission,
    revoking a role no policy attached to it or its ancestors denies anything in, read across every tenant on the write
    connection, so a screen and the service judge alike and an ancestor the tenant scope hides still counts, detaching a
    policy with no deny statement, and a grant that only shortens or narrows one the grantee holds live in the same scope
@@ -81,7 +86,8 @@ delegated administration never grants anything it cannot justify.
 10. **Rank is a comparison, never an allow (N76, in this release).** `Administration\RankComparison` compares the actor
     and the target through the same scope-aware path (the roles each holds in the scope, expired grants and other
     applications never counting): strictly senior, an unranked target the most junior, an unranked actor acting on no
-    one, an uncomparable side failing closed, and rank turned off passing every comparison. When neither side holds a
+    one, an uncomparable side failing closed, and rank turned off passing every comparison. Roles are read on the write
+    connection, as every other source of `check()` is. When neither side holds a
     ranked role, the comparison refuses: both count as the most junior, so their ranks are equal, and strict seniority
     refuses equal rank; an application that leaves rank on but ranks no role should turn it off. An actor given as a
     resolved `Subject` is ranked by the roles that reach it, its principal's and its granting identity's, and a rank
@@ -91,18 +97,17 @@ delegated administration never grants anything it cannot justify.
     weighs every change to an identity or a principal (`Administration\OperationGrantee`), in order, each further check
     decided as the actor through every stage up to the allow but never through the stage again
     (`Administration\FurtherChecks`):
-    - **owner** (D20): the tenant the check is made from, the request's, must be the tenant that holds the grant row
-      the change edits, the platform for a platform-wide row (`Administration\OwnerConstraint`, a reusable piece part 3
-      applies to definitions, role membership and policies), or the change is `administration.owner`; granting an
-      ancestor's record to a local grantee edits the local row alone; a call that changes nothing edits nothing;
     - **scope**: a change that may widen authority decides its own action again in the grant's tenant, standing just
       below it for a subtree grant (`TenantScope::within(..., isBelow: true)`), so only authority that itself reaches
       below counts, and in the grant's application, so a grant to every application needs authority in every
       application, or it is `administration.scope`; a platform-wide change already needs platform authority;
-    - **rank**: unless the grantee is the actor, the actor must be strictly senior to it in the grant's scope, and to
+    - **rank**: unless the grantee is the actor, the actor, ranked in the grant's own tenant and application, must be
+      strictly senior to the most senior rank the grantee holds anywhere the change reaches (platform-wide, the
+      grant's tenant and its ancestors, the tenants below for a grant reaching below, every tenant for a
+      platform-wide grant, any application for a grant to every application, `RankComparison::rankAcross()`), and to
       the rank a role grant would give it, or the change is `administration.rank` (`administration.rank_uncomparable`
-      when a side cannot be read), a revocation, a sync, `revokeAll()`, a boundary change and a call that changes
-      nothing included, so a refusal never depends on what the grantee holds;
+      when a side or the reach cannot be read), a revocation, a sync, `revokeAll()`, a boundary change and a call that
+      changes nothing included, so a refusal never depends on what the grantee holds;
     - **self**: a change to the actor's principal or identity that may widen authority needs
       `authorization:administration.self` on the same operation, or it is `administration.self`;
     - **possession** (N77, `Administration\Possession`): a direct grant of a permission is allowed when the actor
@@ -110,18 +115,29 @@ delegated administration never grants anything it cannot justify.
       (`Administration\HeldLifetime`), its `check()` there allows it, and nothing that denies or caps the actor could
       limit it anywhere in the reach (`Administration\PossessionLimits`: any deny statement naming an action it covers,
       a boundary or guardrail not allowing it whole, unconditionally and on every resource, a cap not covering it, or a
-      document that cannot be read, the actor's policies, its roles', every resource's, its boundaries and the
-      guardrails read as stored whatever their application); or when `authorization:permission.grantable` is allowed on
-      the grant's descriptor (`OperationResource::grantable()`). Otherwise it is `administration.not_grantable` when the
-      actor does not hold the permission across the reach and lifetime, and `administration.unprovable` when it does but
-      cannot be proved contained. An extension needs authority lasting until the new expiry; a shortening only narrows.
+      tree, row or document that cannot be read, the actor's policies, its roles', every resource's, its boundaries and
+      the guardrails read as stored whatever their application, a table at a time with the reach in the query
+      (`Administration\GrantReach`) and every policy found in one more query, so the cost never grows with other
+      tenants' rows; two patterns that both hold wildcards, one of them `?` or a `[...]` class, are taken to overlap);
+      or when `authorization:permission.grantable` is allowed, in the grant's reach, on the grant's descriptor
+      (`OperationResource::grantable()`), through a source lasting as long as the grant (`HeldLifetime::of()` for a
+      permission held, `HeldLifetime::ofPolicy()` for a stored policy, a resource policy never expiring). Otherwise it
+      is `administration.not_grantable` when the actor does not hold the permission across the reach and lifetime, and
+      `administration.unprovable` when it does but cannot be proved contained. An extension needs authority lasting
+      until the new expiry; a shortening only narrows;
+    - **batches** are decided kind by kind, then by tenant, application and record (`ActingContext::authorizeIn()`), so
+      the first refusal never depends on the order rows were read in;
+    - the owner rule (D20, `Administration\OwnerConstraint`) does not apply to grant rows (N79): it is kept for part 3,
+      which applies it to definitions, their membership and attachments.
 
 12. **Roles, grantable rights and impact (part 3, Not yet).** Granting a role covers its whole transitive authority:
     direct and inherited permissions and policies. An explicit `policy.grantable` decision can allow an exact delegation
     of a policy the actor does not itself hold (N77), as `permission.grantable` already does for a direct permission. A
     policy right is bound to the policy's digest, so a rewrite needs a new one. A change to a role's content or parent,
     a permission rename, a policy rewrite and a boundary or resource policy change are re-checked against every holder
-    they reach, as a new distribution of authority. Definitions are edited only from their owner's tenant (D20).
+    they reach, as a new distribution of authority. Definitions (roles, permissions, policies, their membership and
+    attachments) are edited only from their owner's tenant (D20, `Administration\OwnerConstraint`); grant rows never
+    are (N79).
 
 13. **Guardrails and concurrency (part 4, Not yet).** Guardrail changes join the operation-resource path. Every
     authorization dependency of a change is locked or version-checked, so a concurrent revocation, role growth, policy
@@ -181,9 +197,10 @@ delegated administration never grants anything it cannot justify.
 - `Administration\Narrowing` -- which removals, and which grants, only narrow; `Services\Support\GrantTable::liveRow()`
   -- the grant held live that a shortening is judged against.
 - `Administration\RankComparison` -- the rank comparison, behind `HasRoles::canActOn()`.
-- `Administration\OwnerConstraint` -- only the owner edits.
+- `Administration\OwnerConstraint` -- only the owner edits, for part 3's definition edits.
 - `Administration\Possession`, `Administration\HeldLifetime`, `Administration\PossessionLimits` -- the possession and
-  grantable routes of a direct permission grant.
+  grantable routes of a direct permission grant; `Administration\GrantReach` -- the tenants a grant reaches, read once
+  and put into each query.
 - `Support\Operation` -- the operation's actor, identity, impersonator, mode and actions.
 - `Services\Support\RecordWriter`, `Services\Support\GrantChanges` and every management service -- the changes they
   decide, before they write.
@@ -197,14 +214,17 @@ delegated administration never grants anything it cannot justify.
   own action, and made or refused per this release; screens and services agreeing; atomic batches;
   impersonation; the audit fields and the correlation id.
 - `ActingContextTest` -- resolution, its failure, the session, caps, a machine's credential caps and refusals.
-- `DelegatedGrantsTest` -- part 2 end to end: the rank table over grants, revocations and syncs, the resulting rank,
-  self, node-only and application-limited authority, platform grants, an ancestor's records edited from a descendant,
-  possession and its lifetime, every limit that fails it, explicit grantability, shortening, atomic batches decided on
-  the authority held before them, and a screen and the service agreeing over random grants.
+- `DelegatedGrantsTest` -- part 2 end to end: the rank table over grants, revocations and syncs, the resulting rank, the
+  grantee ranked across the reach, self, node-only and application-limited authority, platform grants, the administered
+  scope deciding who changes a grant row, possession and its lifetime, every limit that fails it, wildcards of one
+  character, explicit grantability across the reach and lifetime, shortening, atomic batches decided on the authority
+  held before them, and a screen and the service agreeing over random grants.
+- `DelegatedGrantQueryBudgetTest` -- a delegated grant and a sync's additions read as much with unrelated resource
+  policies and guardrails as without.
 - `OperationResourceTest`, `OperationChangeTest`, `OperationGranteeTest`, `OperationAttributesTest`,
   `OperationConstraintsTest`, `FurtherChecksTest`, `NarrowingTest`, `RankComparisonTest`, `OwnerConstraintTest`,
-  `PossessionTest`, `HeldLifetimeTest`, `PossessionLimitsTest` -- the operation resource, its change, its grantee, its
-  attributes, the administration stage and each of its constraints.
+  `PossessionTest`, `HeldLifetimeTest`, `PossessionLimitsTest`, `GrantReachTest` -- the operation resource, its change,
+  its grantee, its attributes, the administration stage and each of its constraints.
 - `GuardrailAuthorityTest`, `GuardrailServiceTest`, `DecisionPipelineTest` -- the guardrail right inside the
   transaction, impersonation, and the exemption of exactly `authorization:guardrail.manage`.
 - `PackagePermissionsTest`, `OperationTest`, `RecordWriterTest`, `GrantChangesTest` -- the catalogue, the operation and
@@ -218,7 +238,8 @@ delegated administration never grants anything it cannot justify.
 ## Change Triggers
 
 - Part 2 (in this release) replaced the `administration.unprovable` refusal of direct permission grants with the scope,
-  owner, rank, self, expiry and possession rules, wiring `RankComparison` into every change to a subject.
+  rank, self, expiry and possession rules, wiring `RankComparison` into every change to a subject; who changes a grant
+  row is the administered scope (N79), never the owner rule.
 - Part 3 does the same for roles, definition edits and impact, applies `OwnerConstraint` to definitions, role membership
   and policies, and decides `policy.grantable`.
 - Part 4 moves guardrail changes onto the operation-resource path and adds the concurrency protocol.

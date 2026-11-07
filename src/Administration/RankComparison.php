@@ -4,9 +4,15 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Administration;
 
+use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
+use SineMacula\Laravel\Authorization\Database\GrantApplications;
+use SineMacula\Laravel\Authorization\Database\LiveGrants;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
 /**
@@ -35,6 +41,12 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  *   `administration.rank_uncomparable` reports it;
  * - with `authorization.rank.enabled` false, rank is no constraint, and every
  *   comparison passes, which still grants nothing.
+ *
+ * Roles are read on the write connection, as every other source of a decision
+ * is, so a screen and the service compare the same rows. A delegated change
+ * reads the target's rank across the whole reach of the change instead (see
+ * `rankAcross()`): the most senior rank the target holds anywhere the change
+ * reaches counts.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -120,7 +132,7 @@ final class RankComparison
             }
 
             /** @var iterable<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-            $roles = $side->roles()->get();
+            $roles = $side->roles()->useWritePdo()->get(); // @phpstan-ignore method.notFound
 
             foreach ($roles as $role) {
                 $ranks[] = $role->rank;
@@ -128,6 +140,47 @@ final class RankComparison
         }
 
         $ranks = \array_filter($ranks, static fn (?int $rank): bool => $rank !== null);
+
+        return $ranks === [] ? null : \min($ranks);
+    }
+
+    /**
+     * Return the most senior rank among the roles the target holds live
+     * anywhere the grant scope reaches, or null when it holds no ranked role
+     * there, in one query on the write connection: its grants of every
+     * application for a grant to every application, else of that application
+     * and of every application; held platform-wide, or in a tenant of the reach
+     * (see `GrantReach`), every tenant for a platform-wide grant.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $target
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @return int|null
+     *
+     * @throws \UnexpectedValueException
+     */
+    public static function rankAcross(Model $target, GrantScope $scope): ?int
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
+        $class = config('authorization.models.role', Role::class);
+
+        /** @var string $pivot */
+        $pivot   = config('authorization.tables.authorizable_roles', 'authorizable_roles');
+        $role    = new $class;
+        $grantee = Reference::of($target);
+        $query   = $class::query()->withoutGlobalScopes()->useWritePdo()->join($pivot, $pivot . '.role_id', '=', $role->getQualifiedKeyName())
+            ->where($pivot . '.authorizable_type', $grantee->type)
+            ->where($pivot . '.authorizable_id', $grantee->id);
+
+        if ($scope->application !== null) {
+            GrantApplications::only($query, $pivot, $scope->application);
+        }
+
+        $rank  = $role->qualifyColumn('rank');
+        $ranks = [];
+
+        foreach (GrantReach::of($scope)->constrain(LiveGrants::only($query, $pivot), $pivot)->whereNotNull($rank)->get([$rank]) as $held) {
+            $ranks[] = $held->rank;
+        }
 
         return $ranks === [] ? null : \min($ranks);
     }

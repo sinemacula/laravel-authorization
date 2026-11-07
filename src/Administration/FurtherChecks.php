@@ -7,18 +7,15 @@ namespace SineMacula\Laravel\Authorization\Administration;
 use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Subject;
-use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
  * What the administration stage of one decision may ask of the decision
- * pipeline (see `OperationConstraints`): the acting subject, the tenant the
- * check is made from, before the operation's own tenant is put in place, and
- * further checks of the same subject, each decided as the pipeline decides any
- * check, through every stage up to the allow, in the scope in place when it is
- * asked, but never through the administration stage itself, so a constraint
- * that decides the operation's own action again in another scope cannot
- * recurse.
+ * pipeline (see `OperationConstraints`): the acting subject, and further checks
+ * of the same subject, each decided as the pipeline decides any check, through
+ * every stage up to the allow, in the scope in place when it is asked, but
+ * never through the administration stage itself, so a constraint that decides
+ * the operation's own action again in another scope cannot recurse.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,7 +28,6 @@ final readonly class FurtherChecks
      * Create the further checks of one decision.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $origin
      * @param  \Closure(string, \SineMacula\Laravel\Authorization\Support\ResourceReference|null): \SineMacula\Laravel\Authorization\Evaluation\Decision  $decide
      * @param  \Closure(string): (\SineMacula\Laravel\Authorization\Evaluation\CheckSources|null)  $sources
      */
@@ -39,9 +35,6 @@ final readonly class FurtherChecks
 
         /** The acting subject the decision is about. */
         public Subject $subject,
-
-        /** The tenant the check is made from, the request's, or null for the platform. */
-        public ?Reference $origin,
 
         /** Decides a further check of the subject in the scope in place. */
         private \Closure $decide,
