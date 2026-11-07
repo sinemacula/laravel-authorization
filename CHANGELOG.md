@@ -1,0 +1,53 @@
+# Changelog
+
+## 1.0.0 (2026-11-07)
+
+
+### Features
+
+* add cannot, any and all, and a trait for Laravel policy classes ([#109](https://github.com/sinemacula/laravel-authorization/issues/109)) ([8b4164c](https://github.com/sinemacula/laravel-authorization/commit/8b4164cb555246160b94111c5fda82e250c3f2cf))
+* answer every declared ability through one Gate hook whose allow and deny both stand ([#108](https://github.com/sinemacula/laravel-authorization/issues/108)) ([60cbb4d](https://github.com/sinemacula/laravel-authorization/commit/60cbb4d98f012caa8c191dc96bb80245ba21c8ce))
+* answer whether a principal may use an application ([#95](https://github.com/sinemacula/laravel-authorization/issues/95)) ([4d255a3](https://github.com/sinemacula/laravel-authorization/commit/4d255a3e891ca39b770a7932f0e40007977b5457))
+* attach policies to resources and let them name their subjects ([#103](https://github.com/sinemacula/laravel-authorization/issues/103)) ([833a220](https://github.com/sinemacula/laravel-authorization/commit/833a220011871e44732621afe1f5b13c9d6c3ae8))
+* attach policies to roles and give grantees inline policies ([#102](https://github.com/sinemacula/laravel-authorization/issues/102)) ([8668fec](https://github.com/sinemacula/laravel-authorization/commit/8668fecc20257be612e65a6a3f1b80b7c394e81a))
+* cap checks with session policies and keep machines apart from people ([#106](https://github.com/sinemacula/laravel-authorization/issues/106)) ([ba5f209](https://github.com/sinemacula/laravel-authorization/commit/ba5f209184b5b198547880872474820edc7788ba))
+* cap tenants and the platform with guardrails only those above may change ([#105](https://github.com/sinemacula/laravel-authorization/issues/105)) ([8166678](https://github.com/sinemacula/laravel-authorization/commit/81666788a90b10efde3d2e556547eccc8f983909))
+* count the identity's grants, deny inactive grantees and remove a deleted grantee's grants ([#84](https://github.com/sinemacula/laravel-authorization/issues/84)) ([9065269](https://github.com/sinemacula/laravel-authorization/commit/90652697d505c96de0b60ab71d701e816d1ab117))
+* decide checks in AUTHZ-7.1's stages and cap grantees with permission boundaries ([#104](https://github.com/sinemacula/laravel-authorization/issues/104)) ([61cc863](https://github.com/sinemacula/laravel-authorization/commit/61cc86372056aa180c315075ee5ac6553e8a9c10))
+* decide every check in stages and return a decision with its reason and trace ([#96](https://github.com/sinemacula/laravel-authorization/issues/96)) ([8d8e6a1](https://github.com/sinemacula/laravel-authorization/commit/8d8e6a109656363532f9160f1318b7a72feac1ec))
+* decide insufficient authentication from requirements a checker judges ([#101](https://github.com/sinemacula/laravel-authorization/issues/101)) ([e425b2b](https://github.com/sinemacula/laravel-authorization/commit/e425b2b323c5d2cf385fa610f66a920c14d194e8))
+* enforce owner and guard parity on roles, permissions, parents and grants ([#86](https://github.com/sinemacula/laravel-authorization/issues/86)) ([9dd9343](https://github.com/sinemacula/laravel-authorization/commit/9dd93431078d0c77b645383457d01f067594c35d))
+* give every client-facing denial one translatable line ([#110](https://github.com/sinemacula/laravel-authorization/issues/110)) ([243c013](https://github.com/sinemacula/laravel-authorization/commit/243c013f5100119ed93423079641a7a1f800c5b4))
+* grant roles, permissions and policies in a tenant, and count them only there ([#85](https://github.com/sinemacula/laravel-authorization/issues/85)) ([05c6f70](https://github.com/sinemacula/laravel-authorization/commit/05c6f70e441620916222245e9d477f5dca891358))
+* let a grant be limited to one application ([#94](https://github.com/sinemacula/laravel-authorization/issues/94)) ([7f39efe](https://github.com/sinemacula/laravel-authorization/commit/7f39efe30a0ee54c3f5b52dd5af077984c5a0488))
+* let a grant in a tenant be limited to that tenant ([#93](https://github.com/sinemacula/laravel-authorization/issues/93)) ([5006f00](https://github.com/sinemacula/laravel-authorization/commit/5006f004ef54fa98d12c348fb8ccf7c2974e0248))
+* let a role's permissions expire ([#91](https://github.com/sinemacula/laravel-authorization/issues/91)) ([0d1eb76](https://github.com/sinemacula/laravel-authorization/commit/0d1eb761c42a0153ce49e33d95e2820ab88f6c51))
+* let grants and records reach the tenants below them through a tenant tree ([#92](https://github.com/sinemacula/laravel-authorization/issues/92)) ([f5d5d71](https://github.com/sinemacula/laravel-authorization/commit/f5d5d71066af7b5ea73c3df671b515294cec6912))
+* name every check's resource by reference and decide tenant-owned resources in their tenant's scope ([#97](https://github.com/sinemacula/laravel-authorization/issues/97)) ([85bfee8](https://github.com/sinemacula/laravel-authorization/commit/85bfee8c492a7c78c92e011404fde43d45716ce7))
+* prune expired grants and the grants of grantees that are gone ([#89](https://github.com/sinemacula/laravel-authorization/issues/89)) ([ccbec1a](https://github.com/sinemacula/laravel-authorization/commit/ccbec1a63e562218e1749fd812628c3d019a0d19))
+* read conditions over a namespaced context built from trusted sources ([#99](https://github.com/sinemacula/laravel-authorization/issues/99)) ([c566e50](https://github.com/sinemacula/laravel-authorization/commit/c566e5020968153bcee332f4b0c42b5a577b4b37))
+* read subject and resource attributes from declared providers ([#100](https://github.com/sinemacula/laravel-authorization/issues/100)) ([8cd5bc8](https://github.com/sinemacula/laravel-authorization/commit/8cd5bc8eca5e53c41a647b849ab24a3319fbc50c))
+* refuse to delete a role with children ([#88](https://github.com/sinemacula/laravel-authorization/issues/88)) ([08caf93](https://github.com/sinemacula/laravel-authorization/commit/08caf93deb5002f4dcc3e3f813b2567327aa73df))
+* report every change after it commits, with its actor ([#79](https://github.com/sinemacula/laravel-authorization/issues/79)) ([d2c3040](https://github.com/sinemacula/laravel-authorization/commit/d2c3040fa914b1932f9be67f3df4003d1452e722))
+* resolve the subject of every check through one resolver ([#76](https://github.com/sinemacula/laravel-authorization/issues/76)) ([3ab7f07](https://github.com/sinemacula/laravel-authorization/commit/3ab7f07b3bea37523ba9c3c5eb8fca7335862c82))
+* scope Eloquent queries to the rows check() allows for whole-type decisions ([#112](https://github.com/sinemacula/laravel-authorization/issues/112)) ([13b2711](https://github.com/sinemacula/laravel-authorization/commit/13b27116278c41cb505f16af741d9a112c742245))
+* sync the permission catalogue on command, never at boot ([#75](https://github.com/sinemacula/laravel-authorization/issues/75)) ([3ae317b](https://github.com/sinemacula/laravel-authorization/commit/3ae317bf7569d977c8b5c538ca326c11925683d2))
+* the 1.0 schema ([#74](https://github.com/sinemacula/laravel-authorization/issues/74)) ([b047365](https://github.com/sinemacula/laravel-authorization/commit/b0473650dcdfae527cc3921b592082f96e36a1e0))
+* weigh a held permission only after every deny and cap, within its grant's reach ([#107](https://github.com/sinemacula/laravel-authorization/issues/107)) ([7a2cd97](https://github.com/sinemacula/laravel-authorization/commit/7a2cd973fecf7ee68bb5aa8282e682dfb1d8643a))
+* write every role, permission, policy and grant through management services ([#78](https://github.com/sinemacula/laravel-authorization/issues/78)) ([96eae34](https://github.com/sinemacula/laravel-authorization/commit/96eae341b6d26e18c34f6805e6afb8aa6b8ee597))
+* write policies in an operator-first language, validated on write and checked on read ([#98](https://github.com/sinemacula/laravel-authorization/issues/98)) ([865a31a](https://github.com/sinemacula/laravel-authorization/commit/865a31af8aef816e190696f15a041aaa5eea74cd))
+
+
+### Bug Fixes
+
+* allow dots in role and permission names and validate the Spatie import ([#66](https://github.com/sinemacula/laravel-authorization/issues/66)) ([3cd1534](https://github.com/sinemacula/laravel-authorization/commit/3cd1534e2fd615aa6d9829d8268efedf4a4a1bb6))
+* compare tenant, grantee and resource references byte for byte on MySQL ([#111](https://github.com/sinemacula/laravel-authorization/issues/111)) ([0c4a2e8](https://github.com/sinemacula/laravel-authorization/commit/0c4a2e845f3a1933d7c56e2ac2289b5e96e99186))
+* decide the package middleware and Blade directives on the full decision ([#77](https://github.com/sinemacula/laravel-authorization/issues/77)) ([37ae425](https://github.com/sinemacula/laravel-authorization/commit/37ae425b7bae585ff0856236640d29cd99dcb5fa))
+* keep system records protected against every edit ([#67](https://github.com/sinemacula/laravel-authorization/issues/67)) ([ada47f4](https://github.com/sinemacula/laravel-authorization/commit/ada47f45142269c7177dbb0eaed44e710f4dd83d))
+* keep the tenant and resolved grants to one request or job ([#72](https://github.com/sinemacula/laravel-authorization/issues/72)) ([08e287c](https://github.com/sinemacula/laravel-authorization/commit/08e287c566be3ff8d7260122a25356fb871a4222))
+* never let a policy statement that cannot be decided skip a deny ([#70](https://github.com/sinemacula/laravel-authorization/issues/70)) ([9a08187](https://github.com/sinemacula/laravel-authorization/commit/9a08187bdfbcf4fcb0fbc3f6fa7dad19864ff356))
+* resolve a subject's permissions in a fixed number of queries ([#81](https://github.com/sinemacula/laravel-authorization/issues/81)) ([0faf0e8](https://github.com/sinemacula/laravel-authorization/commit/0faf0e8b115baac620a10d03543a0a11f0706075))
+* throw Laravel's authorization exception with the reason code and a translated message ([#68](https://github.com/sinemacula/laravel-authorization/issues/68)) ([8a917c5](https://github.com/sinemacula/laravel-authorization/commit/8a917c5d084acb640b4d76fac277737c14dca93e))
+* use and validate the configured model classes everywhere ([#69](https://github.com/sinemacula/laravel-authorization/issues/69)) ([c0e8154](https://github.com/sinemacula/laravel-authorization/commit/c0e8154b160215af19913ce19a144b7723b0ba83))
+* version the resolution cache so every write takes effect on the next check ([#82](https://github.com/sinemacula/laravel-authorization/issues/82)) ([f952308](https://github.com/sinemacula/laravel-authorization/commit/f952308a101982f5f60f34b5fa3113e94fd9c5d7))
+* write warnings to the application's log channel ([#73](https://github.com/sinemacula/laravel-authorization/issues/73)) ([3d388a8](https://github.com/sinemacula/laravel-authorization/commit/3d388a82842dc0404260572ebe911d64c9fdbeae))
