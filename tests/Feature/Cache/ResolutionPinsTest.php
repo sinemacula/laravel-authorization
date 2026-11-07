@@ -9,10 +9,15 @@ use Illuminate\Cache\Repository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
+use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\FailingCacheStore;
 use Tests\Feature\Stubs\RecordingLogger;
+use Tests\Feature\Stubs\StubTenant;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -26,6 +31,8 @@ use Tests\TestCase;
 #[CoversClass(ResolutionPins::class)]
 final class ResolutionPinsTest extends TestCase
 {
+    use ActsAsTenant;
+
     /**
      * The grantee, roles, policies, the versions role policies, resource
      * policies, boundaries and guardrails share and the tenants are pinned
@@ -121,5 +128,45 @@ final class ResolutionPinsTest extends TestCase
 
         self::assertSame([], $pins->tokens());
         self::assertFalse($pins->isComplete());
+    }
+
+    /**
+     * The current tenant's chain is pinned, and read again once pinned: with no
+     * store it holds as read and pins nothing; with one it holds while the tree
+     * is unchanged, and when the tenant moved meanwhile the new chain is pinned
+     * too and it does not hold.
+     *
+     * @return void
+     */
+    public function testTheCurrentChainIsPinnedAndReadAgain(): void
+    {
+        [$account, $org, $sibling] = \array_map(self::createTenant(...), ['account', 'org', 'sibling']);
+        $tree                      = (new StubTenantTree)->put(Reference::of($account), Reference::of($org));
+
+        $this->app?->instance(TenantTree::class, $tree);
+        $this->actAsTenant($account);
+
+        $none = new ResolutionPins;
+
+        self::assertTrue($none->isChainHeldOncePinned());
+        self::assertSame([], $none->tokens());
+        self::assertSame(1, $tree->reads);
+
+        $store = new VersionedStore(new Repository(new ArrayStore), 'authz');
+        $held  = new ResolutionPins($store);
+
+        self::assertTrue($held->isChainHeldOncePinned());
+        $key = static fn (StubTenant $tenant, string $id): string => 'authz:version:tenant:' . $tenant->getMorphClass() . ':' . $id;
+
+        self::assertSame([$key($account, 'account'), $key($org, 'org')], \array_keys($held->tokens()));
+        self::assertSame(2, $tree->reads);
+
+        $tree->put(Reference::of($account), Reference::of($sibling));
+
+        $moved = new ResolutionPins($store);
+
+        self::assertFalse($moved->isChainHeldOncePinned());
+        self::assertSame([$key($account, 'account'), $key($org, 'org'), $key($sibling, 'sibling')], \array_keys($moved->tokens()));
+        self::assertEquals([Reference::of($account), Reference::of($sibling)], TenantScope::currentChain()->tenants);
     }
 }

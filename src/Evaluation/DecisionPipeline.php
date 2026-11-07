@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 
 use SineMacula\Laravel\Authorization\Context\AttributeNamespaces;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
+use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -26,12 +27,18 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  * gathers every source, the session caps included; the policy evaluator runs
  * the rest of the stages, the denies, the caps, the allows and the implicit
  * deny, each recorded in the decision's trace. It records nothing and reports
- * nothing: the manager's `check()` is the one decision entry point (D22) and
- * owns the recording, so every decision the pipeline makes reaches the caller
- * through it.
+ * nothing: the manager's `check()` is the one decision entry point (D22), and
+ * `checkMany()` the same over many checks, and `CheckBatch` owns the recording
+ * for both, so every decision the pipeline makes reaches the caller through it.
  *
  * A pipeline is immutable: `withPolicies()` and `capped()` return a new one, as
  * the manager's scoped clones do.
+ *
+ * A bulk check decides each of its checks through `decide()` too, exactly as a
+ * single check is decided; `prepare()` only reads ahead, in bulk, what those
+ * checks will read, and a check of the batch reads its resource's attributes
+ * through the batch's (see `ResourceAttributeBatch`), so the decisions are the
+ * ones the checks would get one at a time.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -116,15 +123,17 @@ final class DecisionPipeline
      * its identity), is denied before anything else is read; a resource that
      * cannot be identified is denied next; a tenant-owned resource is decided
      * in its tenant's scope, or denied as out of scope (see `ResourceScope`);
-     * then the grants decide.
+     * then the grants decide. A check of a bulk check reads its resource's
+     * attributes through the batch's.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  string  $action
      * @param  false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    public function decide(?Subject $subject, string $action, false|ResourceReference|null $resource, array $context): Decision
+    public function decide(?Subject $subject, string $action, false|ResourceReference|null $resource, array $context, ?ResourceAttributeBatch $attributes = null): Decision
     {
         if ($subject === null || SubjectGrants::isInactive($subject)) {
             return Decision::deny($subject === null ? DecisionReason::SUBJECT_UNRESOLVED : DecisionReason::SUBJECT_INACTIVE, DecisionStage::SUBJECT);
@@ -134,9 +143,54 @@ final class DecisionPipeline
             return Decision::deny(DecisionReason::RESOURCE_UNRESOLVED, DecisionStage::RESOURCE);
         }
 
-        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource, $context);
+        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource, $context, $attributes);
 
         return $resource === null ? $decide() : ResourceScope::decide($subject, $action, $resource, $decide);
+    }
+
+    /**
+     * Read ahead, in bulk, what checks on the resources will read, for the
+     * subject: the policies attached to each record and to its type, in the
+     * scope each record's check is decided in (see `ResourceScope`), through
+     * the resolution cache, which keeps each record's, so each check then reads
+     * its own from there, or afresh after a write. Nothing is decided, so a
+     * check reads exactly what it would have read without it. Nothing is read
+     * for no subject, or an inactive one, whose checks read none, nor under a
+     * `withPolicies()` override, which replaces the attached policies; a record
+     * whose identifier is not UTF-8 is left to its own check, so a database
+     * that refuses it fails that check alone, and whatever cannot be read
+     * ahead, a document that cannot be read or a tenant whose place in the tree
+     * cannot be read say, is left to each check that reads it, so a failure
+     * here never stops a check that would not fail on its own.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
+     * @param  array<array-key, mixed>  $resources
+     * @return void
+     *
+     * @internal
+     */
+    public function prepare(?Subject $subject, array $resources): void
+    {
+        $policies = $this->policyOverride === null ? $this->resourcePolicies : null;
+
+        if ($policies === null || $subject === null || SubjectGrants::isInactive($subject)) {
+            return;
+        }
+
+        $records = [];
+
+        foreach ($resources as $key => $resource) {
+            if (!$resource instanceof ResourceReference || $resource->id === null || !\mb_check_encoding($resource->identifier, 'UTF-8')) {
+                continue;
+            }
+
+            $records[$key] = $resource;
+        }
+
+        // A group that cannot be read ahead, a document that cannot be read
+        // among it say, is read again by each of its checks, which decides or
+        // fails alone (see `ResourceScope::prepare()`).
+        ResourceScope::prepare($records, static fn (array $group): array => $policies->policiesForMany($group));
     }
 
     /**
@@ -145,19 +199,21 @@ final class DecisionPipeline
      * the boundaries, the check's context, the permission held and the session
      * caps, as `decideGrants()` weighs them. `whereAuthorized()` reads them
      * before they are weighed, so a query is decided from exactly the sources
-     * `check()` is.
+     * `check()` is. A check of a bulk check reads its resource's attributes
+     * through the batch's.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
      * @return \SineMacula\Laravel\Authorization\Evaluation\CheckSources
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      *
      * @internal
      */
-    public function sources(Subject $subject, string $action, ?ResourceReference $resource, array $context): CheckSources
+    public function sources(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes = null): CheckSources
     {
         $policies   = $this->gatherPolicies($subject, $resource);
         $guardrails = $action === PackagePermissions::GUARDRAILS_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
@@ -168,7 +224,7 @@ final class DecisionPipeline
         // authentication, the subject, the resource or any source's values
         // (N27). Without a factory, the subject and resource still supply their
         // built-in keys.
-        $checkContext = $this->contexts?->make($context, $subject, $resource)
+        $checkContext = $this->contexts?->make($context, $subject, $resource, $attributes)
             ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
 
         $permission = static fn (): ?string => SubjectGrants::permissionFor($subject, $action);
@@ -267,12 +323,13 @@ final class DecisionPipeline
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context): Decision
+    private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes): Decision
     {
         try {
-            $sources = $this->sources($subject, $action, $resource, $context);
+            $sources = $this->sources($subject, $action, $resource, $context, $attributes);
         } catch (InvalidPolicyDocumentException) {
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }

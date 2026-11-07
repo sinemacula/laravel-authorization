@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -24,6 +25,7 @@ use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
+use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -3435,6 +3437,112 @@ final class AuthorizationManagerTest extends TestCase
         $this->expectExceptionMessage('model_undeclared');
 
         $manager->queryScope(new StubIdentity, 'posts:view');
+    }
+
+    /**
+     * `checkMany()` decides each check as `check()` does, keyed and ordered as
+     * the checks are, sparse and string keys included, and `check()` decides
+     * its one check through it.
+     *
+     * @return void
+     */
+    public function testCheckManyDecidesEachCheckAsCheckDoes(): void
+    {
+        $user = StubIdentity::create(['id' => 'bulk-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+
+        $manager   = Authorization::for($user);
+        $checks    = [7 => new CheckInput('posts:read', 'posts:1'), 'b' => new CheckInput('posts:edit', 'posts:1'), 2 => new CheckInput('posts:read')];
+        $decisions = $manager->checkMany($checks);
+
+        self::assertSame([7, 'b', 2], \array_keys($decisions));
+        self::assertEquals(\array_map(static fn (CheckInput $check): Decision => $manager->check($check->action, $check->resource, $check->context), $checks), $decisions);
+        self::assertSame([], $manager->checkMany([]));
+    }
+
+    /**
+     * `canEach()` decides every resource, keyed as given, none stopping the
+     * rest, a resource repeated included; an insufficient authentication is a
+     * refusal; no resource gives none.
+     *
+     * @return void
+     */
+    public function testCanEachDecidesEveryResource(): void
+    {
+        Event::fake([DecisionEvaluated::class]);
+
+        $user    = StubIdentity::create(['id' => '0d6a7f1e-5c2b-4e9a-8f3d-1b2c3d4e5f61']);
+        $checker = new StubRequirementChecker(RequirementResult::unmet(['multifactor']));
+        $manager = $this->inSession($user, 'session-1', $checker)->withPolicies([self::requiringPolicy()]);
+        $allowed = $manager->canEach('reports:export', ['x' => 'reports:1', 3 => 'reports:2', 'again' => 'reports:1']);
+
+        self::assertSame(['x' => false, 3 => false, 'again' => false], $allowed);
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $manager->lastDecision()?->reason);
+        Event::assertDispatchedTimes(DecisionEvaluated::class, 3);
+        self::assertSame([], $manager->canEach('reports:export', []));
+
+        $granted = StubIdentity::create(['id' => 'bulk-2']);
+
+        $granted->givePermission(Permission::create(['name' => 'posts:read']));
+
+        $generated = (static function (): \Generator {
+            yield 'a' => 'posts:1';
+            yield 'b' => 'posts:2';
+        })();
+
+        self::assertSame(['a' => true, 'b' => true], Authorization::for($granted)->canEach('posts:read', $generated, ['flag' => 'on']));
+        self::assertSame(['a' => false], Authorization::for($granted)->canEach('posts:edit', ['a' => 'posts:1']));
+    }
+
+    /**
+     * `filterAuthorized()` keeps the resources allowed with their keys, in
+     * their order, as given: an array for an array or any other iterable, and a
+     * collection of the same class for a collection.
+     *
+     * @return void
+     */
+    public function testFilterAuthorizedKeepsTheAllowedResourcesAsGiven(): void
+    {
+        $user  = StubIdentity::create(['id' => 'bulk-3']);
+        $posts = \array_map(static fn (string $title): ScopedPost => ScopedPost::query()->create(['title' => $title]), ['a', 'b', 'c']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        self::attachToResource(self::resourcePolicy('deny-b', [['effect' => 'deny', 'actions' => ['posts:read']]]), $posts[1]);
+
+        $manager    = Authorization::for($user);
+        $collection = ScopedPost::query()->orderBy('id')->get();
+        $filtered   = $manager->filterAuthorized('posts:read', $collection);
+        $array      = $manager->filterAuthorized('posts:read', ['z' => $posts[2], 5 => $posts[1], 'y' => $posts[0]]);
+        $generated  = $manager->filterAuthorized('posts:read', (static function () use ($posts): \Generator {
+            yield 'q' => $posts[1];
+            yield 'r' => $posts[2];
+        })());
+
+        self::assertInstanceOf($collection::class, $filtered);
+        self::assertSame([0, 2], $filtered->keys()->all());
+        self::assertSame($collection[0], $filtered[0]);
+        self::assertSame(['z' => $posts[2], 'y' => $posts[0]], $array);
+        self::assertSame(['r' => $posts[2]], $generated);
+        self::assertSame([], $manager->filterAuthorized('posts:read', []));
+        self::assertCount(0, $manager->filterAuthorized('posts:read', new Collection));
+    }
+
+    /**
+     * The facade reaches the bulk checks of the current request's manager.
+     *
+     * @return void
+     */
+    public function testTheFacadeReachesTheBulkChecks(): void
+    {
+        $user = StubIdentity::create(['id' => 'bulk-4']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        $this->resolvePrincipalAs($user);
+
+        self::assertTrue(Authorization::checkMany(['one' => new CheckInput('posts:read', 'posts:1')])['one']->isAllowed());
+        self::assertSame(['posts:1' => true], Authorization::canEach('posts:read', ['posts:1' => 'posts:1']));
+        self::assertSame([1 => 'posts:2'], Authorization::filterAuthorized('posts:read', [1 => 'posts:2']));
     }
 
     /**

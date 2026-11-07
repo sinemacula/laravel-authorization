@@ -108,6 +108,37 @@ final class TenantScope implements Scope
     }
 
     /**
+     * Return the key of the scope checks are decided in: the tenant the scope
+     * limits rows to, or the platform, whether checks are decided just below
+     * it, and the application, read together from the tenant held for the
+     * request or job. A query run while the subject is being resolved is at
+     * platform scope for every application.
+     *
+     * The resolution cache keys its entries by it, so two scopes never share
+     * one.
+     *
+     * @return string
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     */
+    public static function scopeKey(): string
+    {
+        $scope = self::whileResolving(static function (ResolvedTenant $resolved): string {
+            $application = $resolved->application === null ? 'every' : 'app:' . $resolved->application;
+
+            if ($resolved->tenant === null) {
+                return 'platform:' . $application;
+            }
+
+            $below = $resolved->isBelow ? ':below' : '';
+
+            return \implode(':', self::extractTenantPair($resolved->tenant)) . $below . ':' . $application;
+        });
+
+        return $scope ?? 'platform:every';
+    }
+
+    /**
      * Return the tenant the scope limits rows to and its ancestors, through the
      * bound tenant tree, or the platform's empty chain.
      *

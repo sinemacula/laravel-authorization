@@ -6,9 +6,11 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use Illuminate\Support\Collection;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
@@ -23,7 +25,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * (`givePermissionTo`, `revokePermissionTo`, `hasPermissionTo`,
  * `getPermissionNames`) for migrating consumers. The `hasPermission` check
  * consults both direct grants and role-inherited permissions, so a consumer
- * does not need to branch on assignment style.
+ * does not need to branch on assignment style. `canEach` and `filterAuthorized`
+ * decide the model's checks over many resources through the authorization
+ * manager.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -218,6 +222,41 @@ trait HasPermissions // @phpstan-ignore trait.unused
         $resolve = fn (ResolutionPins $pins): Resolution => GrantResolver::permissions($this->permissions(), $this->roles(), $pins);
 
         return ResolutionCache::instance()?->rememberPermissions($this, $resolve) ?? $resolve(new ResolutionPins)->value;
+    }
+
+    /**
+     * Determine, for each resource, whether this model is allowed the action on
+     * it, keyed as the resources are: a delegate to
+     * `Authorization::for($this)->canEach()`, deciding every resource through
+     * the full decision, policies, boundaries, guardrails and caps included.
+     *
+     * @template TKey of array-key
+     *
+     * @param  string  $action
+     * @param  iterable<TKey, mixed>  $resources
+     * @param  array<string, mixed>  $context
+     * @return array<TKey, bool>
+     */
+    public function canEach(string $action, iterable $resources, array $context = []): array
+    {
+        return Authorization::for($this)->canEach($action, $resources, $context);
+    }
+
+    /**
+     * Return the resources this model is allowed the action on, with their
+     * keys, in their order, as given: a delegate to
+     * `Authorization::for($this)->filterAuthorized()`, deciding every resource
+     * through the full decision, policies, boundaries, guardrails and caps
+     * included.
+     *
+     * @param  string  $action
+     * @param  iterable<array-key, mixed>  $resources
+     * @param  array<string, mixed>  $context
+     * @return ($resources is \Illuminate\Support\Collection<array-key, mixed> ? \Illuminate\Support\Collection<array-key, mixed> : array<array-key, mixed>)
+     */
+    public function filterAuthorized(string $action, iterable $resources, array $context = []): array|Collection
+    {
+        return Authorization::for($this)->filterAuthorized($action, $resources, $context);
     }
 
     // ------------------------------------------------------------------

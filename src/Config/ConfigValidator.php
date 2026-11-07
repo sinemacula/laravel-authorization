@@ -76,6 +76,7 @@ final class ConfigValidator
         AttributeConfigValidator::validate($config['attributes'] ?? [], $container);
         SessionConfigValidator::validate($config['session'] ?? [], $container);
         QueryScopingConfigValidator::validate($config['query_scoping'] ?? []);
+        BulkConfigValidator::validate($config['bulk'] ?? []);
     }
 
     /**

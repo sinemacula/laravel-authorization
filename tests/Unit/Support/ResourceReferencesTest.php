@@ -515,6 +515,34 @@ final class ResourceReferencesTest extends TestCase
     }
 
     /**
+     * Tenants given in place of the bound resolver answer a model's and a
+     * pair's tenant, the bound resolver asked about neither; a value that needs
+     * no tenant never asks them.
+     *
+     * @return void
+     */
+    public function testTenantsGivenAnswerInPlaceOfTheBoundResolver(): void
+    {
+        $tenant  = new Reference('stub_tenant', '7');
+        $given   = new FixedResourceTenantResolver($tenant, false);
+        $model   = new StubTenant(['id' => '3']);
+        $keyless = new StubTenant;
+
+        $reference = ResourceReferences::of($model, $given);
+
+        self::assertInstanceOf(ResourceReference::class, $reference);
+        self::assertSame($tenant, $reference->tenant);
+        self::assertFalse(ResourceReferences::of(['post', '42'], $given));
+        self::assertFalse(ResourceReferences::of($keyless, $given));
+        self::assertFalse(ResourceReferences::of(['post', ''], $given));
+        self::assertNull(ResourceReferences::of(null, $given));
+        self::assertSame([$model], $given->asked);
+        self::assertSame([['post', '42']], $given->askedRecords);
+        self::assertSame([], $this->resolver->asked);
+        self::assertSame([], $this->resolver->askedRecords);
+    }
+
+    /**
      * Bind a resource tenant resolver that answers the given tenant for every
      * model, and the given record tenant for every pair.
      *

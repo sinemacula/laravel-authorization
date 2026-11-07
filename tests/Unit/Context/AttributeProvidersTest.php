@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Context\AttributeProviders;
+use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
 use SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider;
 use SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
@@ -23,6 +24,7 @@ use Tests\Feature\Stubs\ConflictingResourceAttributes;
 use Tests\Feature\Stubs\FailingResourceAttributes;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
+use Tests\Fixtures\BulkChecks\FixedBulkAttributes;
 
 /**
  * Unit tests for `AttributeProviders`, the subject and resource attribute
@@ -359,6 +361,32 @@ final class AttributeProvidersTest extends TestCase
         self::assertSame(RecordingSubjectAttributes::class, $providers->subjectProviderClass('user'));
         self::assertNull($providers->subjectProviderClass('post'));
         self::assertNull($providers->subjectProviderClass('machine'));
+    }
+
+    /**
+     * In a bulk check, a record's values come from its provider's bulk read,
+     * filtered to the declared attributes; a record the batch holds nothing
+     * for, or a provider that does not read in bulk, is asked on its own.
+     *
+     * @return void
+     */
+    public function testABulkChecksValuesComeFromItsBatch(): void
+    {
+        $provider = new FixedBulkAttributes;
+
+        $this->container->instance(FixedBulkAttributes::class, $provider);
+
+        $providers = new AttributeProviders($this->container, ['post' => FixedBulkAttributes::class, 'comment' => RecordingResourceAttributes::class]);
+        $record    = ResourceReference::record('post', '1');
+        $comment   = ResourceReference::record('comment', '1');
+        $batch     = new ResourceAttributeBatch([$record, $comment]);
+
+        self::assertSame(['status' => 'published'], $providers->resourceValues($record, $batch));
+        self::assertSame(['status' => 'draft'], $providers->resourceValues(ResourceReference::record('post', '2'), $batch));
+        self::assertSame(['status' => 'draft'], $providers->resourceValues($record));
+        self::assertSame(['item-0'], $provider->bulkCalls[0]);
+        self::assertSame(['2', '1'], $provider->calls);
+        self::assertSame('draft', $providers->resourceValues($comment, $batch)['status'] ?? null);
     }
 
     /**

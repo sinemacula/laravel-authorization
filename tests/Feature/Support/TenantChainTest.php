@@ -7,6 +7,7 @@ namespace Tests\Feature\Support;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -194,6 +195,51 @@ final class TenantChainTest extends TestCase
         (new TenantChain)->nearestFirst($unordered, 'tenant_type', 'tenant_id');
 
         self::assertNull($unordered->getQuery()->orders);
+    }
+
+    /**
+     * Within a batch of checks, the tree is asked for a tenant's ancestors, and
+     * whether a tenant is within another, once for each tenant or pair, unless
+     * the ancestors are read afresh; outside one, and with no resolution cache,
+     * it is asked every time.
+     *
+     * @return void
+     */
+    public function testWithinABatchTheTreeIsAskedEachQuestionOnce(): void
+    {
+        $account = new Reference('stub_tenant', 'account');
+        $org     = new Reference('stub_tenant', 'org');
+        $other   = new Reference('stub_tenant', 'other');
+        $tree    = (new StubTenantTree)->put($account, $org);
+        $cache   = new ResolutionCache;
+
+        $this->app?->instance(TenantTree::class, $tree);
+        $this->app?->instance(ResolutionCache::class, $cache);
+
+        $answers = $cache->batch(static fn (): array => [
+            TenantChain::of($account, $tree)->tenants,
+            TenantChain::of($account, $tree, true)->tenants,
+            TenantChain::isWithin($account, $org),
+            TenantChain::isWithin($account, $org),
+            TenantChain::isWithin($account, $other),
+            TenantChain::of($org, $tree)->tenants,
+            TenantChain::of($account, $tree, false, true)->tenants,
+        ]);
+
+        self::assertEquals([[$account, $org], [$account, $org], true, true, false, [$org]], \array_slice($answers, 0, 6));
+        self::assertSame(5, $tree->reads);
+
+        TenantChain::of($account, $tree);
+        TenantChain::isWithin($account, $org);
+
+        self::assertSame(7, $tree->reads);
+
+        $this->app?->offsetUnset(ResolutionCache::class);
+
+        self::assertTrue(TenantChain::isWithin($account, $org));
+        self::assertEquals([$account, $org], TenantChain::of($account, $tree)->tenants);
+        self::assertFalse(TenantChain::isWithin(null, $org));
+        self::assertSame(9, $tree->reads);
     }
 
     /**

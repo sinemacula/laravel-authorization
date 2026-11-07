@@ -272,6 +272,23 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Bulk checks
+    |---------------------------------------------------------------------------
+    |
+    | `checkMany()`, `canEach()` and `filterAuthorized()` decide many checks at
+    | once, reading the tenants, attached policies and attributes of their
+    | resources in bulk. They read them a chunk of `chunk_size` checks at a
+    | time, releasing each chunk's once it is decided, so a large batch never
+    | holds every resource's at once. It is a whole number of at least 1.
+    |
+    */
+
+    'bulk' => [
+        'chunk_size' => (int) env('AUTHORIZATION_BULK_CHUNK_SIZE', 500),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
     | Context
     |---------------------------------------------------------------------------
     |

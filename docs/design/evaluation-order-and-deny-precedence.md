@@ -9,11 +9,14 @@ why the decision behaves the way it does -- the code and tests encode the *what*
 
 ## The Decision
 
-`AuthorizationManager::check()` is the one core decision (D22); `can()` and `cannot()` read whether it allows, `any()`
-and `all()` read it for each action they decide, `authorize()` throws when it does not, and a Laravel policy class
-deciding through `Concerns\DecidesThroughAuthorization` turns it into a policy response. It makes no decision of its
-own: `Evaluation\DecisionPipeline` admits the check and gathers its sources, the policy evaluator decides it, and
-`check()` alone records and reports the result. It returns a `Decision`:
+`AuthorizationManager::check()` is the one core decision (D22), and `checkMany()` the same decision over many checks,
+`check()` deciding as `checkMany()` decides a batch of one; `can()` and `cannot()` read whether it allows, `any()` and
+`all()` read it for each action they decide, `canEach()` and `filterAuthorized()` read it for each resource,
+`authorize()` throws when it does not, and a Laravel policy class deciding through
+`Concerns\DecidesThroughAuthorization` turns it into a policy response. It makes no decision of its own:
+`Evaluation\DecisionPipeline` admits the check and gathers its sources, the policy evaluator decides it, and
+`Evaluation\CheckBatch` alone records and reports the result (see [Bulk checks](bulk-checks.md)). It returns a
+`Decision`:
 
 - `effect` -- `DecisionEffect::ALLOW` or `DecisionEffect::DENY`; `isAllowed()` reads it.
 - `reason` -- why it denies, a `DecisionReason` (AUTHZ-7.10); null when it allows.

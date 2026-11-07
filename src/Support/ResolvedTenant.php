@@ -104,8 +104,7 @@ final class ResolvedTenant
     public function chain(TenantTree $tree): TenantChain
     {
         if ($this->chain === null || $this->chain[0] !== $tree) {
-            $tenant      = $this->tenant === null ? null : new Reference(...TenantScope::extractTenantPair($this->tenant));
-            $this->chain = [$tree, TenantChain::of($tenant, $tree, $this->isBelow)];
+            $this->chain = [$tree, $this->read($tree, false)];
         }
 
         return $this->chain[1];
@@ -113,7 +112,8 @@ final class ResolvedTenant
 
     /**
      * Read the tenant's ancestors again through the given tree, in place of the
-     * chain held, and return the chain read.
+     * chain held, and of the answer a batch of checks keeps, and return the
+     * chain read.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
      * @return \SineMacula\Laravel\Authorization\Support\TenantChain
@@ -122,8 +122,25 @@ final class ResolvedTenant
      */
     public function refreshChain(TenantTree $tree): TenantChain
     {
-        $this->chain = null;
+        $this->chain = [$tree, $this->read($tree, true)];
 
-        return $this->chain($tree);
+        return $this->chain[1];
+    }
+
+    /**
+     * Read the tenant's chain through the given tree, afresh when asked, past
+     * the answers a batch of checks keeps (see `TenantChain::of()`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
+     * @param  bool  $isFresh
+     * @return \SineMacula\Laravel\Authorization\Support\TenantChain
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     */
+    private function read(TenantTree $tree, bool $isFresh): TenantChain
+    {
+        $tenant = $this->tenant === null ? null : new Reference(...TenantScope::extractTenantPair($this->tenant));
+
+        return TenantChain::of($tenant, $tree, $this->isBelow, $isFresh);
     }
 }
