@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -25,6 +26,7 @@ use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\UsesAnAuthorizationConnection;
@@ -257,6 +259,65 @@ final class RecordWriterTest extends TestCase
     }
 
     /**
+     * A delegated save or deletion is weighed on, and writes, the record as
+     * stored: a change to the model that is not saved is discarded first, so a
+     * role given a rank and not saved keeps its stored rank when renamed, and a
+     * denying policy whose document is changed to allow alone is still refused
+     * its deletion; trusted work saves the model as given.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedChangeIsWeighedOnTheStoredRecord(): void
+    {
+        $admin      = self::administrator([PackagePermissions::ROLE_RENAME, PackagePermissions::POLICY_DELETE]);
+        $role       = Role::query()->create(['name' => 'editor', 'rank' => 7]);
+        $role->rank = 0;
+
+        RecordWriter::save($admin, PackagePermissions::ROLE_RENAME, static fn (): Role => $role, ['name' => 'author']);
+
+        self::assertSame(7, $role->rank);
+        self::assertSame(['author', 7], [Role::query()->whereKey($role->getKey())->firstOrFail()->name, Role::query()->whereKey($role->getKey())->firstOrFail()->rank]);
+
+        $policy           = Policy::query()->create(['name' => 'denying', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:edit']]]]]);
+        $policy->document = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]];
+
+        $delete = static fn () => RecordWriter::delete($admin, PackagePermissions::POLICY_DELETE, static fn (): Policy => $policy);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::reasonOf($delete));
+        self::assertTrue(Policy::query()->whereKey($policy->getKey())->exists());
+
+        $trusted       = Role::query()->create(['name' => 'trusted', 'rank' => 7]);
+        $trusted->rank = 3;
+
+        RecordWriter::save(null, PackagePermissions::ROLE_RENAME, static fn (): Role => $trusted, ['name' => 'trusted-renamed']);
+
+        self::assertSame(3, Role::query()->whereKey($trusted->getKey())->firstOrFail()->rank);
+    }
+
+    /**
+     * A new record is owned by the tenant given, as a model or a reference to
+     * it, and by the platform for none; a tenant with no key is refused.
+     *
+     * @return void
+     */
+    public function testANewRecordIsOwnedByTheTenantGiven(): void
+    {
+        $owned    = RecordWriter::ownedBy(new Role, new Reference('tenant', 'a'));
+        $platform = new Role;
+
+        self::assertSame(['tenant', 'a'], [$owned->tenant_type, $owned->tenant_id]);
+        self::assertSame($platform, RecordWriter::ownedBy($platform, null));
+        self::assertNull($platform->tenant_type);
+        self::assertNull($platform->tenant_id);
+
+        $this->expectException(InvalidTenantException::class);
+
+        RecordWriter::ownedBy(new Role, new Reference('tenant', ''));
+    }
+
+    /**
      * A delegated save offers each proposed attribute to policies under its
      * name, whatever attributes come before it unset, so a policy conditioned
      * on a later one decides on it: the right value is allowed, and refused at
@@ -309,37 +370,30 @@ final class RecordWriterTest extends TestCase
     }
 
     /**
-     * The proposed change offers a document that cannot be read with no digest,
-     * and leaves out an attribute that is not a scalar.
+     * A save giving a policy a document is decided on the rewrite the operation
+     * resource builds, one that cannot be read offered as none with no digest;
+     * any other save on the definition's change, an attribute that is not a
+     * scalar left out.
      *
      * @return void
      */
-    public function testTheChangeOfAnUnreadableDocumentHasNoDigest(): void
+    public function testAPolicyGivenADocumentIsDecidedAsARewrite(): void
     {
-        $changeOf = new \ReflectionMethod(RecordWriter::class, 'changeOf');
+        $resourceOf = new \ReflectionMethod(RecordWriter::class, 'resourceOf');
+        $attributes = ['name' => 'readers', 'description' => ['not' => 'scalar'], 'document' => '{not json'];
+        $unreadable = $resourceOf->invoke(null, PackagePermissions::POLICY_UPDATE, new Policy(['name' => 'readers']), $attributes);
+        $rewritten  = $resourceOf->invoke(null, PackagePermissions::POLICY_CREATE, new Policy, ['name' => 'viewers', 'document' => ['statements' => []]]);
+        $ranked     = $resourceOf->invoke(null, PackagePermissions::ROLE_UPDATE, new Role(['name' => 'editor']), ['rank' => 2]);
 
-        self::assertSame(['name' => 'readers', 'digest' => null], $changeOf->invoke(null, ['name' => 'readers', 'description' => ['not' => 'scalar'], 'document' => '{not json']));
-        self::assertSame(['rank' => 2], $changeOf->invoke(null, ['rank' => 2]));
-    }
-
-    /**
-     * The document a save gives a policy is offered as it would be stored,
-     * named as the policy is, or by the name the save gives it; none is offered
-     * for a save that gives no document, or one that cannot be read.
-     *
-     * @return void
-     */
-    public function testTheDocumentIsOfferedAsItWouldBeStored(): void
-    {
-        $documentOf = new \ReflectionMethod(RecordWriter::class, 'documentOf');
-        $policy     = new Policy(['name' => 'readers']);
-        $document   = ['statements' => []];
-
-        self::assertSame(['statements' => [], 'name' => 'readers'], $documentOf->invoke(null, $policy, ['document' => $document]));
-        self::assertSame(['statements' => [], 'name' => 'viewers'], $documentOf->invoke(null, $policy, ['name' => 'viewers', 'document' => \json_encode($document)]));
-        self::assertSame(['name' => 'own', 'statements' => []], $documentOf->invoke(null, $policy, ['document' => ['name' => 'own', 'statements' => []]]));
-        self::assertNull($documentOf->invoke(null, $policy, ['name' => 'readers']));
-        self::assertNull($documentOf->invoke(null, $policy, ['document' => '{not json']));
+        self::assertInstanceOf(OperationResource::class, $unreadable);
+        self::assertInstanceOf(OperationResource::class, $rewritten);
+        self::assertInstanceOf(OperationResource::class, $ranked);
+        self::assertSame(['name' => 'readers', 'digest' => null], $unreadable->definition?->values);
+        self::assertNull($unreadable->definition->document);
+        self::assertSame(PackagePermissions::POLICY_CREATE, $rewritten->action);
+        self::assertSame(['statements' => [], 'name' => 'viewers'], $rewritten->definition?->document);
+        self::assertSame(['rank' => 2], $ranked->definition?->values);
+        self::assertNull($ranked->definition->document);
     }
 
     /**

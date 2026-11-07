@@ -14,7 +14,9 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions as Actions;
@@ -141,7 +143,153 @@ final class DefinitionConstraintsTest extends TestCase
         self::grants()->grantRole(StubIdentity::query()->findOrFail('senior'), $role);
 
         self::assertSame(DecisionReason::ADMINISTRATION_RANK, $rank(5));
+        self::assertNull($rank(8));
         self::assertNull($rank(9));
+        self::assertNull($rank(null));
+    }
+
+    /**
+     * A rank that cannot be read as a whole number cannot be compared, so it is
+     * refused, created or given, whatever rank holds; and a rank is changed
+     * only on a role junior to the actor, so a senior or peer role is never
+     * demoted or cleared, while an unranked role may be given a junior rank.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARankIsChangedOnlyComparablyAndOnlyOnAJuniorRole(): void
+    {
+        $junior   = Role::query()->create(['name' => 'junior', 'rank' => 8]);
+        $peer     = Role::query()->create(['name' => 'peer', 'rank' => 2]);
+        $senior   = Role::query()->create(['name' => 'senior', 'rank' => 1]);
+        $unranked = Role::query()->create(['name' => 'unranked']);
+        $ranked   = static fn (string $action, Role $role, bool|float|int|string|null $rank): ?DecisionReason => self::refusal(
+            OperationResource::definition($action, $role, ['rank' => $rank]),
+            null,
+        );
+        $rank   = static fn (Role $role, bool|float|int|string|null $rank): ?DecisionReason => $ranked(Actions::ROLE_UPDATE, $role, $rank);
+        $create = static fn (bool|float|int|string|null $rank): ?DecisionReason => $ranked(Actions::ROLE_CREATE, new Role, $rank);
+
+        foreach (['9.0', 'nine', '', ' 9x', '99999999999999999999', 9.0, 0.5, true, false] as $uncomparable) {
+            self::assertSame(DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE, $rank($junior, $uncomparable), \var_export($uncomparable, true));
+            self::assertSame(DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE, $create($uncomparable), \var_export($uncomparable, true));
+        }
+
+        self::assertNull($create('9'));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $create('1'));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $rank($junior, '0'));
+
+        foreach ([$peer, $senior] as $role) {
+            self::assertSame(DecisionReason::ADMINISTRATION_RANK, $rank($role, 10), $role->name);
+            self::assertSame(DecisionReason::ADMINISTRATION_RANK, $rank($role, null), $role->name);
+            self::assertNull(self::refusal(OperationResource::definition(Actions::ROLE_UPDATE, $role, ['description' => 'Kept']), null), $role->name);
+        }
+
+        self::assertNull($rank($unranked, 9));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $rank($unranked, 2));
+        self::assertNull($rank($junior, 10));
+
+        config(['authorization.rank.enabled' => false]);
+
+        self::assertNull($rank($senior, 0));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE, $rank($senior, 'nine'));
+    }
+
+    /**
+     * A permission's name or guard is what its holders' grants mean, so a new
+     * one reaches every holder, while a new description reaches no one; a
+     * role's name gates who holds it, so renaming a held role reaches its
+     * holders too.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testANewNameReachesEveryHolder(): void
+    {
+        $read = self::permission('posts:read');
+        $role = Role::query()->create(['name' => 'editor']);
+        $peer = StubIdentity::query()->create(['id' => 'peer']);
+
+        self::grants()->grantRole($peer, Role::query()->create(['name' => 'peer', 'rank' => 1]));
+        self::grants()->grantPermission($peer, $read);
+        self::grants()->grantRole($peer, $role);
+
+        self::assertNull(self::refusal(OperationResource::definition(Actions::PERMISSION_UPDATE, $read, ['description' => 'Reads']), null));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::refusal(OperationResource::definition(Actions::PERMISSION_UPDATE, $read, ['guard' => 'api']), null));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::refusal(OperationResource::definition(Actions::PERMISSION_RENAME, $read, ['name' => 'posts:view']), null));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::refusal(OperationResource::definition(Actions::ROLE_RENAME, $role, ['name' => 'writer']), null));
+        self::assertNull(self::refusal(OperationResource::definition(Actions::PERMISSION_RENAME, self::permission('posts:free'), ['name' => 'posts:view']), null));
+    }
+
+    /**
+     * A role's parent is weighed by what the new parent hands the role's
+     * holders: keeping none is no change, and a parent carrying a permission
+     * the actor can neither hold nor grant is refused, its route deciding.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAParentIsWeighedByWhatItHandsOut(): void
+    {
+        $role = Role::query()->create(['name' => 'editor']);
+        $top  = Role::query()->create(['name' => 'top']);
+
+        RoleService::instance()?->grantPermission($top, self::permission('billing:refund'));
+
+        self::assertNull(self::refusal(OperationResource::definition(Actions::ROLE_PARENT_SET, $role, ['parent' => null]), null));
+
+        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'holder']), $role);
+
+        $parent = OperationResource::definition(Actions::ROLE_PARENT_SET, $role, ['parent' => $top->id]);
+
+        self::assertNull(self::refusal($parent, null));
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, self::refusal($parent, null, self::refusing(Actions::PERMISSION_GRANTABLE)));
+    }
+
+    /**
+     * A policy given a document that cannot be read, offered by its digest
+     * alone, cannot be weighed, and one that lifts a deny cannot be bounded, so
+     * each is unprovable.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARewriteThatCannotBeWeighedIsUnprovable(): void
+    {
+        $deny = self::policy('denying', 'deny');
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::refusal(OperationResource::definition(Actions::POLICY_UPDATE, $deny, ['digest' => null]), null));
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::refusal(OperationResource::definition(Actions::POLICY_UPDATE, $deny, [], ['statements' => []]), null));
+    }
+
+    /**
+     * A change that reaches holders is weighed across the change's own reach
+     * where it names one, so a resource policy attached in one application of a
+     * tenant, by an actor allowed only there, is allowed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAChangeIsWeighedAcrossItsOwnReach(): void
+    {
+        $tenant = new Reference('tenant', 'a');
+        $junior = StubIdentity::query()->create(['id' => 'junior']);
+        $policy = Policy::create(['name' => 'sharing', 'document' => ['statements' => [[
+            'effect'     => 'allow',
+            'actions'    => ['posts:read'],
+            'principals' => [Reference::of($junior)->type . ':' . Reference::of($junior)->id],
+        ]]]]);
+        $attach = OperationResource::grant(Actions::RESOURCE_POLICY_ATTACH, new Reference('posts', '7'), $policy, new GrantScope($tenant, 'admin', false));
+        $inApp  = static fn (): Decision => TenantScope::currentApplication() === 'admin' ? Decision::allow(DecisionStage::ALLOW) : self::denied();
+
+        self::grants()->grantRole($junior, Role::query()->create(['name' => 'junior', 'rank' => 9]));
+
+        self::assertNull(self::refusal($attach, null, $inApp));
     }
 
     /**
@@ -186,16 +334,17 @@ final class DefinitionConstraintsTest extends TestCase
 
     /**
      * Return why the operation is refused when its action is allowed, the actor
-     * ranked 2, every further check allowed and the grantable rights held, made
-     * from the tenant given.
+     * ranked 2, every further check allowed, unless another decides them, and
+     * the grantable rights held, made from the tenant given.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $from
+     * @param  (\Closure(string, \SineMacula\Laravel\Authorization\Support\ResourceReference|null): \SineMacula\Laravel\Authorization\Evaluation\Decision)|null  $decide
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      *
      * @throws \Throwable
      */
-    private static function refusal(OperationResource $operation, ?Reference $from): ?DecisionReason
+    private static function refusal(OperationResource $operation, ?Reference $from, ?\Closure $decide = null): ?DecisionReason
     {
         $actor = StubIdentity::query()->firstOrCreate(['id' => 'admin']);
 
@@ -204,9 +353,31 @@ final class DefinitionConstraintsTest extends TestCase
             self::grants()->grantPermission($actor, self::permission('authorization:*'));
         }
 
-        $checks = new FurtherChecks(new Subject($actor, $actor), static fn (): Decision => Decision::allow(DecisionStage::ALLOW), static fn (): null => null, $from);
+        $decide ??= static fn (): Decision => Decision::allow(DecisionStage::ALLOW);
+        $checks = new FurtherChecks(new Subject($actor, $actor), $decide, static fn (): null => null, $from);
 
         return DefinitionConstraints::refusal($operation, $operation->toResourceReference(), $checks);
+    }
+
+    /**
+     * Return further checks that refuse the action and allow every other.
+     *
+     * @param  string  $action
+     * @return \Closure(string, \SineMacula\Laravel\Authorization\Support\ResourceReference|null): \SineMacula\Laravel\Authorization\Evaluation\Decision
+     */
+    private static function refusing(string $action): \Closure
+    {
+        return static fn (string $asked): Decision => $asked === $action ? self::denied() : Decision::allow(DecisionStage::ALLOW);
+    }
+
+    /**
+     * Return a decision that refuses, as no statement matching does.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     */
+    private static function denied(): Decision
+    {
+        return Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
     }
 
     /**

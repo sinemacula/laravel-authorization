@@ -151,6 +151,64 @@ final class RoleServiceTest extends TestCase
     }
 
     /**
+     * A delegated change to a role is weighed on, and writes, the rows as
+     * stored: a permission renamed and not saved is judged on its stored name,
+     * granted or synced, and a role given a rank and not saved keeps its stored
+     * rank when it is re-parented; a permission given by name is read as it is
+     * looked up.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedChangeToARoleIsWeighedOnTheStoredRows(): void
+    {
+        $admin  = self::administrator([PackagePermissions::PERMISSION_GRANT, PackagePermissions::ROLE_PARENT_SET, 'posts:read']);
+        $editor = self::role('editor', ['rank' => 7]);
+        $top    = self::role('top');
+
+        app(GrantService::class)->grantRole(StubIdentity::query()->create(['id' => 'junior']), $editor);
+
+        $delete        = Permission::query()->create(['name' => 'posts:delete']);
+        $renamed       = Permission::query()->whereKey($delete->getKey())->firstOrFail();
+        $renamed->name = 'posts:read';
+
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, static fn (): mixed => self::service()->grantPermission($editor, $renamed, actor: $admin));
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, static fn (): mixed => self::service()->syncPermissions($editor, [$renamed], actor: $admin));
+        self::assertSame(0, DB::table('role_permissions')->count());
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantPermission($editor, 'posts:read', actor: $admin));
+
+        $editor->rank = 0;
+
+        self::service()->setParent($editor, $top, $admin);
+
+        self::assertSame(7, $editor->rank);
+        self::assertSame(7, Role::query()->whereKey($editor->getKey())->firstOrFail()->rank);
+        self::assertSame($top->getKey(), Role::query()->whereKey($editor->getKey())->firstOrFail()->parent_id);
+    }
+
+    /**
+     * A role is created owned by the tenant given, as a model or a reference,
+     * and by the platform for none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleIsCreatedOwnedByTheTenantGiven(): void
+    {
+        $tenant = self::createTenant('acme');
+        $owned  = self::service()->create('editor', tenant: $tenant);
+        $named  = self::service()->create('writer', tenant: new Reference('team', 'blue'));
+
+        self::assertSame([$tenant->getMorphClass(), 'acme'], [$owned->tenant_type, $owned->tenant_id]);
+        self::assertSame(['team', 'blue'], [$named->tenant_type, $named->tenant_id]);
+        self::assertNull(self::service()->create('reader')->tenant_type);
+        self::assertSame('blue', Role::query()->withoutGlobalScopes()->whereKey($named->getKey())->firstOrFail()->tenant_id);
+    }
+
+    /**
      * A delegated sync re-arms a kept permission as of the instant it judged
      * the grant's liveness at, so one it decided as live and unchanged is never
      * re-armed, even when it expires before it is written.

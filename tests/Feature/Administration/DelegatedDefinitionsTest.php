@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Administration\RoleAuthority;
 use SineMacula\Laravel\Authorization\Administration\RoleParent;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -92,6 +93,95 @@ final class DelegatedDefinitionsTest extends TestCase
 
         self::assertDecided(null, $actor, self::roleGrant($user, $child), $grant($child));
         self::assertTrue($user->fresh()?->hasRole('child'));
+    }
+
+    /**
+     * An allow a resource policy hands to a role, by naming it or an ancestor
+     * as a principal, reaches whoever holds the role later: attaching it to a
+     * role no one holds reaches no one, but granting the role, or a role below
+     * it, or making it the parent of a held role, hands the allow out, so the
+     * actor must be able to hand out what it allows, or be allowed
+     * `policy.grantable` on its document, whichever key the role was given.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAResourcePolicyNamingARoleReachesItsLaterHolders(): void
+    {
+        $actor   = self::actor('admin', [Actions::RESOURCE_POLICY_ATTACH, Actions::ROLE_GRANT, Actions::ROLE_PARENT_SET, 'posts:read']);
+        $junior  = self::user('junior');
+        $role    = self::roles()->create('deleters', id: '01a1b0c0-0000-7000-8000-0000000000aa');
+        $below   = self::role('below', $role);
+        $held    = self::role('held');
+        $policy  = self::policy('deleting', [['effect' => 'allow', 'actions' => ['posts:delete'], 'principals' => ['role:' . $role->id]]]);
+        $grant   = static fn (Role $granted): \Closure => static fn (): mixed => self::grants()->grantRole($junior, $granted, actor: $actor);
+        $parent  = static fn (): \Closure => static fn (): mixed => self::roles()->setParent($held->fresh() ?? $held, $role, $actor);
+        $screen  = OperationResource::definition(Actions::ROLE_PARENT_SET, $held, ['parent' => $role->id]);
+        $attach  = OperationResource::grant(Actions::RESOURCE_POLICY_ATTACH, new Reference('posts', '*'), $policy, GrantScope::platform());
+        $refused = DecisionReason::ADMINISTRATION_NOT_GRANTABLE;
+
+        self::grants()->grantRole(self::user('holder'), $held);
+        self::assertDecided(null, $actor, $attach, static fn (): mixed => self::resourcePolicies()->attach($policy, 'posts', actor: $actor));
+        self::assertDecided($refused, $actor, self::roleGrant($junior, $role), $grant($role));
+        self::assertDecided($refused, $actor, self::roleGrant($junior, $below), $grant($below));
+        self::assertDecided($refused, $actor, $screen, $parent());
+        self::assertFalse(Authorization::for($junior)->check('posts:delete', new Reference('posts', '7'))->isAllowed());
+
+        self::allowGrantable($actor, self::digestOf($policy));
+
+        self::assertDecided(null, $actor, self::roleGrant($junior, $below), $grant($below));
+        self::assertDecided(null, $actor, $screen, $parent());
+    }
+
+    /**
+     * An allow a resource policy hands to a role is contained when the actor
+     * holds what it allows, whatever principals it names.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAResourcePolicyAllowTheActorHoldsIsContained(): void
+    {
+        $actor  = self::actor('admin', [Actions::ROLE_GRANT, 'posts:read']);
+        $junior = self::user('junior');
+        $role   = self::role('readers');
+        $policy = self::policy('reading', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['role:' . $role->id, 'user:1']]]);
+
+        self::resourcePolicies()->attach($policy, ['posts', 7]);
+
+        self::assertDecided(null, $actor, self::roleGrant($junior, $role), static fn (): mixed => self::grants()->grantRole($junior, $role, actor: $actor));
+    }
+
+    /**
+     * A screen that builds a rewrite through `OperationResource::rewrite()`
+     * offers policies the digest of the document as it would be stored, so a
+     * right conditioned on `resource.change.digest` decides the screen and the
+     * policy service alike.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARewriteIsDecidedOnItsDigestByTheScreenAsByTheService(): void
+    {
+        $actor    = self::actor('admin', []);
+        $policy   = self::policy('support', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+        $approved = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']], ['effect' => 'deny', 'actions' => ['posts:delete']]]];
+        $other    = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']], ['effect' => 'deny', 'actions' => ['posts:edit']]]];
+        $digest   = DocumentDigest::of(PolicyDocument::named($approved, 'support'))->digest;
+        $rewrite  = static fn (array $document): \Closure => static fn (): mixed => self::policies()->rewrite($policy->fresh() ?? $policy, $document, $actor);
+
+        self::grants()->attachPolicy($actor->subject->subject, self::policy('approver', [[
+            'effect'     => 'allow',
+            'actions'    => [Actions::POLICY_UPDATE],
+            'resources'  => [OperationResource::TYPE . ':*'],
+            'conditions' => ['eq' => ['resource.change.digest' => $digest]],
+        ]]));
+
+        self::assertDecided(DecisionReason::CONDITION_FAILED, $actor, OperationResource::rewrite($policy, $other), $rewrite($other));
+        self::assertDecided(null, $actor, OperationResource::rewrite($policy, $approved), $rewrite($approved));
     }
 
     /**
@@ -184,6 +274,55 @@ final class DelegatedDefinitionsTest extends TestCase
         self::assertDecided(DecisionReason::ADMINISTRATION_OWNER, $actor, $screen($owned), $describe($owned));
         self::inTenant($parent, static fn (): mixed => self::assertDecided(null, $actor, $screen($owned), $describe($owned)));
         self::assertDecided(null, $actor, $screen($platform), $describe($platform));
+    }
+
+    /**
+     * A definition is created owned by the tenant the call names, and decided
+     * by the owner rule against it: an administrator creates its own tenant's
+     * roles, permissions and policies from that tenant's context, never from
+     * the platform's or another tenant's, and the platform's from the platform
+     * alone; a screen building the same new record gets the same decision.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADefinitionIsCreatedFromItsOwnersContext(): void
+    {
+        $tenant = self::createTenant('acme');
+        $other  = self::createTenant('other');
+        $actor  = self::actor('admin', [Actions::ROLE_CREATE, Actions::PERMISSION_CREATE, Actions::POLICY_CREATE]);
+        $owned  = self::ownedBy($tenant);
+        $policy = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]];
+        $cases  = [
+            'a role' => [
+                static fn (string $name): OperationResource => OperationResource::definition(Actions::ROLE_CREATE, new Role($owned), ['name' => $name]),
+                static fn (string $name): \Closure => static fn (): mixed => self::roles()->create($name, actor: $actor, tenant: $tenant),
+            ],
+            'a permission' => [
+                static fn (string $name): OperationResource => OperationResource::definition(Actions::PERMISSION_CREATE, new Permission($owned), ['name' => 'posts:' . $name]),
+                static fn (string $name): \Closure => static fn (): mixed => self::permissions()->create('posts:' . $name, actor: $actor, tenant: $tenant),
+            ],
+            'a policy' => [
+                static fn (string $name): OperationResource => OperationResource::rewrite(new Policy($owned), $policy, ['name' => $name], Actions::POLICY_CREATE),
+                static fn (string $name): \Closure => static fn (): mixed => self::policies()->create($name, $policy, actor: $actor, tenant: $tenant),
+            ],
+        ];
+
+        foreach ($cases as [$screen, $create]) {
+            self::assertDecided(DecisionReason::ADMINISTRATION_OWNER, $actor, $screen('platform'), $create('platform'));
+            self::inTenant($other, static fn (): mixed => self::assertDecided(DecisionReason::ADMINISTRATION_OWNER, $actor, $screen('other'), $create('other')));
+            self::inTenant($tenant, static fn (): mixed => self::assertDecided(null, $actor, $screen('owned'), $create('owned')));
+        }
+
+        self::assertSame($tenant->getKey(), Role::query()->withoutGlobalScopes()->where('name', 'owned')->sole()->tenant_id);
+        self::assertSame($tenant->getKey(), Permission::query()->withoutGlobalScopes()->where('name', 'posts:owned')->sole()->tenant_id);
+        self::assertSame($tenant->getKey(), Policy::query()->withoutGlobalScopes()->where('name', 'owned')->sole()->tenant_id);
+        $platform = static fn (string $name): OperationResource => OperationResource::definition(Actions::ROLE_CREATE, new Role, ['name' => $name]);
+        $shared   = static fn (string $name): \Closure => static fn (): mixed => self::roles()->create($name, actor: $actor);
+
+        self::assertDecided(null, $actor, $platform('shared'), $shared('shared'));
+        self::inTenant($tenant, static fn (): mixed => self::assertDecided(DecisionReason::ADMINISTRATION_OWNER, $actor, $platform('stray'), $shared('stray')));
     }
 
     /**
@@ -542,10 +681,7 @@ final class DelegatedDefinitionsTest extends TestCase
      */
     private static function rewriteOf(Policy $policy, array $statements): OperationResource
     {
-        $stored   = $policy->fresh() ?? $policy;
-        $document = PolicyDocument::named(['statements' => $statements], $stored->name);
-
-        return OperationResource::definition(Actions::POLICY_UPDATE, $stored, ['digest' => DocumentDigest::of(['statements' => $statements])->digest], $document);
+        return OperationResource::rewrite($policy->fresh() ?? $policy, ['statements' => $statements]);
     }
 
     /**

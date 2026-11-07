@@ -42,9 +42,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * 2. an operation on a subject, a principal or an identity (a grant, a
  *    revocation, an attachment, a detach, a boundary set or removal), is
  *    weighed by the constraints of a change to a subject, listed below;
- * 3. any other operation, a change to a definition, to a role's permissions,
- *    policies or parent, or to a resource's policies, is weighed by the owner
- *    rule and by what it changes (see `DefinitionConstraints`).
+ * 3. any other operation, a change to a definition or to a role's permissions,
+ *    policies or parent, is weighed by the owner rule and by what it changes,
+ *    and a change to a resource's policies by what it changes alone, which the
+ *    owner rule never weighs (N79) (see `DefinitionConstraints`).
  *
  * The constraints of a change to a subject, in order:
  *
@@ -72,11 +73,15 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *   (see `Possession`), or it is refused as `administration.not_grantable` or
  *   `administration.unprovable`;
  * - **roles**: a role grant hands out the role's whole authority, every
- *   permission and policy it and its ancestors carry (see `RoleAuthority`),
- *   each by its own route; a chain that cannot be read is unprovable;
+ *   permission and policy it and its ancestors carry, and every allow of a
+ *   resource policy in the grant's reach that names it or an ancestor (see
+ *   `RoleAuthority`), each by its own route, its rank, as stored, counting as
+ *   the grantee's; what cannot be read whole is unprovable;
  * - **policies**: a policy attachment needs the policy route, containment or
- *   `authorization:policy.grantable` on the policy's digest (see
- *   `PolicyRoute`);
+ *   `authorization:policy.grantable` on the digest of the policy's stored
+ *   document (see `PolicyRoute`); a service hands the stage the role or policy
+ *   as stored (see `StoredRecords`), so the model in hand never stands in for
+ *   the row;
  * - **boundaries**: a boundary that only adds or tightens a cap narrows (see
  *   `Narrowing`); one that replaces a boundary with a wider one, or a removal,
  *   cannot be bounded in general, so it is refused as
@@ -85,9 +90,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * - every other change that may widen authority, a detach of a denying policy
  *   included, is refused as `administration.unprovable`.
  *
- * The owner rule (D20, see `OwnerConstraint`) governs definitions, their
- * membership and their attachments, never grant rows: who may change a grant
- * row is the administered scope alone.
+ * The owner rule (D20, see `OwnerConstraint`) governs definitions and what a
+ * role carries, its permissions, policies and parent, never a resource policy's
+ * attachment or a grant row: who may change a grant row is the administered
+ * scope alone.
  *
  * An allow that passes records one satisfied step at the stage.
  *
@@ -335,7 +341,7 @@ final class OperationConstraints
      */
     private static function roleGranted(OperationResource $operation, OperationChange $change, Role $role, FurtherChecks $checks): ?DecisionReason
     {
-        $authority = RoleAuthority::of([$role->id]);
+        $authority = RoleAuthority::of([$role->id], $change->scope);
 
         return $authority === null ? DecisionReason::ADMINISTRATION_UNPROVABLE : $authority->refusal($operation, $change, $checks);
     }

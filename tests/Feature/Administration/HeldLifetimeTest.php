@@ -89,6 +89,45 @@ final class HeldLifetimeTest extends TestCase
     }
 
     /**
+     * Many permissions are read in one pass, each keyed by its name, with the
+     * same lifetime it has alone, directly and through a role, in the same
+     * number of queries however many there are; each is unheld while the
+     * subject is inactive.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testManyPermissionsAreReadInOnePass(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $editor = Role::create(['name' => 'editor']);
+
+        self::grants()->grantPermission($user, self::permission('posts:read'));
+        self::grants()->grantPermission($user, self::permission('posts:edit'), Carbon::now()->addDay());
+        self::roles()->grantPermission($editor, self::permission('posts:*'), Carbon::now()->addDays(3));
+        self::roles()->grantPermission($editor, self::permission('billing:view'));
+        self::grants()->grantRole($user, $editor, Carbon::now()->addDays(2));
+
+        $names    = ['posts:read', 'posts:edit', 'billing:view', 'billing:refund', '7'];
+        $each     = HeldLifetime::ofEach(self::subject($user), $names);
+        $expected = [];
+
+        foreach ($names as $name) {
+            $expected[$name] = HeldLifetime::of(self::subject($user), $name);
+        }
+
+        self::assertSame($expected, $each);
+        self::assertSame(\PHP_INT_MAX, $each['posts:read']);
+        self::assertSame(Carbon::now()->addDays(2)->getTimestamp(), $each['posts:edit']);
+        self::assertSame(Carbon::now()->addDays(2)->getTimestamp(), $each['billing:view']);
+        self::assertNull($each['billing:refund']);
+        self::assertSame(self::queriesOf($user, ['posts:read']), self::queriesOf($user, $names));
+        self::assertSame([], HeldLifetime::ofEach(self::subject($user), []));
+        self::assertSame(['posts:read' => null], HeldLifetime::ofEach(new Subject(new \stdClass), ['posts:read']));
+    }
+
+    /**
      * A role's grant of the permission lasts until the earlier of the role's
      * grant and the role's own, its ancestors' included while the hierarchy is
      * enabled, and only then; the latest such grant wins, among a role's own
@@ -326,6 +365,28 @@ final class HeldLifetimeTest extends TestCase
     private static function permission(string $name): Permission
     {
         return Permission::query()->firstOrCreate(['name' => $name]);
+    }
+
+    /**
+     * Count the queries reading the identity's lifetimes of the permissions
+     * takes.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  list<string>  $permissions
+     * @return int
+     */
+    private static function queriesOf(StubIdentity $user, array $permissions): int
+    {
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        HeldLifetime::ofEach(self::subject($user), $permissions);
+
+        $count = \count(DB::getQueryLog());
+
+        DB::disableQueryLog();
+
+        return $count;
     }
 
     /**

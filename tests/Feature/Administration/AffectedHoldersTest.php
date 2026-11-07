@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Administration;
 
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\AffectedHolders;
 use SineMacula\Laravel\Authorization\Administration\DocumentComparison;
@@ -172,6 +173,143 @@ final class AffectedHoldersTest extends TestCase
 
         self::assertCount(3, self::holdersOf($role) ?? []);
         self::assertSame(1000, AffectedHolders::DEFAULT_LIMIT);
+    }
+
+    /**
+     * The limit counts distinct holders: a holder one set names twice, or two
+     * sets both name, never uses up the room of one not read yet, so a set at
+     * the limit holds every holder, and one over it is always over, whichever
+     * set the extra holder comes from.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheLimitCountsDistinctHolders(): void
+    {
+        $edit   = Permission::query()->create(['name' => 'posts:edit']);
+        $editor = Role::query()->create(['name' => 'editor']);
+
+        foreach (['a', 'b'] as $id) {
+            self::grants()->grantPermission(self::user($id), $edit);
+        }
+
+        RoleService::instance()?->grantPermission($editor, $edit);
+
+        foreach (['a', 'b', 'c'] as $id) {
+            self::grants()->grantRole(self::user($id), $editor);
+        }
+
+        self::grants()->grantRole(self::user('a'), $editor, tenant: new Reference('tenant', 'a'));
+
+        config(['authorization.administration.max_impact' => 3]);
+
+        self::assertSame(['a', 'b', 'c'], self::ids(AffectedHolders::none()->ofPermission($edit)->holders()));
+        self::assertSame(['a', 'b', 'c'], self::ids(AffectedHolders::none()->ofRoles([$editor->id])->holders()));
+
+        self::grants()->grantRole(self::user('senior'), $editor);
+
+        self::assertNull(AffectedHolders::none()->ofPermission($edit)->holders());
+
+        config(['authorization.administration.max_impact' => 4]);
+
+        self::assertSame(['a', 'b', 'c', 'senior'], self::ids(AffectedHolders::none()->ofPermission($edit)->holders()));
+
+        $view = Permission::query()->create(['name' => 'posts:view']);
+        $role = Role::query()->create(['name' => 'viewer']);
+
+        foreach (['a', 'b', 'c'] as $id) {
+            self::grants()->grantPermission(self::user($id), $view);
+        }
+
+        RoleService::instance()?->grantPermission($role, $view);
+        self::grants()->grantRole(self::user('a'), $role);
+        self::grants()->grantRole(self::user('outsider'), $role);
+
+        config(['authorization.administration.max_impact' => 3]);
+
+        self::assertNull(AffectedHolders::none()->ofPermission($view)->holders());
+    }
+
+    /**
+     * The limit counts distinct holders of a policy too: subjects it is both
+     * attached to and bounds count once, and one more than the limit, from
+     * either set, puts it over.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicysHoldersAreCountedOnce(): void
+    {
+        $plain = Policy::create(['name' => 'plain', 'document' => ['statements' => []]]);
+
+        foreach (['p', 'q'] as $id) {
+            self::grants()->attachPolicy(self::user($id), $plain);
+            BoundaryService::instance()?->set(self::user($id), $plain);
+        }
+
+        $document = [DocumentComparison::read($plain->document)];
+
+        config(['authorization.administration.max_impact' => 2]);
+
+        self::assertSame(['p', 'q'], self::ids(AffectedHolders::none()->ofPolicy($plain, $document)->holders()));
+
+        BoundaryService::instance()?->set(self::user('r'), $plain);
+
+        self::assertNull(AffectedHolders::none()->ofPolicy($plain, $document)->holders());
+
+        config(['authorization.administration.max_impact' => 3]);
+
+        self::assertSame(['p', 'q', 'r'], self::ids(AffectedHolders::none()->ofPolicy($plain, $document)->holders()));
+    }
+
+    /**
+     * At the edges of the limit: a limit of one holds one role, and no holder
+     * at all, without being over; a set over it reads nothing more; a limit
+     * that is no positive whole number is the default.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheLimitHoldsAtItsEdges(): void
+    {
+        $role = Role::query()->create(['name' => 'editor']);
+        $lone = Permission::query()->create(['name' => 'posts:lone']);
+
+        RoleService::instance()?->grantPermission(Role::query()->create(['name' => 'empty']), $lone);
+
+        foreach (['one', 'two', 'three'] as $id) {
+            self::grants()->grantRole(self::user($id), $role);
+        }
+
+        config(['authorization.administration.max_impact' => 1]);
+
+        self::assertSame(1, AffectedHolders::limit());
+        self::assertSame([], AffectedHolders::none()->ofPermission($lone)->holders());
+        self::assertNull(self::holdersOf($role));
+
+        $over = AffectedHolders::none()->ofPrincipals(null);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        $over->ofRoles([$role->id]);
+        AffectedHolders::none()->ofRoles([]);
+
+        $queries = \count(DB::getQueryLog());
+
+        DB::disableQueryLog();
+
+        self::assertSame(0, $queries);
+
+        foreach ([0, -1] as $limit) {
+            config(['authorization.administration.max_impact' => $limit]);
+
+            self::assertSame(AffectedHolders::DEFAULT_LIMIT, AffectedHolders::limit());
+            self::assertCount(3, self::holdersOf($role) ?? []);
+        }
     }
 
     /**

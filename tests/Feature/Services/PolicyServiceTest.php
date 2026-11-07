@@ -345,6 +345,23 @@ final class PolicyServiceTest extends TestCase
     }
 
     /**
+     * A policy is created owned by the tenant given, and by the platform for
+     * none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyIsCreatedOwnedByTheTenantGiven(): void
+    {
+        $owned = self::service()->create('readers', ['statements' => []], tenant: new Reference('tenant', 'acme'));
+
+        self::assertSame(['tenant', 'acme'], [$owned->tenant_type, $owned->tenant_id]);
+        self::assertSame('acme', Policy::query()->withoutGlobalScopes()->whereKey($owned->getKey())->firstOrFail()->tenant_id);
+        self::assertNull(self::service()->create('writers', ['statements' => []])->tenant_type);
+    }
+
+    /**
      * Return the policy service.
      *
      * @return \SineMacula\Laravel\Authorization\Services\PolicyService

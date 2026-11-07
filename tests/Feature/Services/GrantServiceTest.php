@@ -1975,6 +1975,64 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
+     * A delegated grant is weighed on the row it is written against, never on
+     * the model in hand: a policy whose document is changed and not saved is
+     * judged on the stored document, one read before a rewrite on the rewritten
+     * one, a role given a rank and not saved on its stored rank, and a
+     * permission renamed and not saved on its stored name, a sync's targets
+     * included; a policy whose row is gone is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedGrantIsWeighedOnTheStoredRow(): void
+    {
+        $actions  = [PackagePermissions::POLICY_ATTACH, PackagePermissions::ROLE_GRANT, PackagePermissions::PERMISSION_GRANT, 'posts:read'];
+        $admin    = self::administrator($actions, 'admin-1', 5);
+        $user     = self::user();
+        $refused  = DecisionReason::ADMINISTRATION_NOT_GRANTABLE;
+        $allowing = static fn (string $action): array => ['statements' => [['effect' => 'allow', 'actions' => [$action]]]];
+
+        $deleting        = Policy::query()->create(['name' => 'deleting', 'document' => $allowing('posts:delete')]);
+        $dirty           = Policy::query()->whereKey($deleting->getKey())->firstOrFail();
+        $dirty->document = $allowing('posts:read');
+
+        self::assertDelegatedRefusal($refused, static fn (): mixed => self::service()->attachPolicy($user, $dirty, actor: $admin));
+        self::assertDelegatedRefusal($refused, static fn (): mixed => self::service()->syncPolicies($user, [$dirty], actor: $admin));
+
+        $reading = Policy::query()->create(['name' => 'reading', 'document' => $allowing('posts:read')]);
+        $stale   = Policy::query()->whereKey($reading->getKey())->firstOrFail();
+
+        $reading->forceFill(['document' => $allowing('posts:delete')])->save();
+
+        self::assertDelegatedRefusal($refused, static fn (): mixed => self::service()->attachPolicy($user, $stale, actor: $admin));
+
+        $senior     = Role::query()->create(['name' => 'senior', 'rank' => 1]);
+        $fake       = Role::query()->whereKey($senior->getKey())->firstOrFail();
+        $fake->rank = 99;
+
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_RANK, static fn (): mixed => self::service()->grantRole($user, $fake, actor: $admin));
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_RANK, static fn (): mixed => self::service()->syncRoles($user, [$fake], actor: $admin));
+
+        $delete        = Permission::query()->create(['name' => 'posts:delete']);
+        $renamed       = Permission::query()->whereKey($delete->getKey())->firstOrFail();
+        $renamed->name = 'posts:read';
+
+        self::assertDelegatedRefusal($refused, static fn (): mixed => self::service()->grantPermission($user, $renamed, actor: $admin));
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+        self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', $user->getKey())->count());
+
+        $gone = Policy::query()->create(['name' => 'gone', 'document' => $allowing('posts:read')]);
+
+        DB::table('policies')->where('id', $gone->getKey())->delete();
+
+        $this->expectException(InvalidGrantTargetException::class);
+
+        self::service()->attachPolicy($user, $gone, actor: $admin);
+    }
+
+    /**
      * A policy attached to and detached from a role is reported with the role
      * as the grantee, in the scope it was attached in.
      *

@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\Impact;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -21,6 +22,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Fixtures\BulkChecks\FailingTenantTree;
 use Tests\TestCase;
 
 /**
@@ -82,8 +84,8 @@ final class ImpactTest extends TestCase
     /**
      * The actor must be strictly senior to every holder but itself anywhere the
      * reach goes, and to a rank the change gives them; a holder or an actor
-     * whose rank cannot be read cannot be compared; with rank turned off, rank
-     * stands in nobody's way.
+     * whose rank cannot be read, or a reach whose tenants cannot be read,
+     * cannot be compared; with rank turned off, rank stands in nobody's way.
      *
      * @return void
      *
@@ -112,6 +114,12 @@ final class ImpactTest extends TestCase
 
         self::assertSame(DecisionReason::ADMINISTRATION_RANK, Impact::refusal(self::operation(), self::resource(), $reach, [$junior], $unranked));
         self::assertSame(DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE, Impact::refusal(self::operation(), self::resource(), $reach, [$junior], $unread));
+
+        $this->app?->instance(TenantTree::class, new FailingTenantTree(failing: ['a']));
+
+        $unreadable = Impact::reachOf(new Reference('tenant', 'a'));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE, Impact::refusal(self::operation(), self::resource(), $unreadable, [$junior], $checks));
 
         config(['authorization.rank.enabled' => false]);
 

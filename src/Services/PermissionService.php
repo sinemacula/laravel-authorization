@@ -6,7 +6,9 @@ namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
@@ -32,13 +34,17 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  * its transaction before anything is written, and refused with the decision's
  * `AuthorizationException` when it is not allowed. A change is made only from
  * the tenant that owns the permission, a platform permission's from the
- * platform (`administration.owner`, D20). Creating, describing and deleting a
- * permission widen no one; renaming one re-grants it to every holder under the
- * new name, so each holder must be one the actor administers and the actor must
- * be able to hand out the new name (see `DefinitionConstraints`). A read is not
- * decided yet. Every event a write dispatches carries the operation, with the
- * actor, its mode and the action, once the write commits; the actor is never
- * read from the authenticated user.
+ * platform (`administration.owner`, D20): `create()` makes one owned by the
+ * tenant it is given, else by the platform, so a tenant's administrator creates
+ * its tenant's permissions from that tenant's context. A delegated change
+ * weighs, and writes, the permission as stored, discarding changes to the model
+ * in hand that were not saved. Creating, describing and deleting a permission
+ * widen no one; renaming one re-grants it to every holder under the new name,
+ * so each holder must be one the actor administers and the actor must be able
+ * to hand out the new name (see `DefinitionConstraints`). A read is not decided
+ * yet. Every event a write dispatches carries the operation, with the actor,
+ * its mode and the action, once the write commits; the actor is never read from
+ * the authenticated user.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,7 +54,8 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 final class PermissionService
 {
     /**
-     * Create a permission. A permission given no id is given a new one.
+     * Create a permission, owned by the tenant given, or by the platform for
+     * none. A permission given no id is given a new one.
      *
      * @param  string  $name
      * @param  string|null  $guard
@@ -56,6 +63,7 @@ final class PermissionService
      * @param  string|null  $category
      * @param  string|null  $id
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|null  $tenant
      * @return \SineMacula\Laravel\Authorization\Models\Permission
      *
      * @throws \Throwable
@@ -67,10 +75,11 @@ final class PermissionService
         ?string $category = null,
         ?string $id = null,
         ?ActingContext $actor = null,
+        AuthorizableTenant|Model|null $tenant = null,
     ): Permission {
         $class = self::permissionClass();
 
-        return RecordWriter::create($actor, PackagePermissions::PERMISSION_CREATE, new $class, $id, [
+        return RecordWriter::create($actor, PackagePermissions::PERMISSION_CREATE, RecordWriter::ownedBy(new $class, $tenant), $id, [
             'name'        => $name,
             'guard'       => $guard,
             'description' => $description,

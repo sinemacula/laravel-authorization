@@ -282,6 +282,23 @@ final class PermissionServiceTest extends TestCase
     }
 
     /**
+     * A permission is created owned by the tenant given, and by the platform
+     * for none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPermissionIsCreatedOwnedByTheTenantGiven(): void
+    {
+        $owned = self::service()->create('posts:edit', tenant: new Reference('tenant', 'acme'));
+
+        self::assertSame(['tenant', 'acme'], [$owned->tenant_type, $owned->tenant_id]);
+        self::assertSame('acme', Permission::query()->withoutGlobalScopes()->whereKey($owned->getKey())->firstOrFail()->tenant_id);
+        self::assertNull(self::service()->create('posts:read')->tenant_type);
+    }
+
+    /**
      * Return the permission service.
      *
      * @return \SineMacula\Laravel\Authorization\Services\PermissionService

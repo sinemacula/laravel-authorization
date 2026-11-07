@@ -25,45 +25,55 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *    definition, or the role, and a platform definition's from the platform:
  *    the tenant the check is made from (see `FurtherChecks`) must be the owner,
  *    or it is refused as `administration.owner`, whether or not it narrows (see
- *    `OwnerConstraint`). A resource policy's attachment is a grant to a
- *    resource, which the rule never weighs (N79).
+ *    `OwnerConstraint`). A definition being created is owned by the tenant its
+ *    record names. A resource policy's attachment is a grant to a resource,
+ *    which the rule never weighs (N79).
  * 2. A change that can only narrow is then allowed: removing a permission from
  *    a role, detaching an allow-only policy, one that changes nothing.
- * 3. Every other change is weighed by what it changes: - **creating** a
- *    definition widens no one, so it passes, but a role created with a rank
- *    must be junior to the actor's (see `Impact::juniorRank()`); - **renaming a
- *    role**, and renaming a permission or changing its name or guard otherwise,
- *    changes what every existing grant means, so it is a new distribution to
- *    every holder: the impact check over them (see `Impact`), and, for a
- *    permission, the permission route under the new name across the
- *    definition's reach (see `Possession`); - **changing a role's rank** must
- *    leave it junior to the actor's, and a rank made more senior is weighed by
- *    the impact check over the role's holders, the new rank counting as theirs;
- *    - **deleting** a role narrows unless a policy attached to it, or to an
- *    ancestor, denies anything, deleting a permission always does, and deleting
- *    a policy does only when it has no deny statement (see `Narrowing`);
- *    anything else is `administration.unprovable`; - **rewriting a policy's
- *    document** changes nothing when the new document only narrows the old one,
- *    the same document in authority terms included (see `DocumentComparison`);
- *    one that lifts a deny is unprovable; one that adds allows is weighed by
- *    the impact check over every holder (the subjects it is attached to or
- *    bounds, the holders of every role it is attached to, and the principals
- *    its allows name where it is attached to a resource), needs the policy
- *    route for the allows it adds (see `PolicyRoute`), and, for a policy in use
- *    as a boundary, the further right `authorization:administration.unbounded`,
- *    as replacing a boundary with a wider one does; describing or renaming a
- *    policy passes; - **adding a permission or attaching a policy to a role**,
- *    and **setting or replacing a role's parent**, hands what is added to every
- *    holder of the role and of every role below it: the impact check over them,
- *    and the permission or policy route for what is added, the new parent's
- *    whole authority with its ancestors' (see `RoleAuthority`), across the
- *    role's reach; a parent replaced or cleared whose chain carries a deny is
- *    unprovable, since lifting a deny cannot be bounded; - **attaching a policy
- *    to a resource** hands its allows to every principal they name, and the
- *    holders of every role they name: the impact check over them across the
- *    attachment's reach, and the policy route; - anything else that may widen
- *    authority, a denying policy detached from a role or a resource included,
- *    is `administration.unprovable`.
+ * 3. Every other change is weighed by what it changes, each case below.
+ *
+ * - **Creating** a definition widens no one, so it passes, but a role created
+ *   with a rank must be junior to the actor's (see `Impact::juniorRank()`).
+ * - **Renaming a role**, and renaming a permission or changing its name or
+ *   guard otherwise, changes what every existing grant means, so it is a new
+ *   distribution to every holder: the impact check over them (see `Impact`),
+ *   and, for a permission, the permission route under the new name across the
+ *   definition's reach (see `Possession`).
+ * - **Changing a role's rank** is made only to a role junior to the actor, so a
+ *   senior role is never demoted, and must leave it junior to the actor; a rank
+ *   made more senior is weighed by the impact check over the role's holders,
+ *   the new rank counting as theirs. A rank that is no whole number, given as
+ *   one or as its decimal text, cannot be compared, created or given, and is
+ *   refused as `administration.rank_uncomparable`.
+ * - **Deleting** a role narrows unless a policy attached to it, or to an
+ *   ancestor, denies anything, deleting a permission always does, and deleting
+ *   a policy does only when it has no deny statement (see `Narrowing`);
+ *   anything else is `administration.unprovable`.
+ * - **Rewriting a policy's document** changes nothing when the new document
+ *   only narrows the old one, the same document in authority terms included
+ *   (see `DocumentComparison`); one that lifts a deny is unprovable; one that
+ *   adds allows is weighed by the impact check over every holder (the subjects
+ *   it is attached to or bounds, the holders of every role it is attached to,
+ *   and the principals its allows name where it is attached to a resource),
+ *   needs the policy route for the allows it adds (see `PolicyRoute`), and, for
+ *   a policy in use as a boundary, the further right
+ *   `authorization:administration.unbounded`, as replacing a boundary with a
+ *   wider one does (see `PolicyRewrite`). Describing or renaming a policy
+ *   passes.
+ * - **Adding a permission or attaching a policy to a role**, and **setting or
+ *   replacing a role's parent**, hands what is added to every holder of the
+ *   role and of every role below it: the impact check over them, and the
+ *   permission or policy route for what is added, the new parent's whole
+ *   authority with its ancestors' (see `RoleAuthority`), across the role's
+ *   reach. A parent replaced or cleared whose chain carries a deny is
+ *   unprovable, since lifting a deny cannot be bounded (see `RoleParent`).
+ * - **Attaching a policy to a resource** hands its allows to every principal
+ *   they name, and the holders of every role they name: the impact check over
+ *   them across the attachment's reach, and the policy route. A role a selector
+ *   names that no one holds yet is weighed when it is granted (see
+ *   `RoleAuthority`).
+ * - Anything else that may widen authority, a denying policy detached from a
+ *   role or a resource included, is `administration.unprovable`.
  *
  * A change that reaches no holder widens no one, so it needs neither the impact
  * check nor a route.
@@ -173,13 +183,34 @@ final class DefinitionConstraints
      */
     private static function widening(OperationResource $operation, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
-        $record = $operation->definition?->record;
+        $definition = $operation->definition;
+        $change     = $operation->change;
 
         return match (true) {
-            $record instanceof Role       => self::ofRole($operation, $record, $resource, $checks),
-            $record instanceof Permission => self::ofPermission($operation, $record, $resource, $checks),
-            $record instanceof Policy     => self::ofPolicy($operation, $record, $resource, $checks),
-            $operation->change !== null   => self::ofMembership($operation, $operation->change, $resource, $checks),
+            $definition !== null => self::ofDefinition($operation, $definition, $resource, $checks),
+            $change     !== null => self::ofMembership($operation, $change, $resource, $checks),
+            default              => DecisionReason::ADMINISTRATION_UNPROVABLE,
+        };
+    }
+
+    /**
+     * Return why a change to a role, a permission or a policy itself is
+     * refused, by the kind of record it changes, or null when it is allowed.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  \SineMacula\Laravel\Authorization\Administration\DefinitionChange  $definition
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
+     */
+    private static function ofDefinition(OperationResource $operation, DefinitionChange $definition, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
+    {
+        $record = $definition->record;
+
+        return match (true) {
+            $record instanceof Role       => self::ofRole($operation, $record, $definition->values, $resource, $checks),
+            $record instanceof Permission => self::ofPermission($operation, $definition, $record, $resource, $checks),
+            $record instanceof Policy     => self::ofPolicy($operation, $definition, $record, $resource, $checks),
             default                       => DecisionReason::ADMINISTRATION_UNPROVABLE,
         };
     }
@@ -190,16 +221,15 @@ final class DefinitionConstraints
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  array<string, bool|float|int|string|null>  $values
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      */
-    private static function ofRole(OperationResource $operation, Role $role, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
+    private static function ofRole(OperationResource $operation, Role $role, array $values, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
-        $values = $operation->definition->values ?? [];
-
         return match ($operation->action) {
-            PackagePermissions::ROLE_CREATE     => Impact::juniorRank($operation, self::rankOf($values), $checks),
+            PackagePermissions::ROLE_CREATE     => self::createdRank($operation, self::rankOf($values), $checks),
             PackagePermissions::ROLE_RENAME     => self::reaching($operation, $resource, AffectedHolders::none()->ofRoles([$role->id]), $checks),
             PackagePermissions::ROLE_UPDATE     => self::ranked($operation, $role, $values, $resource, $checks),
             PackagePermissions::ROLE_DELETE     => self::unlessWidening(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $role)),
@@ -209,10 +239,27 @@ final class DefinitionConstraints
     }
 
     /**
-     * Return why updating the role with the values is refused: a rank it is
-     * given must be junior to the actor's, and one more senior than the role's
-     * is weighed by the impact check over the role's holders, the rank counting
-     * as theirs; any other update widens no one.
+     * Return why creating a role of the rank is refused: a rank that cannot be
+     * read as a whole number cannot be compared, and one that can must be
+     * junior to the actor's.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  false|int|null  $rank
+     * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
+     */
+    private static function createdRank(OperationResource $operation, false|int|null $rank, FurtherChecks $checks): ?DecisionReason
+    {
+        return $rank === false ? DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE : Impact::juniorRank($operation, $rank, $checks);
+    }
+
+    /**
+     * Return why updating the role with the values is refused: a rank that
+     * cannot be read as a whole number cannot be compared; a rank change is
+     * made only to a role junior to the actor, so a senior role is never
+     * demoted, and must leave it junior to the actor; and a rank more senior
+     * than the role's is weighed by the impact check over the role's holders,
+     * the rank counting as theirs. Any other update widens no one.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
@@ -227,25 +274,38 @@ final class DefinitionConstraints
             return null;
         }
 
-        $rank         = self::rankOf($values);
+        $rank = self::rankOf($values);
+
+        if ($rank === false) {
+            return DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE;
+        }
+
         $isMoreSenior = $rank !== null && $rank < ($role->rank ?? \PHP_INT_MAX);
         $holders      = $isMoreSenior ? AffectedHolders::none()->ofRoles([$role->id])->holders() : [];
         $reach        = Impact::reachOf($operation->tenant);
 
-        return Impact::juniorRank($operation, $rank, $checks) ?? Impact::refusal($operation, $resource, $reach, $holders, $checks, $rank);
+        return Impact::juniorRank($operation, $role->rank, $checks)
+            ?? Impact::juniorRank($operation, $rank, $checks)
+            ?? Impact::refusal($operation, $resource, $reach, $holders, $checks, $rank);
     }
 
     /**
-     * Return the rank the values propose, or null for none.
+     * Return the rank the values propose: null for none, a whole number given
+     * as one or as its decimal text, or false for anything else, a fraction, a
+     * flag or text that is no whole number included, which cannot be compared.
      *
      * @param  array<string, bool|float|int|string|null>  $values
-     * @return int|null
+     * @return false|int|null
      */
-    private static function rankOf(array $values): ?int
+    private static function rankOf(array $values): false|int|null
     {
         $rank = $values['rank'] ?? null;
 
-        return \is_int($rank) ? $rank : null;
+        return match (true) {
+            $rank === null, \is_int($rank) => $rank,
+            \is_string($rank)              => \filter_var($rank, \FILTER_VALIDATE_INT),
+            default                        => false,
+        };
     }
 
     /**
@@ -266,16 +326,21 @@ final class DefinitionConstraints
      * when it is allowed.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  \SineMacula\Laravel\Authorization\Administration\DefinitionChange  $definition
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      */
-    private static function ofPermission(OperationResource $operation, Permission $permission, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
-    {
-        $definition = $operation->definition;
-        $isRename   = \in_array($operation->action, [PackagePermissions::PERMISSION_RENAME, PackagePermissions::PERMISSION_UPDATE], true);
-        $renames    = $isRename && $definition !== null && ($definition->proposes('name') || $definition->proposes('guard'));
+    private static function ofPermission(
+        OperationResource $operation,
+        DefinitionChange $definition,
+        Permission $permission,
+        ResourceReference $resource,
+        FurtherChecks $checks,
+    ): ?DecisionReason {
+        $isRename = \in_array($operation->action, [PackagePermissions::PERMISSION_RENAME, PackagePermissions::PERMISSION_UPDATE], true);
+        $renames  = $isRename && ($definition->proposes('name') || $definition->proposes('guard'));
 
         if (!$renames) {
             return null;
@@ -293,16 +358,21 @@ final class DefinitionConstraints
      * allowed.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  \SineMacula\Laravel\Authorization\Administration\DefinitionChange  $definition
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      */
-    private static function ofPolicy(OperationResource $operation, Policy $policy, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
-    {
-        $definition = $operation->definition;
-        $document   = $definition?->document;
-        $rewrites   = $document !== null || ($definition?->proposes('digest') ?? false);
+    private static function ofPolicy(
+        OperationResource $operation,
+        DefinitionChange $definition,
+        Policy $policy,
+        ResourceReference $resource,
+        FurtherChecks $checks,
+    ): ?DecisionReason {
+        $document = $definition->document;
+        $rewrites = $document !== null || $definition->proposes('digest');
 
         return match ($operation->action) {
             PackagePermissions::POLICY_CREATE, PackagePermissions::POLICY_RENAME => null,

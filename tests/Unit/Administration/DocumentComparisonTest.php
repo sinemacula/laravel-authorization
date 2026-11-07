@@ -72,6 +72,7 @@ final class DocumentComparisonTest extends TestCase
         self::assertFalse(DocumentComparison::isNarrower($old, self::document([['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit']], self::DENY])));
         self::assertFalse(DocumentComparison::isNarrower($old, self::document([[...self::READ, 'resources' => ['posts:1']], self::EDIT, self::DENY])));
         self::assertFalse(DocumentComparison::isNarrower($old, self::document([self::READ, self::EDIT, self::DENY], 2)));
+        self::assertFalse(DocumentComparison::isNarrower(self::document([self::DENY]), self::document([[...self::DENY, 'effect' => 'allow']])));
         self::assertFalse(DocumentComparison::isNarrower(null, $old));
         self::assertFalse(DocumentComparison::isNarrower($old, null));
     }
@@ -89,6 +90,7 @@ final class DocumentComparisonTest extends TestCase
         self::assertTrue(DocumentComparison::keepsDenies($old, self::document([self::EDIT, self::DENY])));
         self::assertFalse(DocumentComparison::keepsDenies($old, self::document([self::READ])));
         self::assertFalse(DocumentComparison::keepsDenies($old, self::document([self::DENY], 2)));
+        self::assertFalse(DocumentComparison::keepsDenies(self::document([self::DENY]), self::document([[...self::DENY, 'effect' => 'allow']])));
         self::assertFalse(DocumentComparison::keepsDenies(null, $old));
         self::assertFalse(DocumentComparison::keepsDenies($old, null));
     }

@@ -27,12 +27,15 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * scope, whatever tenant or application the grant holds in and whether or not
  * it has expired, since re-arming a grant restores what it carried; the roles
  * below a role in one recursive query. The read is bounded by
- * `authorization.administration.max_impact` (1000 by default): each query asks
- * for one row more than the holders still allowed, and once more are found the
- * set is over its limit, and the change it would weigh cannot be proved (see
- * `Impact`), so the reach of a change is never approximated. A principal named
- * by a selector the package cannot read, or by a document that cannot be read,
- * puts the set over its limit too.
+ * `authorization.administration.max_impact` (1000 by default), counted in
+ * distinct holders: each query asks for its distinct holders, at most one more
+ * than the limit, whatever the sets read before it hold, so a holder named
+ * twice, by one set or by two, never uses up the room of one not yet read.
+ * Every query then reads either all its holders, or more than the limit alone
+ * holds, and once the holders of every set, merged, are more than the limit,
+ * the set is over its limit, and the change it would weigh cannot be proved
+ * (see `Impact`), so the reach of a change is never approximated. A principal
+ * named by a document that cannot be read puts the set over its limit too.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,9 +75,21 @@ final class AffectedHolders
      */
     public static function none(): self
     {
+        return new self(self::limit());
+    }
+
+    /**
+     * Return the most rows a read of what a change reaches takes:
+     * `authorization.administration.max_impact`, or the default when it is not
+     * a positive whole number.
+     *
+     * @return int
+     */
+    public static function limit(): int
+    {
         $limit = config('authorization.administration.max_impact', self::DEFAULT_LIMIT);
 
-        return new self(\is_int($limit) && $limit > 0 ? $limit : self::DEFAULT_LIMIT);
+        return \is_int($limit) && $limit > 0 ? $limit : self::DEFAULT_LIMIT;
     }
 
     /**
@@ -182,8 +197,10 @@ final class AffectedHolders
     }
 
     /**
-     * Add the grantees the query of a grant table selects, each once, asking
-     * for one more than the limit still allows.
+     * Add the distinct grantees the query of a grant table selects, at most one
+     * more than the limit, whatever holders the set already has: a query that
+     * finds more than the limit puts the set over it alone, and one that finds
+     * no more reads every holder it selects.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @return void
@@ -194,7 +211,7 @@ final class AffectedHolders
             return;
         }
 
-        $rows = $query->distinct()->limit($this->limit - \count($this->holders) + 1)->get(['authorizable_type', 'authorizable_id']);
+        $rows = $query->distinct()->limit($this->limit + 1)->get(['authorizable_type', 'authorizable_id']);
 
         foreach ($rows as $row) {
             /** @var array{authorizable_type: string, authorizable_id: int|string} $columns */

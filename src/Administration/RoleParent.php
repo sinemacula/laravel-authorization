@@ -95,13 +95,14 @@ final class RoleParent
      */
     private static function added(OperationResource $operation, Role $role, string $parent, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
-        $authority = RoleAuthority::of([$parent]);
+        $across    = DefinitionConstraints::across($operation, $role);
+        $authority = RoleAuthority::of([$parent], $across->scope);
 
         if ($authority === null) {
             return DecisionReason::ADMINISTRATION_UNPROVABLE;
         }
 
-        $route = static fn (): ?DecisionReason => $authority->refusal($operation, DefinitionConstraints::across($operation, $role), $checks);
+        $route = static fn (): ?DecisionReason => $authority->refusal($operation, $across, $checks);
 
         return DefinitionConstraints::growth($operation, $resource, AffectedHolders::none()->ofRoles([$role->id]), $checks, $route);
     }

@@ -371,6 +371,7 @@ $grants = app(GrantService::class);
 
 // Trusted work, such as a seeder: nothing is decided.
 $editor = $roles->create('editor', 'web', 'Edits posts');
+$author = $roles->create('author', tenant: $team); // owned by the team, not the platform
 $roles->grantPermission($editor, 'posts:update');
 $roles->setParent($editor, 'author');
 
@@ -1232,7 +1233,8 @@ authority for the action reaches the row's tenant, from a parent tenant by autho
 platform, changes the row from its own context, and one `revokeAll()` clears a grantee's rows across every tenant the
 actor administers; a parent's node-only authority reaches no child's row, and a tenant's no platform-wide row. A screen
 that builds the same resource through the same named constructor (`OperationResource::grant()`, `revoke()`,
-`unchanged()` or `definition()`) and checks it with `$actor->check($resource)` gets the decision the service makes.
+`unchanged()`, `definition()` or `rewrite()`) and checks it with `$actor->check($resource)` gets the decision the
+service makes.
 Nothing is ever attached to one operation, so a check on it reads only the resource policies attached to the type
 `authorization:operation`. The resource offers what the change names to your policies, under `resource`:
 
@@ -1320,22 +1322,44 @@ weighs the operation's constraints, in this order, and can only refuse:
   the grant's reach and lifetime, and as `administration.unprovable` when it does but its check there is refused or
   something could limit it.
 - **Role grants.** Granting a role hands out its whole active authority: every permission it and its ancestors carry
-  live (with the hierarchy enabled), and every policy attached to it or to them, read in a fixed number of queries
-  outside every tenant scope. Each permission must pass the permission route and each policy the policy route, across
-  the grant's reach and lifetime, so a permission or a policy inherited from an ancestor the actor cannot hand out
-  blocks the grant. A role's denies hand nothing out, so they never justify its allows. The role's rank counts as the
-  grantee's, so the grant never leaves it equal to or senior to the actor. A re-grant, an extension and a sync's
-  additions are judged the same way, and a chain that cannot be read whole is `administration.unprovable`.
+  live (with the hierarchy enabled), every policy attached to it or to them, and every allow of a resource policy, in
+  the grant's reach, that names the role or an ancestor by a `role:<key>` selector, since such an allow reaches
+  whoever holds the role, now or later, however the role came by its key. It is read in a fixed number of queries
+  outside every tenant scope. Each permission must pass the permission route and each policy, and each such allow, the
+  policy route, across the grant's reach and lifetime, so a permission, a policy or a resource policy's allow the actor
+  cannot hand out blocks the grant; a resource policy that names a role no one holds yet is weighed when the role, or a
+  role below it, is granted, or made the parent of a held role. Every permission, and every action a policy allows, is
+  decided in one pass, so a role carrying thirty permissions costs as many queries as one carrying three. A role's
+  denies hand nothing out, so they never justify its allows. The role's rank counts as the grantee's, so the grant
+  never leaves it equal to or senior to the actor. A re-grant, an extension and a sync's additions are judged the same
+  way. A chain that cannot be read whole, a reach whose tenants cannot be read, more resource policies in the reach
+  than `authorization.administration.max_impact`, or a resource policy whose document cannot be read, is
+  `administration.unprovable`.
+- **The stored row.** A delegated change is weighed on the row it writes against: the role, permission or policy
+  handed out is read again by its key inside the call's transaction, and a role, permission or policy a call edits is
+  read again before it is weighed, discarding changes to the model in hand that were not saved. So a model given a rank,
+  a name or a document and not saved, or one read before another write rewrote its row, is judged on the row as
+  stored, and a grantable right bound to the old digest never covers the new document.
 - **The policy route.** A policy handed out, attached to an identity, a principal or a role, carried by a granted role
   or a new parent, rewritten, or attached to a resource, passes by one of two routes, across the change's reach and
   lifetime:
   - *containment*: every allow names its actions alone (`actions`, with no resource patterns and no conditions, and
-    no principals except on a resource policy, whose principals the impact check weighs), and every action passes the
-    permission route;
+    no principals except on a resource policy, whose principals the impact check weighs, or on a resource policy's
+    allow a granted role is named by, which reaches the grantee itself), and every action passes the permission route;
   - *`authorization:policy.grantable`*: allowed on the descriptor `OperationResource::policyGrantable()` builds, the
     same operation naming the policy and its document's digest (`DocumentDigest`, as the policy events report it) under
     `resource.digest`. A policy that grants the right on one digest never covers the policy rewritten, so a rewrite
     needs a new right. A rewrite offers its new document's digest, in the same form, as `resource.change.digest`.
+
+  A screen weighing a rewrite builds it with `OperationResource::rewrite($policy, $document, $change)`, passing the
+  document it will submit, as a JSON object or its decoded array, and any other change it proposes alongside it (such
+  as `['name' => 'support-v2']`). That is the builder the policy service uses: it decodes the document and names it as
+  the policy is (by the new name when the change gives one, unless the document names itself), as it would be stored,
+  hands it to the stage, which compares it with the stored document, and offers `DocumentDigest::of()` of it as
+  `resource.change.digest`, the digest the policy events report and a later `policy.grantable` right is decided on. A
+  resource built with `definition()` and no document is not the one the service decides: the stage cannot weigh it, so
+  it is refused as `administration.unprovable`; and a digest of the document before it is named matches no right the
+  service's decision would.
 
   A policy that allows nothing passes. Otherwise it is refused with the permission route's reason, for a policy that
   could be contained, or as `administration.unprovable`.
@@ -1344,15 +1368,23 @@ weighs the operation's constraints, in this order, and can only refuse:
   policy attached or detached), is made only from the tenant that owns the definition or the role: the tenant the
   check is made from must be the owner, and a platform definition needs the platform, so a record seen from a
   descendant, another tenant or the platform is refused as `administration.owner`, whether or not the change narrows.
-  The services create definitions platform-owned, so they are created from the platform. Grant rows are never weighed
-  by the rule (N79): who may change one is the administered scope.
+  `RoleService::create()`, `PermissionService::create()` and `PolicyService::create()` take an optional `tenant:` (a
+  model, an `AuthorizableTenant` or a `Reference`) that owns what they create, the platform when it is left out, so a
+  tenant administrator creates its own tenant's definitions from that tenant's context, and a create is refused as
+  `administration.owner` from any other; a screen builds the same new record with its owner's `tenant_type` and
+  `tenant_id`, such as `OperationResource::definition('authorization:role.create', new Role(['tenant_type' => 'team',
+  'tenant_id' => '7']), ['name' => 'editor'])`. A resource policy's attachment is a grant to a resource, never weighed
+  by the rule, and nor is a grant row (N79): who may change one is the administered scope.
 - **Definitions.** Creating a definition widens no one, so it passes, but a role is created only junior to the actor
   (`administration.rank`). Describing a role, permission or policy, and renaming a policy, pass. Renaming a role, or a
   permission (or changing a permission's name or guard), changes what every existing grant means, so it is a new grant
   to every holder: the impact check below, and, for a permission, the permission route under the new name across the
   definition's reach, so renaming `posts:read` to `*` passes only when every holder is one the actor administers and
-  the actor may hand out `*`. Giving a role a rank must leave it junior to the actor, and a rank made more senior is
-  weighed against its holders. Deleting a permission narrows; deleting a role narrows unless a policy attached to it or
+  the actor may hand out `*`. A rank that is no whole number (a fraction, a flag, or text that is not the decimal of
+  one) cannot be compared, so it is `administration.rank_uncomparable`. A rank is changed only on a role junior to the
+  actor, so a senior or peer role is never demoted or cleared (`administration.rank`), the new rank must leave the role
+  junior to the actor, and a rank made more senior is weighed against its holders. Deleting a permission narrows;
+  deleting a role narrows unless a policy attached to it or
   an ancestor denies anything, and deleting a policy unless it denies, each otherwise `administration.unprovable`.
 - **Role membership and hierarchy.** Adding a permission to a role, attaching a policy to it, and setting or replacing
   its parent hand something new to every holder of the role and of every role below it: the impact check, then the
@@ -1377,8 +1409,9 @@ weighs the operation's constraints, in this order, and can only refuse:
   itself holds there, and to a rank the change gives them, or `administration.rank` (`administration.rank_uncomparable`
   when a rank cannot be read); and a change reaching the actor itself needs `authorization:administration.self`, or
   `administration.self`. A change reaching no holder widens no one and needs neither the check nor a route. The set is
-  bounded by `authorization.administration.max_impact` (1000 by default): a change reaching more holders is refused as
-  `administration.unprovable`, never approximated.
+  bounded by `authorization.administration.max_impact` (1000 by default), counted in distinct holders: a holder that
+  two sets, or one set twice, name counts once, and never hides a holder not read yet. A change reaching more holders is
+  refused as `administration.unprovable`, never approximated.
 - **Boundaries.** Setting a boundary where the grantee has none narrows, and so does replacing one with the same policy
   or one whose document can only narrow it, reaching no fewer tenants. Replacing one with a wider boundary, and removing
   one (`revokeAll()` included), lift a cap whose release cannot in general be bounded, so each is refused as
@@ -1418,8 +1451,8 @@ step-up, carrying the decision (`getDecision()`), its stage and its trace, for a
 line. The administration stage refuses with these reasons, each at the `administration` stage with a trace step naming
 it: `administration.impersonating`, `administration.scope`, `administration.rank_uncomparable`, `administration.rank`,
 `administration.self`, `administration.owner`, `administration.not_grantable` and `administration.unprovable`. The
-owner rule (D20) applies to definitions (roles, permissions, policies, their membership and attachments), never to grant
-rows.
+owner rule (D20) applies to definitions (roles, permissions and policies), what a role carries (its permissions,
+policies and parent), never to a resource policy's attachment or to grant rows.
 
 **Audit.** Every decision is reported with `DecisionEvaluated`, and a refusal with `AuthorizationFailed`, as
 `authorize()` reports one, each naming the operation resource `authorization:operation:{operation id}`. The change

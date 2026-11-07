@@ -10,18 +10,23 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Administration\RoleAuthority;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Fixtures\BulkChecks\FailingTenantTree;
 use Tests\TestCase;
 
 /**
@@ -162,15 +167,138 @@ final class RoleAuthorityTest extends TestCase
     }
 
     /**
+     * A role also hands out the allows of every policy attached to a resource
+     * in the reach that name it, or an ancestor, as a principal: those allows
+     * alone, never a deny or an allow naming another, and only from a policy
+     * attached in a tenant of the reach or platform-wide; with the hierarchy
+     * disabled, the role's own alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleHandsOutTheResourcePolicyAllowsNamingItsChain(): void
+    {
+        $root   = Role::query()->create(['name' => 'root']);
+        $child  = Role::query()->create(['name' => 'child', 'parent_id' => $root->id]);
+        $other  = Role::query()->create(['name' => 'other']);
+        $naming = self::resourcePolicy('naming', [
+            ['effect' => 'allow', 'actions' => ['posts:delete'], 'principals' => ['role:' . $root->id]],
+            ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['role:' . $other->id]],
+            ['effect' => 'deny', 'actions' => ['posts:edit']],
+        ]);
+
+        self::resourcePolicy('elsewhere', [['effect' => 'allow', 'actions' => ['posts:archive'], 'principals' => ['role:' . $child->id]]], new Reference('tenant', 'other'));
+        self::resourcePolicy('unnamed', [['effect' => 'allow', 'actions' => ['posts:publish'], 'principals' => ['user:1']]]);
+
+        $inTenant = self::authorityOf($child->id, new GrantScope(new Reference('tenant', 'a')));
+        $platform = self::authorityOf($child->id);
+
+        self::assertSame([['naming', [['posts:delete']]]], self::selected($inTenant));
+        self::assertEqualsCanonicalizing([['naming', [['posts:delete']]], ['elsewhere', [['posts:archive']]]], self::selected($platform));
+        self::assertSame($naming->getKey(), $inTenant->selecting[0][0]->getKey());
+
+        config(['authorization.hierarchy.enabled' => false]);
+
+        self::assertSame([['elsewhere', [['posts:archive']]]], self::selected(self::authorityOf($child->id)));
+        self::assertSame([], self::authorityOf($child->id, new GrantScope(new Reference('tenant', 'a')))->selecting);
+    }
+
+    /**
+     * The resource policies are never guessed: a reach whose tenants cannot be
+     * read, more of them in the reach than the impact limit allows, or one
+     * whose document cannot be read, reads as no authority at all; no roles
+     * read none of them, and nothing at all.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testResourcePoliciesThatCannotBeReadWholeReadAsNone(): void
+    {
+        $role = Role::query()->create(['name' => 'editor']);
+
+        self::resourcePolicy('first', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]);
+
+        $broken = self::resourcePolicy('second', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:2']]]);
+        $tenant = new GrantScope(new Reference('tenant', 'a'));
+
+        config(['authorization.administration.max_impact' => 2]);
+
+        self::assertNotNull(RoleAuthority::of([$role->id]));
+
+        config(['authorization.administration.max_impact' => 1]);
+
+        self::assertNull(RoleAuthority::of([$role->id]));
+
+        config(['authorization.administration.max_impact' => 2]);
+
+        $this->app?->instance(TenantTree::class, new FailingTenantTree(failing: ['a']));
+
+        self::assertNull(RoleAuthority::of([$role->id], $tenant));
+
+        DB::table('policies')->where('id', $broken->getKey())->update(['document' => '{"statements": 5}']);
+
+        self::assertNull(RoleAuthority::of([$role->id]));
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        self::assertSame([], RoleAuthority::of([])?->selecting);
+        self::assertSame([], DB::getQueryLog());
+
+        DB::disableQueryLog();
+    }
+
+    /**
+     * An allow a resource policy hands a role's holders is weighed by the
+     * policy route, its principals no bar to containment: one naming an action
+     * the actor cannot hand out is refused as not grantable, and one with a
+     * condition, which cannot be contained, as unprovable.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAResourcePolicysAllowsAreWeighedByThePolicyRoute(): void
+    {
+        $role   = Role::query()->create(['name' => 'editor']);
+        $user   = StubIdentity::query()->create(['id' => 'user']);
+        $actor  = StubIdentity::query()->create(['id' => 'admin']);
+        $denied = static fn (): Decision => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
+        $checks = new FurtherChecks(new Subject($actor, $actor), $denied, static fn (): null => null);
+        $grant  = OperationResource::grant(PackagePermissions::ROLE_GRANT, $user, $role, GrantScope::platform());
+
+        /** @var \SineMacula\Laravel\Authorization\Administration\OperationChange $change */
+        $change = $grant->change;
+
+        self::resourcePolicy('deleting', [['effect' => 'allow', 'actions' => ['posts:delete'], 'principals' => ['role:' . $role->id]]]);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, self::authorityOf($role->id)->refusal($grant, $change, $checks));
+
+        DB::table('resource_policies')->delete();
+
+        self::resourcePolicy('conditional', [[
+            'effect'     => 'allow',
+            'actions'    => ['posts:delete'],
+            'principals' => ['role:' . $role->id],
+            'conditions' => ['eq' => ['resource.owner' => 'me']],
+        ]]);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::authorityOf($role->id)->refusal($grant, $change, $checks));
+    }
+
+    /**
      * Return the authority of the role with the key, once it is known to be
-     * read.
+     * read, across the reach, every tenant for none.
      *
      * @param  string  $key
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope|null  $reach
      * @return \SineMacula\Laravel\Authorization\Administration\RoleAuthority
      */
-    private static function authorityOf(string $key): RoleAuthority
+    private static function authorityOf(string $key, ?GrantScope $reach = null): RoleAuthority
     {
-        $authority = RoleAuthority::of([$key]);
+        $authority = RoleAuthority::of([$key], $reach);
 
         self::assertNotNull($authority);
 
@@ -230,6 +358,40 @@ final class RoleAuthorityTest extends TestCase
     private static function names(array $records): array
     {
         return \array_map(static fn (Permission|Policy $record): string => $record->name, $records);
+    }
+
+    /**
+     * Create a policy of the statements, attached to every post, in the tenant
+     * given or platform-wide.
+     *
+     * @param  string  $name
+     * @param  list<array<string, mixed>>  $statements
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @return \SineMacula\Laravel\Authorization\Models\Policy
+     *
+     * @throws \Throwable
+     */
+    private static function resourcePolicy(string $name, array $statements, ?Reference $tenant = null): Policy
+    {
+        $policy = Policy::create(['name' => $name, 'document' => ['statements' => $statements]]);
+
+        ResourcePolicyService::instance()?->attach($policy, 'posts', $tenant);
+
+        return $policy;
+    }
+
+    /**
+     * Return the name of each resource policy the authority hands out, with the
+     * actions of each allow it hands out.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\RoleAuthority  $authority
+     * @return list<array{string, list<array<int, string>|null>}>
+     */
+    private static function selected(RoleAuthority $authority): array
+    {
+        $actions = static fn (Statement $allow): ?array => $allow->actions;
+
+        return \array_map(static fn (array $selected): array => [$selected[0]->name, \array_map($actions, $selected[1])], $authority->selecting);
     }
 
     /**

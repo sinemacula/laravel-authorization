@@ -96,8 +96,9 @@ final class PolicyRouteTest extends TestCase
      * A policy whose allows name anything but their actions, resources,
      * conditions, `not_actions` or principals, cannot be proved contained, so
      * it is unprovable unless `policy.grantable` allows it; a resource policy's
-     * principals are weighed by the impact check instead, so they never stand
-     * in the way there.
+     * principals are weighed by the impact check instead, and the allows that
+     * select a granted role are handed out to the grantee, so their principals
+     * never stand in the way there.
      *
      * @return void
      *
@@ -131,6 +132,20 @@ final class PolicyRouteTest extends TestCase
         $toUser = OperationResource::grant(PackagePermissions::POLICY_ATTACH, self::user('user'), $sharing, GrantScope::platform());
 
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, PolicyRoute::refusal($toUser, self::changeOf($toUser), $sharing, $this->checks($actor, false)));
+
+        $allows   = PolicyRoute::allowsOf(DocumentComparison::read($sharing->document));
+        $selected = static fn (FurtherChecks $checks, bool $isSelected): ?DecisionReason => PolicyRoute::refusalOf(
+            $toUser,
+            self::changeOf($toUser),
+            $sharing,
+            $sharing->document,
+            $allows,
+            $checks,
+            $isSelected,
+        );
+
+        self::assertNull($selected($this->checks($actor, false), true));
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $selected($this->checks($actor, false), false));
     }
 
     /**

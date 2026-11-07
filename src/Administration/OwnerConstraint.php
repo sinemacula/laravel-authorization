@@ -14,12 +14,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * in its checks and may grant them where the grant scopes allow, but seeing a
  * record from a descendant is no authority to edit it: an operator who
  * administers the owner enters the owner's context first. The record is a
- * definition, a role, permission or policy, with its membership and its
- * attachments: the administration stage applies the rule to every change to a
- * definition, to a role's permissions, policies or parent (see
- * `DefinitionConstraints`). A grant row is never such a record (N79): who may
- * change one is the scope the actor administers (see `OperationConstraints`),
- * so this rule never weighs a grant.
+ * definition, a role, permission or policy, with what a role carries: the
+ * administration stage applies the rule to every change to a definition, its
+ * creation included, and to a role's permissions, policies or parent (see
+ * `DefinitionConstraints`). A grant row is never such a record, and nor is a
+ * resource policy's attachment (N79): who may change one is the scope the actor
+ * administers (see `OperationConstraints`), so this rule never weighs a grant.
  *
  * The context is the tenant the check is made from (see `FurtherChecks`),
  * compared byte for byte, so a change from the platform edits the platform's

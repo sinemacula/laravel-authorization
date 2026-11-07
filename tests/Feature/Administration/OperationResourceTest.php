@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -373,5 +374,36 @@ final class OperationResourceTest extends TestCase
         self::assertEquals(new ResourceReference('authorization:operation:operation-1', 'authorization:operation', 'operation-1', $tenant, null, $operation), $reference);
         self::assertSame($operation, $reference->source);
         self::assertEquals($reference, ResourceReferences::of($operation));
+    }
+
+    /**
+     * A policy given a document is offered it as it would be stored, named as
+     * the policy is, or by the name the change gives it, unless it names
+     * itself, and by that document's digest; one that cannot be read is offered
+     * as none, with no digest.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testARewriteOffersItsDocumentAsItWouldBeStored(): void
+    {
+        $policy   = new Policy(['name' => 'readers']);
+        $document = ['statements' => []];
+        $stored   = ['statements' => [], 'name' => 'readers'];
+        $rewrite  = OperationResource::rewrite($policy, $document);
+
+        self::assertSame(PackagePermissions::POLICY_UPDATE, $rewrite->action);
+        self::assertSame($stored, $rewrite->definition?->document);
+        self::assertSame(['digest' => DocumentDigest::of($stored)->digest], $rewrite->definition->values);
+        self::assertSame(['statements' => [], 'name' => 'viewers'], OperationResource::rewrite($policy, \json_encode($document), ['name' => 'viewers'])->definition?->document);
+        self::assertSame(['name' => 'own', 'statements' => []], OperationResource::rewrite($policy, ['name' => 'own', 'statements' => []])->definition?->document);
+        self::assertSame(PackagePermissions::POLICY_CREATE, OperationResource::rewrite($policy, $document, [], PackagePermissions::POLICY_CREATE)->action);
+
+        $unreadable = OperationResource::rewrite($policy, '{not json');
+
+        self::assertNull($unreadable->definition?->document);
+        self::assertSame(['digest' => null], $unreadable->definition?->values);
+        self::assertSame(['digest' => null], OperationResource::rewrite($policy, ['bad' => \NAN, 'statements' => []])->definition?->values);
     }
 }

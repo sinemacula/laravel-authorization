@@ -6,10 +6,12 @@ namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
@@ -24,6 +26,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
 use SineMacula\Laravel\Authorization\Services\Support\RolePermissionTable;
+use SineMacula\Laravel\Authorization\Services\Support\StoredRecords;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -79,11 +82,16 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * able to hand out what is added, the parent's whole authority included, or it
  * is refused as the first rule that fails refuses it; a parent replaced or
  * cleared whose chain carries a deny is refused as `administration.unprovable`.
- * A role is created only junior to the actor, a rename reaches every holder as
- * a new grant would, and a role a deny reaches is never deleted (see
- * `DefinitionConstraints`). A read is not decided yet. Every event a write
- * dispatches carries the operation, with the actor, its mode and the actions,
- * once the write commits; the actor is never read from the authenticated user.
+ * A role is created only junior to the actor, owned by the tenant `create()` is
+ * given, else by the platform, so a tenant's administrator creates its tenant's
+ * roles from that tenant's context; a rename reaches every holder as a new
+ * grant would, and a role a deny reaches is never deleted (see
+ * `DefinitionConstraints`). A delegated change weighs, and writes, the role as
+ * stored, discarding changes to the model in hand that were not saved, and the
+ * permission it adds as stored (see `StoredRecords`). A read is not decided
+ * yet. Every event a write dispatches carries the operation, with the actor,
+ * its mode and the actions, once the write commits; the actor is never read
+ * from the authenticated user.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -95,7 +103,8 @@ final class RoleService
     use HasContainerInstance;
 
     /**
-     * Create a role. A role given no id is given a new one.
+     * Create a role, owned by the tenant given, or by the platform for none. A
+     * role given no id is given a new one.
      *
      * @param  string  $name
      * @param  string|null  $guard
@@ -103,15 +112,23 @@ final class RoleService
      * @param  int|null  $rank
      * @param  string|null  $id
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|null  $tenant
      * @return \SineMacula\Laravel\Authorization\Models\Role
      *
      * @throws \Throwable
      */
-    public function create(string $name, ?string $guard = null, ?string $description = null, ?int $rank = null, ?string $id = null, ?ActingContext $actor = null): Role
-    {
+    public function create(
+        string $name,
+        ?string $guard = null,
+        ?string $description = null,
+        ?int $rank = null,
+        ?string $id = null,
+        ?ActingContext $actor = null,
+        AuthorizableTenant|Model|null $tenant = null,
+    ): Role {
         $attributes = ['name' => $name, 'guard' => $guard, 'description' => $description, 'rank' => $rank];
 
-        return RecordWriter::create($actor, PackagePermissions::ROLE_CREATE, new (self::roleClass()), $id, $attributes);
+        return RecordWriter::create($actor, PackagePermissions::ROLE_CREATE, RecordWriter::ownedBy(new (self::roleClass()), $tenant), $id, $attributes);
     }
 
     /**
@@ -213,7 +230,7 @@ final class RoleService
     {
         /** @var \SineMacula\Laravel\Authorization\Models\Role */
         return OperationScope::run(Operation::begin($actor, [PackagePermissions::ROLE_PARENT_SET]), static function (Operation $operation) use ($actor, $role, $parent): Role {
-            $model       = self::resolve($role);
+            $model       = self::resolve($role, null, $actor);
             $parentModel = $parent === null ? null : self::resolve($parent, $model->guard);
 
             $actor?->authorizeIn($operation, OperationResource::definition(PackagePermissions::ROLE_PARENT_SET, $model, ['parent' => $parentModel?->id]));
@@ -252,8 +269,8 @@ final class RoleService
         $operation = Operation::begin($actor, [PackagePermissions::PERMISSION_GRANT]);
 
         return OperationScope::run($operation, static function (Operation $operation) use ($actor, $role, $permission, $expiresAt): GrantOutcome {
-            $model  = self::resolve($role);
-            $target = self::permissionFor($model, $permission);
+            $model  = self::resolve($role, null, $actor);
+            $target = self::permissionFor($model, $permission, $actor);
 
             $actor?->authorizeIn($operation, OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $model, $target, self::scopeOf($model), $expiresAt));
 
@@ -284,7 +301,7 @@ final class RoleService
     public function revokePermission(Role|string $role, Permission|string $permission, ?ActingContext $actor = null): int
     {
         return OperationScope::run(Operation::begin($actor, [PackagePermissions::PERMISSION_REVOKE]), static function (Operation $operation) use ($actor, $role, $permission): int {
-            $model = self::resolve($role);
+            $model = self::resolve($role, null, $actor);
             $held  = self::heldPermissionIds($model);
 
             /** @var non-empty-list<\SineMacula\Laravel\Authorization\Models\Permission> $candidates */
@@ -328,9 +345,9 @@ final class RoleService
 
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult */
         return OperationScope::run($operation, static function (Operation $operation) use ($actor, $role, $permissions, $expiresAt): SyncResult {
-            $model   = self::resolve($role);
+            $model   = self::resolve($role, null, $actor);
             $held    = self::heldPermissionIds($model);
-            $desired = self::desired($model, $permissions, $held);
+            $desired = self::desired($model, $permissions, $held, $actor);
             $revoked = \array_values(\array_diff($held, \array_map(static fn (Permission $target): string => $target->id, $desired)));
             $table   = new RolePermissionTable($model);
             $now     = Carbon::now('UTC');
@@ -422,18 +439,19 @@ final class RoleService
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  array<int, mixed>  $permissions
      * @param  list<string>  $held
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return array<array-key, \SineMacula\Laravel\Authorization\Models\Permission>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
      */
-    private static function desired(Role $role, array $permissions, array $held): array
+    private static function desired(Role $role, array $permissions, array $held, ?ActingContext $actor): array
     {
         $desired = [];
 
         foreach ($permissions as $permission) {
             /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $targets */
-            $targets = \is_string($permission) ? GrantTarget::PERMISSION->heldOrFirst($permission, $role->guard, $held) : [self::permissionFor($role, $permission)];
+            $targets = \is_string($permission) ? GrantTarget::PERMISSION->heldOrFirst($permission, $role->guard, $held) : [self::permissionFor($role, $permission, $actor)];
 
             foreach ($targets as $target) {
                 $desired[$target->id] = $target;
@@ -459,19 +477,24 @@ final class RoleService
 
     /**
      * Resolve a permission for the role: a name under the role's guard, else
-     * the package default; a model once it is known to be a saved permission.
+     * the package default; a model once it is known to be a saved permission,
+     * its row as stored for a delegated change (see `StoredRecords`), so the
+     * change is weighed on the name the row holds.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  mixed  $permission
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Permission
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
      */
-    private static function permissionFor(Role $role, mixed $permission): Permission
+    private static function permissionFor(Role $role, mixed $permission, ?ActingContext $actor = null): Permission
     {
-        /** @var \SineMacula\Laravel\Authorization\Models\Permission */
-        return GrantTarget::PERMISSION->resolve($permission, $role->guard);
+        /** @var \SineMacula\Laravel\Authorization\Models\Permission $resolved */
+        $resolved = GrantTarget::PERMISSION->resolve($permission, $role->guard);
+
+        return $actor === null || \is_string($permission) ? $resolved : StoredRecords::of('permission', $resolved);
     }
 
     /**
@@ -498,18 +521,28 @@ final class RoleService
     /**
      * Resolve a role: a name through the configured role class, under the given
      * guard or the package default; a model once it is known to be saved, so a
-     * change never creates a role and an unsaved parent never clears one.
+     * change never creates a role and an unsaved parent never clears one. A
+     * model a delegated change edits is first read again as stored, discarding
+     * changes to it not saved, so the change is weighed on, and writes, the row
+     * as stored.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  string|null  $guard
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Role
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException
      */
-    private static function resolve(Role|string $role, ?string $guard = null): Role
+    private static function resolve(Role|string $role, ?string $guard = null, ?ActingContext $actor = null): Role
     {
-        return $role instanceof Role ? RecordWriter::existing('role', $role) : self::lookup($role, $guard);
+        if (!$role instanceof Role) {
+            return self::lookup($role, $guard);
+        }
+
+        $model = RecordWriter::existing('role', $role);
+
+        return $actor === null ? $model : $model->refresh();
     }
 
     /**

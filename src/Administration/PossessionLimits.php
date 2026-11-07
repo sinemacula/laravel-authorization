@@ -75,17 +75,40 @@ final class PossessionLimits
      */
     public static function isLimited(Subject $subject, string $permission, GrantScope $scope, CheckSources $sources): bool
     {
+        return self::limitedEach($subject, $scope, [$permission => $sources])[$permission];
+    }
+
+    /**
+     * Determine, for each of the permissions, whether anything that applies to
+     * the subject anywhere in the grant's reach could limit it, keyed by the
+     * permission, reading what is stored in the reach once for them all, so the
+     * cost never grows with the permissions.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Evaluation\CheckSources>  $sources
+     * @return array<array-key, bool>
+     */
+    public static function limitedEach(Subject $subject, GrantScope $scope, array $sources): array
+    {
         try {
-            [$denying, $capping] = self::stored($subject, GrantReach::of($scope));
+            [$denying, $capping] = $sources === [] ? [[], []] : self::stored($subject, GrantReach::of($scope));
         } catch (\Throwable) {
-            return true;
+            return \array_map(static fn (): bool => true, $sources);
         }
 
-        $capping = [...$capping, ...$sources->boundaries, ...$sources->guardrails ?? []];
+        $limited = [];
 
-        return self::denies([...$sources->policies, ...$denying, ...$capping], $permission)
-            || !self::isCoveredByEvery($capping, $permission)
-            || !self::isCoveredByCaps($sources->session, $permission);
+        foreach ($sources as $permission => $checked) {
+            $caps = [...$capping, ...$checked->boundaries, ...$checked->guardrails ?? []];
+            $name = (string) $permission;
+
+            $limited[$permission] = self::denies([...$checked->policies, ...$denying, ...$caps], $name)
+                || !self::isCoveredByEvery($caps, $name)
+                || !self::isCoveredByCaps($checked->session, $name);
+        }
+
+        return $limited;
     }
 
     /**

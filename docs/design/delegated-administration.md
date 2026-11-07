@@ -135,21 +135,36 @@ prove is refused, so delegated administration never grants anything it cannot ju
     authority, so it passes only when the actor may hand out everything it adds and it reaches only holders the actor
     administers. Each rule runs in the same administration stage (`Administration\OperationConstraints`, and
     `Administration\DefinitionConstraints` for anything but a change to a subject):
-    - **role grants**: a role's whole active authority, the permissions it and its ancestors carry live and the
-      policies attached to them (`Administration\RoleAuthority`, read in a fixed number of queries outside every tenant
-      scope), each passing its route across the grant's reach and lifetime; a role's denies never justify its allows,
-      and its rank counts as the grantee's;
+    - **role grants**: a role's whole active authority, the permissions it and its ancestors carry live, the policies
+      attached to them, and the allows of every resource policy in the grant's reach that names the role or an ancestor
+      by a `role:<key>` selector, since such an allow reaches whoever holds the role, now or later
+      (`Administration\RoleAuthority`, read in a fixed number of queries outside every tenant scope, the resource
+      policies bounded by `max_impact`, and anything it cannot read whole unprovable), each passing its route across the
+      grant's reach and lifetime; every permission, and every action of a policy, is decided in one pass
+      (`Possession::refusalOfEach()`), so the cost never grows with what the role carries; a role's denies never
+      justify its allows, and its rank counts as the grantee's;
+    - **the stored row**: a delegated change is weighed on the row it writes against, read again by key inside the
+      transaction (`Services\Support\StoredRecords`, and a fresh read of a record a definition change edits), so a
+      model with unsaved changes, or one read before a rewrite, is never judged on a rank, name or document the row
+      does not hold;
     - **the policy route** (`Administration\PolicyRoute`): containment, every allow naming its actions alone, no
-      resource pattern, condition or principal (a resource policy's principals are weighed by the impact check), each
-      action passing the permission route; or `authorization:policy.grantable` on the descriptor
-      `OperationResource::policyGrantable()` builds, naming the policy and its document's digest (`DocumentDigest`)
-      under `resource.digest`, so a right bound to one digest never covers a rewritten document;
+      resource pattern, condition or principal (a resource policy's principals are weighed by the impact check, and the
+      allows that select a granted role reach the grantee itself), each action passing the permission route; or
+      `authorization:policy.grantable` on the descriptor `OperationResource::policyGrantable()` builds, naming the
+      policy and its document's digest (`DocumentDigest`) under `resource.digest`, so a right bound to one digest never
+      covers a rewritten document. A rewrite is built by `OperationResource::rewrite()`, for a screen as for the
+      service, with the document as it would be stored and its digest under `resource.change.digest`;
     - **the owner rule** (D20): a change to a definition, or to a role's permissions, policies or parent, is made from
       the tenant that owns it, a platform definition's from the platform (`FurtherChecks::$from`, the tenant the check
-      is made from), or it is `administration.owner`, narrowing or not;
+      is made from), or it is `administration.owner`, narrowing or not; a resource policy's attachment is a grant to a
+      resource, which the rule never weighs (N79). The record services create a definition owned by the tenant a call
+      names (`tenant:`), else the platform, so a tenant administrator creates its own tenant's definitions from its own
+      context;
     - **definitions**: creating passes, a created role junior to the actor; renaming a role or a permission (or changing
-      a permission's name or guard) is a new grant to every holder, under the new name; a rank made more senior is
-      weighed against the role's holders; deleting narrows by `Narrowing`'s rules;
+      a permission's name or guard) is a new grant to every holder, under the new name; a rank that is no whole number
+      cannot be compared (`administration.rank_uncomparable`); a rank changes only on a role junior to the actor and
+      must leave it junior, so a senior role is never demoted; a rank made more senior is weighed against the role's
+      holders; deleting narrows by `Narrowing`'s rules;
     - **membership and hierarchy**: adding a permission or a policy to a role, and setting or replacing its parent, hand
       what is added to every holder of the role and of the roles below it (`Administration\RoleParent` for a parent);
       clearing or replacing a parent whose chain carries a deny is unprovable;
@@ -161,8 +176,10 @@ prove is refused, so delegated administration never grants anything it cannot ju
       read set by set (direct grantees, grantees of the roles below, subjects a policy is attached to or bounds,
       principals a resource policy names), is weighed at once, at a fixed cost: the action across the definition's whole
       reach, the actor strictly senior to every holder but itself (`RankComparison::rankAcrossAll()`), and
-      `administration.self` for a change reaching the actor; more than `authorization.administration.max_impact` holders
-      (1000 by default, validated at boot) is unprovable, never approximated;
+      `administration.self` for a change reaching the actor; more than `authorization.administration.max_impact`
+      distinct holders (1000 by default, validated at boot) is unprovable, never approximated: each set asks for its
+      distinct holders, at most one more than the limit, whatever the sets before it hold, so a holder named twice never
+      hides one not read yet;
     - **boundaries**: a boundary that only adds or tightens a cap narrows; replacing one with a wider boundary, and
       removing one, cannot in general be bounded, so the package takes one fail-closed rule: each is unprovable unless
       the actor is also allowed `authorization:administration.unbounded` on the same operation, after the scope, rank
@@ -235,12 +252,12 @@ prove is refused, so delegated administration never grants anything it cannot ju
   rewrites and the comparison of documents.
 - `Administration\Impact`, `Administration\AffectedHolders`, `Config\AdministrationConfigValidator` -- the impact
   check, the holders it reads and its limit.
-- `Administration\Possession`, `Administration\HeldLifetime`, `Administration\PossessionLimits` -- the possession and
-  grantable routes of a direct permission grant; `Administration\GrantReach` -- the tenants a grant reaches, read once
-  and put into each query.
+- `Administration\Possession`, `Administration\HeldLifetime`, `Administration\HeldLifetimes`,
+  `Administration\PossessionLimits` -- the possession and grantable routes of a permission handed out, one or many in
+  one pass; `Administration\GrantReach` -- the tenants a grant reaches, read once and put into each query.
 - `Support\Operation` -- the operation's actor, identity, impersonator, mode and actions.
-- `Services\Support\RecordWriter`, `Services\Support\GrantChanges` and every management service -- the changes they
-  decide, before they write.
+- `Services\Support\RecordWriter`, `Services\Support\GrantChanges`, `Services\Support\StoredRecords` and every
+  management service -- the changes they decide, on the rows as stored, before they write.
 - `Services\Support\GuardrailAuthority` -- the guardrail right, decided inside the transaction.
 - `Evaluation\Enums\DecisionReason`, `DecisionStage::ADMINISTRATION`, `TraceOutcome::SATISFIED` -- the reasons, the
   stage and its trace.
@@ -258,14 +275,17 @@ prove is refused, so delegated administration never grants anything it cannot ju
   held before them, and a screen and the service agreeing over random grants.
 - `DelegatedGrantQueryBudgetTest` -- a delegated grant and a sync's additions read as much with unrelated resource
   policies and guardrails as without.
-- `DelegatedDefinitionsTest` -- part 3 end to end: role grants over the whole chain, `policy.grantable` bound to the
-  digest, the owner rule, a role created senior, renames, role membership against senior, out-of-scope and self
-  holders, parents, policy rewrites, the impact limit, boundaries and resource-policy attachments, a screen and the
-  service agreeing throughout.
+- `DelegatedDefinitionsTest` -- part 3 end to end: role grants over the whole chain, a resource policy naming a role
+  reaching its later holders, `policy.grantable` bound to the digest, the owner rule, definitions created from their
+  owner's context, a role created senior, renames, role membership against senior, out-of-scope and self holders,
+  parents, policy rewrites decided on their digest, the impact limit, boundaries and resource-policy attachments, a
+  screen and the service agreeing throughout.
 - `AdministrationImpactQueryBudgetTest` -- the impact check reads as much for thirty holders as for three.
+- `DelegatedRoleGrantQueryBudgetTest` -- a role grant reads as much for a role carrying thirty permissions, or a policy
+  allowing thirty actions, as for three.
 - `DefinitionConstraintsTest`, `DefinitionChangeTest`, `RoleAuthorityTest`, `PolicyRouteTest`, `PolicyRewriteTest`,
   `RoleParentTest`, `DocumentComparisonTest`, `ImpactTest`, `AffectedHoldersTest`,
-  `AdministrationConfigValidatorTest` -- each rule of part 3.
+  `HeldLifetimesTest`, `StoredRecordsTest`, `AdministrationConfigValidatorTest` -- each rule of part 3.
 - `OperationResourceTest`, `OperationChangeTest`, `OperationGranteeTest`, `OperationAttributesTest`,
   `OperationConstraintsTest`, `FurtherChecksTest`, `NarrowingTest`, `RankComparisonTest`, `OwnerConstraintTest`,
   `PossessionTest`, `HeldLifetimeTest`, `PossessionLimitsTest`, `GrantReachTest` -- the operation resource, its change,

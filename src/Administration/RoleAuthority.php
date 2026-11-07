@@ -7,29 +7,42 @@ namespace SineMacula\Laravel\Authorization\Administration;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Statement;
+use SineMacula\Laravel\Authorization\Evaluation\StatementValidator;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 
 /**
- * The whole active authority a role hands out (AUTHZ-3.3, AUTHZ-7.2): the
- * permissions it carries live and the policies attached to it live, each with
- * its ancestors' when the hierarchy is enabled, so a delegated role grant, or a
- * new parent, is judged on everything a holder would get (see
+ * The whole active authority a role hands out (AUTHZ-3.3, AUTHZ-7.2,
+ * AUTHZ-7.3): the permissions it carries live, the policies attached to it
+ * live, each with its ancestors' when the hierarchy is enabled, and the allows
+ * of every policy attached to a resource that name the role, or one of its
+ * ancestors, by a `role:<key>` principal selector, since such an allow reaches
+ * whoever holds the role, now or later. A delegated role grant, or a new
+ * parent, is judged on everything a holder would get (see
  * `DefinitionConstraints` and `OperationConstraints`).
  *
  * It is read in a fixed number of queries, however many roles, permissions and
  * policies there are: one recursive query for the chain of every role above the
  * roles given, outside every tenant scope (see `RoleGraph::reach()`), one for
  * the permissions every role of the chain carries, one for the policies
- * attached to them and one to read those policies as stored. Every row is read
- * on the write connection outside every tenant scope, so an ancestor or a
- * permission another tenant owns still counts, whichever tenant the check is
- * decided in, and the authority read is never less than what a holder gets. A
- * chain that cannot be read whole, a role or a parent missing from it, or one
- * that returns to a role it has passed, reads as no authority at all, so a
- * change it would justify is never proved.
+ * attached to them and one to read those policies as stored, and, for the
+ * resource policies, the tenants of the reach (see `GrantReach`), one query for
+ * the policies attached to a resource in a tenant of the reach, or
+ * platform-wide, and one to read them as stored. Every row is read on the write
+ * connection outside every tenant scope, so an ancestor or a permission another
+ * tenant owns still counts, whichever tenant the check is decided in, and the
+ * authority read is never less than what a holder gets.
+ *
+ * Nothing it cannot read whole is ever proved: a chain that cannot be read
+ * whole, a role or a parent missing from it, or one that returns to a role it
+ * has passed, a reach whose tenants cannot be read, more resource policies in
+ * the reach than `authorization.administration.max_impact` allows, or a
+ * resource policy whose document cannot be read, each reads as no authority at
+ * all, so a change it would justify is refused as unprovable.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,6 +56,7 @@ final readonly class RoleAuthority
      *
      * @param  list<\SineMacula\Laravel\Authorization\Models\Permission>  $permissions
      * @param  list<\SineMacula\Laravel\Authorization\Models\Policy>  $policies
+     * @param  list<array{\SineMacula\Laravel\Authorization\Models\Policy, non-empty-list<\SineMacula\Laravel\Authorization\Evaluation\Statement>}>  $selecting
      */
     private function __construct(
 
@@ -51,28 +65,41 @@ final readonly class RoleAuthority
 
         /** The policies attached live to the roles and their ancestors, as stored. */
         public array $policies,
+
+        /** The policies attached to a resource in the reach, as stored, each with its allows that name a role of the chain. */
+        public array $selecting,
     ) {}
 
     /**
      * Return the authority the roles with the keys hand out, with their
-     * ancestors', or null when a chain cannot be read whole.
+     * ancestors', across the reach, every tenant for none given, or null when
+     * it cannot be read whole.
      *
      * @param  list<string>  $keys
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope|null  $reach
      * @return self|null
      */
-    public static function of(array $keys): ?self
+    public static function of(array $keys, ?GrantScope $reach = null): ?self
     {
         $chain = self::chainsOf($keys);
 
-        return $chain === null ? null : new self(self::permissionsOf($chain), self::policiesOf($chain));
+        if ($chain === null) {
+            return null;
+        }
+
+        $selecting = self::selectingOf($chain, $reach ?? GrantScope::platform());
+
+        return $selecting === null ? null : new self(self::permissionsOf($chain), self::policiesOf($chain), $selecting);
     }
 
     /**
      * Return why handing out this authority across the change's reach and
      * lifetime is refused: the first refusal of the permission route for a
      * permission (see `Possession`), or of the policy route for a policy (see
-     * `PolicyRoute`); or null when every one passes. A role's denies never
-     * justify its allows: each policy's allows are weighed alone.
+     * `PolicyRoute`), the allows of a resource policy that name a role of the
+     * chain included, their principals weighed as the grant itself; or null
+     * when every one passes. A role's denies never justify its allows: each
+     * policy's allows are weighed alone.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
@@ -81,14 +108,14 @@ final readonly class RoleAuthority
      */
     public function refusal(OperationResource $operation, OperationChange $change, FurtherChecks $checks): ?DecisionReason
     {
-        $refusal = null;
-
-        foreach ($this->permissions as $permission) {
-            $refusal ??= Possession::refusal($operation, $change, $permission, $checks);
-        }
+        $refusal = Possession::refusalOfEach($operation, $change, $this->permissions, $checks);
 
         foreach ($this->policies as $policy) {
             $refusal ??= PolicyRoute::refusal($operation, $change, $policy, $checks);
+        }
+
+        foreach ($this->selecting as [$policy, $allows]) {
+            $refusal ??= PolicyRoute::refusalOf($operation, $change, $policy, $policy->document, $allows, $checks, true);
         }
 
         return $refusal;
@@ -208,5 +235,73 @@ final readonly class RoleAuthority
 
         /** @var list<\SineMacula\Laravel\Authorization\Models\Policy> */
         return $class::query()->withoutGlobalScopes()->useWritePdo()->whereKey($keys)->get()->all();
+    }
+
+    /**
+     * Return the policies attached to a resource in a tenant of the reach, or
+     * platform-wide, whose allows name a role of the chain by a principal
+     * selector, each with those allows, or null when they cannot be read whole:
+     * the reach cannot be read, it holds more of them than the impact limit
+     * allows, or a document cannot be read.
+     *
+     * @param  list<string>  $chain
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
+     * @return list<array{\SineMacula\Laravel\Authorization\Models\Policy, non-empty-list<\SineMacula\Laravel\Authorization\Evaluation\Statement>}>|null
+     */
+    private static function selectingOf(array $chain, GrantScope $reach): ?array
+    {
+        $keys = $chain === [] ? [] : self::resourcePoliciesIn($reach);
+
+        if ($keys === null || $keys === []) {
+            return $keys;
+        }
+
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
+        $class     = config('authorization.models.policy', Policy::class);
+        $selectors = \array_map(static fn (string $key): string => StatementValidator::ROLE_SELECTOR . ':' . $key, $chain);
+        $selecting = [];
+
+        foreach ($class::query()->withoutGlobalScopes()->useWritePdo()->whereKey($keys)->get() as $policy) {
+            $allows = PolicyRoute::allowsOf(DocumentComparison::read($policy->document));
+            $named  = \array_values(\array_filter($allows ?? [], static fn (Statement $allow): bool => \array_intersect($allow->principals ?? [], $selectors) !== []));
+
+            if ($allows === null) {
+                return null;
+            }
+
+            if ($named === []) {
+                continue;
+            }
+
+            $selecting[] = [$policy, $named];
+        }
+
+        return $selecting;
+    }
+
+    /**
+     * Return the keys of the policies attached to a resource in a tenant of the
+     * reach, or platform-wide, each once, in one query, or null when the reach
+     * cannot be read or holds more of them than the impact limit allows (see
+     * `AffectedHolders::limit()`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
+     * @return list<string>|null
+     */
+    private static function resourcePoliciesIn(GrantScope $reach): ?array
+    {
+        /** @var string $table */
+        $table = config('authorization.tables.resource_policies', 'resource_policies');
+        $limit = AffectedHolders::limit();
+
+        try {
+            $query = GrantReach::of($reach)->constrain(AuthorizationConnection::connection()->table($table)->useWritePdo(), $table);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $keys = \array_values(\array_map(\strval(...), $query->distinct()->limit($limit + 1)->pluck($table . '.policy_id')->all()));
+
+        return \count($keys) > $limit ? null : $keys;
     }
 }

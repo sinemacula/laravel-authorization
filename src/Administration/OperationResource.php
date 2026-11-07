@@ -6,11 +6,14 @@ namespace SineMacula\Laravel\Authorization\Administration;
 
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
+use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
@@ -188,6 +191,36 @@ final readonly class OperationResource implements AuthorizableResource
     }
 
     /**
+     * Return the operation resource of a policy given a new document, as the
+     * policy service decides it: a rewrite under `authorization:policy.update`,
+     * or the action given, such as `authorization:policy.create`. The document,
+     * a JSON object or its decoded array, is read as it would be stored:
+     * decoded, and named as the policy is, the new name among the proposed
+     * changes or else the policy's own, unless it names itself (see
+     * `PolicyDocument::named()`). The stage weighs that document (see
+     * `PolicyRewrite`), and policies read its digest (see `DocumentDigest`)
+     * under `resource.change.digest`, the digest the policy events report and
+     * the grantable right of the rewritten policy is decided on; a document
+     * that cannot be read is offered as none, with a null digest, and refused.
+     *
+     * A screen that builds a rewrite here, with the document it will submit and
+     * the changes it proposes alongside it, gets the decision the service gives
+     * the same rewrite.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $policy
+     * @param  mixed  $document
+     * @param  array<string, bool|float|int|string|null>  $change
+     * @param  string  $action
+     * @return self
+     */
+    public static function rewrite(Model $policy, mixed $document, array $change = [], string $action = PackagePermissions::POLICY_UPDATE): self
+    {
+        $named = self::storedForm($document, $change['name'] ?? $policy->getAttribute('name'));
+
+        return self::definition($action, $policy, [...$change, 'digest' => self::digestOf($named)], $named);
+    }
+
+    /**
      * Return this operation resource as the operation with the id makes it,
      * while the impersonator, when there is one, impersonates its actor.
      *
@@ -302,6 +335,39 @@ final readonly class OperationResource implements AuthorizableResource
         $named = [...$this->attributes, ...$attributes, 'unchanged' => null];
 
         return new self($right, false, $this->tenant, $named, $this->change ?? $this->definition, $this->id, $this->impersonator);
+    }
+
+    /**
+     * Return the document as it would be stored, decoded and given the name
+     * unless it names itself, or null when it cannot be read.
+     *
+     * @param  mixed  $document
+     * @param  mixed  $name
+     * @return array<string, mixed>|null
+     */
+    private static function storedForm(mixed $document, mixed $name): ?array
+    {
+        try {
+            return PolicyDocument::named(PolicyDocument::decode($document, ''), $name);
+        } catch (InvalidPolicyDocumentException) {
+            return null;
+        }
+    }
+
+    /**
+     * Return the digest of a document as it would be stored, or null for one
+     * that cannot be read or encoded.
+     *
+     * @param  array<string, mixed>|null  $document
+     * @return string|null
+     */
+    private static function digestOf(?array $document): ?string
+    {
+        try {
+            return $document === null ? null : DocumentDigest::of($document)->digest;
+        } catch (\JsonException) {
+            return null;
+        }
     }
 
     /**
