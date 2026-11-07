@@ -27,9 +27,9 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * dialect writes a bound value (`InlinedQuery`); under the flat tree a tenant's
  * subtree is the tenant alone, compared as such. A subtree query run on another
  * connection than the model's cannot be nested, so it is refused
- * (`subtree_connection`); so is one the model's connection would run on a
- * separate read connection (`read_replica`), and one a value of which cannot be
- * inlined exactly (`inline_value`).
+ * (`subtree_connection`), and so is one a value of which cannot be inlined
+ * exactly (`inline_value`); where the query carrying it runs is the scope's to
+ * settle (`AuthorizedQuery`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,8 +38,8 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  */
 final class TenantMembership
 {
-    /** @var string The alias the subtree query is nested under. */
-    private const string ALIAS = 'authz_subtree';
+    /** @var string The alias the subtree query is nested under, by which a condition reading it is told. */
+    public const string ALIAS = 'authz_subtree';
 
     /** @var array<string, string> The condition of each subtree written, by tenant. */
     private array $subtrees = [];
@@ -139,8 +139,8 @@ final class TenantMembership
 
     /**
      * Return the condition a row meets when the subtree query selects its
-     * tenant, refusing a query on another connection than the model's, one read
-     * on a separate read connection, and one that cannot be inlined.
+     * tenant, refusing a query on another connection than the model's, and one
+     * that cannot be inlined.
      *
      * @param  mixed  $subtree
      * @return string
@@ -157,11 +157,10 @@ final class TenantMembership
             throw $this->refusal(RefusalReason::SUBTREE_CONNECTION);
         }
 
-        $isReadOnWrite = InlinedQuery::isReadOnWrite($connection);
-        $raw           = $isReadOnWrite ? InlinedQuery::sqlOf($query, $shape->dialect) : null;
+        $raw = InlinedQuery::sqlOf($query, $shape->dialect);
 
         if ($raw === null) {
-            throw $this->refusal($isReadOnWrite ? RefusalReason::INLINE_VALUE : RefusalReason::READ_REPLICA);
+            throw $this->refusal(RefusalReason::INLINE_VALUE);
         }
 
         $grammar = $connection->getQueryGrammar();

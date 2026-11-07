@@ -66,7 +66,7 @@ enum RefusalReason: string
     /** A value the condition must inline, a tenant's, an application's, a policy's or one the tenant tree's subtree query is bound to, cannot be written as the database reads it bound, or that query's text holds a question mark that is not a placeholder. */
     case INLINE_VALUE = 'inline_value';
 
-    /** The condition would read the authorization tables on a connection with a separate read connection, outside a transaction, while `check()` reads them on the write connection. */
+    /** The condition reads the authorization tables, which `check()` reads on the write connection, in a query that is not itself run (nested in another, or compiled to text), so cannot be put on the write connection, on a connection with a separate read connection, outside a transaction. */
     case READ_REPLICA = 'read_replica';
 
     /** The tenants the subject's grants and the type's policies are kept in, or the classes of rows they make, are more than `authorization.query_scoping` allows. */

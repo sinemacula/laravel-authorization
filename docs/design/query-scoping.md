@@ -129,9 +129,19 @@ every bound value, untyped; MySQL reads `_utf8mb4 X'…'`, which takes the colla
 integer's digits. A value no literal can stand for (a NUL byte or a string that is not UTF-8 on PostgreSQL, a string
 that is not UTF-8 on MySQL), and a query whose text holds a question mark that is not a placeholder (which a
 PostgreSQL `??` operator would), refuse as `inline_value`. `check()` reads the attachments and the pairs of a declared
-model on the write connection, so such a condition runs on the model's connection only where it reads there too: with
-no separate read connection, or inside a transaction; otherwise it refuses as `read_replica`, since a replica that lags
-could miss a deny `check()` sees.
+model on the write connection, and a replica that lags could miss a deny `check()` sees, so such a condition must run
+on the write connection too. With no separate read connection, or inside a transaction, it already does. Otherwise
+the grammar's macro, compiling the condition, asks whether the query it compiles is the one its builder is running
+(`InlinedQuery::isRunning()`, read from the call stack: the builder's own `runSelect()`, `cursor()` and its generator,
+`exists()`, `update()`, `delete()` or `updateFrom()`), and if so sets `useWritePdo()` on it: Laravel passes
+`! $this->useWritePdo` to the connection after `toSql()` or `compileExists()` in the same call, so that execution reads
+on the write connection. Every way a scoped query runs itself goes through those (`get()`, `first()`, `pluck()`, the
+aggregates, `paginate()`'s count and page, `chunk()`, `chunkById()`, `lazy()` and `lazyById()` through `get()`).
+Anything else carrying the condition refuses as `read_replica`: a query nested whole in another (`whereHas()`,
+`whereExists()`, the model-level scope on a related model), one compiled to text (`toSql()`, `toRawSql()`, `whereIn()`,
+`fromSub()`, `withCount()`, `withExists()`, `has()` with a count), and a grouped query's page count, which Laravel runs
+as another query wrapped around the compiled text. A condition that reads no authorization table, told by the aliases
+the attachments and the subtree are read under, leaves the query where Laravel puts it.
 
 The condition is `KeyGuard ∧ ⋁ (Member_c ∧ Decision_c ∧ LongGuard_c)` over the classes:
 
@@ -188,7 +198,7 @@ class has a pattern that resolves, since `fnmatch()` refuses an identifier of `P
 | `attachment_connection`, `attachment_collation`          | Record attachments on another connection, or whose key column cannot be compared with the key, once one is attached                                                                                  |
 | `too_many_scopes`, `too_many_attachments`                | More anchors, classes or record attachments than `authorization.query_scoping` allows, or four times `max_attachments` attached to the type's records in one scope whatever their actions            |
 | `inline_value`                                           | A value of a record attachment's or a subtree's query that no literal can stand for as the database reads it bound, or a subtree query whose text holds a question mark that is not a placeholder    |
-| `read_replica`                                           | A record attachment or a nested subtree on a model connection with a separate read connection, outside a transaction, while `check()` reads the write connection                                     |
+| `read_replica`                                           | A record attachment or a nested subtree in a query that is not itself run, so cannot be put on the write connection, on a model connection with a separate read connection outside a transaction     |
 | `resource_pattern`                                       | A material pattern with `?` or `[`, a `*` not at its end or more than one, a trailing `\`, one too long for `fnmatch()`, or an integer id beyond 64 bits                                             |
 | `resource_namespace`                                     | A material statement reading `resource`, in a condition, an operand or a pattern                                                                                                                     |
 | `scope_variant_source`                                   | A material statement reading a namespace, or stating a requirement, through an unmarked seam                                                                                                         |
@@ -270,7 +280,10 @@ recurses.
   and applications holding `?`, `??`, quotes, backslashes and NUL bytes, the key-kind proofs, the limits at their
   boundaries, every new refusal reason, and reentrancy.
 - `tests/Feature/Query/InlinedQueryTest.php`: each inlined value finding exactly what the value bound finds, on every
-  database, and the read connection.
+  database, the read connection, and which compiles are of the query being run.
+- `tests/Feature/Query/AuthorizedQueryTest.php`: on a connection whose read connection lags behind every write, each way
+  a scoped query runs itself, by either scope, reading the attachments or a subtree on the write connection, and each
+  shape that cannot be moved there refusing as `read_replica`.
 - `tests/Feature/Registrars/QueryScopeRegistrarTest.php`: grouping, raw and expression conditions holding `OR`, a
   comment ending a raw condition, refusals at the call and at execution, nested and relation-definition use, subqueries
   taken whole and as text, `beforeQuery()` callbacks, base queries run again, pagination, chunks and counts,

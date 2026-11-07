@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Query;
 
+use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
@@ -56,6 +57,13 @@ use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
  * in, so the other query reuses that decision each time it runs: Laravel gives
  * no sign that a compile is for such a text, so this one shape cannot be
  * refused.
+ *
+ * A condition that reads the authorization tables (a record attachment or a
+ * nested subtree) must read them where `check()` does, on the write connection:
+ * on a connection with a separate read connection, outside a transaction, the
+ * query being run is put there as its condition is compiled, and one that is
+ * not being run (nested in another, or compiled to text) is refused
+ * (`read_replica`), since it cannot be.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -229,7 +237,42 @@ final readonly class AuthorizedQuery implements Scope
         $this->refuseWhen($isApplied ? self::escapeOf($query, false) : RefusalReason::SCOPE_REMOVED);
         $this->assertScopable($query);
 
-        return '(' . Reentrancy::guarded($this->compile) . ')';
+        $condition = Reentrancy::guarded($this->compile);
+
+        $this->refuseWhen(self::writeConnectionFor($query, $condition));
+
+        return '(' . $condition . ')';
+    }
+
+    /**
+     * Put the query on the write connection when its condition reads the
+     * authorization tables and the connection would otherwise read them on a
+     * separate read connection, as `check()` never does; return why the query
+     * is refused when it is not the query being run, so cannot be put there, or
+     * null.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  string  $condition
+     * @return \SineMacula\Laravel\Authorization\Query\Enums\RefusalReason|null
+     */
+    private static function writeConnectionFor(QueryBuilder $query, string $condition): ?RefusalReason
+    {
+        $connection = $query->getConnection();
+        $isSplit    = !$connection instanceof Connection || !InlinedQuery::isReadOnWrite($connection);
+
+        if (!$isSplit || !InlinedQuery::readsAuthorizationTables($condition)) {
+            return null;
+        }
+
+        if (!InlinedQuery::isRunning($query)) {
+            return RefusalReason::READ_REPLICA;
+        }
+
+        // The builder passes this to the connection after compiling the
+        // condition, so the query runs on the write connection.
+        $query->useWritePdo();
+
+        return null;
     }
 
     /**
@@ -351,7 +394,11 @@ final readonly class AuthorizedQuery implements Scope
             return;
         }
 
-        $detail = $reason === RefusalReason::SCOPE_REMOVED ? 'call whereAuthorized() on the query that runs, after removing its global scopes' : null;
+        $detail = match ($reason) {
+            RefusalReason::SCOPE_REMOVED => 'call whereAuthorized() on the query that runs, after removing its global scopes',
+            RefusalReason::READ_REPLICA  => 'a query that is not run itself cannot be put on the write connection',
+            default                      => null,
+        };
 
         throw QueryScopeRefusedException::of($this->action, $this->type, new Refusal($reason, null, null, null, $detail));
     }

@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Query;
 
 use Illuminate\Database\Connection;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -12,6 +13,8 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Query\Contracts\Dialect;
 use SineMacula\Laravel\Authorization\Query\Dialects\Dialects;
 use SineMacula\Laravel\Authorization\Query\InlinedQuery;
+use SineMacula\Laravel\Authorization\Query\RecordAttachments;
+use SineMacula\Laravel\Authorization\Query\TenantMembership;
 use Tests\TestCase;
 
 /**
@@ -139,6 +142,47 @@ final class InlinedQueryTest extends TestCase
         $connection->setReadPdo(null);
 
         self::assertTrue(InlinedQuery::isReadOnWrite($connection));
+    }
+
+    /**
+     * A condition reads the authorization tables when it nests the attachments
+     * or a subtree, by the alias each is read under.
+     *
+     * @return void
+     */
+    public function testAConditionReadingTheAuthorizationTablesIsTold(): void
+    {
+        self::assertTrue(InlinedQuery::readsAuthorizationTables('EXISTS (select 1 from "resource_policies" as "' . RecordAttachments::ALIAS . '")'));
+        self::assertTrue(InlinedQuery::readsAuthorizationTables('EXISTS (SELECT 1 FROM (x) AS `' . TenantMembership::ALIAS . '`)'));
+        self::assertFalse(InlinedQuery::readsAuthorizationTables('"scoped_posts"."id" = 5'));
+    }
+
+    /**
+     * A query is running when its own select, cursor, existence, update or
+     * deletion compiles it, and not when it is compiled to text or nested in
+     * another query.
+     *
+     * @return void
+     */
+    public function testAQueryBeingRunIsTold(): void
+    {
+        $this->values();
+
+        /** @var \ArrayObject<string, bool> $seen */
+        $seen  = new \ArrayObject;
+        $query = static fn (string $shape): Builder => DB::table('inlined_values')->beforeQuery(static function (Builder $query) use ($seen, $shape): void {
+            $seen[$shape] = InlinedQuery::isRunning($query);
+        });
+
+        $query('select')->get();
+        $query('cursor')->cursor()->all();
+        $query('exists')->exists();
+        $query('update')->where('id', 0)->update(['flag' => true]);
+        $query('delete')->where('id', 0)->delete();
+        $query('text')->toSql();
+        DB::table('inlined_values')->whereExists($query('nested'))->get();
+
+        self::assertSame(['select' => true, 'cursor' => true, 'exists' => true, 'update' => true, 'delete' => true, 'text' => false], $seen->getArrayCopy());
     }
 
     /**

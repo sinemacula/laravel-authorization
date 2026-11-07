@@ -242,15 +242,14 @@ final class TenantMembershipTest extends TestCase
     }
 
     /**
-     * A subtree the model's connection would read on a separate read connection
-     * is refused, since `check()` reads the tree as it reads it; inside a
-     * transaction it is nested.
+     * The subtree is nested whatever read connection the model's has: where the
+     * query carrying it runs is the scope's to settle.
      *
      * @return void
      *
      * @throws \LogicException
      */
-    public function testASubtreeReadOnAReadConnectionIsRefused(): void
+    public function testASubtreeIsNestedWhateverTheReadConnection(): void
     {
         $this->useAnAuthorizationConnection();
 
@@ -269,8 +268,7 @@ final class TenantMembershipTest extends TestCase
 
         $connection->setReadPdo(static fn (): never => throw new \LogicException('The read connection was used.'));
 
-        self::assertSame([RefusalReason::READ_REPLICA], self::refusedReasons(static fn (): string => $membership->within(new Reference('teams', '5'))));
-        self::assertStringStartsWith('EXISTS (', $connection->transaction(static fn (): string => $membership->within(new Reference('teams', '6'))));
+        self::assertStringStartsWith('EXISTS (', $membership->within(new Reference('teams', '5')));
 
         $connection->setReadPdo(null);
     }

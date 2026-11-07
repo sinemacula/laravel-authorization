@@ -351,16 +351,14 @@ final class RecordAttachmentsTest extends TestCase
     }
 
     /**
-     * A model connection with a separate read connection would read the
-     * attachments there while `check()` reads them on the write connection, so
-     * it is refused, naming the connection; inside a transaction, where Laravel
-     * reads on the write connection, it is not.
+     * The attachments are compiled whatever read connection the model's has:
+     * where the query carrying them runs is the scope's to settle.
      *
      * @return void
      *
      * @throws \LogicException
      */
-    public function testAttachmentsReadOnAReadConnectionAreRefused(): void
+    public function testAttachmentsAreCompiledWhateverTheReadConnection(): void
     {
         $this->useAnAuthorizationConnection();
 
@@ -384,10 +382,7 @@ final class RecordAttachmentsTest extends TestCase
 
         $connection->setReadPdo(static fn (): never => throw new \LogicException('The read connection was used.'));
 
-        self::assertSame([], $attachments->inScope('posts:view', $screen, false));
-        self::assertSame([[RefusalReason::READ_REPLICA, ReplicatedPost::CONNECTION]], self::refused($screen));
-
-        self::assertCount(1, $connection->transaction(static fn (): array => $attachments->inScope('posts:view', $kept, false)));
+        self::assertCount(1, $attachments->inScope('posts:view', $kept, false));
         self::assertSame([], $kept->refusals());
 
         $connection->setReadPdo(null);

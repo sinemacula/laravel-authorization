@@ -41,12 +41,13 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * Refused: a document that cannot be read (`invalid_policy`); more policies
  * than allowed (`too_many_attachments`); and, only when a policy is attached,
  * attachments kept on another connection than the model's
- * (`attachment_connection`), a model connection that reads them on a separate
- * read connection while `check()` reads them on the write connection
- * (`read_replica`), an attachment column whose collation the key's text cannot
- * be compared under (`attachment_collation`), an integer key that may hold what
- * PHP reads otherwise (`column_type`), and a value that cannot be inlined as
- * the database reads it bound (`inline_value`).
+ * (`attachment_connection`), an attachment column whose collation the key's
+ * text cannot be compared under (`attachment_collation`), an integer key that
+ * may hold what PHP reads otherwise (`column_type`), and a value that cannot be
+ * inlined as the database reads it bound (`inline_value`). Where the query
+ * carrying the condition runs, on the write connection as `check()` reads, is
+ * the scope's to settle (`AuthorizedQuery`), since the alias the attachments
+ * are read under tells it the condition reads them.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,8 +56,8 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  */
 final class RecordAttachments
 {
-    /** @var string The alias the attachments table is read under. */
-    private const string ALIAS = 'authz_rp';
+    /** @var string The alias the attachments table is read under, by which a condition reading them is told. */
+    public const string ALIAS = 'authz_rp';
 
     /** @var string The column holding an attached record's key. */
     private const string KEY_COLUMN = 'resource_id';
@@ -165,36 +166,17 @@ final class RecordAttachments
         $keyText    = $connection === null ? null : $this->keyTextOn($connection);
 
         $reason = match (true) {
-            $isOverLimit                                                                  => RefusalReason::TOO_MANY_ATTACHMENTS,
-            $connection?->getName() !== AuthorizationConnection::connection()->getName()  => RefusalReason::ATTACHMENT_CONNECTION,
-            $connection             !== null && !InlinedQuery::isReadOnWrite($connection) => RefusalReason::READ_REPLICA,
-            $keyText === null                                                             => RefusalReason::ATTACHMENT_COLLATION,
-            default                                                                       => $this->shape->keyRefusal,
+            $isOverLimit                                                                 => RefusalReason::TOO_MANY_ATTACHMENTS,
+            $connection?->getName() !== AuthorizationConnection::connection()->getName() => RefusalReason::ATTACHMENT_CONNECTION,
+            $keyText === null                                                            => RefusalReason::ATTACHMENT_COLLATION,
+            default                                                                      => $this->shape->keyRefusal,
         };
 
         if ($reason !== null) {
-            $screen->refuse(new Refusal($reason, null, null, $this->refusedKey($reason)));
+            $screen->refuse(new Refusal($reason, null, null, $reason === RefusalReason::COLUMN_TYPE ? $this->shape->keyName : self::KEY_COLUMN));
         }
 
         return $reason === null ? $keyText : null;
-    }
-
-    /**
-     * Return what a refusal of the attachments names: the key column for an
-     * integer key that may hold what PHP reads otherwise, the connection for
-     * one that reads on a separate read connection, else the attachment's key
-     * column.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Query\Enums\RefusalReason  $reason
-     * @return string
-     */
-    private function refusedKey(RefusalReason $reason): string
-    {
-        return match ($reason) {
-            RefusalReason::COLUMN_TYPE  => $this->shape->keyName,
-            RefusalReason::READ_REPLICA => (string) $this->shape->connection?->getName(),
-            default                     => self::KEY_COLUMN,
-        };
     }
 
     /**

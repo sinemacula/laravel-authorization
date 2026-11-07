@@ -1964,9 +1964,20 @@ A record attachment, and a subtree of a tree other than the flat one, are read i
 they are bound to (a tenant, an application, a policy) inlined as the database reads it bound, its characters written
 as hex or escaped code points, so a quote, a backslash, a question mark or a NUL byte is never read as SQL; a value that
 cannot be written so, and a subtree query whose text holds a question mark that is not a placeholder, refuse as
-`inline_value`. `check()` reads the authorization tables on the write connection, so on a model connection with a
-separate read connection such a condition refuses as `read_replica`, unless the query runs inside a transaction, where
-Laravel reads on the write connection too.
+`inline_value`.
+
+`check()` reads the authorization tables on the write connection, and a condition that reads them must too. On a model
+connection with a separate read connection, outside a transaction (where Laravel already reads on the write
+connection), the query carrying such a condition is put on the write connection when it is the query being run: a
+scoped query's own `get()`, `first()`, `pluck()`, `count()` and other aggregates, `exists()`, `paginate()` (its count
+and its page), `cursor()`, `chunk()`, `chunkById()`, `lazy()`, `lazyById()`, `update()` or `delete()`, with
+`whereAuthorized()` or the model-level scope alike. Laravel passes the query's choice of connection only after
+compiling it, so this holds for that execution alone. A query that carries the condition but is not itself run cannot
+be moved, and refuses as `read_replica`: one nested whole in another (`whereHas()`, `whereExists()`, a relation's
+existence query, the model-level scope on a related model), one compiled to text (`toSql()`, `toRawSql()`, and every
+shape that takes it in as text, such as `whereIn()`, `fromSub()`, `withCount()`, `withExists()` and `has()` with a
+count), and `paginate()` on a grouped query, whose count Laravel runs as another query around it. A condition that
+reads no authorization table (no record attachment and no nested subtree) leaves the query on the read connection.
 
 A statement gathered for the type is refused only when a check would weigh it: it names the action, its target can
 name a row and, for an allow, it applies to the subject. A document that cannot be read always refuses. Everything
@@ -1987,7 +1998,7 @@ else that could change a decision refuses, with no pruning:
 | `attachment_connection`, `attachment_collation`          | Policies attached to records kept on another connection, or whose key column cannot be compared with the key, once one is attached                   |
 | `too_many_scopes`, `too_many_attachments`                | More tenants, classes or record attachments than `authorization.query_scoping` allows                                                                |
 | `inline_value`                                           | A tenant, application or policy value, or a subtree query, that cannot be inlined exactly as the database reads it bound                             |
-| `read_replica`                                           | A record attachment or subtree read on a separate read connection, outside a transaction, while `check()` reads the write connection                 |
+| `read_replica`                                           | A record attachment or subtree read by a query that is not itself run, on a separate read connection outside a transaction                           |
 | `resource_pattern`                                       | A pattern with `?` or `[`, a `*` not at its end or more than one, a trailing `\`, one too long for `fnmatch()`, or an integer id beyond 64 bits      |
 | `resource_namespace`, `scope_variant_source`             | A statement reading the resource, or a source not marked `ScopeInvariant`                                                                            |
 | `invalid_statement`, `invalid_policy`                    | A statement that cannot be evaluated, or a document that cannot be read                                                                              |
