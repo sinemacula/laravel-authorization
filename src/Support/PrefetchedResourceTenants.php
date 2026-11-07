@@ -31,7 +31,7 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
  */
 final class PrefetchedResourceTenants implements ResourceTenantResolver
 {
-    /** @var \WeakMap<\Illuminate\Database\Eloquent\Model, \SineMacula\Laravel\Authorization\Support\Reference|null> The tenant read for each model. */
+    /** @var \WeakMap<\Illuminate\Database\Eloquent\Model, array{\SineMacula\Laravel\Authorization\Support\Reference|null}> The tenant read for each model, held in a list of one, since a map holding null holds nothing. */
     private \WeakMap $models;
 
     /** @var array<string, false|\SineMacula\Laravel\Authorization\Support\Reference|null> The tenant read for each record, keyed by its type and key. */
@@ -79,7 +79,7 @@ final class PrefetchedResourceTenants implements ResourceTenantResolver
     #[\Override]
     public function tenantOf(Model $resource): ?Reference
     {
-        return $this->models->offsetExists($resource) ? $this->models[$resource] : $this->resolver->tenantOf($resource);
+        return $this->models->offsetExists($resource) ? $this->models[$resource][0] : $this->resolver->tenantOf($resource);
     }
 
     /**
@@ -112,6 +112,7 @@ final class PrefetchedResourceTenants implements ResourceTenantResolver
     {
         $models  = [];
         $records = [];
+        $seen    = [];
 
         foreach ($values as $value) {
             if (self::isAskedAbout($value)) {
@@ -127,16 +128,25 @@ final class PrefetchedResourceTenants implements ResourceTenantResolver
             }
 
             // A record always has a type and a key.
-            [$type, $id] = [(string) $record->type, (string) $record->id];
+            /** @var string $type */
+            $type = $record->type;
 
-            $records["#{$type}"][0]           = $type;
-            $records["#{$type}"][1]["#{$id}"] = $id;
+            /** @var string $id */
+            $id = $record->id;
+
+            if (isset($seen["{$type}\0{$id}"])) {
+                continue;
+            }
+
+            $seen["{$type}\0{$id}"]   = true;
+            $records["#{$type}"][0]   = $type;
+            $records["#{$type}"][1][] = $id;
         }
 
         $this->readModels($models, $resolver);
 
         foreach ($records as [$type, $ids]) {
-            $this->readRecords($type, \array_values($ids), $resolver);
+            $this->readRecords($type, $ids, $resolver);
         }
     }
 
@@ -165,7 +175,7 @@ final class PrefetchedResourceTenants implements ResourceTenantResolver
                 continue;
             }
 
-            $this->models[$model] = $tenants[$index];
+            $this->models[$model] = [$tenants[$index]];
         }
     }
 

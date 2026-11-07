@@ -388,4 +388,185 @@ final class ResolutionMemoTest extends TestCase
 
         $memo->close();
     }
+
+    /**
+     * Within a batch, an entry whose lifetime ran out while another scope was
+     * current has lapsed, as the first read once its scope is entered again.
+     *
+     * @return void
+     */
+    public function testAnEntryLapsedInAnotherScopeHasLapsedOnReturn(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $memo  = new ResolutionMemo(static fn (): string => $scope->key);
+
+        $memo->open();
+        $memo->put(self::KEY, ['editor'], 1);
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+        $memo->get('other');
+
+        $scope->key = 'tenant-a';
+        $memo->scopeChanged();
+
+        Carbon::setTestNow(Carbon::now()->addSeconds(5));
+
+        self::assertTrue($memo->lapsed(self::KEY));
+
+        $memo->close();
+    }
+
+    /**
+     * Within a batch, forgetting a key as the first read once its scope is
+     * entered again forgets the entry of that scope.
+     *
+     * @return void
+     */
+    public function testForgettingOnReturnToAScopeForgetsItsEntry(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $memo  = new ResolutionMemo(static fn (): string => $scope->key);
+
+        $memo->open();
+        $memo->put(self::KEY, ['editor'], null);
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+        $memo->get('other');
+
+        $scope->key = 'tenant-a';
+        $memo->scopeChanged();
+        $memo->forget(self::KEY);
+
+        self::assertNull($memo->get(self::KEY));
+
+        $memo->close();
+    }
+
+    /**
+     * Closing a batch that is not open leaves no batch open below zero: one
+     * opened after it still keeps each scope's entries apart, and nested
+     * batches close only with the outermost.
+     *
+     * @return void
+     */
+    public function testClosingWithNoBatchOpenLeavesTheNextBatchWhole(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $memo  = new ResolutionMemo(static fn (): string => $scope->key);
+
+        $memo->close();
+        $memo->open();
+        $memo->put(self::KEY, ['editor'], null);
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+        $memo->get('other');
+
+        $scope->key = 'tenant-a';
+        $memo->scopeChanged();
+
+        self::assertSame(['editor'], $memo->get(self::KEY));
+
+        $memo->open();
+        $memo->open();
+        $memo->close();
+        $memo->close();
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+        $scope->key = 'tenant-a';
+        $memo->scopeChanged();
+
+        self::assertSame(['editor'], $memo->get(self::KEY));
+
+        $memo->close();
+    }
+
+    /**
+     * Within a batch, the tenant tree is asked each question once, in every
+     * scope, unless it is asked afresh, which replaces the answer kept; a
+     * question that throws keeps nothing; and with no batch open the tree is
+     * asked every time.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheTreesAnswersAreKeptForTheBatch(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $memo  = new ResolutionMemo(static fn (): string => $scope->key);
+        $asked = 0;
+        $read  = static function () use (&$asked): int {
+            return ++$asked;
+        };
+
+        self::assertSame([1, 2], [$memo->tree(['q'], $read), $memo->tree(['q'], $read)]);
+
+        $memo->open();
+
+        self::assertSame(3, $memo->tree(['q'], $read));
+        self::assertSame(3, $memo->tree(['q'], $read));
+        self::assertSame(4, $memo->tree(['q', 'other'], $read));
+        self::assertSame(5, $memo->tree(["q\0", 'other'], $read));
+        self::assertSame(6, $memo->tree(['q', "\0other"], $read));
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+
+        self::assertSame(3, $memo->tree(['q'], $read));
+        self::assertSame(7, $memo->tree(['q'], $read, true));
+        self::assertSame(7, $memo->tree(['q'], $read));
+
+        $failing = static function () use (&$asked): int {
+            throw new \RuntimeException('unavailable ' . $asked);
+        };
+
+        try {
+            $memo->tree(['broken'], $failing);
+        } catch (\RuntimeException $exception) {
+            self::assertSame('unavailable 7', $exception->getMessage());
+        }
+
+        self::assertSame(8, $memo->tree(['broken'], $read));
+
+        $memo->close();
+
+        self::assertSame(9, $memo->tree(['q'], $read));
+    }
+
+    /**
+     * A flush drops the tree's answers, as closing the outermost batch does, so
+     * the tree is asked again.
+     *
+     * @return void
+     */
+    public function testAFlushOrTheBatchClosingDropsTheTreesAnswers(): void
+    {
+        $memo  = new ResolutionMemo(static fn (): string => 'tenant-a');
+        $asked = 0;
+        $read  = static function () use (&$asked): int {
+            return ++$asked;
+        };
+
+        $memo->open();
+        $memo->tree(['q'], $read);
+        $memo->flush();
+
+        self::assertSame(2, $memo->tree(['q'], $read));
+
+        $memo->close();
+        $memo->open();
+
+        self::assertSame(3, $memo->tree(['q'], $read));
+
+        $memo->open();
+        $memo->close();
+
+        self::assertSame(3, $memo->tree(['q'], $read));
+
+        $memo->close();
+    }
 }

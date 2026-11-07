@@ -25,6 +25,12 @@ use Illuminate\Support\Carbon;
  * are dropped, and the current ones too when the scope changed since they were
  * taken.
  *
+ * While a batch is open, the memo also holds what the tenant tree answered, a
+ * tenant's ancestors and whether a tenant is within another, which holds in
+ * every scope, so a batch asks the tree each question once. A write, a change
+ * to the tree reported among them, drops those answers too, and so does the
+ * outermost batch closing.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -47,6 +53,9 @@ final class ResolutionMemo
 
     /** @var bool Whether the scope's key is being read, which may itself read the memo, while the subject is resolved. */
     private bool $isTakingScope = false;
+
+    /** @var array<string, mixed> While a batch is open, what the tenant tree answered, keyed by the question. */
+    private array $answers = [];
 
     /**
      * Create a new memo.
@@ -135,6 +144,36 @@ final class ResolutionMemo
     {
         $this->entries = [];
         $this->parked  = [];
+        $this->answers = [];
+    }
+
+    /**
+     * Return the tenant tree's answer to the question: while a batch is open,
+     * the one already given, or the one the callback reads, kept for the rest
+     * of the batch, or, asked afresh, the one it reads in place of the one
+     * kept; with no batch open, the one it reads, kept for nothing. A callback
+     * that throws keeps nothing.
+     *
+     * @template TAnswer
+     *
+     * @param  list<string>  $question
+     * @param  \Closure(): TAnswer  $answer
+     * @param  bool  $isFresh
+     * @return TAnswer
+     */
+    public function tree(array $question, \Closure $answer, bool $isFresh = false): mixed
+    {
+        if ($this->batches === 0) {
+            return $answer();
+        }
+
+        $key = \serialize($question);
+
+        if ($isFresh || !\array_key_exists($key, $this->answers)) {
+            $this->answers[$key] = $answer();
+        }
+
+        return $this->answers[$key];
     }
 
     /**
@@ -146,7 +185,8 @@ final class ResolutionMemo
      */
     public function scopeChanged(): void
     {
-        if ($this->batches > 0 && $this->scope !== null) {
+        // A scope is only ever taken while a batch is open.
+        if ($this->scope !== null) {
             $this->parked[$this->scope] = $this->entries;
         }
 
@@ -169,23 +209,27 @@ final class ResolutionMemo
     /**
      * Close a batch. Once the outermost one closes, the entries set aside are
      * dropped, and the current ones too when the scope changed since they were
-     * taken, as they would have been without the batch.
+     * taken, as they would have been without the batch, and so are the tenant
+     * tree's answers.
      *
      * @return void
      */
     public function close(): void
     {
-        $this->batches = \max(0, $this->batches - 1);
+        if ($this->batches > 1) {
+            $this->batches--;
 
-        if ($this->batches > 0) {
             return;
         }
+
+        $this->batches = 0;
 
         if ($this->isScopeChanged) {
             $this->entries = [];
         }
 
         $this->parked         = [];
+        $this->answers        = [];
         $this->scope          = null;
         $this->isScopeChanged = false;
     }

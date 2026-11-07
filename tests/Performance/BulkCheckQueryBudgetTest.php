@@ -12,16 +12,19 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\CheckBatch;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\BulkChecks\BulkStatusAttributes;
+use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\TenantScopedPost;
 use Tests\TestCase;
 
@@ -30,7 +33,9 @@ use Tests\TestCase;
  * type and tenant reads the subject's grants and policies once, and the
  * resources' tenants, the policies attached to them and their attributes in
  * bulk, so it costs exactly the queries a check over one of them costs, never
- * one more per resource.
+ * one more per resource. Over a tenant tree that is read from the database,
+ * each tenant's place in the tree is read once, so the tree costs what the
+ * distinct tenants cost, whatever the number of resources.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -89,12 +94,63 @@ final class BulkCheckQueryBudgetTest extends TestCase
     }
 
     /**
+     * Over a closure-table tree, checking a hundred posts of a tenant below the
+     * request's reads the tree as checking one does, and a hundred posts spread
+     * over four such tenants read it as four posts, one in each, do: once for
+     * each tenant, never once more per post.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATenantTreeIsReadOncePerTenantNotPerResource(): void
+    {
+        $this->app?->instance(TenantTree::class, new ClosureTenantTree);
+
+        $org      = StubTenant::query()->create(['id' => 'o1', 'name' => 'o1']);
+        $accounts = \array_map(static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]), ['a1', 'a2', 'a3', 'a4']);
+        $user     = StubIdentity::create(['id' => 'user-1']);
+        $posts    = [];
+
+        ClosureTenantTree::add(Reference::of($org));
+
+        foreach ($accounts as $account) {
+            ClosureTenantTree::add(Reference::of($account), Reference::of($org));
+        }
+
+        for ($index = 0; $index < 100; $index++) {
+            $account = $accounts[$index % 4];
+            $posts[] = TenantScopedPost::query()->create(['title' => 'p', 'status' => 'published', 'tenant_type' => $account->getMorphClass(), 'tenant_id' => $account->getKey()]);
+        }
+
+        $user->givePermission(Permission::create(['name' => self::ACTION]), null, $org, true);
+        $this->resolve($user, $org);
+
+        $sameTenant = \array_values(\array_filter($posts, static fn (TenantScopedPost $post): bool => $post->getAttribute('tenant_id') === 'a1'));
+
+        $this->queriesOf(\array_slice($posts, 0, 2));
+
+        $one      = $this->queriesOf(\array_slice($sameTenant, 0, 1));
+        $tenant   = $this->queriesOf($sameTenant);
+        $four     = $this->queriesOf(\array_slice($posts, 0, 4));
+        $hundred  = $this->queriesOf($posts);
+        $allowed  = $this->manager()->canEach(self::ACTION, self::pairs($posts));
+        $describe = static fn (array $queries): string => \implode("\n", $queries['tree']);
+
+        self::assertSame(\array_fill(0, 100, true), $allowed);
+        self::assertNotSame([], $one['tree']);
+        self::assertCount(\count($one['tree']), $tenant['tree'], $describe($tenant));
+        self::assertCount(\count($four['tree']), $hundred['tree'], $describe($hundred));
+        self::assertCount(\count($four['all']), $hundred['all'], \implode("\n", $hundred['all']));
+    }
+
+    /**
      * Return the queries checking the posts, named by pair, costs with a cold
      * cache: all of them, and those reading the posts' tenants, the policies
-     * attached to them and their attributes.
+     * attached to them, their attributes and the tenant tree.
      *
      * @param  list<\Tests\Fixtures\QueryScoping\TenantScopedPost>  $posts
-     * @return array{all: list<string>, tenants: list<string>, attachments: list<string>, attributes: list<string>}
+     * @return array{all: list<string>, tenants: list<string>, attachments: list<string>, attributes: list<string>, tree: list<string>}
      */
     private function queriesOf(array $posts): array
     {
@@ -121,6 +177,7 @@ final class BulkCheckQueryBudgetTest extends TestCase
             'tenants'     => \array_values(\array_filter($posts, static fn (string $sql): bool => !\str_contains($sql, 'select *'))),
             'attachments' => \array_values(\array_filter($queries, static fn (string $sql): bool => \str_contains($sql, 'resource_policies'))),
             'attributes'  => \array_values(\array_filter($posts, static fn (string $sql): bool => \str_contains($sql, 'select *'))),
+            'tree'        => \array_values(\array_filter($queries, static fn (string $sql): bool => \str_contains($sql, ClosureTenantTree::TABLE))),
         ];
     }
 

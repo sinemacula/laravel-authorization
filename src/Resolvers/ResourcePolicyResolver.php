@@ -119,7 +119,7 @@ final readonly class ResourcePolicyResolver
      * records of one type are read in one query in the scope the call is made
      * in, and, for those of a tenant decided outside it, in one more in each
      * such tenant, through the resolution cache, which keeps each record's
-     * entry. A record whose key is read more than once is read once.
+     * entry. A record named more than once is read in the same query.
      *
      * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\ResourceReference|null>  $resources
      * @return array<array-key, list<\SineMacula\Laravel\Authorization\Evaluation\Policy>>
@@ -391,11 +391,13 @@ final readonly class ResourcePolicyResolver
                 continue;
             }
 
-            $type = (string) $resource->type;
+            // A resource with an entry always has a type.
+            /** @var string $type */
+            $type = $resource->type;
 
             if (self::isReadInBulk($resource->id)) {
-                $records["#{$type}"][0]                     = $type;
-                $records["#{$type}"][1]["#{$resource->id}"] = $resource->id;
+                $records["#{$type}"][0]   = $type;
+                $records["#{$type}"][1][] = $resource->id;
 
                 continue;
             }
@@ -404,7 +406,7 @@ final readonly class ResourcePolicyResolver
         }
 
         foreach ($records as [$type, $ids]) {
-            $read = [...$read, ...self::readRecords($type, \array_values($ids))];
+            $read = [...$read, ...self::readRecords($type, $ids)];
         }
 
         return $read;

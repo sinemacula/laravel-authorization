@@ -35,6 +35,8 @@ use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\BulkChecks\BulkStatusAttributes;
+use Tests\Fixtures\BulkChecks\GuardedPost;
+use Tests\Fixtures\BulkChecks\GuardedStatusAttributes;
 use Tests\Fixtures\BulkChecks\StatusAttributes;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\InvariantRequirementChecker;
@@ -48,11 +50,12 @@ use Tests\Fixtures\QueryScoping\TenantScopedPost;
  * the checks run through and a batch of checks, drawn from a seed: a flat
  * tenant tree or a closure table, grants that reach a tenant's subtree or not,
  * for an application or every one, live or expired, roles through a parent,
- * resource attributes read in bulk or one at a time, posts of the active
- * tenant, below it, outside it or of none, named by model, by a model holding
- * other attributes in memory, by pair, by reference, by type, by an opaque
- * string, unsaved or not at all, under sparse and string keys, with repeats.
- * Every choice is logged, so a failure names the scenario.
+ * resource attributes read in bulk or one at a time, some through the tenant
+ * scope, so they are found only in the scope a post is decided in, posts of the
+ * active tenant, below it, outside it or of none, named by model, by a model
+ * holding other attributes in memory, by pair, by reference, by type, by an
+ * opaque string, unsaved or not at all, under sparse and string keys, with
+ * repeats. Every choice is logged, so a failure names the scenario.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -92,6 +95,9 @@ final class ParityScenario
 
     /** @var \Tests\Feature\Stubs\StubIdentity The subject. */
     private StubIdentity $user;
+
+    /** @var \Tests\Feature\Stubs\StubTenant|null The request's tenant. */
+    private ?StubTenant $active = null;
 
     /**
      * Create a scenario drawn from the seed.
@@ -198,10 +204,11 @@ final class ParityScenario
 
         $this->tree($tenants);
 
-        $active      = $this->pick($this->tenants);
-        $application = $this->pick([null, 'admin']);
-        $session     = $this->pick([null, 'session-1']);
-        $isMet       = $this->random->getInt(0, 1) === 1;
+        $active       = $this->pick([...$this->tenants, $tenants[0]]);
+        $this->active = $active;
+        $application  = $this->pick([null, 'admin']);
+        $session      = $this->pick([null, 'session-1']);
+        $isMet        = $this->random->getInt(0, 1) === 1;
 
         $this->app->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($this->user, $this->user, $active, $application, null, $session)));
         $this->app->instance(AuthenticationRequirementChecker::class, new InvariantRequirementChecker($isMet));
@@ -275,8 +282,8 @@ final class ParityScenario
     }
 
     /**
-     * Attach the subject's policies, and set a boundary and a guardrail, each
-     * sometimes.
+     * Attach the subject's policies, one allowing a post by its status often,
+     * and set a boundary and a guardrail, each sometimes.
      *
      * @return void
      *
@@ -284,6 +291,19 @@ final class ParityScenario
      */
     private function policies(): void
     {
+        // Often an allow that reads each post's status, in the request's tenant
+        // and below, so the posts of several scopes read their attributes in
+        // one batch.
+        if ($this->random->getInt(0, 1) === 1) {
+            $tenant = $this->active;
+
+            $this->log[] = 'status policy in ' . self::nameOf($tenant) . ' and below';
+
+            $published = ['effect' => 'allow', 'actions' => [self::ACTIONS[0]], 'conditions' => ['eq' => ['resource.status' => 'published']]];
+
+            $this->user->attachPolicy($this->policy('status', [$published]), null, $tenant, true);
+        }
+
         for ($index = $this->random->getInt(0, 2); $index > 0; $index--) {
             $tenant = $this->pick($this->tenants);
 
@@ -313,22 +333,25 @@ final class ParityScenario
 
     /**
      * Create the posts: tenantless ones, and tenant-owned ones of every tenant
-     * or none, each published or a draft.
+     * or none, some read through the tenant scope, each published or a draft.
      *
      * @return void
      */
     private function posts(): void
     {
         for ($index = $this->random->getInt(2, 6); $index > 0; $index--) {
-            $tenant  = $this->pick($this->tenants);
-            $status  = $this->pick(self::STATUSES);
-            $isOwned = $this->random->getInt(0, 3) > 0;
+            $tenant = $this->pick($this->tenants);
+            $status = $this->pick(self::STATUSES);
+            $kind   = $this->pick(['owned', 'owned', 'guarded', 'guarded', 'tenantless']);
+            $owner  = ['title' => 'p', 'status' => $status, 'tenant_type' => $tenant?->getMorphClass(), 'tenant_id' => $tenant?->getKey()];
 
-            $this->posts[] = $isOwned
-                ? TenantScopedPost::query()->create(['title' => 'p', 'status' => $status, 'tenant_type' => $tenant?->getMorphClass(), 'tenant_id' => $tenant?->getKey()])
-                : ScopedPost::query()->create(['title' => 'p', 'status' => $status]);
+            $this->posts[] = match ($kind) {
+                'owned'   => TenantScopedPost::query()->create($owner),
+                'guarded' => GuardedPost::query()->create($owner),
+                default   => ScopedPost::query()->create(['title' => 'p', 'status' => $status]),
+            };
 
-            $this->log[] = ($isOwned ? 'owned post in ' . self::nameOf($tenant) : 'tenantless post') . ", {$status}";
+            $this->log[] = ($kind === 'tenantless' ? 'tenantless post' : "{$kind} post in " . self::nameOf($tenant)) . ", {$status}";
         }
     }
 
@@ -384,6 +407,12 @@ final class ParityScenario
 
             $this->log[] = "{$class} attributes " . $provider::class . ' failing ' . \json_encode($provider->failing);
         }
+
+        // Read through the tenant scope, so a post's status is found only in
+        // the scope its own check is decided in.
+        $this->app->instance(GuardedStatusAttributes::class, new GuardedStatusAttributes);
+
+        $providers[(new GuardedPost)->getMorphClass()] = GuardedStatusAttributes::class;
 
         // One provider class serves both types when both draw the same one.
         app(ConfigRepository::class)->set('authorization.attributes.resources', $providers);
@@ -494,7 +523,7 @@ final class ParityScenario
      */
     private function fresh(Model $post): Model
     {
-        $fresh = $post->newQuery()->whereKey($post->getKey())->firstOrFail();
+        $fresh = $post->newQueryWithoutScopes()->whereKey($post->getKey())->firstOrFail();
 
         $fresh->setAttribute('status', $post->getAttribute('status') === 'published' ? 'draft' : 'published');
 
@@ -543,7 +572,7 @@ final class ParityScenario
 
         for ($index = $this->random->getInt(1, 3); $index > 0; $index--) {
             $statement = ['effect' => $this->pick(['allow', 'allow', 'deny']), 'actions' => [$this->pick([...self::ACTIONS, 'posts:*', '*'])], ...$this->conditions()];
-            $types     = [(new TenantScopedPost)->getMorphClass() . ':*', (new ScopedPost)->getMorphClass() . ':*'];
+            $types     = [(new TenantScopedPost)->getMorphClass() . ':*', (new ScopedPost)->getMorphClass() . ':*', (new GuardedPost)->getMorphClass() . ':*'];
 
             if ($this->random->getInt(0, 2) === 0) {
                 $statement['resources'] = [$this->pick(['*', ...$types, 'notes:*'])];

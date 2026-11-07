@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Resolvers;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +19,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Fixtures\BulkChecks\CountingBulkTenants;
+use Tests\Fixtures\BulkChecks\UnreadableTenantPost;
 use Tests\Fixtures\QueryRecorder;
 use Tests\Fixtures\QueryScoping\RecordedTenantPost;
 use Tests\Fixtures\QueryScoping\ScopedPost;
@@ -192,9 +194,12 @@ final class DeclaredResourceTenantTest extends TestCase
         $resolver = new DeclaredResourceTenant($fallback);
         $post     = TenantScopedPost::query()->create(['tenant_type' => 'teams', 'tenant_id' => '5']);
         $partial  = new TenantScopedPost(['id' => 3]);
+        $long     = new TenantScopedPost(['id' => 4, 'tenant_type' => 'teams', 'tenant_id' => \str_repeat('9', 192)]);
         $other    = StubIdentity::create(['id' => 'u1']);
 
-        self::assertEquals(['a' => new Reference('teams', '5'), 'b' => null], $resolver->tenantsOf(['a' => $post, 'b' => new ScopedPost, 'c' => $partial, 'd' => $other]));
+        $models = ['a' => $post, 'b' => new ScopedPost, 'c' => $partial, 'e' => $long, 'd' => $other];
+
+        self::assertEquals(['a' => new Reference('teams', '5'), 'b' => null], $resolver->tenantsOf($models));
         self::assertSame([], $fallback->asked);
         self::assertSame([], $resolver->tenantsOf([]));
 
@@ -244,6 +249,37 @@ final class DeclaredResourceTenantTest extends TestCase
         TenantScopedDocument::query()->create(['code' => 'doc-a', 'tenant_type' => 'teams', 'tenant_id' => 't1']);
 
         self::assertEquals(['a' => new Reference('teams', 't1')], $resolver->tenantsOfRecords(TenantScopedDocument::class, ['a' => 'doc-a', 'b' => 'DOC-A', 'c' => 'missing']));
+    }
+
+    /**
+     * A record whose tenant cannot be read, a key too long for a reference or
+     * one holding neither text nor an integer, is left out of the bulk answer,
+     * so its own lookup throws, failing its check alone.
+     *
+     * @return void
+     */
+    public function testARecordWhoseTenantCannotBeReadIsLeftOut(): void
+    {
+        $resolver = new DeclaredResourceTenant(new FixedResourceTenantResolver(null, false));
+        $long     = RecordedTenantPost::query()->create(['tenant_type' => 'teams', 'tenant_id' => \str_repeat('9', 192)]);
+        $odd      = UnreadableTenantPost::query()->create(['tenant_type' => 'teams', 'tenant_id' => UnreadableTenantPost::UNREADABLE]);
+        $fine     = UnreadableTenantPost::query()->create(['tenant_type' => 'teams', 'tenant_id' => '5']);
+        $key      = static fn (Model $post): string => (string) $post->getKey(); // @phpstan-ignore cast.string
+
+        self::assertSame([], $resolver->tenantsOfRecords(RecordedTenantPost::class, ['long' => $key($long)]));
+        self::assertEquals(['fine' => new Reference('teams', '5')], $resolver->tenantsOfRecords(UnreadableTenantPost::class, ['odd' => $key($odd), 'fine' => $key($fine)]));
+
+        $unreadable = [[RecordedTenantPost::class, $long, \InvalidArgumentException::class], [UnreadableTenantPost::class, $odd, \UnexpectedValueException::class]];
+
+        foreach ($unreadable as [$class, $post, $exception]) {
+            try {
+                $resolver->tenantOfRecord($class, $key($post));
+
+                self::fail('The record\'s tenant cannot be read.');
+            } catch (\Throwable $thrown) {
+                self::assertInstanceOf($exception, $thrown);
+            }
+        }
     }
 
     /**

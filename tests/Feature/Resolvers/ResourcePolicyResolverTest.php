@@ -585,6 +585,80 @@ final class ResourcePolicyResolverTest extends TestCase
     }
 
     /**
+     * Several records of one tenant decided outside it each read the denies
+     * attached to them in that tenant, as each does on its own.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRecordsOfOneTenantDecidedOutsideItEachReadItsDenies(): void
+    {
+        $tenant = self::createTenant('tenant-b');
+
+        foreach (['7', '8'] as $id) {
+            $lock = Policy::create(['name' => "lock-{$id}", 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:delete']]]]]);
+
+            self::service()->attach($lock, ['posts', $id], $tenant);
+        }
+
+        $resources = ['seven' => ResourceReference::record('posts', '7', Reference::of($tenant)), 'eight' => ResourceReference::record('posts', '8', Reference::of($tenant))];
+        $alone     = \array_map(static fn (ResourceReference $resource): array => (new ResourcePolicyResolver)->policiesFor($resource), $resources);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        $many  = (new ResourcePolicyResolver)->policiesForMany($resources);
+        $names = static fn (array $policies): array => \array_map(static fn (EvaluationPolicy $policy): string => $policy->name . '@' . $policy->resource, $policies);
+
+        self::assertSame(['seven' => ['lock-7@posts:7'], 'eight' => ['lock-8@posts:8']], \array_map($names, $many));
+        self::assertSame(\array_map(self::described(...), $alone), \array_map(self::described(...), $many));
+    }
+
+    /**
+     * A document attached to the type that cannot be read is hydrated once
+     * however many records are read with it, so it is written to the log
+     * channel once, and every record is left out, to be read on its own.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATypesUnreadableDocumentIsHydratedOnce(): void
+    {
+        $logger = new RecordingLogger;
+        $this->app?->instance('log', $logger);
+
+        $broken = self::sharing('broken');
+
+        self::service()->attach($broken, 'posts');
+
+        DB::table('policies')->where('id', $broken->id)->update(['document' => \json_encode(['statements' => [['effect' => 'deny', 'actions' => []]]])]);
+
+        self::assertSame([], ResourcePolicyResolver::resolveMany('posts', ['7', '8', '9'], new ResolutionPins));
+        self::assertCount(1, $logger->records);
+    }
+
+    /**
+     * A type exactly as long as the table stores is read as any other; one byte
+     * longer has no attachments.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATypeAsLongAsTheTableStoresIsRead(): void
+    {
+        $type = \str_repeat('p', Reference::MAX_BYTES);
+
+        self::service()->attach(self::sharing('longest'), $type);
+
+        $read = (new ResourcePolicyResolver)->policiesForMany([ResourceReference::record($type, '7'), ResourceReference::record($type . 'p', '7')]);
+
+        self::assertSame(['longest'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $read[0]));
+        self::assertSame([], $read[1]);
+    }
+
+    /**
      * A table whose key column folds case is never read in bulk: each record
      * reads its own, under the column's comparison, so a record finds an
      * attachment of its key in another case as it does on its own.

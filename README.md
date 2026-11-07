@@ -110,7 +110,8 @@ must each allow the check, then an explicit allow or a permission held allows it
 - **Bulk checks**: `checkMany()`, `canEach()` and `filterAuthorized()` decide many resources at once, each exactly as
   `check()` would decide it and reported with its own decision event, reading the subject's grants and policies once in
   each scope and the resources' tenants, attached policies and attributes in bulk, so with the package's resolvers and
-  bulk-reading attribute providers a check over many resources never costs a query per resource.
+  bulk-reading attribute providers a check over many resources does not cost a query per resource, outside the few cases
+  the [bulk checks](#bulk-checks) section names.
 - **A permission catalogue in code**: enums and providers declare each permission with a description, a category and
   its guards, and `authorization:sync` writes them to the database on deploy, reporting stale rows rather than
   deleting them. Booting never touches the database.
@@ -1741,7 +1742,7 @@ or about the subject of the scoped manager it is called on:
 | `all($actions, $resource, $context)`              | Returns whether every one of the actions is allowed                                                             |
 | `checkMany($checks)`                              | Decides each `CheckInput` and returns its `Decision`, keyed as the checks are (see [Bulk checks](#bulk-checks)) |
 | `canEach($action, $resources, $context)`          | Decides the action on each resource and returns whether each is allowed, keyed as the resources are             |
-| `filterAuthorized($action, $resources, $context)` | Returns the resources the action is allowed on, with their keys and order, a collection as its own class        |
+| `filterAuthorized($action, $resources, $context)` | Returns the resources the action is allowed on, with their keys and order, a `Collection` as its own class      |
 | `explain($action, $resource, $context)`           | Decides the action and returns its explanation as text                                                          |
 | `lastDecision()`                                  | Returns the latest decision of the request or job, whichever manager made it                                    |
 | `effectivePermissions($context)`                  | Decides every permission the enums declare and returns whether each is allowed                                  |
@@ -1751,13 +1752,13 @@ or about the subject of the scoped manager it is called on:
 | `withPolicies($policies)`                         | Returns a scoped manager that evaluates only the policies given                                                 |
 | `queryScope($model, $action, $context)`           | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))                     |
 
-`check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` being `checkMany()` given
-one: every other method but `queryScope()` adapts one of them, and each decision they make is recorded as the last
-decision and reported with `DecisionEvaluated`; `queryScope()` compiles a scope from the same pipeline without deciding
-a check, so it records and reports nothing. The resource and the context take the same forms everywhere: a model, a
-`[type, id]` pair, a `ResourceReference`, an `AuthorizableResource`, a model class or a string names the resource (see
-[Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the context is the caller's
-values, read under `input` (see [The check's context](#the-checks-context)).
+`check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` deciding as `checkMany()`
+decides a batch of one: every other method but `queryScope()` adapts one of them, and each decision they make is
+recorded as the last decision and reported with `DecisionEvaluated`; `queryScope()` compiles a scope from the same
+pipeline without deciding a check, so it records and reports nothing. The resource and the context take the same forms
+everywhere: a model, a `[type, id]` pair, a `ResourceReference`, an `AuthorizableResource`, a model class or a string
+names the resource (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the
+context is the caller's values, read under `input` (see [The check's context](#the-checks-context)).
 
 ```php
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -1840,9 +1841,10 @@ returned under each of its keys. A list holding anything other than a `CheckInpu
 `InvalidCheckArgumentException` before any check is decided. `canEach()` decides one action, with one context, on each
 of the resources of an array, a collection or any other iterable, and returns whether each is allowed, keyed as the
 resources are; an `insufficient_authentication` decision is `false`, as it is for `can()`. `filterAuthorized()` returns
-the resources the action is allowed on, the very objects given, with their keys, in their order: a collection comes
-back as a collection of its own class (an Eloquent collection as an Eloquent collection), and anything else as an
-array, its keys kept, so call `values()` or `array_values()` for a list. Neither stops at a denial: every resource is
+the resources the action is allowed on, the very objects given, with their keys, in their order: an
+`Illuminate\Support\Collection`, or a subclass of it such as an Eloquent collection, comes back as a collection of its
+own class, and anything else, a `LazyCollection` or a generator included, as an array, its keys kept, so call
+`values()` or `array_values()` for a list. Neither stops at a denial: every resource is
 decided. No checks or no resources return an empty result. A generator that yields a key twice keeps the last resource
 under it, as `iterator_to_array()` does. Models using `HasPermissions` get `canEach()` and `filterAuthorized()` too,
 deciding about the model through `Authorization::for($model)`.
@@ -1860,8 +1862,11 @@ permission boundaries, session caps and the guardrails are resolved once in each
 checks are decided in, through the resolution cache, which keeps each scope's apart. The resources' tenants, the
 policies attached to the records and the records' attributes are read in bulk, so deciding 100 records of one type and
 tenant costs the queries deciding one does: at most one for their tenants (none for a model that declares its tenant),
-one for the policies attached to them and one for their attributes. A check on its own reads exactly what it did
-before.
+one for the policies attached to them and one for their attributes. A tenant tree of your own is asked about each
+tenant's place in it once for the batch, however many of its resources are decided, and a persistent cache store is
+read and written for the records' attachments together, in the same number of round trips for one record as for 100.
+A single check, `check()` or a batch of one, reads nothing ahead and holds nothing for later: it reads its resource's
+tenant, attached policies and attributes on its own, as it always has.
 
 Reading in bulk needs the resource tenant resolver and the attribute providers to read in bulk. The package's own
 resolvers do. A resolver of your own implements `Contracts\BulkResourceTenantResolver`: `tenantsOf($models)` and
@@ -1908,9 +1913,19 @@ An item's answer can be the exception `values()` would throw for it: it fails th
 check reads `resource`. An item left out of the answer, or every item when `valuesMany()` itself throws, is asked about
 through `values()`, and so is every item of a resolver or provider without the bulk contract. That keeps every decision
 correct, but costs one read for each resource that reads the database, so the one-query guarantee holds only with the
-bulk contracts. The first check on a type that reads `resource` asks its provider about every record of that type still
-to be decided in the chunk, so a provider can be asked about a record whose own check never reads `resource`; that
-answer is used by no check. Two models with the same key are two items, since each may hold other attributes in memory.
+bulk contracts. Even with them, two cases read one record at a time, each decision still exact:
+
+- record attachments are read one record at a time when the attachments table does not compare keys byte for byte (a
+  case-folding collation, or a driver the package does not know); the package's own tables compare byte for byte;
+- a string-keyed declared record the bulk query does not find under its exact spelling, a missing UUID say, is asked
+  about on its own, one query each.
+
+The first check on a type that reads `resource` asks its provider about every record of that type still to be decided
+in the chunk in the same scope as that check (where the request is, the record's own tenant below the request's, or
+platform scope for a record admitted from outside it), and asks it in that scope, so a provider reading through the
+tenant scope finds for each record what it would find on its own; the records of another scope are read when the first
+of them reads `resource`. A provider can be asked about a record whose own check never reads `resource`; that answer is
+used by no check. Two models with the same key are two items, since each may hold other attributes in memory.
 
 The checks are decided in chunks of `authorization.bulk.chunk_size` (`AUTHORIZATION_BULK_CHUNK_SIZE`, 500 by default,
 a whole number of at least 1, checked at boot), and what a chunk read is released once it is decided. The decisions
@@ -1919,9 +1934,10 @@ themselves, traces included, are all returned at once, so decide a very large se
 
 A batch sees a write as a sequence of `check()` calls in the same request would. A grant, revocation, policy,
 attachment, boundary or guardrail written while the batch runs, by a listener reacting to one of its decisions
-included, empties the resolution cache, so every later check reads it. The resources' tenants and attributes are read
-for each chunk, the tenants as it starts and the attributes when its first check reads them, so a change to a
-resource's tenant or attributes made while a chunk is decided is seen from the next chunk.
+included, empties the resolution cache, so every later check reads it; so does a change to the tenant tree reported
+through `Authorization::treeChanged()`, after which the tree is asked again. The resources' tenants and attributes are
+read for each chunk, the tenants as it starts and the attributes when its first check on a type reads them, so a change
+to a resource's tenant or attributes made after it was read is seen from the next chunk.
 
 ### Query scoping
 

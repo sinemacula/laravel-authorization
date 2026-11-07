@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Fixtures\BulkChecks\CountingBulkTenants;
+use Tests\Fixtures\QueryScoping\SealedModels;
 
 /**
  * Unit tests for `PrefetchedResourceTenants`, the tenants of a bulk check's
@@ -109,5 +110,46 @@ final class PrefetchedResourceTenantsTest extends TestCase
         $this->expectException(\RuntimeException::class);
 
         $tenants->tenantOfRecord('posts', '3');
+    }
+
+    /**
+     * A model or record the bulk answer leaves out is asked about on its own,
+     * and every one after it is still answered from the bulk read.
+     *
+     * @return void
+     */
+    public function testWhatTheBulkAnswerLeavesOutIsAskedOnItsOwn(): void
+    {
+        $tenant            = new Reference('teams', '5');
+        $resolver          = new CountingBulkTenants(['1' => $tenant, '2' => $tenant, '3' => null]);
+        $resolver->leftOut = ['1', '2'];
+        $first             = new StubIdentity(['id' => '1']);
+        $second            = new StubIdentity(['id' => '3']);
+        $tenants           = PrefetchedResourceTenants::of([$first, $second, ['posts', '2'], ['posts', '3']], $resolver);
+
+        self::assertNull($tenants->tenantOf($second));
+        self::assertNull($tenants->tenantOfRecord('posts', '3'));
+        self::assertSame([], $resolver->calls);
+        self::assertSame($tenant, $tenants->tenantOf($first));
+        self::assertSame($tenant, $tenants->tenantOfRecord('posts', '2'));
+        self::assertSame(['1', '2'], $resolver->calls);
+    }
+
+    /**
+     * A model that names its own resource is never asked about, since its
+     * reference carries its own tenant.
+     *
+     * @return void
+     */
+    public function testAModelNamingItsOwnResourceIsNotAskedAbout(): void
+    {
+        $resolver = new CountingBulkTenants;
+        $naming   = SealedModels::namingItsResource();
+
+        $naming->setAttribute('id', 9);
+
+        PrefetchedResourceTenants::of([$naming, new StubIdentity(['id' => '1'])], $resolver);
+
+        self::assertSame([['1']], $resolver->bulkCalls);
     }
 }

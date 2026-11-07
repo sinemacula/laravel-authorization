@@ -22,13 +22,15 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 final class BulkConfigValidatorTest extends TestCase
 {
     /**
-     * No block, an empty one and a whole chunk size of at least 1 are accepted.
+     * An empty block, one leaving the chunk size null and a whole chunk size of
+     * at least 1 are accepted.
      *
      * @return void
      */
     public function testAWholeChunkSizeIsAccepted(): void
     {
         BulkConfigValidator::validate([]);
+        BulkConfigValidator::validate(['chunk_size' => null]);
         BulkConfigValidator::validate(['chunk_size' => 1]);
         BulkConfigValidator::validate(['chunk_size' => 500]);
 
@@ -48,6 +50,7 @@ final class BulkConfigValidatorTest extends TestCase
         yield 'not an array' => ['500', 'authorization.bulk', 'expected an array, got \'500\' (string).'];
         yield 'an object' => [new \stdClass, 'authorization.bulk', 'expected an array, got \'stdClass\' (stdClass).'];
         yield 'an unknown key' => [['size' => 4], 'authorization.bulk', 'unknown key \'size\'; expected one of chunk_size.'];
+        yield 'an unknown key after a known one' => [['chunk_size' => 1, 'size' => 4], 'authorization.bulk', 'unknown key \'size\'; expected one of chunk_size.'];
         yield 'zero' => [['chunk_size' => 0], 'authorization.bulk.chunk_size', $whole . '0 (int).'];
         yield 'negative' => [['chunk_size' => -1], 'authorization.bulk.chunk_size', $whole . '-1 (int).'];
         yield 'a string' => [['chunk_size' => '500'], 'authorization.bulk.chunk_size', $whole . '\'500\' (string).'];

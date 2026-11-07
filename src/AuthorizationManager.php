@@ -44,14 +44,14 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * `canEach` and `filterAuthorized`, on the current subject or on a scoped clone
  * from `for()`, `forUser()`, `withPolicies()` or `capped()`. `check()` is the
  * one decision entry point (D22) and `checkMany()` the one bulk entry point,
- * `check()` being a batch of one, so a check is decided the same way however it
- * is asked: every other form adapts one of them, and they alone record each
- * decision and report it (see `CheckBatch`). The decision itself is made by the
- * manager's `DecisionPipeline`, which admits the check (the subject, resource
- * and tenant stages) and gathers every source, the session caps included; the
- * policy evaluator runs the rest of the stages in AUTHZ-7.1's order, the
- * denies, the caps, the allows and the implicit deny, each recorded in the
- * decision's trace for audit consumers.
+ * `check()` deciding as `checkMany()` decides a batch of one, so a check is
+ * decided the same way however it is asked: every other form adapts one of
+ * them, and they alone record each decision and report it (see `CheckBatch`).
+ * The decision itself is made by the manager's `DecisionPipeline`, which admits
+ * the check (the subject, resource and tenant stages) and gathers every source,
+ * the session caps included; the policy evaluator runs the rest of the stages
+ * in AUTHZ-7.1's order, the denies, the caps, the allows and the implicit deny,
+ * each recorded in the decision's trace for audit consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -244,9 +244,11 @@ final class AuthorizationManager
      * Decide the action for the current subject, the one core decision every
      * other form adapts (D22): `can()` and `cannot()` read whether it is
      * allowed, `any()` and `all()` read it for each action they decide, and
-     * `authorize()` throws when it is not. It is `checkMany()` given one check,
-     * so a check is decided the same way on its own or in a batch. The decision
-     * is recorded as the last decision and reported with `DecisionEvaluated`.
+     * `authorize()` throws when it is not. It decides as `checkMany()` decides
+     * a batch of one, through the same `CheckBatch`, so a check is decided the
+     * same way on its own or in a batch, but reads nothing ahead and holds
+     * nothing for later. The decision is recorded as the last decision and
+     * reported with `DecisionEvaluated`.
      *
      * The context is what the caller passes, which a policy reads under `input`
      * (`['post' => ['status' => 'draft']]` is `input.post.status`) and never
@@ -270,7 +272,7 @@ final class AuthorizationManager
      */
     public function check(string $action, mixed $resource = null, array $context = []): Decision
     {
-        return $this->checkMany([new CheckInput($action, $resource, $context)])[0];
+        return $this->batch()->decideOne($this->currentSubject(), new CheckInput($action, $resource, $context));
     }
 
     /**
@@ -304,7 +306,7 @@ final class AuthorizationManager
      */
     public function checkMany(array $checks): array
     {
-        return (new CheckBatch($this->pipeline, $this->lastDecisionStore, $this->subjectResolver, $this->events))->decide($this->currentSubject(), $checks);
+        return $this->batch()->decide($this->currentSubject(), $checks);
     }
 
     /**
@@ -514,5 +516,16 @@ final class AuthorizationManager
     public function currentSubject(): ?Subject
     {
         return $this->isSubjectNamed ? $this->subjectOverride : $this->subjectResolver->resolve();
+    }
+
+    /**
+     * Return the batch that decides this manager's checks, through its
+     * pipeline, so `check()` and `checkMany()` take the one path.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckBatch
+     */
+    private function batch(): CheckBatch
+    {
+        return new CheckBatch($this->pipeline, $this->lastDecisionStore, $this->subjectResolver, $this->events);
     }
 }

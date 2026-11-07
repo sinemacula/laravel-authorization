@@ -35,6 +35,9 @@ final class CountingBulkTenants implements BulkResourceTenantResolver
     /** @var bool Whether every bulk call throws. */
     public bool $isBroken = false;
 
+    /** @var list<string> The keys a bulk call leaves out of its answer, each answered on its own. */
+    public array $leftOut = [];
+
     /**
      * Create a new resolver answering from the map.
      *
@@ -93,7 +96,9 @@ final class CountingBulkTenants implements BulkResourceTenantResolver
 
         $this->bulkCalls[] = \array_values($keys);
 
-        return $this->isBroken ? throw new \RuntimeException(self::MESSAGE) : \array_map(fn (string $key): ?Reference => $this->tenants[$key] ?? null, $keys);
+        $tenants = $this->isBroken ? throw new \RuntimeException(self::MESSAGE) : \array_map(fn (string $key): ?Reference => $this->tenants[$key] ?? null, $keys);
+
+        return \array_diff_key($tenants, \array_intersect($keys, $this->leftOut));
     }
 
     /**
@@ -117,7 +122,7 @@ final class CountingBulkTenants implements BulkResourceTenantResolver
 
         $tenants = \array_map(fn (string $id): false|Reference|null => \array_key_exists($id, $this->tenants) ? $this->tenants[$id] : false, $ids);
 
-        return \array_diff_key($tenants, \array_intersect($ids, $this->failing));
+        return \array_diff_key($tenants, \array_intersect($ids, [...$this->failing, ...$this->leftOut]));
     }
 
     /**

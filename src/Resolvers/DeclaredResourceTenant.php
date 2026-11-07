@@ -37,12 +37,13 @@ use SineMacula\Laravel\Authorization\Support\ResourceTenancy;
  * It answers many resources at once for a bulk check (see
  * `BulkResourceTenantResolver`): the declared models from their declarations,
  * and the records of a declared type with one query, on the write connection,
- * for the keys the key column could hold. A record that query finds under
- * another spelling of its key, as a database comparing keys loosely does, or
- * does not find at all, is left to be looked up on its own, as is a record
- * whose tenant cannot be read, so its check alone fails. Every other model and
- * record is left to the configured resolver: in bulk when it answers in bulk,
- * otherwise each on its own.
+ * for the keys the key column could hold. A record that query does not find
+ * under exactly its string key, which a database comparing keys loosely may
+ * still find, is left to be looked up on its own, as is a record whose tenant
+ * cannot be read, so its check alone fails; an integer key it does not find
+ * names no record, so its check is denied as `resource_unresolved`, as on its
+ * own. Every other model and record is left to the configured resolver: in bulk
+ * when it answers in bulk, otherwise each on its own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -241,6 +242,9 @@ final readonly class DeclaredResourceTenant implements BulkResourceTenantResolve
             /** @var int|string $key */
             $key = $record->getKey();
 
+            // An integer key is read back canonical from an integer column, but
+            // from a text column it is read as stored ("007", say), and is
+            // matched to the key asked for in its canonical form.
             $records[$model->getKeyType() === 'int' ? (string) (int) $key : (string) $key] = $record;
         }
 

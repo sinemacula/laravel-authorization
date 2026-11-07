@@ -11,11 +11,16 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  * read the attributes of many records at once. In a bulk check (`checkMany()`,
  * `canEach()` and `filterAuthorized()`), the first check on a record of the
  * provider's type that reads `resource` asks it for the records of that type
- * the batch has still to decide, so a check over many resources never reads one
- * record's attributes at a time. A provider that does not implement it is asked
- * about each record on its own, when its check reads `resource`, which keeps
- * every decision exactly as it is, but costs a read per resource when it reads
- * the database.
+ * the chunk has still to decide in the scope that check is decided in, and asks
+ * it in that scope, so a check over many resources never reads one record's
+ * attributes at a time. A bulk check is decided in chunks of
+ * `authorization.bulk.chunk_size`, and the records of each scope are read when
+ * the first of them is needed, so the provider may be asked once per chunk and
+ * scope, never about the whole batch at once; a provider that reads through the
+ * tenant scope sees what it would see for each record on its own. A provider
+ * that does not implement it is asked about each record on its own, when its
+ * check reads `resource`, which keeps every decision exactly as it is, but
+ * costs a read per resource when it reads the database.
  *
  * Each item is keyed by a token the package makes for it, and is the record's
  * reference with the model the check was given, exactly as `values()` is given

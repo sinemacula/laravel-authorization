@@ -27,9 +27,9 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  * gathers every source, the session caps included; the policy evaluator runs
  * the rest of the stages, the denies, the caps, the allows and the implicit
  * deny, each recorded in the decision's trace. It records nothing and reports
- * nothing: the manager's `check()` is the one decision entry point (D22) and
- * owns the recording, so every decision the pipeline makes reaches the caller
- * through it.
+ * nothing: the manager's `check()` is the one decision entry point (D22), and
+ * `checkMany()` the same over many checks, and `CheckBatch` owns the recording
+ * for both, so every decision the pipeline makes reaches the caller through it.
  *
  * A pipeline is immutable: `withPolicies()` and `capped()` return a new one, as
  * the manager's scoped clones do.
@@ -158,8 +158,10 @@ final class DecisionPipeline
      * for no subject, or an inactive one, whose checks read none, nor under a
      * `withPolicies()` override, which replaces the attached policies; a record
      * whose identifier is not UTF-8 is left to its own check, so a database
-     * that refuses it fails that check alone, and a document that cannot be
-     * read is left to each check that reads it.
+     * that refuses it fails that check alone, and whatever cannot be read
+     * ahead, a document that cannot be read or a tenant whose place in the tree
+     * cannot be read say, is left to each check that reads it, so a failure
+     * here never stops a check that would not fail on its own.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  array<array-key, mixed>  $resources
@@ -185,15 +187,10 @@ final class DecisionPipeline
             $records[$key] = $resource;
         }
 
-        ResourceScope::prepare($records, static function (array $group) use ($policies): void {
-            try {
-                $policies->policiesForMany($group);
-            } catch (InvalidPolicyDocumentException) {
-                // A document that cannot be read is read again by each check
-                // that needs it, which it denies as an invalid policy.
-                return;
-            }
-        });
+        // A group that cannot be read ahead, a document that cannot be read
+        // among it say, is read again by each of its checks, which decides or
+        // fails alone (see `ResourceScope::prepare()`).
+        ResourceScope::prepare($records, static fn (array $group): array => $policies->policiesForMany($group));
     }
 
     /**

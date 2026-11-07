@@ -30,13 +30,22 @@ use SineMacula\Laravel\Authorization\Subject;
  * A bulk check reads what its resources need in the scope each is decided in,
  * through `prepare()`, which groups them as `decide()` scopes them, admitting
  * none: a resource from outside the scope is read for at platform scope whether
- * or not its check is admitted.
+ * or not its check is admitted. A resource whose place in the tree cannot be
+ * read is left out, so its own check fails when it is reached. `scopeOf()`
+ * names the scope a resource is decided in, so what is read for one resource is
+ * read with the others decided in the same scope alone.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 final class ResourceScope
 {
+    /** @var string The key of the scope a resource with no tenant is decided in: where the request is. */
+    public const string HERE = 'here';
+
+    /** @var string The key of the scope a resource of a tenant outside the decision's is decided in. */
+    public const string PLATFORM = 'platform';
+
     /**
      * Decide the check on the resource through the callback, in the scope the
      * resource's tenant calls for, or deny it as out of scope.
@@ -69,7 +78,11 @@ final class ResourceScope
      * Run the callback with each group of the resources, in the scope a check
      * on them is decided in: those with no tenant where the request is, those
      * of the decision's tenant or below it in their own tenant, and those of
-     * any other tenant at platform scope, admitted or not. Nothing is decided.
+     * any other tenant at platform scope, admitted or not. Nothing is decided,
+     * and nothing thrown: what is read ahead only supplies data, so a resource
+     * whose place in the tree cannot be read is left out, and a group whose
+     * callback throws is left to its checks, each of which reads its own, and
+     * fails alone, when it is reached.
      *
      * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\ResourceReference>  $resources
      * @param  \Closure(array<array-key, \SineMacula\Laravel\Authorization\Support\ResourceReference>): mixed  $prepare
@@ -77,33 +90,65 @@ final class ResourceScope
      */
     public static function prepare(array $resources, \Closure $prepare): void
     {
-        $here   = [];
-        $scopes = [];
+        $application = TenantScope::currentApplication();
+
+        foreach (self::groups($resources) as $scope => [$tenant, $group]) {
+            try {
+                $scope === self::HERE ? $prepare($group) : TenantScope::within($tenant, $application, static fn (): mixed => $prepare($group));
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+    }
+
+    /**
+     * Return the key of the scope a check on the resource is decided in, for a
+     * decision whose tenant is the one given: `HERE` for a resource with no
+     * tenant, the resource's tenant for one of that tenant or below it, and
+     * `PLATFORM` for one of any other tenant, every tenant-owned resource when
+     * no tenant is given included. Two resources with the same key are decided
+     * in the same scope.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $active
+     * @return string
+     */
+    public static function scopeOf(ResourceReference $resource, ?Reference $active): string
+    {
+        $tenant = $resource->tenant;
+
+        if ($tenant === null) {
+            return self::HERE;
+        }
+
+        return self::isWithinActive($tenant, $active) ? 'tenant:' . \strlen($tenant->type) . ':' . $tenant->type . ':' . $tenant->id : self::PLATFORM;
+    }
+
+    /**
+     * Return the resources grouped by the scope a check on them is decided in,
+     * each group with the tenant it is decided in: none where the request is,
+     * since those resources have none, and none at platform scope; a resource
+     * whose place in the tree cannot be read is left out.
+     *
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\ResourceReference>  $resources
+     * @return array<string, array{\SineMacula\Laravel\Authorization\Support\Reference|null, array<array-key, \SineMacula\Laravel\Authorization\Support\ResourceReference>}>
+     */
+    private static function groups(array $resources): array
+    {
+        $groups = [];
 
         foreach ($resources as $key => $resource) {
-            $tenant = $resource->tenant;
-
-            if ($tenant === null) {
-                $here[$key] = $resource;
-
+            try {
+                $scope = self::scopeOf($resource, $resource->tenant === null ? null : TenantScope::currentChain()->tenant());
+            } catch (\Throwable) {
                 continue;
             }
 
-            $scope                      = self::isInScope($tenant) ? $tenant : null;
-            $scopeKey                   = $scope === null ? '' : $scope->type . "\0" . $scope->id;
-            $scopes[$scopeKey][0]       = $scope;
-            $scopes[$scopeKey][1][$key] = $resource;
+            $groups[$scope][0]       = $scope === self::PLATFORM ? null : $resource->tenant;
+            $groups[$scope][1][$key] = $resource;
         }
 
-        if ($here !== []) {
-            $prepare($here);
-        }
-
-        $application = TenantScope::currentApplication();
-
-        foreach ($scopes as [$scope, $group]) {
-            TenantScope::within($scope, $application, static fn (): mixed => $prepare($group));
-        }
+        return $groups;
     }
 
     /**
@@ -115,8 +160,19 @@ final class ResourceScope
      */
     private static function isInScope(Reference $tenant): bool
     {
-        $active = TenantScope::currentChain()->tenant();
+        return self::isWithinActive($tenant, TenantScope::currentChain()->tenant());
+    }
 
+    /**
+     * Determine whether the tenant is the given decision's tenant or below it.
+     * No tenant is within no decision's tenant.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $active
+     * @return bool
+     */
+    private static function isWithinActive(Reference $tenant, ?Reference $active): bool
+    {
         return $active !== null && TenantChain::isWithin($tenant, $active);
     }
 }

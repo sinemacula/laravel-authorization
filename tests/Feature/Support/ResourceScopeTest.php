@@ -28,6 +28,7 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
+use Tests\Fixtures\BulkChecks\FailingTenantTree;
 use Tests\TestCase;
 
 /**
@@ -423,23 +424,33 @@ final class ResourceScopeTest extends TestCase
      */
     public function testPreparingGroupsTheResourcesByTheScopeEachIsDecidedIn(): void
     {
+        $child = StubTenant::query()->create(['id' => 'child', 'name' => 'child']);
+
+        /** @var \Tests\Feature\Stubs\StubTenantTree $tree */
+        $tree = $this->app?->make(TenantTree::class);
+        $tree->put(Reference::of($child), Reference::of($this->account));
+
         $this->request($this->account, 'admin');
 
         $none     = new ResourceReference('post:1');
         $own      = ResourceReference::record('post', '2', Reference::of($this->account));
+        $below    = ResourceReference::record('post', '6', Reference::of($child));
         $again    = ResourceReference::record('post', '3', Reference::of($this->account));
         $sibling  = ResourceReference::record('post', '4', Reference::of($this->sibling));
         $org      = ResourceReference::record('post', '5', Reference::of($this->org));
         $before   = $this->scope();
         $prepared = [];
 
-        ResourceScope::prepare(['none' => $none, 'own' => $own, 'sibling' => $sibling, 'again' => $again, 'org' => $org], function (array $group) use (&$prepared): void {
+        $resources = ['none' => $none, 'own' => $own, 'child' => $below, 'sibling' => $sibling, 'again' => $again, 'org' => $org];
+
+        ResourceScope::prepare($resources, function (array $group) use (&$prepared): void {
             $prepared[] = [\array_keys($group), ...$this->scope()];
         });
 
         self::assertEquals([
             [['none'], [Reference::of($this->account), Reference::of($this->org)], 'admin'],
             [['own', 'again'], [Reference::of($this->account), Reference::of($this->org)], 'admin'],
+            [['child'], [Reference::of($child), Reference::of($this->account), Reference::of($this->org)], 'admin'],
             [['sibling', 'org'], [], 'admin'],
         ], $prepared);
         self::assertEquals($before, $this->scope());
@@ -451,6 +462,62 @@ final class ResourceScopeTest extends TestCase
         });
 
         self::assertSame([], $prepared);
+    }
+
+    /**
+     * Preparing never throws: a resource whose tenant's place in the tree
+     * cannot be read is left out, and a group whose callback throws leaves the
+     * other groups prepared.
+     *
+     * @return void
+     */
+    public function testPreparingLeavesOutWhatCannotBeRead(): void
+    {
+        $account = Reference::of($this->account);
+
+        $this->app?->instance(TenantTree::class, new FailingTenantTree(['sibling' => Reference::of($this->org)], ['boom']));
+        $this->request($this->account);
+
+        $resources = [
+            'boom'    => ResourceReference::record('post', '1', new Reference($account->type, 'boom')),
+            'own'     => ResourceReference::record('post', '2', $account),
+            'none'    => new ResourceReference('post:3'),
+            'sibling' => ResourceReference::record('post', '4', Reference::of($this->sibling)),
+        ];
+        $prepared = [];
+
+        ResourceScope::prepare($resources, static function (array $group) use (&$prepared): void {
+            $prepared[] = \array_keys($group);
+
+            if (\array_key_exists('own', $group)) {
+                throw new \RuntimeException('cannot prepare');
+            }
+        });
+
+        self::assertSame([['own'], ['none'], ['sibling']], $prepared);
+        self::assertEquals([Reference::of($this->account)], TenantScope::currentChain()->tenants);
+    }
+
+    /**
+     * The scope a resource is decided in is named by `scopeOf()`: where the
+     * request is for one with no tenant, its own tenant for one within the
+     * decision's tenant, each tenant apart, and the platform for any other, or
+     * for every tenant-owned one with no decision's tenant.
+     *
+     * @return void
+     */
+    public function testTheScopeOfAResourceIsNamed(): void
+    {
+        $account = Reference::of($this->account);
+        $org     = Reference::of($this->org);
+
+        self::assertSame(ResourceScope::HERE, ResourceScope::scopeOf(new ResourceReference('post:1'), $org));
+        self::assertSame(ResourceScope::HERE, ResourceScope::scopeOf(ResourceReference::record('post', '1'), null));
+        self::assertSame('tenant:' . \strlen($account->type) . ':' . $account->type . ':account', ResourceScope::scopeOf(ResourceReference::record('post', '1', $account), $org));
+        self::assertSame('tenant:' . \strlen($org->type) . ':' . $org->type . ':org', ResourceScope::scopeOf(ResourceReference::record('post', '1', $org), $org));
+        self::assertSame(ResourceScope::PLATFORM, ResourceScope::scopeOf(ResourceReference::record('post', '1', $org), $account));
+        self::assertSame(ResourceScope::PLATFORM, ResourceScope::scopeOf(ResourceReference::record('post', '1', $account), null));
+        self::assertNotSame(ResourceScope::HERE, ResourceScope::PLATFORM);
     }
 
     /**

@@ -6,7 +6,9 @@ namespace SineMacula\Laravel\Authorization\Context;
 
 use SineMacula\Laravel\Authorization\Contracts\BulkResourceAttributeProvider;
 use SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\ResourceScope;
 
 /**
  * The resource attributes of a bulk check's records, read in bulk as its checks
@@ -16,12 +18,16 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * its own under a token, it reads nothing up front. The first check on a record
  * of a type that reads `resource` asks the type's provider, when it reads in
  * bulk (`BulkResourceAttributeProvider`), for every record of that type the
- * chunk still has to decide, and keeps each item's answer, values or failure,
- * for that item's check alone: an item's failure is thrown only when its own
- * check reads `resource`, so it never touches another's decision. A check the
- * batch holds no answer for (its provider does not read in bulk, the bulk call
- * threw, or the answer left its item out) asks the provider about its own
- * record, as a single check does.
+ * chunk still has to decide in the scope that check is decided in (see
+ * `ResourceScope::scopeOf()`), so the provider is asked in the very scope it
+ * would be asked in about each record on its own; a record decided in another
+ * scope is read with the others of its scope, when the first of them reads
+ * `resource`. Each item's answer, values or failure, is kept for that item's
+ * check alone: an item's failure is thrown only when its own check reads
+ * `resource`, so it never touches another's decision. A check the batch holds
+ * no answer for (its provider does not read in bulk, the bulk call threw, or
+ * the answer left its item out) asks the provider about its own record, as a
+ * single check does.
  *
  * Each decided item is forgotten, and its answer released with it, so a check
  * decided is never read for again.
@@ -42,14 +48,24 @@ final class ResourceAttributeBatch
     /** @var array<string, array<string, mixed>|\Throwable> The answer read for each item, by token. */
     private array $answers = [];
 
+    /** @var array<string, string|null> The key of the scope each item is decided in, by token, once told; null when it cannot be told. */
+    private array $scopes = [];
+
     /**
      * Create the batch of the records among the references, each an item of its
-     * own.
+     * own, for a decision in the tenant given.
      *
      * @param  array<array-key, mixed>  $references
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $active
      */
-    public function __construct(array $references)
-    {
+    public function __construct(
+
+        // The references of the chunk's checks, each record among them an item.
+        array $references,
+
+        /** The tenant the checks are decided in, which tells the scope each record is decided in; null for none. */
+        private readonly ?Reference $active = null,
+    ) {
         $this->tokens = new \WeakMap;
 
         foreach ($references as $reference) {
@@ -66,9 +82,9 @@ final class ResourceAttributeBatch
 
     /**
      * Return the values the provider gave in bulk for the record, reading them
-     * now, with every record of its type still to be decided, when they have
-     * not been read; or null when there are none, so the provider is asked
-     * about the record on its own. An item's failure is thrown.
+     * now, with every record of its type still to be decided in its scope, when
+     * they have not been read; or null when there are none, so the provider is
+     * asked about the record on its own. An item's failure is thrown.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider  $provider
@@ -85,7 +101,7 @@ final class ResourceAttributeBatch
         }
 
         if (isset($this->pending[$token])) {
-            $this->read((string) $resource->type, $provider);
+            $this->read($token, $provider);
         }
 
         $answer = $this->answers[$token] ?? null;
@@ -112,27 +128,32 @@ final class ResourceAttributeBatch
     }
 
     /**
-     * Read the values of every record of the type still to be decided, in one
-     * call to the provider, keeping each answer it gives for an item. A call
-     * that throws keeps none, so each record is asked about on its own.
+     * Read the values of the item and of every other record of its type still
+     * to be decided in its scope, in one call to the provider, keeping each
+     * answer it gives for an item. A call that throws keeps none, so each
+     * record is asked about on its own.
      *
-     * @param  string  $type
+     * @param  string  $token
      * @param  \SineMacula\Laravel\Authorization\Contracts\BulkResourceAttributeProvider  $provider
      * @return void
      */
-    private function read(string $type, BulkResourceAttributeProvider $provider): void
+    private function read(string $token, BulkResourceAttributeProvider $provider): void
     {
+        $type  = $this->pending[$token]->type;
+        $scope = $this->scopeOf($token);
+
         /** @var array<string, array{resource: \SineMacula\Laravel\Authorization\Support\ResourceReference, model: \Illuminate\Database\Eloquent\Model|null}> $items */
         $items = [];
 
-        foreach ($this->pending as $token => $reference) {
-            if ($reference->type !== $type) {
+        foreach ($this->pending as $pending => $reference) {
+            // An item whose scope cannot be told is read alone.
+            if ($pending !== $token && ($scope === null || $reference->type !== $type || $this->scopeOf($pending) !== $scope)) {
                 continue;
             }
 
-            $items[$token] = ['resource' => $reference, 'model' => $reference->model];
+            $items[$pending] = ['resource' => $reference, 'model' => $reference->model];
 
-            unset($this->pending[$token]);
+            unset($this->pending[$pending]);
         }
 
         try {
@@ -141,14 +162,35 @@ final class ResourceAttributeBatch
             return;
         }
 
-        foreach (\array_keys($items) as $token) {
-            $answer = $answers[$token] ?? null;
+        foreach (\array_keys($items) as $item) {
+            $answer = $answers[$item] ?? null;
 
             if (!\is_array($answer) && !$answer instanceof \Throwable) {
                 continue;
             }
 
-            $this->answers[$token] = $answer;
+            $this->answers[$item] = $answer;
         }
+    }
+
+    /**
+     * Return the key of the scope the item's check is decided in, told once, or
+     * null when its tenant's place in the tree cannot be read, so it is read
+     * with no other item: its check reads it again, and fails, on its own.
+     *
+     * @param  string  $token
+     * @return string|null
+     */
+    private function scopeOf(string $token): ?string
+    {
+        if (!\array_key_exists($token, $this->scopes)) {
+            try {
+                $this->scopes[$token] = ResourceScope::scopeOf($this->pending[$token], $this->active);
+            } catch (\Throwable) { // @phpstan-ignore catch.neverThrown (an application's tenant tree may throw)
+                $this->scopes[$token] = null;
+            }
+        }
+
+        return $this->scopes[$token];
     }
 }

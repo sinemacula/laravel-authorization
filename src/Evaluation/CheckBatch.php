@@ -12,8 +12,10 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PrefetchedResourceTenants;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 
@@ -23,27 +25,33 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  *
  * Each check is decided by the decision pipeline, in the order given, exactly
  * as it would be on its own: the same admission stages, the same scope and the
- * same evaluator, so its decision is the one a single check would make. What
- * the checks share is read once rather than for each: the subject is resolved
- * once for the batch; what the subject's grants, policies, boundaries and caps,
- * the guardrails and the resource types' policies resolve to is read once in
- * each scope the checks are decided in, through the resolution cache, which
- * keeps each scope's apart for the batch (see `ResolutionCache::batch()`); and,
- * for each chunk of the checks, the resources' tenants, the policies attached
- * to the records and the records' attributes are read in bulk. Bulk reading
- * only supplies data: a resolver or provider that cannot read in bulk is asked
- * about each resource on its own, and a resource whose data cannot be read
- * fails its own check alone, when that check is reached.
+ * same evaluator, so its decision is the one a single check would make. A batch
+ * of one is decided as it stands, reading nothing ahead and holding nothing for
+ * later, so a single check costs what it did before bulk checks. What the
+ * checks of a larger batch share is read once rather than for each: the subject
+ * is resolved once for the batch; what the subject's grants, policies,
+ * boundaries and caps, the guardrails and the resource types' policies resolve
+ * to is read once in each scope the checks are decided in, through the
+ * resolution cache, which keeps each scope's apart for the batch, as it keeps
+ * what the tenant tree answers (see `ResolutionCache::batch()`); and, for each
+ * chunk of the checks, the resources' tenants and the policies attached to the
+ * records are read in bulk as the chunk starts, and the records' attributes
+ * when the chunk's first check on a type reads `resource`, for the records of
+ * that type decided in that check's scope. Bulk reading only supplies data: a
+ * resolver or provider that cannot read in bulk is asked about each resource on
+ * its own, and a resource whose data cannot be read fails its own check alone,
+ * when that check is reached.
  *
  * Each check is recorded as the last decision, and its `DecisionEvaluated`
  * dispatched, as soon as it is decided, before the next is decided, so the last
  * decision is the last check completed, a check failing part way leaves the one
  * before it, and an empty batch leaves it untouched. A write made meanwhile, by
  * a listener reacting to a decision say, empties what the cache holds, so every
- * later check reads the subject's grants, policies and the policies attached to
- * its resource afresh, as it would one check at a time. The resources' tenants
- * and attributes are read for a chunk as it starts, and a change to them made
- * while it is decided is seen from the next chunk.
+ * later check reads the subject's grants, policies, the policies attached to
+ * its resource and the tenant tree afresh, as it would one check at a time. The
+ * resources' tenants are read for a chunk as it starts, and their attributes
+ * when the chunk's first check on a type reads `resource`; a change to either
+ * made after it was read is seen from the next chunk.
  *
  * The checks are decided in chunks of `authorization.bulk.chunk_size` (500 by
  * default), and what a chunk read is released once it is decided.
@@ -102,25 +110,62 @@ final readonly class CheckBatch
             $inputs[$key] = $check instanceof CheckInput ? $check : throw InvalidCheckArgumentException::notACheck($key);
         }
 
-        $decide = function () use ($subject, $inputs): array {
-            $decisions = [];
+        $cache = \count($inputs) > 1 ? ResolutionCache::instance() : null;
 
-            foreach (\array_chunk($inputs, self::chunkSize(), true) as $chunk) {
-                $decisions += $this->decideChunk($subject, $chunk);
-            }
+        if ($cache === null) {
+            return $this->decideChunks($subject, $inputs);
+        }
 
-            return $decisions;
-        };
-
-        $cache = $inputs === [] ? null : ResolutionCache::instance();
-
-        return $cache === null ? $decide() : $cache->batch($decide);
+        return $cache->batch(fn (): array => $this->decideChunks($subject, $inputs));
     }
 
     /**
-     * Decide each check of one chunk, having read its resources' tenants, the
-     * policies attached to its records and, as they are first needed, its
-     * records' attributes in bulk, recording each decision as it is made. A
+     * Decide the check for the subject, as it stands: its resource told through
+     * the bound resolver, nothing read ahead, and the decision recorded and
+     * reported. Every check takes this path or `decideChunk()`, each deciding
+     * through the pipeline's `decide()` and recording through `record()`.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckInput  $check
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     */
+    public function decideOne(?Subject $subject, CheckInput $check): Decision
+    {
+        $reference = ResourceReferences::of($check->resource);
+
+        return $this->record($subject, $check, $reference, $this->pipeline->decide($subject, $check->action, $reference, $check->context));
+    }
+
+    /**
+     * Decide the checks a chunk at a time, or, for one check, as it stands.
+     *
+     * @template TKey of array-key
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
+     * @param  array<TKey, \SineMacula\Laravel\Authorization\Evaluation\CheckInput>  $inputs
+     * @return array<TKey, \SineMacula\Laravel\Authorization\Evaluation\Decision>
+     *
+     * @throws \Throwable
+     */
+    private function decideChunks(?Subject $subject, array $inputs): array
+    {
+        if (\count($inputs) === 1) {
+            return \array_map(fn (CheckInput $check): Decision => $this->decideOne($subject, $check), $inputs);
+        }
+
+        $decisions = [];
+
+        foreach (\array_chunk($inputs, self::chunkSize(), true) as $chunk) {
+            $decisions += $this->decideChunk($subject, $chunk);
+        }
+
+        return $decisions;
+    }
+
+    /**
+     * Decide each check of one chunk, having read its resources' tenants and
+     * the policies attached to its records in bulk, and, as they are first
+     * needed, its records' attributes, recording each decision as it is made. A
      * check whose resource could not be told throws when it is reached.
      *
      * @template TKey of array-key
@@ -135,12 +180,12 @@ final readonly class CheckBatch
     {
         $references = self::references($chunk);
 
-        // A check on its own reads exactly what it would read ahead.
-        if (\count($chunk) > 1 && ResolutionCache::instance() !== null) {
+        // Read ahead only into the cache, from which each check then reads.
+        if (ResolutionCache::instance() !== null) {
             $this->pipeline->prepare($subject, $references);
         }
 
-        $attributes = new ResourceAttributeBatch($references);
+        $attributes = new ResourceAttributeBatch($references, self::activeTenant());
         $decisions  = [];
 
         foreach ($chunk as $key => $check) {
@@ -200,6 +245,24 @@ final readonly class CheckBatch
         } catch (\Throwable $exception) {
             return $exception;
         }
+    }
+
+    /**
+     * Return the tenant the checks are decided in, which tells the scope each
+     * resource's check is decided in, or null for none, or for one that cannot
+     * be read, whose checks each fail on their own when they read it.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\Reference|null
+     */
+    private static function activeTenant(): ?Reference
+    {
+        try {
+            $tenant = TenantScope::currentTenant();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $tenant === null ? null : new Reference(...$tenant);
     }
 
     /**
