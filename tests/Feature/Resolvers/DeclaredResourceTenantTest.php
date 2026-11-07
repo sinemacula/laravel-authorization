@@ -5,6 +5,9 @@ declare(strict_types = 1);
 namespace Tests\Feature\Resolvers;
 
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Database\Query\Builder as QueryBuilder;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\After;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
@@ -14,9 +17,13 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Fixtures\QueryRecorder;
+use Tests\Fixtures\QueryScoping\RecordedTenantPost;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\Fixtures\QueryScoping\ScopedTicket;
+use Tests\Fixtures\QueryScoping\TenantScopedDocument;
 use Tests\Fixtures\QueryScoping\TenantScopedPost;
+use Tests\Fixtures\QueryScoping\UuidScopedDocument;
 use Tests\TestCase;
 
 /**
@@ -75,9 +82,83 @@ final class DeclaredResourceTenantTest extends TestCase
         self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, '999'));
         self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, 'abc'));
         self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, \str_repeat('9', 19)));
+        self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, \str_repeat('9', 11)));
         self::assertFalse($resolver->tenantOfRecord('posts', '1'));
         self::assertFalse($resolver->tenantOfRecord(StubIdentity::class, 'u1'));
         self::assertSame([['posts', '1'], [StubIdentity::class, 'u1']], $fallback->askedRecords);
+    }
+
+    /**
+     * A pair naming a string-keyed declared model is looked up whatever its
+     * key, a long run of digits included, which bounds only an integer key.
+     *
+     * @return void
+     */
+    public function testAPairNamingAStringKeyedModelLooksItsRecordUp(): void
+    {
+        $resolver = new DeclaredResourceTenant(new FixedResourceTenantResolver(null, false));
+        $digits   = \str_repeat('9', 19);
+
+        TenantScopedDocument::query()->create(['code' => 'doc-a', 'tenant_type' => 'teams', 'tenant_id' => 't1']);
+        TenantScopedDocument::query()->create(['code' => $digits, 'tenant_type' => 'teams', 'tenant_id' => 't2']);
+
+        self::assertEquals(new Reference('teams', 't1'), $resolver->tenantOfRecord(TenantScopedDocument::class, 'doc-a'));
+        self::assertEquals(new Reference('teams', 't2'), $resolver->tenantOfRecord(TenantScopedDocument::class, $digits));
+        self::assertFalse($resolver->tenantOfRecord(TenantScopedDocument::class, 'missing-doc'));
+    }
+
+    /**
+     * A key the key column could not hold names no record, so it is never
+     * looked up: a uuid column's key that is not a uuid, and one that is not
+     * UTF-8, deny inside a transaction that stays usable, on PostgreSQL too.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAKeyTheColumnCannotHoldNamesNoRecord(): void
+    {
+        $resolver = new DeclaredResourceTenant(new FixedResourceTenantResolver(null, false));
+        $id       = (string) Str::uuid();
+        $isSqlite = DB::connection()->getDriverName() === 'sqlite';
+
+        UuidScopedDocument::query()->create(['id' => $id, 'tenant_type' => 'teams', 'tenant_id' => 't1']);
+
+        // SQLite keeps any bytes, and is asked for them.
+        if ($isSqlite) {
+            UuidScopedDocument::query()->create(['id' => "\xff\xfe", 'tenant_type' => 'teams', 'tenant_id' => 't2']);
+        }
+
+        DB::transaction(static function () use ($resolver, $id, $isSqlite): void {
+            self::assertFalse($resolver->tenantOfRecord(UuidScopedDocument::class, 'not-a-uuid'));
+            self::assertEquals($isSqlite ? new Reference('teams', 't2') : false, $resolver->tenantOfRecord(UuidScopedDocument::class, "\xff\xfe"));
+            self::assertEquals(new Reference('teams', 't1'), $resolver->tenantOfRecord(UuidScopedDocument::class, $id));
+            self::assertSame($isSqlite ? 2 : 1, UuidScopedDocument::query()->count());
+        });
+
+        self::assertFalse(ResourceReferences::of([UuidScopedDocument::class, 'not-a-uuid']));
+    }
+
+    /**
+     * The record is looked up on the write connection, so a record just moved
+     * to another tenant is read as it is now.
+     *
+     * @return void
+     */
+    public function testThePairsRecordIsReadOnTheWriteConnection(): void
+    {
+        $post = RecordedTenantPost::query()->create(['tenant_type' => 'teams', 'tenant_id' => '5']);
+
+        QueryRecorder::reset();
+
+        $resolver = new DeclaredResourceTenant(new FixedResourceTenantResolver);
+
+        self::assertEquals(new Reference('teams', '5'), $resolver->tenantOfRecord(RecordedTenantPost::class, (string) $post->getKey())); // @phpstan-ignore cast.string
+
+        $lookups = \array_values(\array_filter(QueryRecorder::recorded(), static fn (QueryBuilder $query): bool => $query->wheres !== []));
+
+        self::assertCount(1, $lookups);
+        self::assertTrue($lookups[0]->useWritePdo);
     }
 
     /**

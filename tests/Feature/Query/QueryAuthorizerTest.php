@@ -23,6 +23,8 @@ use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Query\Dialects\SqliteDialect;
+use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Query\Refusal;
@@ -40,6 +42,7 @@ use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Fixtures\QueryScoping\NumberedTenantPost;
 use Tests\Fixtures\QueryScoping\ScopedDocument;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\Fixtures\QueryScoping\ScopedTicket;
@@ -191,6 +194,95 @@ final class QueryAuthorizerTest extends TestCase
         self::assertSame(['team none', 'team 5'], $kept(new Reference('teams', '5')));
         self::assertSame(['team none'], $kept(new Reference('teams', '05')));
         self::assertSame(['team none'], $kept(StubTenant::query()->create(['id' => '5'])));
+
+        // The rows of another tenant type compile to no row, which drops out.
+        $condition = self::authorizer()->compile($this->resolveRequest($user, StubTenant::query()->findOrFail('5'))->currentSubject(), new ScopedTicket, 'posts:view');
+
+        self::assertStringNotContainsString(QueryAuthorizer::NO_ROW, $condition);
+    }
+
+    /**
+     * A row of no tenant whose tenant id column holds a real number, which
+     * SQLite alone keeps in an integer column and on which `check()` throws, is
+     * left out, whichever tenant column is null.
+     *
+     * @return void
+     */
+    public function testARowOfNoTenantCheckCannotReadIsLeftOut(): void
+    {
+        if (DB::connection()->getDriverName() !== 'sqlite') {
+            self::markTestSkipped('Only SQLite keeps a real number in an integer column.');
+        }
+
+        $user = StubIdentity::create(['id' => 'u1']);
+
+        $user->attachPolicy(self::storedPolicy('allow', [['effect' => 'allow', 'actions' => ['posts:view']]]));
+
+        foreach (['none' => [null, null], 'type' => ['teams', null], 'half' => [null, 1.5], 'huge' => [null, 1e20], 'typed' => ['teams', 2.5]] as $title => [$type, $id]) {
+            NumberedTenantPost::query()->create(['title' => $title, 'tenant_type' => $type, 'tenant_id' => $id]);
+        }
+
+        $manager   = $this->resolveRequest($user);
+        $condition = self::authorizer()->compile($manager->currentSubject(), new NumberedTenantPost, 'posts:view');
+        $allowed   = [];
+
+        // A throw counts as a deny.
+        foreach (NumberedTenantPost::query()->orderBy('id')->get() as $post) {
+            $allowed = rescue(static fn (): bool => $manager->can('posts:view', $post), false, false) === true ? [...$allowed, $post->getAttribute('title')] : $allowed;
+        }
+
+        $kinds = DB::select('select typeof(tenant_id) as kind from scoped_numbered_posts where title in (\'half\', \'huge\', \'typed\')');
+
+        self::assertSame(['real', 'real', 'real'], \array_column($kinds, 'kind'));
+        self::assertSame(['none', 'type'], $allowed);
+        self::assertSame($allowed, NumberedTenantPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all());
+    }
+
+    /**
+     * A row of the active tenant is matched by comparing the bare tenant
+     * columns first, which an index on them serves, then byte for byte.
+     *
+     * @return void
+     */
+    public function testARowOfTheActiveTenantIsMatchedThroughAnIndex(): void
+    {
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $tenant  = new Reference('teams', '5');
+        $model   = new NumberedTenantPost;
+        $grammar = DB::connection()->getQueryGrammar();
+
+        $user->attachPolicy(self::storedPolicy('allow', [['effect' => 'allow', 'actions' => ['posts:view']]]));
+
+        foreach ([['teams', 5], ['teams', 7], ['other', 5], [null, null]] as $index => [$type, $id]) {
+            NumberedTenantPost::query()->create(['title' => 'p' . $index, 'tenant_type' => $type, 'tenant_id' => $id]);
+        }
+
+        $condition = self::authorizer()->compile($this->resolveRequest($user, $tenant)->currentSubject(), $model, 'posts:view');
+        $shape     = DB::connection()->getDriverName();
+
+        foreach (['tenant_type' => 'teams', 'tenant_id' => '5'] as $column => $value) {
+            $wrapped = $grammar->wrap($model->qualifyColumn($column));
+
+            self::assertStringContainsString($wrapped . ($shape === 'sqlite' ? ' IN (' : ' = '), $condition);
+        }
+
+        self::assertSame(['p0', 'p3'], NumberedTenantPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all());
+
+        if ($shape !== 'sqlite') {
+            return;
+        }
+
+        $dialect = new SqliteDialect;
+        $match   = \implode(' AND ', [
+            $dialect->equalsIndexed('tenant_type', ColumnKind::STRING, 'teams'),
+            $dialect->equalsIndexed('tenant_id', ColumnKind::INTEGER, '5'),
+            $dialect->equalsBytes('tenant_type', 'teams'),
+            $dialect->equalsBytes('tenant_id', '5'),
+        ]);
+
+        $plan = \array_column(DB::select('EXPLAIN QUERY PLAN select * from scoped_numbered_posts where ' . $match), 'detail');
+
+        self::assertMatchesRegularExpression('/USING (COVERING )?INDEX/', \implode("\n", $plan));
     }
 
     /**
@@ -297,11 +389,16 @@ final class QueryAuthorizerTest extends TestCase
 
         self::assertSame(QueryAuthorizer::NO_ROW, self::authorizer()->compile($subject, new ScopedPost, 'posts:view'));
 
-        $policy  = self::attachToResource([ScopedPost::class, '4'], [['effect' => 'deny', 'actions' => ['posts:*']]]);
+        $policy = self::attachToResource([ScopedPost::class, '4'], [['effect' => 'deny', 'actions' => ['posts:*']]]);
+
+        self::attachToResource([ScopedPost::class, '5'], [['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => ['user:other']]]);
+
         $refusal = self::refusalOf(static fn (): string => self::authorizer()->compile($subject, new ScopedPost, 'posts:view'));
 
         self::assertSame([RefusalReason::RECORD_ATTACHMENT], $refusal->reasons());
-        self::assertSame($policy->name . '[' . $policy->getKey() . ']', $refusal->refusals[0]->policy); // @phpstan-ignore binaryOp.invalid
+        self::assertNull($refusal->refusals[0]->policy);
+        self::assertSame('a policy attached to a record of the type names the action', $refusal->refusals[0]->detail);
+        self::assertStringNotContainsString((string) $policy->getKey(), $refusal->getMessage()); // @phpstan-ignore cast.string
         self::assertSame(QueryAuthorizer::NO_ROW, self::authorizer(self::pipeline()->withPolicies([]))->compile($subject, new ScopedPost, 'posts:view'));
     }
 

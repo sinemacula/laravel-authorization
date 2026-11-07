@@ -381,10 +381,13 @@ return [
     | owns the record a check is about, named by its model or by a `(type,
     | id)` pair. A resource of the active tenant, or of a tenant below it, is
     | then decided in its own tenant, and one of any other tenant is denied as
-    | `tenant_scope` unless a platform-wide grant covers it. The shipped
-    | default knows no record's tenant, so nothing is refused for its tenant
-    | until you bind your own (reading a tenant column, say). A resource
-    | implementing `AuthorizableResource` names its own tenant.
+    | `tenant_scope` unless a platform-wide grant covers it. A model
+    | implementing `QueryableResource` is always answered from its
+    | `resourceTenancy()` declaration, ahead of this class; this class answers
+    | every other model, and the shipped default knows none of their tenants,
+    | so nothing else is refused for its tenant until you bind your own
+    | (reading a tenant column, say). A resource implementing
+    | `AuthorizableResource` names its own tenant.
     |
     */
 

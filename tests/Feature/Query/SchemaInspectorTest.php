@@ -58,6 +58,34 @@ final class SchemaInspectorTest extends TestCase
     }
 
     /**
+     * The same table on another connection is read apart, once.
+     *
+     * @return void
+     */
+    public function testTheSameTableOnAnotherConnectionIsReadApart(): void
+    {
+        config()->set('database.connections.other', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+
+        /** @var \Illuminate\Database\Connection $other */
+        $other = DB::connection('other');
+
+        $other->statement('create table scoped_posts (id integer primary key, other_col text)');
+
+        $inspector = new SchemaInspector;
+        $reads     = 0;
+
+        self::assertSame(['id', 'title', 'status', 'tenant_type', 'tenant_id'], \array_keys($inspector->columns(DB::connection(), 'scoped_posts')));
+        self::assertSame(['id', 'other_col'], \array_keys($inspector->columns($other, 'scoped_posts')));
+
+        $other->listen(static function () use (&$reads): void {
+            $reads++;
+        });
+
+        self::assertSame(['id', 'other_col'], \array_keys($inspector->columns($other, 'scoped_posts')));
+        self::assertSame(0, $reads);
+    }
+
+    /**
      * Whether a connection is UTF-8 is asked of its dialect once.
      *
      * @return void

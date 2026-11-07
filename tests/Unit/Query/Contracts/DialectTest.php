@@ -32,7 +32,7 @@ final class DialectTest extends TestCase
     {
         $methods = \array_map(static fn (\ReflectionMethod $method): string => $method->getName(), (new \ReflectionClass(Dialect::class))->getMethods());
 
-        self::assertSame(['kindOf', 'isUtf8', 'keyGuard', 'keyLength', 'equalsBytes'], $methods);
+        self::assertSame(['kindOf', 'isUtf8', 'keyGuard', 'keyLength', 'readable', 'equalsBytes', 'equalsIndexed'], $methods);
 
         foreach ([SqliteDialect::class, PostgresDialect::class, MySqlDialect::class] as $dialect) {
             self::assertContains(Dialect::class, \class_implements($dialect), $dialect);

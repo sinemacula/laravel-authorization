@@ -6,6 +6,7 @@ namespace Tests\Feature\Resolvers;
 
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -22,6 +23,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\RecordingLogger;
+use Tests\Fixtures\QueryRecorder;
+use Tests\Fixtures\QueryRecordingPolicy;
 use Tests\TestCase;
 
 /**
@@ -389,43 +392,83 @@ final class ResourcePolicyResolverTest extends TestCase
     }
 
     /**
-     * Every policy attached to a record of the type is read, once, in any
-     * tenant and for any application, and none attached to the type alone or to
-     * another type's records; a type longer than the table stores has none, and
-     * a document that cannot be read throws.
+     * A policy attached to a record of the type naming the action is found, in
+     * any tenant and for any application, whatever its principals; one attached
+     * to the type alone, to another type's records, or naming another action is
+     * not; a type longer than the table stores has none, one as long as it
+     * stores is read, and a document that cannot be read throws.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testEveryPolicyAttachedToARecordOfTheTypeIsRead(): void
+    public function testAPolicyAttachedToARecordOfTheTypeIsFound(): void
     {
-        $service = self::service();
-        $tenant  = new Reference('teams', '5');
-        $first   = self::sharing('first');
-        $second  = self::sharing('second');
+        $service  = self::service();
+        $resolver = new ResourcePolicyResolver;
+        $long     = \str_repeat('p', Reference::MAX_BYTES);
 
-        $service->attach($first, ['posts', '1']);
-        $service->attach($first, ['posts', '2'], $tenant, true, 'admin');
-        $service->attach($second, ['posts', '3'], $tenant);
         $service->attach(self::sharing('type'), 'posts');
         $service->attach(self::sharing('other'), ['comments', '1']);
+        $service->attach(self::sharing('edit', 'posts:edit'), ['posts', '1']);
 
-        $names = \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, (new ResourcePolicyResolver)->recordPolicies('posts'));
+        self::assertFalse($resolver->hasRecordPolicyFor('posts', 'posts:read'));
+        self::assertTrue($resolver->hasRecordPolicyFor('posts', 'posts:edit'));
 
-        \sort($names);
+        $service->attach(self::sharing('read'), ['posts', '2'], new Reference('teams', '5'), true, 'admin');
+        $service->attach(self::sharing('long'), [$long, '1']);
 
-        self::assertSame(['first', 'second'], $names);
-        self::assertSame([], (new ResourcePolicyResolver)->recordPolicies(\str_repeat('p', 192)));
+        self::assertTrue($resolver->hasRecordPolicyFor('posts', 'posts:read'));
+        self::assertTrue($resolver->hasRecordPolicyFor($long, 'posts:read'));
+        self::assertFalse($resolver->hasRecordPolicyFor($long . 'p', 'posts:read'));
 
         $id = (string) Str::uuid();
 
         DB::table('policies')->insert(['id' => $id, 'name' => 'unreadable', 'document' => '{"statements":[{"effect":"allow"}]}', 'created_at' => now(), 'updated_at' => now()]);
-        DB::table('resource_policies')->insert(['policy_id' => $id, 'resource_type' => 'posts', 'resource_id' => '9']);
+        DB::table('resource_policies')->insert(['policy_id' => $id, 'resource_type' => 'comments', 'resource_id' => '9']);
 
         $this->expectException(InvalidPolicyDocumentException::class);
 
-        (new ResourcePolicyResolver)->recordPolicies('posts');
+        $resolver->hasRecordPolicyFor('comments', 'posts:edit');
+    }
+
+    /**
+     * The attached policies are read a page at a time, on the write connection,
+     * and none after a page holding one that names the action.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRecordPoliciesAreReadAPageAtATimeUntilOneNamesTheAction(): void
+    {
+        $service = self::service();
+
+        for ($index = 0; $index < 101; $index++) {
+            $service->attach(self::sharing('read-' . $index), ['posts', (string) $index]);
+        }
+
+        config()->set('authorization.models.policy', QueryRecordingPolicy::class);
+        QueryRecorder::reset();
+
+        /** @var \ArrayObject<int, string> $pages */
+        $pages = new \ArrayObject;
+
+        DB::listen(static function (QueryExecuted $query) use ($pages): void {
+            $pages[] = \strtolower($query->sql);
+        });
+
+        self::assertTrue((new ResourcePolicyResolver)->hasRecordPolicyFor('posts', 'posts:read'));
+        self::assertCount(1, $pages);
+        self::assertStringContainsString('limit 100', $pages[0]);
+        self::assertTrue(QueryRecorder::recorded()[0]->useWritePdo);
+
+        $pages->exchangeArray([]);
+
+        self::assertFalse((new ResourcePolicyResolver)->hasRecordPolicyFor('posts', 'posts:edit'));
+        self::assertCount(2, $pages);
+
+        DB::getEventDispatcher()?->forget(QueryExecuted::class);
     }
 
     /**
@@ -521,13 +564,14 @@ final class ResourcePolicyResolverTest extends TestCase
     }
 
     /**
-     * Create a policy whose allow names its principals.
+     * Create a policy whose allow of the action names its principals.
      *
      * @param  string  $name
+     * @param  string  $action
      * @return \SineMacula\Laravel\Authorization\Models\Policy
      */
-    private static function sharing(string $name): Policy
+    private static function sharing(string $name, string $action = 'posts:read'): Policy
     {
-        return Policy::create(['name' => $name, 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]]]);
+        return Policy::create(['name' => $name, 'document' => ['statements' => [['effect' => 'allow', 'actions' => [$action], 'principals' => ['user:1']]]]]);
     }
 }

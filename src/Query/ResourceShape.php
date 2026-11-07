@@ -62,6 +62,7 @@ final readonly class ResourceShape
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceTenancy  $tenancy
      * @param  string|null  $typeColumn
      * @param  string|null  $idColumn
+     * @param  \SineMacula\Laravel\Authorization\Query\Enums\ColumnKind|null  $idKind
      */
     private function __construct(
 
@@ -91,11 +92,14 @@ final readonly class ResourceShape
 
         /** The tenant id column, qualified and wrapped, or null for a tenantless model. */
         public ?string $idColumn,
+
+        /** The tenant id column's kind, or null for a tenantless model. */
+        public ?ColumnKind $idKind = null,
     ) {}
 
     /**
      * Return the shape of the model, refusing a model the scope cannot compile
-     * exactly.
+     * exactly; every refusal names the model's morph type.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @param  string  $action
@@ -106,8 +110,9 @@ final readonly class ResourceShape
      */
     public static function of(Model $model, string $action, SchemaInspector $inspector): self
     {
-        $refuse = static function (RefusalReason $reason, ?string $key = null, ?string $detail = null) use ($model, $action): never {
-            throw QueryScopeRefusedException::of($action, $model::class, new Refusal($reason, null, null, $key, $detail));
+        $type   = $model->getMorphClass();
+        $refuse = static function (RefusalReason $reason, ?string $key = null, ?string $detail = null) use ($type, $action): never {
+            throw QueryScopeRefusedException::of($action, $type, new Refusal($reason, null, null, $key, $detail));
         };
 
         if (!$model instanceof QueryableResource) {
@@ -130,7 +135,6 @@ final readonly class ResourceShape
         $tenancy = $model::resourceTenancy();
         $kinds   = self::kindsOf($model, $connection, $dialect, $inspector, $tenancy, $refuse);
         $wrap    = static fn (?string $column): ?string => $column === null ? null : $connection->getQueryGrammar()->wrap($model->qualifyColumn($column));
-        $type    = $model->getMorphClass();
 
         if (\strlen($type) + 1 + self::BOUNDED_KEY_BYTES >= \PHP_MAXPATHLEN) {
             $refuse(RefusalReason::MODEL_CONTRACT, null, 'the morph type is too long to identify a record');
@@ -139,7 +143,10 @@ final readonly class ResourceShape
         /** @var string $key */
         $key = $wrap($model->getKeyName());
 
-        return new self($type, $model->getTable(), $dialect, $key, $kinds[0], self::isIntegerCast($model), $tenancy, $wrap($tenancy->typeColumn), $wrap($tenancy->idColumn));
+        $idKind  = $tenancy->isTenantless() ? null : $kinds[\count($kinds) - 1];
+        $columns = [$wrap($tenancy->typeColumn), $wrap($tenancy->idColumn), $idKind];
+
+        return new self($type, $model->getTable(), $dialect, $key, $kinds[0], self::isIntegerCast($model), $tenancy, ...$columns);
     }
 
     /**

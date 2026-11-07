@@ -100,6 +100,31 @@ final class SqliteDialectTest extends TestCase
     }
 
     /**
+     * A tenant column is readable when it holds no real number.
+     *
+     * @return void
+     */
+    public function testATenantColumnIsReadableUnlessItHoldsARealNumber(): void
+    {
+        self::assertSame('typeof("c") IN (\'null\', \'integer\', \'text\', \'blob\')', (new SqliteDialect)->readable('"c"'));
+    }
+
+    /**
+     * The bare column is compared with the value as text and as a blob,
+     * whatever its kind.
+     *
+     * @return void
+     */
+    public function testTheBareColumnIsComparedWithTheValueAsTextAndAsABlob(): void
+    {
+        $dialect = new SqliteDialect;
+
+        foreach ([ColumnKind::STRING, ColumnKind::INTEGER] as $kind) {
+            self::assertSame('"c" IN (CAST(X\'612762\' AS TEXT), X\'612762\')', $dialect->equalsIndexed('"c"', $kind, 'a\'b'));
+        }
+    }
+
+    /**
      * Return a connection whose one row is the given.
      *
      * @param  array<string, string>  $row

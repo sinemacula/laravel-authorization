@@ -10,6 +10,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Query\Dialects\MySqlDialect;
 use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
+use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 
 /**
  * Unit tests for the SQL a query scope writes on MySQL.
@@ -101,6 +102,42 @@ final class MySqlDialectTest extends TestCase
     public function testAColumnEqualsAValueByItsBytes(): void
     {
         self::assertSame('CAST(`c` AS BINARY) = X\'612762\'', (new MySqlDialect)->equalsBytes('`c`', 'a\'b'));
+    }
+
+    /**
+     * Every tenant column of a kind the scope compares is read as a string, an
+     * integer or null.
+     *
+     * @return void
+     */
+    public function testEveryTenantColumnIsReadable(): void
+    {
+        self::assertSame(QueryAuthorizer::EVERY_ROW, (new MySqlDialect)->readable('`c`'));
+    }
+
+    /**
+     * The bare column is compared with the value it could hold: a string column
+     * with UTF-8 as a utf8mb4 literal, an integer column with an integer's
+     * decimal text, unsigned ones beyond PHP's integers included; with any
+     * other, no row is.
+     *
+     * @return void
+     */
+    public function testTheBareColumnIsComparedWithAValueItCouldHold(): void
+    {
+        $dialect = new MySqlDialect;
+
+        self::assertSame('`c` = _utf8mb4 X\'612762\'', $dialect->equalsIndexed('`c`', ColumnKind::STRING, 'a\'b'));
+        self::assertSame(QueryAuthorizer::NO_ROW, $dialect->equalsIndexed('`c`', ColumnKind::STRING, "\xff"));
+        self::assertSame('`c` = 18446744073709551615', $dialect->equalsIndexed('`c`', ColumnKind::INTEGER, '18446744073709551615'));
+        self::assertSame('`c` = -5', $dialect->equalsIndexed('`c`', ColumnKind::INTEGER, '-5'));
+        self::assertSame('`c` = 0', $dialect->equalsIndexed('`c`', ColumnKind::INTEGER, '0'));
+
+        foreach (['05', '-0', '5a', ' 5', \str_repeat('9', 21), ''] as $value) {
+            self::assertSame(QueryAuthorizer::NO_ROW, $dialect->equalsIndexed('`c`', ColumnKind::INTEGER, $value), $value);
+        }
+
+        self::assertSame(QueryAuthorizer::NO_ROW, $dialect->equalsIndexed('`c`', ColumnKind::UUID, 'a'));
     }
 
     /**

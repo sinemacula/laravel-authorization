@@ -5,8 +5,10 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Query\Dialects;
 
 use Illuminate\Database\Connection;
+use Illuminate\Support\Str;
 use SineMacula\Laravel\Authorization\Query\Contracts\Dialect;
 use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
+use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 
 /**
  * The SQL `whereAuthorized()` writes on PostgreSQL.
@@ -16,7 +18,19 @@ use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
  * uuid its canonical lower-case form, as PHP reads them, and for text the bytes
  * PHP reads, whatever the column's collation. PostgreSQL text never holds a NUL
  * byte. The server and the client encodings must both be UTF8, so the bytes
- * compared are the bytes PHP reads.
+ * compared are the bytes PHP reads. PHP reads every column of these kinds as a
+ * string or an integer.
+ *
+ * The plain comparison an index serves compares a text column with the value
+ * decoded from its hex, under the column's collation, under which equal bytes
+ * are equal; an integer column with its digits; and a uuid column with its
+ * canonical text. A value that is not UTF-8 or holds a NUL byte, which no text
+ * holds, or that no integer or uuid reads as, is compared with nothing, since
+ * PostgreSQL would raise an error rather than find no row.
+ *
+ * It also tells whether a key column can be compared with a value at all, which
+ * the resolver of a declared model's tenant asks before looking a record up,
+ * since an error would abort the transaction around it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,6 +47,13 @@ final readonly class PostgresDialect implements Dialect
         'varchar' => ColumnKind::STRING,
         'text'    => ColumnKind::STRING,
         'uuid'    => ColumnKind::UUID,
+    ];
+
+    /** @var array<string, int> The largest value of each integer type. */
+    private const array INTEGER_MAX = [
+        'int2' => 32767,
+        'int4' => 2147483647,
+        'int8' => \PHP_INT_MAX,
     ];
 
     /**
@@ -98,6 +119,42 @@ final readonly class PostgresDialect implements Dialect
     }
 
     /**
+     * Determine whether a key column of the type the schema builder describes
+     * can be compared with the value without PostgreSQL raising an error: an
+     * integer column with the digits of a value its type holds, a uuid column
+     * with a uuid, and any other with UTF-8 text.
+     *
+     * @param  array<string, mixed>  $column
+     * @param  string  $value
+     * @return bool
+     */
+    public function isComparableKey(array $column, string $value): bool
+    {
+        $type      = \is_string($column['type_name'] ?? null) ? \strtolower($column['type_name']) : '';
+        $max       = self::INTEGER_MAX[$type] ?? null;
+        $isInteger = \preg_match('/\A-?\d{1,18}\z/', $value) === 1 && (int) $value >= -($max ?? 0) - 1 && (int) $value <= ($max ?? 0);
+
+        return match (true) {
+            $max !== null    => $isInteger,
+            $type === 'uuid' => Str::isUuid($value),
+            default          => \mb_check_encoding($value, 'UTF-8'),
+        };
+    }
+
+    /**
+     * Return the condition every row's tenant column meets, since PHP reads
+     * each kind the scope compares as a string, an integer or null.
+     *
+     * @param  string  $column
+     * @return string
+     */
+    #[\Override]
+    public function readable(string $column): string
+    {
+        return QueryAuthorizer::EVERY_ROW;
+    }
+
+    /**
      * Return the condition a row's column meets when the UTF-8 bytes of its
      * text are exactly the value's.
      *
@@ -109,5 +166,31 @@ final readonly class PostgresDialect implements Dialect
     public function equalsBytes(string $column, string $value): string
     {
         return "convert_to(CAST({$column} AS TEXT), 'UTF8') = decode('" . \bin2hex($value) . '\', \'hex\')';
+    }
+
+    /**
+     * Return a condition comparing the bare column with the value: a text
+     * column with the value decoded, when it is UTF-8 with no NUL byte; an
+     * integer column with its digits, when it is an integer's decimal text, as
+     * PHP reads one; a uuid column with the value, when it is a uuid's
+     * canonical lower-case text, as PHP reads one.
+     *
+     * @param  string  $column
+     * @param  \SineMacula\Laravel\Authorization\Query\Enums\ColumnKind  $kind
+     * @param  string  $value
+     * @return string
+     */
+    #[\Override]
+    public function equalsIndexed(string $column, ColumnKind $kind, string $value): string
+    {
+        $isText = \mb_check_encoding($value, 'UTF-8') && !\str_contains($value, "\0");
+        $isUuid = \preg_match('/\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/', $value) === 1;
+
+        return match (true) {
+            $kind === ColumnKind::STRING  && $isText                          => "{$column} = convert_from(decode('" . \bin2hex($value) . '\', \'hex\'), \'UTF8\')',
+            $kind === ColumnKind::INTEGER && (string) (int) $value === $value => "{$column} = {$value}",
+            $kind === ColumnKind::UUID    && $isUuid                          => "{$column} = '{$value}'",
+            default                                                           => QueryAuthorizer::NO_ROW,
+        };
     }
 }

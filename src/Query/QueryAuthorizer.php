@@ -13,9 +13,8 @@ use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
-use SineMacula\Laravel\Authorization\Evaluation\Policy;
-use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
+use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
@@ -31,7 +30,8 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
 /**
  * Compiles the condition `whereAuthorized()` adds to a query: the rows it keeps
  * are exactly the rows `check()` allows (AUTHZ-10.1), or it refuses
- * (AUTHZ-10.2, N64). Part 1 compiles only statements over the whole type (N68).
+ * (AUTHZ-10.2, N64). This release compiles only statements over the whole type
+ * (N68).
  *
  * The rows of the model are split into classes, each decided in one scope as
  * `check()` decides its rows (see `ResourceScope`): a tenantless model's rows,
@@ -40,7 +40,7 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * Every other row of a tenant-bearing model is denied by `check()` as
  * `tenant_scope`, so it is left out; that holds only with the flat tenant tree
  * and when the subject holds no platform-wide grant of the action, which would
- * admit it, so anything else is refused (part 2 adds them).
+ * admit it, so anything else is refused (not yet compiled).
  *
  * Each class is decided once, through the decision pipeline itself, from the
  * sources it gathers in the class's scope, its principal selectors fresh for
@@ -57,8 +57,14 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * `ResourceReferences` requires), and, where a material statement's pattern is
  * matched against the identifier, whose identifier `fnmatch()` would not refuse
  * as too long. A row of a tenant has a tenant of at most 191 bytes, the active
- * one's, so no row it keeps is one `check()` throws on. A guest, an inactive
- * subject or a morph type with a NUL byte keeps no row.
+ * one's, and a row of no tenant holds nothing in its tenant columns PHP would
+ * read as other than a string, an integer or null, so no row it keeps is one
+ * `check()` throws on. A guest, an inactive subject or a morph type with a NUL
+ * byte keeps no row.
+ *
+ * A row of the active tenant is matched by comparing each bare tenant column
+ * with the tenant first, so an index on the columns can be used, and then by
+ * the exact byte comparison; the first keeps every row the second does.
  *
  * Nothing is cached: every call compiles from the state at that instant.
  *
@@ -157,9 +163,10 @@ final readonly class QueryAuthorizer
     /**
      * Return each class of rows, as the tenant its rows are decided as having
      * and the condition a row of it meets: every row of a tenantless model;
-     * else the rows of no tenant and, when a tenant is active, the rows of it.
-     * A tenant-bearing model is refused unless the tree is flat and the subject
-     * holds no platform-wide grant of the action.
+     * else the rows of no tenant whose tenant columns the tenant resolver can
+     * read, and, when a tenant is active, the rows of it. A tenant-bearing
+     * model is refused unless the tree is flat and the subject holds no
+     * platform-wide grant of the action.
      *
      * @param  \SineMacula\Laravel\Authorization\Query\ResourceShape  $shape
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
@@ -187,8 +194,13 @@ final readonly class QueryAuthorizer
             throw QueryScopeRefusedException::of($action, $shape->type, new Refusal($reason));
         }
 
+        // The resolver reads both columns before either's null, so a row of no
+        // tenant is kept only when it can read them.
         $active   = TenantScope::currentChain()->tenant();
-        $tenantOf = $shape->typeColumn === null ? "{$shape->idColumn} IS NULL" : "({$shape->typeColumn} IS NULL OR {$shape->idColumn} IS NULL)";
+        $columns  = \array_filter([$shape->typeColumn, $shape->idColumn], static fn (?string $column): bool => $column !== null);
+        $readable = \array_map($shape->dialect->readable(...), \array_values($columns));
+        $isNull   = $shape->typeColumn === null ? "{$shape->idColumn} IS NULL" : "({$shape->typeColumn} IS NULL OR {$shape->idColumn} IS NULL)";
+        $tenantOf = self::all([$isNull, ...$readable]);
 
         return $active === null ? [[null, $tenantOf]] : [[null, $tenantOf], [$active, self::ofTenant($shape, $active)]];
     }
@@ -205,16 +217,37 @@ final readonly class QueryAuthorizer
     {
         /** @var string $idColumn */
         $idColumn = $shape->idColumn;
-        $isFixed  = $shape->tenancy->type === $tenant->type ? self::EVERY_ROW : self::NO_ROW;
-        $isType   = $shape->typeColumn    === null ? $isFixed : $shape->dialect->equalsBytes($shape->typeColumn, $tenant->type);
 
-        return self::all([$isType, $shape->dialect->equalsBytes($idColumn, $tenant->id)]);
+        /** @var \SineMacula\Laravel\Authorization\Query\Enums\ColumnKind $idKind */
+        $idKind  = $shape->idKind;
+        $isFixed = $shape->tenancy->type === $tenant->type ? self::EVERY_ROW : self::NO_ROW;
+        $isType  = $shape->typeColumn    === null ? [$isFixed] : self::equals($shape, $shape->typeColumn, ColumnKind::STRING, $tenant->type);
+
+        return self::all([...$isType, ...self::equals($shape, $idColumn, $idKind, $tenant->id)]);
+    }
+
+    /**
+     * Return the conditions a row whose column holds exactly the value meets:
+     * the bare column's comparison, which an index can serve and which every
+     * such row meets, then the exact byte comparison.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Query\ResourceShape  $shape
+     * @param  string  $column
+     * @param  \SineMacula\Laravel\Authorization\Query\Enums\ColumnKind  $kind
+     * @param  string  $value
+     * @return list<string>
+     */
+    private static function equals(ResourceShape $shape, string $column, ColumnKind $kind, string $value): array
+    {
+        return [$shape->dialect->equalsIndexed($column, $kind, $value), $shape->dialect->equalsBytes($column, $value)];
     }
 
     /**
      * Refuse the query when a policy attached to a record of the type names the
-     * action, or cannot be read: part 1 compiles no record's attachment. A
-     * `withPolicies()` override reads no attachment, so nothing is refused.
+     * action, whatever its principals, or cannot be read: this release compiles
+     * no attachment to a record. One refusal says so, naming no policy, however
+     * many there are. A `withPolicies()` override reads no attachment, so
+     * nothing is refused.
      *
      * @param  \SineMacula\Laravel\Authorization\Query\ResourceShape  $shape
      * @param  string  $action
@@ -224,19 +257,18 @@ final readonly class QueryAuthorizer
     private function screenAttachments(ResourceShape $shape, string $action, StatementScreen $screen): void
     {
         try {
-            $policies = $this->resourcePolicies?->recordPolicies($shape->type) ?? [];
+            $isAttached = $this->resourcePolicies?->hasRecordPolicyFor($shape->type, $action) ?? false;
         } catch (InvalidPolicyDocumentException) {
-            $screen->refuse(new Refusal(RefusalReason::INVALID_POLICY, null, null, null, 'a policy attached to a record cannot be read'));
+            $isAttached = false;
 
+            $screen->refuse(new Refusal(RefusalReason::INVALID_POLICY, null, null, null, 'a policy attached to a record cannot be read'));
+        }
+
+        if (!$isAttached) {
             return;
         }
 
-        $covers   = static fn (Statement $statement): bool => $statement->coversAction($action);
-        $material = \array_filter($policies, static fn (Policy $policy): bool => \array_filter($policy->statements, $covers) !== []);
-
-        foreach ($material as $policy) {
-            $screen->refuse(new Refusal(RefusalReason::RECORD_ATTACHMENT, $policy->name . ($policy->id === null ? '' : "[{$policy->id}]")));
-        }
+        $screen->refuse(new Refusal(RefusalReason::RECORD_ATTACHMENT, null, null, null, 'a policy attached to a record of the type names the action'));
     }
 
     /**
@@ -259,7 +291,7 @@ final readonly class QueryAuthorizer
     private function decideClass(ResourceShape $shape, Subject $subject, string $action, array $context, ?Reference $tenant, StatementScreen $screen): string
     {
         $resource    = ResourceReference::record($shape->type, '*', $tenant);
-        $isPatterned = false;
+        $isPatterned = null;
 
         $decide = function () use ($subject, $action, $context, $resource, $screen, &$isPatterned): Decision {
             try {
@@ -275,7 +307,7 @@ final readonly class QueryAuthorizer
             return $screen->refusals() === [] ? $this->pipeline->weigh($sources, $action, $resource) : Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
         };
 
-        return ResourceScope::decide($subject, $action, $resource, $decide)->isAllowed() ? self::shortKey($shape, $isPatterned) : self::NO_ROW;
+        return ResourceScope::decide($subject, $action, $resource, $decide)->isAllowed() ? self::shortKey($shape, $isPatterned === true) : self::NO_ROW;
     }
 
     /**
@@ -302,7 +334,7 @@ final readonly class QueryAuthorizer
      */
     private static function all(array $conditions): string
     {
-        $conditions = \array_values(\array_unique(\array_diff($conditions, [self::EVERY_ROW])));
+        $conditions = \array_values(\array_diff($conditions, [self::EVERY_ROW]));
 
         return \in_array(self::NO_ROW, $conditions, true) ? self::NO_ROW : self::joined($conditions, ' AND ', self::EVERY_ROW);
     }
@@ -315,7 +347,7 @@ final readonly class QueryAuthorizer
      */
     private static function any(array $conditions): string
     {
-        $conditions = \array_values(\array_unique(\array_diff($conditions, [self::NO_ROW])));
+        $conditions = \array_values(\array_diff($conditions, [self::NO_ROW]));
 
         return \in_array(self::EVERY_ROW, $conditions, true) ? self::EVERY_ROW : self::joined($conditions, ' OR ', self::NO_ROW);
     }

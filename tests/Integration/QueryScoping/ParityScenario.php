@@ -32,6 +32,7 @@ use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\InvariantRequirementChecker;
+use Tests\Fixtures\QueryScoping\NumberedTenantPost;
 use Tests\Fixtures\QueryScoping\ScopedDocument;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\Fixtures\QueryScoping\ScopedTicket;
@@ -43,8 +44,8 @@ use Tests\Fixtures\QueryScoping\TenantScopedPost;
  * the subject's grants, policies, boundaries, guardrails and resource policies,
  * the request's tenant, application and session, the manager the query is
  * scoped through, the caller's context and the query itself, drawn from a seed
- * within the constructs part 1 compiles. Every choice is logged, so a failure
- * names the scenario.
+ * within the constructs this release compiles. Every choice is logged, so a
+ * failure names the scenario.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,7 +57,7 @@ use Tests\Fixtures\QueryScoping\TenantScopedPost;
 final class ParityScenario
 {
     /** @var list<class-string<\Illuminate\Database\Eloquent\Model>> The models a scenario queries. */
-    private const array MODELS = [ScopedPost::class, ScopedDocument::class, TenantScopedPost::class, TenantScopedDocument::class, ScopedTicket::class];
+    private const array MODELS = [ScopedPost::class, ScopedDocument::class, TenantScopedPost::class, TenantScopedDocument::class, ScopedTicket::class, NumberedTenantPost::class];
 
     /** @var list<string> The actions a scenario scopes to and grants. */
     private const array ACTIONS = ['posts:view', 'posts:edit'];
@@ -117,8 +118,8 @@ final class ParityScenario
 
     /**
      * Build the scenario's state: the request, the grants and policies, the
-     * manager, the context and the rows; with a construct outside part 1's
-     * subset that a check would weigh, when asked.
+     * manager, the context and the rows; with a construct outside this
+     * release's subset that a check would weigh, when asked.
      *
      * @param  bool  $isOutside
      * @return void
@@ -158,17 +159,19 @@ final class ParityScenario
      */
     public function constraints(): \Closure
     {
-        $shape = $this->pick(['none', 'where', 'grouped-or', 'top-or', 'ordered', 'selected']);
+        $shape = $this->pick(['none', 'where', 'grouped-or', 'top-or', 'raw-or', 'expression-or', 'ordered', 'selected']);
 
         $this->log[] = "query {$shape}";
 
         return fn (Builder $query): Builder => match ($shape) {
-            'where'      => $query->where('title', 'like', 'a%'),
-            'grouped-or' => $query->where(static fn (Builder $nested): Builder => $nested->where('title', 'a1')->orWhere('title', 'b1')),
-            'top-or'     => $query->where('title', 'a1')->orWhere('title', 'b1'),
-            'ordered'    => $query->orderBy('title')->orderByDesc($this->identity()),
-            'selected'   => $query->select([$this->identity(), 'title']),
-            default      => $query,
+            'where'         => $query->where('title', 'like', 'a%'),
+            'grouped-or'    => $query->where(static fn (Builder $nested): Builder => $nested->where('title', 'a1')->orWhere('title', 'b1')),
+            'top-or'        => $query->where('title', 'a1')->orWhere('title', 'b1'),
+            'raw-or'        => $query->whereRaw('title = \'a1\' OR title = \'b1\''),
+            'expression-or' => $query->where(DB::raw('title = \'a2\' OR title = \'b2\'')),
+            'ordered'       => $query->orderBy('title')->orderByDesc($this->identity()),
+            'selected'      => $query->select([$this->identity(), 'title']),
+            default         => $query,
         };
     }
 
@@ -217,7 +220,7 @@ final class ParityScenario
     }
 
     /**
-     * Add one construct outside part 1's subset that a check would weigh,
+     * Add one construct outside this release's subset that a check would weigh,
      * attached to the subject so it is material, and log it. A source not
      * marked `ScopeInvariant` is registered for the one that reads it.
      *
@@ -268,7 +271,7 @@ final class ParityScenario
      */
     private function request(): void
     {
-        $isTeam        = $this->model === ScopedTicket::class;
+        $isTeam        = \in_array($this->model, [ScopedTicket::class, NumberedTenantPost::class], true);
         $this->tenants = $isTeam
             ? [null, new Reference('teams', '5'), new Reference('teams', '7')]
             : [null, StubTenant::query()->create(['id' => 't1']), StubTenant::query()->create(['id' => 't2'])];
@@ -405,6 +408,10 @@ final class ParityScenario
             return ['team_id' => $this->pick([null, 5, 7, 0])];
         }
 
+        if ($this->model === NumberedTenantPost::class) {
+            return self::numberedTenantColumns($this->pick([[null, null], ['teams', 5], ['teams', 7], [null, 5], ['teams', null], ['other', 5], [null, 1.5], ['teams', 1e20]]));
+        }
+
         $tenant = $this->pick($this->tenants);
         $type   = (new StubTenant)->getMorphClass();
 
@@ -416,6 +423,20 @@ final class ParityScenario
             ['tenant_type' => 'other', 'tenant_id' => 't1'],
             ['tenant_type' => $type, 'tenant_id' => \str_repeat('t', 200)],
         ]);
+    }
+
+    /**
+     * Return the tenant columns of a new numbered post: a real number, which
+     * SQLite alone keeps in an integer column, is kept as none elsewhere.
+     *
+     * @param  array{string|null, float|int|null}  $tenant
+     * @return array<string, mixed>
+     */
+    private static function numberedTenantColumns(array $tenant): array
+    {
+        [$type, $id] = $tenant;
+
+        return ['tenant_type' => $type, 'tenant_id' => \is_float($id) && DB::connection()->getDriverName() !== 'sqlite' ? null : $id];
     }
 
     /**
@@ -490,8 +511,8 @@ final class ParityScenario
     }
 
     /**
-     * Return one to three statements within part 1's subset, an allow naming
-     * its principals when it is a resource policy's.
+     * Return one to three statements within this release's subset, an allow
+     * naming its principals when it is a resource policy's.
      *
      * @param  bool  $isResourcePolicy
      * @return list<array<string, mixed>>
@@ -556,8 +577,8 @@ final class ParityScenario
     }
 
     /**
-     * Return a statement's conditions over what part 1 folds: the caller's
-     * input, the subject's built-in keys, the frozen clock and an
+     * Return a statement's conditions over what this release folds: the
+     * caller's input, the subject's built-in keys, the frozen clock and an
      * authentication requirement; or none.
      *
      * @return array<string, mixed>

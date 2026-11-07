@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Query\Dialects;
 use Illuminate\Database\Connection;
 use SineMacula\Laravel\Authorization\Query\Contracts\Dialect;
 use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
+use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 
 /**
  * The SQL `whereAuthorized()` writes on MySQL.
@@ -17,7 +18,12 @@ use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
  * string the bytes PHP reads over a utf8mb4 connection, whatever the column's
  * collation; a `CHAR` loses its padding both in PHP and in the comparison. A
  * string column must be utf8mb4, and the connection's client, connection and
- * results character sets all utf8mb4.
+ * results character sets all utf8mb4. PHP reads every column of these kinds as
+ * a string or an integer.
+ *
+ * The plain comparison an index serves compares a string column with the value
+ * as a utf8mb4 literal, which takes the column's collation, under which equal
+ * bytes are equal, and an integer column with the value's digits.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -102,6 +108,19 @@ final readonly class MySqlDialect implements Dialect
     }
 
     /**
+     * Return the condition every row's tenant column meets, since PHP reads
+     * each kind the scope compares as a string, an integer or null.
+     *
+     * @param  string  $column
+     * @return string
+     */
+    #[\Override]
+    public function readable(string $column): string
+    {
+        return QueryAuthorizer::EVERY_ROW;
+    }
+
+    /**
      * Return the condition a row's column meets when its bytes are exactly the
      * value's.
      *
@@ -113,5 +132,26 @@ final readonly class MySqlDialect implements Dialect
     public function equalsBytes(string $column, string $value): string
     {
         return "CAST({$column} AS BINARY) = X'" . \bin2hex($value) . '\'';
+    }
+
+    /**
+     * Return a condition comparing the bare column with the value: a string
+     * column with the value as a utf8mb4 literal, when it is UTF-8, which a
+     * utf8mb4 column always holds; an integer column with its digits, when it
+     * is an integer's decimal text, as PHP reads one.
+     *
+     * @param  string  $column
+     * @param  \SineMacula\Laravel\Authorization\Query\Enums\ColumnKind  $kind
+     * @param  string  $value
+     * @return string
+     */
+    #[\Override]
+    public function equalsIndexed(string $column, ColumnKind $kind, string $value): string
+    {
+        return match (true) {
+            $kind === ColumnKind::STRING  && \mb_check_encoding($value, 'UTF-8')                      => "{$column} = _utf8mb4 X'" . \bin2hex($value) . '\'',
+            $kind === ColumnKind::INTEGER && \preg_match('/\A(?:0|-?[1-9]\d{0,19})\z/', $value) === 1 => "{$column} = {$value}",
+            default                                                                                   => QueryAuthorizer::NO_ROW,
+        };
     }
 }

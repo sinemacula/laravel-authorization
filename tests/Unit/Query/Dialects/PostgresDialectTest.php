@@ -10,6 +10,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Query\Dialects\PostgresDialect;
 use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
+use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 
 /**
  * Unit tests for the SQL a query scope writes on PostgreSQL.
@@ -57,6 +58,7 @@ final class PostgresDialectTest extends TestCase
         $dialect = new PostgresDialect;
 
         self::assertTrue($dialect->isUtf8(self::connection('UTF8', 'UTF8')));
+        self::assertTrue($dialect->isUtf8(self::connection('utf8', 'Utf8')));
         self::assertFalse($dialect->isUtf8(self::connection('LATIN1', 'UTF8')));
         self::assertFalse($dialect->isUtf8(self::connection('UTF8', 'LATIN1')));
     }
@@ -101,6 +103,69 @@ final class PostgresDialectTest extends TestCase
     public function testAColumnEqualsAValueByItsBytes(): void
     {
         self::assertSame('convert_to(CAST("c" AS TEXT), \'UTF8\') = decode(\'612762\', \'hex\')', (new PostgresDialect)->equalsBytes('"c"', 'a\'b'));
+    }
+
+    /**
+     * Every tenant column of a kind the scope compares is read as a string, an
+     * integer or null.
+     *
+     * @return void
+     */
+    public function testEveryTenantColumnIsReadable(): void
+    {
+        self::assertSame(QueryAuthorizer::EVERY_ROW, (new PostgresDialect)->readable('"c"'));
+    }
+
+    /**
+     * The bare column is compared with the value it could hold: text that is
+     * UTF-8 with no NUL byte, an integer's decimal text, a uuid's canonical
+     * text; with any other, no row is.
+     *
+     * @return void
+     */
+    public function testTheBareColumnIsComparedWithAValueItCouldHold(): void
+    {
+        $dialect = new PostgresDialect;
+        $uuid    = '0b7e8a3c-1f2d-4c5b-9a8e-7d6c5b4a3f21';
+
+        self::assertSame('"c" = convert_from(decode(\'612762\', \'hex\'), \'UTF8\')', $dialect->equalsIndexed('"c"', ColumnKind::STRING, 'a\'b'));
+        self::assertSame(QueryAuthorizer::NO_ROW, $dialect->equalsIndexed('"c"', ColumnKind::STRING, "\xff"));
+        self::assertSame(QueryAuthorizer::NO_ROW, $dialect->equalsIndexed('"c"', ColumnKind::STRING, "a\0b"));
+        self::assertSame('"c" = -5', $dialect->equalsIndexed('"c"', ColumnKind::INTEGER, '-5'));
+
+        foreach (['05', '-0', '5a', ' 5', '99999999999999999999', ''] as $value) {
+            self::assertSame(QueryAuthorizer::NO_ROW, $dialect->equalsIndexed('"c"', ColumnKind::INTEGER, $value), $value);
+        }
+
+        self::assertSame("\"c\" = '{$uuid}'", $dialect->equalsIndexed('"c"', ColumnKind::UUID, $uuid));
+        self::assertSame(QueryAuthorizer::NO_ROW, $dialect->equalsIndexed('"c"', ColumnKind::UUID, \strtoupper($uuid)));
+        self::assertSame(QueryAuthorizer::NO_ROW, $dialect->equalsIndexed('"c"', ColumnKind::UUID, "{$uuid}x"));
+    }
+
+    /**
+     * A key column is comparable with a value PostgreSQL would not raise an
+     * error for: digits its integer type holds, a uuid, or UTF-8 text.
+     *
+     * @return void
+     */
+    public function testAKeyColumnIsComparableWithAValueItCouldHold(): void
+    {
+        $dialect = new PostgresDialect;
+
+        self::assertTrue($dialect->isComparableKey(['type_name' => 'int2'], '32767'));
+        self::assertTrue($dialect->isComparableKey(['type_name' => 'INT2'], '-32768'));
+        self::assertFalse($dialect->isComparableKey(['type_name' => 'int2'], '32768'));
+        self::assertFalse($dialect->isComparableKey(['type_name' => 'int2'], '-32769'));
+        self::assertTrue($dialect->isComparableKey(['type_name' => 'int4'], '2147483647'));
+        self::assertFalse($dialect->isComparableKey(['type_name' => 'int4'], '2147483648'));
+        self::assertTrue($dialect->isComparableKey(['type_name' => 'int8'], \str_repeat('9', 18)));
+        self::assertFalse($dialect->isComparableKey(['type_name' => 'int8'], \str_repeat('9', 19)));
+        self::assertFalse($dialect->isComparableKey(['type_name' => 'int4'], 'abc'));
+        self::assertTrue($dialect->isComparableKey(['type_name' => 'uuid'], '0B7E8A3C-1F2D-4C5B-9A8E-7D6C5B4A3F21'));
+        self::assertFalse($dialect->isComparableKey(['type_name' => 'uuid'], 'not-a-uuid'));
+        self::assertTrue($dialect->isComparableKey(['type_name' => 'varchar'], 'ábc'));
+        self::assertFalse($dialect->isComparableKey(['type_name' => 'text'], "\xff"));
+        self::assertFalse($dialect->isComparableKey([], "\xff"));
     }
 
     /**

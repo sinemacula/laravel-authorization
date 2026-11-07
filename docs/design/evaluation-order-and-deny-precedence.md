@@ -646,12 +646,13 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 ## Implementation Anchors
 
 - `AuthorizationManager::check()` -- the core decision and its recording; `DecisionPipeline::decide()` -- the subject
-  and resource stages; `DecisionPipeline::decideGrants()` -- the check's context (`CheckContextFactory::make()`),
-  `invalid_policy` when the policies, the guardrails or the boundaries cannot be gathered, and the evaluator given the
-  policies, the boundaries, the permission callback and the guardrails, or none at all (`null`) for the exempt
-  `authorization:guardrails:manage`, under the check's session caps; `AuthorizationManager::capped()` and
-  `DecisionPipeline::capped()` -- the scoped manager carrying the explicit caps; `AuthorizationManager::any()` and
-  `all()`, over `Support\ActionList` -- several actions decided in order, stopping at the first that settles the answer.
+  and resource stages; `DecisionPipeline::sources()` -- the check's context (`CheckContextFactory::make()`), the
+  policies, the guardrails (none at all, `null`, for the exempt `authorization:guardrails:manage`), the boundaries, the
+  permission callback and the session caps; `DecisionPipeline::weigh()` -- the evaluator given those sources under the
+  session caps; `DecisionPipeline::decideGrants()` -- `invalid_policy` when the sources cannot be gathered;
+  `AuthorizationManager::capped()` and `DecisionPipeline::capped()` -- the scoped manager carrying the explicit caps;
+  `AuthorizationManager::any()` and `all()`, over `Support\ActionList` -- several actions decided in order, stopping at
+  the first that settles the answer.
 - `ResourceReferences::of()` -- every resource argument's reference; `ResourceScope::decide()` -- the tenant stage.
 - `SubjectGrants::permissionFor()` -- the held permission that allows the check, the subject's before its granting
   identity's, read in the scope the check is decided in; `HeldPermissions::match()` -- the wildcard rules and the

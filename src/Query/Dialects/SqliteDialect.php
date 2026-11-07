@@ -16,8 +16,9 @@ use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
  * `CAST(x AS BLOB)`, which for an integer are its decimal digits, as PHP's
  * `(string)` gives them, and for text and blobs the bytes PHP reads. A real
  * number, which PHP reads as a float, never equals a tenant (the tenant
- * resolver refuses it), so a comparison admits integers, text and blobs alone.
- * The database must be UTF-8, as `PRAGMA encoding` reports it.
+ * resolver refuses it), so a comparison admits integers, text and blobs alone,
+ * and a row of no tenant is kept only when neither tenant column holds one. The
+ * database must be UTF-8, as `PRAGMA encoding` reports it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -93,6 +94,19 @@ final readonly class SqliteDialect implements Dialect
     }
 
     /**
+     * Return the condition a row's tenant column meets when it holds no real
+     * number, which PHP reads as a float.
+     *
+     * @param  string  $column
+     * @return string
+     */
+    #[\Override]
+    public function readable(string $column): string
+    {
+        return "typeof({$column}) IN ('null', 'integer', 'text', 'blob')";
+    }
+
+    /**
      * Return the condition a row's column meets when its bytes are exactly the
      * value's.
      *
@@ -104,5 +118,24 @@ final readonly class SqliteDialect implements Dialect
     public function equalsBytes(string $column, string $value): string
     {
         return "(typeof({$column}) IN ('integer', 'text', 'blob') AND CAST({$column} AS BLOB) = X'" . \bin2hex($value) . '\')';
+    }
+
+    /**
+     * Return a condition comparing the bare column with the value as text and
+     * as a blob, whatever the column's kind: the column's affinity turns the
+     * text into the integer an integer row holds, and its collation keeps every
+     * row of the same bytes.
+     *
+     * @param  string  $column
+     * @param  \SineMacula\Laravel\Authorization\Query\Enums\ColumnKind  $kind
+     * @param  string  $value
+     * @return string
+     */
+    #[\Override]
+    public function equalsIndexed(string $column, ColumnKind $kind, string $value): string
+    {
+        $hex = \bin2hex($value);
+
+        return "{$column} IN (CAST(X'{$hex}' AS TEXT), X'{$hex}')";
     }
 }

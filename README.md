@@ -510,9 +510,10 @@ bind a `ResourceTenantResolver` as `resource_tenant_resolver` in `config/authori
 (`tenantOf()`) and a pair's (`tenantOfRecord()`, which returns `false` when it cannot tell, denying the check as
 `resource_unresolved`), so a record is decided the same way however it is named. A resource of the active tenant, or of
 a tenant below it, is then decided there, and one of any other tenant is denied as `tenant_scope` before any policy is
-read, unless a platform-wide grant of the permission covers it. The default knows no record's tenant. Any other string
-is never given a tenant, so a tenant-owned resource that is not a model should implement `AuthorizableResource` and
-carry its tenant.
+read, unless a platform-wide grant of the permission covers it. The default knows no record's tenant; a model
+implementing `QueryableResource` takes its tenant from its declaration instead (see [Query scoping](#query-scoping)).
+Any other string is never given a tenant, so a tenant-owned resource that is not a model should implement
+`AuthorizableResource` and carry its tenant.
 
 Policies fail closed. A deny whose condition cannot be decided, such as one on `request.ip` in a check made outside a
 routed request (a queued job, a console command), where the key is missing, still applies, while an allow in the same
@@ -1741,11 +1742,12 @@ or about the subject of the scoped manager it is called on:
 | `withPolicies($policies)`                 | Returns a scoped manager that evaluates only the policies given                                  |
 | `queryScope($model, $action, $context)`   | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))      |
 
-`check()` is the one decision: every other method adapts it, and each decision it makes is recorded as the last
-decision and reported with `DecisionEvaluated`. The resource and the context take the same forms everywhere: a model,
-a `[type, id]` pair, a `ResourceReference`, an `AuthorizableResource`, a model class or a string names the resource
-(see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the context is the caller's
-values, read under `input` (see [The check's context](#the-checks-context)).
+`check()` is the one decision: every other method but `queryScope()` adapts it, and each decision it makes is recorded
+as the last decision and reported with `DecisionEvaluated`; `queryScope()` compiles a scope from the same pipeline
+without deciding a check, so it records and reports nothing. The resource and the context take the same forms
+everywhere: a model, a `[type, id]` pair, a `ResourceReference`, an `AuthorizableResource`, a model class or a string
+names the resource (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the
+context is the caller's values, read under `input` (see [The check's context](#the-checks-context)).
 
 ```php
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -1812,9 +1814,12 @@ Post::query()->whereAuthorized('posts:view', ['channel' => 'web'], Authorization
 ```
 
 The rows it keeps are exactly the rows of the query's candidate set, before any limit or offset, that `check()` would
-allow the subject on, with the same context, under the state at the instant the query runs; a row on which `check()`
-would throw is not kept. When the scope cannot prove that, it throws a `QueryScopeRefusedException` instead: it never
-filters rows after loading them, and never keeps a row it has not proved `check()` allows.
+allow the subject on for the record loaded with every column, whatever columns the query selects, with the same
+context, under the state at the instant the query runs; a row on which `check()` would throw for that record is not
+kept. When the scope cannot prove that, it throws a `QueryScopeRefusedException` instead: it never filters rows after
+loading them, and never keeps a row it has not proved `check()` allows. A model loaded without its key or its tenant
+columns cannot itself be passed to `check()` (it throws, or denies as `resource_unresolved`), so select those columns
+if you mean to check the results.
 
 The subject is the one `check()` decides about: the current manager's, or that of the manager passed as the third
 argument, so a scoped manager from `for()`, `forUser()`, `withPolicies()` or `capped()` scopes the query with its
@@ -1822,13 +1827,37 @@ subject, its policy override and its caps. A guest keeps no row. The context is 
 `input`, as `check()` reads them.
 
 The scope is compiled when `whereAuthorized()` is called, so a refusal throws there and the builder is left exactly as
-it was, and again every time the query runs, from the state then: a page and its count, each chunk, an update or a
-deletion are each decided afresh, so a grant revoked after the call is seen by the next execution, and no decision is
-reused. It adds one condition, with no bindings, after every constraint of the application's, grouped as Laravel groups
-a scope's, so an `orWhere()` before or after the call never bypasses it, and it never runs a query on the model's
-table of its own. A query is refused when it runs if it would escape the condition: one with a union, one that selects
-from anything but the model's table (an alias or a subquery included), one joined with `or` at the top after the
-condition, and one whose scopes were removed after the call (remove scopes before calling `whereAuthorized()`).
+it was, and again every time the query is compiled to run, from the state then: a page and its count, each chunk, an
+update or a deletion are each decided afresh, so a grant revoked after the call is seen by the next execution, and no
+decision is reused. Compiling, at the call or at execution, records no last decision and dispatches no
+`DecisionEvaluated`, so an audit of row access needs its own hook. The scope never runs a query on the model's table of
+its own.
+
+When the query runs, every constraint of the application's, those added before the call, after it and by other global
+scopes alike, is put in one group, and the scope's condition, with no bindings, is joined to it with `and`: an
+`orWhere()`, or a raw condition or expression holding `OR`, never reaches past it, and a comment at the end of a raw
+condition leaves the group unclosed, so the database refuses the query rather than drop the condition. To compare the
+tenant columns exactly, byte for byte, the condition also compares the bare columns with the active tenant, which an
+index on them can serve; whether the planner uses it beside the rows of no tenant is the database's choice.
+
+A query is refused when it runs if it would escape the condition: one with a union, one that selects from anything but
+the model's table (an alias or a subquery included), one joined with `or` at the top after the condition (a
+`beforeQuery()` callback adding one included), one whose scopes were removed after the call (remove scopes before
+calling `whereAuthorized()`), and one changed at the top after the scope's own last check. `whereAuthorized()` is
+called on the query that runs: called inside a `where()`, `orWhere()` or `whereNot()` group, or in a relation's
+definition that `whereHas()`, `has()`, `withCount()` or `withExists()` then uses, its scope is never applied, and the
+query refuses rather than keep every row. A relation scoped in its definition works when it is loaded, lazily or
+eagerly; to filter by a relation, pass the scope in its constraint:
+`Owner::whereHas('posts', fn ($query) => $query->whereAuthorized('posts:view'))`.
+
+A scoped builder another query takes whole, as `whereHas()`, `whereExists()` and `where($column, $builder)` take it,
+is decided each time that query runs, and so is a base query taken with `toBase()`, which refuses once it is widened
+with `or` or given a condition outside the group. One taken in as SQL text, by `whereIn()`, `fromSub()`, `joinSub()`,
+`selectSub()`, `insertUsing()`, a `withCount()` or `withExists()` constraint, or `has()` with a count, is decided when
+it is taken in, and the other query reuses that decision every time it runs: Laravel gives no sign of a compile that is
+for such a text, so this one shape is not refused. Build the other query again to decide again, or call
+`whereAuthorized()` on it. A `beforeQuery()` callback registered by a global scope applied after `whereAuthorized()`'s
+own runs after the scope's last check, and is the application's to keep honest.
 
 #### Declaring a model
 
@@ -1869,8 +1898,9 @@ This release compiles statements over the whole type, so no record's key is ever
 - resources absent, or `resources` and `not_resources` whose every pattern, resolved as `check()` resolves it, is `*`,
   `T:*` (`T` being the model's morph type) or a literal prefix of `T:` and then `*`, so it covers every record of the
   type;
-- conditions on `input`, on the subject's built-in keys, and on the namespaces of sources marked `ScopeInvariant`, the
-  package's defaults included, and authentication requirements a checker so marked judges;
+- conditions on `input`, on the subject's namespace, built-in keys included, when the subject's type has no attribute
+  provider or one marked `ScopeInvariant`, and on the namespaces of sources marked `ScopeInvariant`, the package's
+  defaults included, and authentication requirements a checker so marked judges;
 - the permissions held, the subject's and its identity's policies, its roles' policies, permission boundaries,
   guardrails (except for `authorization:guardrails:manage`), session caps and the policies attached to the model's
   type, whose allows apply to the subjects their `principals` name, by reference or by role, and whose denies apply to
@@ -1878,12 +1908,15 @@ This release compiles statements over the whole type, so no record's key is ever
 - tenantless models, and tenant-bearing models under the flat tenant tree when the subject holds no platform-wide grant
   of the action: the rows of no tenant are decided in the request's scope, the rows of the active tenant in its own,
   and the rows of any other tenant, which `check()` denies as `tenant_scope`, are left out;
-- rows whose key cannot identify a record (null, empty or holding a NUL byte), and, when a statement matches a pattern
-  against the identifier, rows whose identifier is too long for `fnmatch()`, are left out, as `check()` denies or
-  throws on them.
+- rows whose key cannot identify a record (null, empty or holding a NUL byte), rows of no tenant whose tenant columns
+  hold something other than a string, an integer or null (a real number SQLite keeps in an integer column), and, when
+  a statement matches a pattern against the identifier, rows whose identifier is too long for `fnmatch()`, are left
+  out, as `check()` denies or throws on them.
 
-A statement is refused only when a check would weigh it: it names the action and, for an allow, applies to the
-subject. Everything else that could change a decision refuses, with no pruning:
+A statement gathered for the type is refused only when a check would weigh it: it names the action and, for an allow,
+applies to the subject. A policy attached to a record of the type refuses as soon as it names the action, whatever its
+principals, and a document that cannot be read always refuses. Everything else that could change a decision refuses,
+with no pruning:
 
 | Reason                                                   | Refused                                                                                                                                              |
 |----------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1898,17 +1931,19 @@ subject. Everything else that could change a decision refuses, with no pruning:
 | `tenant_tree`, `platform_admission`                      | A tenant tree that is not flat, or a platform-wide grant of the action, for a tenant-bearing model                                                   |
 | `resource_pattern`                                       | Any other pattern: a record's id, another type's pattern, `T:\*`, `T:4*`, `?`, `[`                                                                   |
 | `resource_namespace`, `scope_variant_source`             | A statement reading the resource, or a source not marked `ScopeInvariant`                                                                            |
-| `record_attachment`                                      | A policy attached to a record of the type that names the action (unless `withPolicies()` replaces them)                                              |
+| `record_attachment`                                      | A policy attached to a record of the type that names the action, whatever its principals (unless `withPolicies()` replaces them)                     |
 | `invalid_statement`, `invalid_policy`                    | A statement that cannot be evaluated, or a document that cannot be read                                                                              |
-| `query_union`, `query_from`, `query_or`, `scope_removed` | A query that would escape the condition                                                                                                              |
+| `query_union`, `query_from`, `query_or`, `query_changed` | A query that would escape the condition                                                                                                              |
+| `scope_removed`                                          | A scope removed after the call, or never applied: called inside a `where` group or a relation's definition, or run past its scopes                   |
 
 #### The exception
 
 `QueryScopeRefusedException` is a `RuntimeException`, not an `AuthorizationException`: a refusal is a developer or
-configuration fault, which Laravel renders as a 500. It carries the `action`, the model's `resourceType` and every
-`refusal`, each with its `reason`, the `policy` and `statement` it names, the condition key, namespace, column or seam
-class (`key`) and a fixed `detail`, and `reasons()` lists their reasons. Neither it nor its message ever carries an
-operand, a pattern, a context value, a row's value or a tenant id.
+configuration fault, which Laravel renders as a 500. It carries the `action`, the model's `resourceType` (its morph
+type, through the morph map when it has one) and every `refusal`, each with its `reason`, the `policy` and `statement`
+it names, the condition key, namespace, column or seam class (`key`) and a fixed `detail`, and `reasons()` lists their
+reasons. Neither it nor its message ever carries an operand, a pattern, a context value, a row's value or a tenant id,
+and a refusal for record attachments names no policy, however many there are.
 
 ### Laravel's Gate
 

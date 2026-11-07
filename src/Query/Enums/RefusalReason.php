@@ -50,7 +50,7 @@ enum RefusalReason: string
     /** A statement reads a namespace, or an authentication requirement, through a seam not marked `ScopeInvariant`. */
     case SCOPE_VARIANT_SOURCE = 'scope_variant_source';
 
-    /** The bound tenant tree is not the flat tree, which part 1 alone compiles. */
+    /** The bound tenant tree is not the flat tree, the only tree this release compiles. */
     case TENANT_TREE = 'tenant_tree';
 
     /** The subject holds the action platform-wide, which admits rows of other tenants. */
@@ -68,7 +68,7 @@ enum RefusalReason: string
     /** A statement that names the action has a resource pattern naming less than the whole type. */
     case RESOURCE_PATTERN = 'resource_pattern';
 
-    /** A policy attached to a record of the type names the action. */
+    /** A policy attached to a record of the type names the action, whatever its principals. */
     case RECORD_ATTACHMENT = 'record_attachment';
 
     /** The query has a union. */
@@ -77,9 +77,12 @@ enum RefusalReason: string
     /** The query selects from something other than the model's table. */
     case QUERY_FROM = 'query_from';
 
-    /** A constraint at the top of the query is joined with `or`, which would bypass the scope. */
+    /** A constraint at the top of the query is joined with `or` after the scope's condition, which would bypass it. */
     case QUERY_OR = 'query_or';
 
-    /** The scope was removed from the query after `whereAuthorized()`. */
+    /** A constraint was added at the top of the query after its scope was applied or last guarded, outside the group that holds the others. */
+    case QUERY_CHANGED = 'query_changed';
+
+    /** The scope was removed after `whereAuthorized()`, or never applied: called inside a `where` group or a relation's definition, or run past its scopes. */
     case SCOPE_REMOVED = 'scope_removed';
 }

@@ -42,7 +42,8 @@ final class ResourceShapeTest extends TestCase
     /**
      * A tenantless post keyed by an integer it casts as one, a document keyed
      * by a string with tenant columns, and a ticket whose tenant is a team, are
-     * described with their columns qualified and wrapped.
+     * described with their columns qualified and wrapped, and the kind of the
+     * tenant id column.
      *
      * @return void
      */
@@ -59,6 +60,7 @@ final class ResourceShapeTest extends TestCase
         self::assertTrue($post->tenancy->isTenantless());
         self::assertNull($post->typeColumn);
         self::assertNull($post->idColumn);
+        self::assertNull($post->idKind);
 
         $document = self::shapeOf(new TenantScopedDocument);
 
@@ -66,11 +68,13 @@ final class ResourceShapeTest extends TestCase
         self::assertFalse($document->isIntegerCast);
         self::assertSame($grammar->wrap('scoped_documents.tenant_type'), $document->typeColumn);
         self::assertSame($grammar->wrap('scoped_documents.tenant_id'), $document->idColumn);
+        self::assertSame(ColumnKind::STRING, $document->idKind);
 
         $ticket = self::shapeOf(new ScopedTicket);
 
         self::assertNull($ticket->typeColumn);
         self::assertSame($grammar->wrap('scoped_tickets.team_id'), $ticket->idColumn);
+        self::assertSame(ColumnKind::INTEGER, $ticket->idKind);
         self::assertSame('teams', $ticket->tenancy->type);
     }
 
@@ -166,6 +170,7 @@ final class ResourceShapeTest extends TestCase
     {
         self::assertSame('id', self::assertRefused(RefusalReason::COLUMN_CAST, SealedModels::withCasts(['id' => 'string'])));
         self::assertTrue(self::shapeOf(SealedModels::withCasts(['id' => 'integer']))->isIntegerCast);
+        self::assertTrue(self::shapeOf(SealedModels::withCasts(['id' => 'Integer']))->isIntegerCast);
 
         AbstractQueryablePost::$tenancy = ResourceTenancy::columns();
 
@@ -174,6 +179,7 @@ final class ResourceShapeTest extends TestCase
         $document = (new ScopedDocument)->mergeCasts(['code' => 'string']);
 
         self::assertSame(ColumnKind::STRING, self::shapeOf($document)->keyKind);
+        self::assertSame(ColumnKind::STRING, self::shapeOf((new ScopedDocument)->mergeCasts(['code' => 'STRING']))->keyKind);
         self::assertSame('code', self::assertRefused(RefusalReason::COLUMN_CAST, (new ScopedDocument)->mergeCasts(['code' => 'int'])));
     }
 
@@ -304,7 +310,7 @@ final class ResourceShapeTest extends TestCase
         } catch (QueryScopeRefusedException $exception) {
             self::assertSame([$reason], $exception->reasons(), $exception->getMessage());
             self::assertSame('posts:view', $exception->action);
-            self::assertSame($model::class, $exception->resourceType);
+            self::assertSame($model->getMorphClass(), $exception->resourceType);
 
             return $field === 'key' ? $exception->refusals[0]->key : $exception->refusals[0]->detail;
         }

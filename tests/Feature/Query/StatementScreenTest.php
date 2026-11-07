@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace Tests\Feature\Query;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
@@ -18,6 +20,7 @@ use SineMacula\Laravel\Authorization\Query\Refusal;
 use SineMacula\Laravel\Authorization\Query\StatementScreen;
 use SineMacula\Laravel\Authorization\Subject;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Fixtures\QueryScoping\InvariantRequirementChecker;
 use Tests\TestCase;
 
 /**
@@ -175,6 +178,51 @@ final class StatementScreenTest extends TestCase
         $reasons = \array_map(static fn (Refusal $refusal): RefusalReason => $refusal->reason, $screen->refusals());
 
         self::assertSame([RefusalReason::RESOURCE_NAMESPACE, RefusalReason::RESOURCE_NAMESPACE], $reasons);
+    }
+
+    /**
+     * An authentication requirement does not end the screening of its
+     * statement: a read of the resource after it is still refused, with or
+     * without a context factory, and with a checker marked `ScopeInvariant`.
+     *
+     * @return void
+     */
+    public function testAReadAfterARequirementIsStillScreened(): void
+    {
+        [$screen, $subject] = $this->screen();
+
+        $this->app?->instance(AuthenticationRequirementChecker::class, new InvariantRequirementChecker(true));
+        $this->app?->forgetInstance(CheckContextFactory::class);
+
+        /** @var \SineMacula\Laravel\Authorization\Context\CheckContextFactory $factory */
+        $factory    = $this->app?->make(CheckContextFactory::class);
+        $conditions = ['authentication_requirement' => ['authentication' => ['multifactor' => []]], 'eq' => ['resource.status' => 'draft']];
+
+        foreach ([$screen, new StatementScreen('posts:view', self::TYPE, $subject, $factory)] as $screening) {
+            $screening->screen($this->sources($subject, [new Policy('step-up', [new Statement(PolicyEffect::DENY, ['posts:view'], null, $conditions)])]), 'posts:*');
+
+            $refused = \array_map(static fn (Refusal $refusal): array => [$refusal->key, $refusal->reason], $screening->refusals());
+
+            self::assertSame([['resource.status', RefusalReason::RESOURCE_NAMESPACE]], $refused);
+        }
+    }
+
+    /**
+     * Without a context factory a check judges no requirement through a seam,
+     * so a statement whose only condition is one compiles.
+     *
+     * @return void
+     */
+    public function testWithoutAFactoryARequirementCompiles(): void
+    {
+        [$screen, $subject] = $this->screen();
+
+        $requirement = ['authentication_requirement' => ['authentication' => ['multifactor' => []]]];
+        $statement   = new Statement(PolicyEffect::ALLOW, ['posts:view'], ['posts:*'], $requirement);
+        $patterned   = $screen->screen($this->sources($subject, [new Policy('step-up', [$statement])]), 'posts:*');
+
+        self::assertCount(1, $patterned);
+        self::assertSame([], $screen->refusals());
     }
 
     /**

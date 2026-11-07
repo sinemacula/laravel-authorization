@@ -56,6 +56,9 @@ final readonly class ResourcePolicyResolver
     /** @var string The column the query reads the attached resource's key into. */
     private const string RESOURCE_ID = 'attached_resource_id';
 
+    /** @var int How many policies attached to records are read at a time. */
+    private const int RECORD_PAGE = 100;
+
     /**
      * Return the policies attached to the resource and to its type, each as a
      * resource policy attached to what it is attached to, and, for a resource
@@ -94,22 +97,25 @@ final readonly class ResourcePolicyResolver
     }
 
     /**
-     * Return every policy attached to a record of the type, in any tenant and
-     * for any application, each read once, so `whereAuthorized()` can tell
-     * whether one names the action it scopes a query to: it compiles no
-     * record's attachment (N68). They are read on the write connection, past
-     * the resolution cache, so an attachment made since the last check counts.
-     * A type longer than the table stores has none.
+     * Determine whether a policy attached to a record of the type, in any
+     * tenant and for any application, has a statement naming the action, so
+     * `whereAuthorized()` can refuse it: it compiles no attachment to a record
+     * (N68). The attached policies are read on the write connection, past the
+     * resolution cache, so an attachment made since the last check counts, a
+     * page at a time, each parsed once and none after the first that names the
+     * action; a type with no record attachments reads one empty page. A type
+     * longer than the table stores has none.
      *
      * @param  string  $type
-     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     * @param  string  $action
+     * @return bool
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
-    public function recordPolicies(string $type): array
+    public function hasRecordPolicyFor(string $type, string $action): bool
     {
         if (\strlen($type) > Reference::MAX_BYTES) {
-            return [];
+            return false;
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
@@ -118,15 +124,22 @@ final readonly class ResourcePolicyResolver
         /** @var string $table */
         $table = config('authorization.tables.resource_policies', 'resource_policies');
 
-        $model = new $class;
-        $rows  = $class::query()->withoutGlobalScopes()->useWritePdo()
+        $model    = new $class;
+        $policies = $class::query()->withoutGlobalScopes()->useWritePdo()
             ->whereIn($model->getQualifiedKeyName(), static function (Builder $query) use ($table, $type): void {
                 $query->select($table . '.policy_id')->from($table)->where($table . '.resource_type', $type)->whereNotNull($table . self::ATTACHED_KEY);
             })
-            ->get()
-            ->all();
+            ->lazyById(self::RECORD_PAGE);
 
-        return \array_values(\array_map(static fn (Policy $row): EvaluationPolicy => GrantResolver::hydrate($row), $rows));
+        $names = static fn (Statement $statement): bool => $statement->coversAction($action);
+
+        foreach ($policies as $policy) {
+            if (\array_filter(GrantResolver::hydrate($policy)->statements, $names) !== []) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

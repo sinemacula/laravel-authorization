@@ -596,7 +596,7 @@ document, then a summary, and exits 1 when any is invalid.
 - `PolicyValidator`, `PolicyLimits` and the `ActionCatalogue` contract -- the write-time checks, and the limits on read.
 - `CheckContext::lookup()` and `find()` -- the one strict dot-path resolver for conditions and references, and the
   per-check memo of built namespaces; `CheckContextFactory::make()` -- a check's context, the caller's values under
-  `input` and every other namespace from its source; `DecisionPipeline::decideGrants()` -- where the caller's values are
+  `input` and every other namespace from its source; `DecisionPipeline::sources()` -- where the caller's values are
   wrapped.
 - `AttributeNamespaces::builders()` -- the `subject` and `resource` namespaces of a check, their built-ins and their
   providers' values; `AttributeProviders` -- the providers by morph type, the declared keys only, and

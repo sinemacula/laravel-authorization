@@ -24,10 +24,10 @@ use Tests\TestCase;
 
 /**
  * The query scoping parity property (AUTHZ-10.1, N64): for random scenarios
- * within part 1's subset, the rows `whereAuthorized()` keeps are exactly the
- * rows of the query's candidate set that `check()` allows on a freshly loaded
- * model, a check that throws counting as a denial; and a construct outside the
- * subset that a check would weigh is refused.
+ * within this release's subset, the rows `whereAuthorized()` keeps are exactly
+ * the rows of the query's candidate set that `check()` allows on a freshly
+ * loaded model, a check that throws counting as a denial; and a construct
+ * outside the subset that a check would weigh is refused.
  *
  * The scenarios are drawn from `AUTHZ_PARITY_SEED`, a random seed when it is
  * not set, and there are `AUTHZ_PARITY_RUNS` of them, 150 by default; a failure
@@ -72,7 +72,8 @@ final class ParityPropertyTest extends TestCase
     }
 
     /**
-     * A construct outside part 1's subset that a check would weigh is refused.
+     * A construct outside this release's subset that a check would weigh is
+     * refused.
      *
      * @return void
      *
@@ -139,7 +140,7 @@ final class ParityPropertyTest extends TestCase
     /**
      * Assert that the scoped query keeps exactly the candidates `check()`
      * allows, and return 1, or 0 when the scope was refused for admitting rows
-     * of other tenants, which part 1 does not compile.
+     * of other tenants, which this release does not compile.
      *
      * @param  \Tests\Integration\QueryScoping\ParityScenario  $scenario
      * @return int

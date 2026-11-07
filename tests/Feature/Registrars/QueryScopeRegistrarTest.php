@@ -9,6 +9,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\Query\Builder as QueryBuilder;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
@@ -20,6 +22,7 @@ use SineMacula\Laravel\Authorization\Registrars\QueryScopeRegistrar;
 use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
+use Tests\Fixtures\QueryScoping\PostOwner;
 use Tests\Fixtures\QueryScoping\ScopedDocument;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\Fixtures\QueryScoping\SealedModels;
@@ -118,9 +121,8 @@ final class QueryScopeRegistrarTest extends TestCase
     }
 
     /**
-     * The condition is one nested condition with no bindings after every one of
-     * the application's, which Laravel groups first when they hold an `or`, one
-     * added after the macro included.
+     * The condition, with no bindings, follows every one of the application's,
+     * which the scope puts in one group, one added after the macro included.
      *
      * @return void
      */
@@ -288,13 +290,13 @@ final class QueryScopeRegistrarTest extends TestCase
     }
 
     /**
-     * The leaks the design's critique found in a broader scope are refused:
-     * `-0`, a literal `*` key, a record's id, a `retrieved` listener and an
-     * overridden `getAttribute()`.
+     * The leaks a broader scope would have are refused: `-0`, a literal `*`
+     * key, a record's id, a `retrieved` listener and an overridden
+     * `getAttribute()`.
      *
      * @return void
      */
-    public function testTheCritiquesLeaksAreRefused(): void
+    public function testTheLeaksOfABroaderScopeAreRefused(): void
     {
         $user    = StubIdentity::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
@@ -316,6 +318,208 @@ final class QueryScopeRegistrarTest extends TestCase
         });
 
         self::assertSame([RefusalReason::MODEL_LISTENER], self::refusalOf(static fn (): Builder => self::authorized(ScopedDocument::query(), 'posts:edit', $manager))->reasons());
+    }
+
+    /**
+     * The macro called inside a `where` group, an `or` one or a negated one,
+     * whose scope Laravel never applies, refuses when the query runs, never
+     * keeping every row.
+     *
+     * @return void
+     */
+    public function testTheMacroInsideAWhereGroupRefuses(): void
+    {
+        $manager = $this->resolveRequest(StubIdentity::create(['id' => 'u1']));
+        $scoped  = static fn (Builder $nested): Builder => self::authorized($nested, 'posts:view', $manager);
+
+        self::createPosts(2);
+
+        $groups = [
+            'where'   => static fn (Builder $query): Builder => $query->where($scoped),
+            'or'      => static fn (Builder $query): Builder => $query->where('title', 'x')->orWhere($scoped),
+            'not'     => static fn (Builder $query): Builder => $query->whereNot($scoped),
+            'or-more' => static fn (Builder $query): Builder => $query->where(static fn (Builder $nested): Builder => $scoped($nested)->orWhere('status', 'live')),
+        ];
+
+        foreach ($groups as $name => $group) {
+            self::assertSame([RefusalReason::SCOPE_REMOVED], self::refusalOf(static fn (): Collection => $group(ScopedPost::query())->get())->reasons(), $name);
+        }
+    }
+
+    /**
+     * A relation scoped in its definition keeps the rows the subject may view
+     * when it is loaded, lazily or eagerly; where Laravel takes only its
+     * constraints, into an existence or count query, it refuses.
+     *
+     * @return void
+     */
+    public function testARelationScopedInItsDefinitionRefusesWhereItsScopeIsDropped(): void
+    {
+        $user  = StubIdentity::create(['id' => 'u1']);
+        $owner = PostOwner::query()->create(['title' => 'post 0']);
+
+        self::createPosts(1);
+        $this->resolveRequest($user);
+
+        self::assertCount(0, $owner->visiblePosts);
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+        $this->resolveRequest($user);
+
+        self::assertCount(1, $owner->visiblePosts()->get());
+        self::assertCount(1, PostOwner::query()->with('visiblePosts')->firstOrFail()->visiblePosts);
+
+        $uses = [
+            'whereHas'   => static fn (): mixed => PostOwner::query()->whereHas('visiblePosts')->get(),
+            'has'        => static fn (): mixed => PostOwner::query()->has('visiblePosts', '>=', 2)->get(),
+            'withCount'  => static fn (): mixed => PostOwner::query()->withCount('visiblePosts')->get(),
+            'withExists' => static fn (): mixed => PostOwner::query()->withExists('visiblePosts')->get(),
+        ];
+
+        foreach ($uses as $name => $use) {
+            self::assertSame([RefusalReason::SCOPE_REMOVED], self::refusalOf($use)->reasons(), $name);
+        }
+    }
+
+    /**
+     * A scoped builder another query takes whole, as `whereHas()` and
+     * `whereExists()` do, is decided each time that query runs; one taken as
+     * SQL text, as `whereIn()` does, is decided when it is taken in, and that
+     * decision kept for as long as the other query is.
+     *
+     * @return void
+     */
+    public function testAScopedSubqueryIsDecidedWhenItsSqlIsWritten(): void
+    {
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user);
+        $view    = Permission::create(['name' => 'posts:view']);
+
+        PostOwner::query()->create(['title' => 'post 0']);
+        self::createPosts(1);
+        $user->givePermission($view);
+
+        $whole  = PostOwner::query()->whereHas('posts', static fn (Builder $posts): Builder => self::authorized($posts, 'posts:view', $manager));
+        $exists = PostOwner::query()->whereExists(self::authorized(ScopedPost::query(), 'posts:view', $manager)->whereColumn('scoped_posts.title', 'scoped_tickets.title'));
+        $text   = ScopedPost::query()->whereIn('id', self::authorized(ScopedPost::query(), 'posts:view', $manager)->select('id'));
+
+        self::assertSame([1, 1, 1], [$whole->count(), $exists->count(), $text->count()]);
+
+        $user->revokePermission($view);
+
+        self::assertSame([0, 0, 1], [$whole->count(), $exists->count(), $text->count()]);
+        self::assertCount(0, self::authorized(ScopedPost::query(), 'posts:view', $manager)->get());
+    }
+
+    /**
+     * A raw condition holding `or`, as a string or an expression, before the
+     * macro or added by a global scope applied after it, is grouped, so it
+     * cannot reach past the scope's condition.
+     *
+     * @return void
+     */
+    public function testARawConditionHoldingOrIsGrouped(): void
+    {
+        $manager = $this->resolveRequest(StubIdentity::create(['id' => 'u1']));
+
+        foreach (['live', 'live', 'draft'] as $status) {
+            ScopedPost::query()->create(['title' => 'post', 'status' => $status]);
+        }
+
+        $raw     = static fn (Builder $query): Builder => $query->whereRaw('1 = 1 OR status = \'live\'');
+        $queries = [
+            'raw'        => self::authorized(ScopedPost::query()->whereRaw('status = \'live\' OR status = \'x\''), 'posts:view', $manager),
+            'expression' => self::authorized(ScopedPost::query()->where(DB::raw('status = \'live\' OR status = \'x\'')), 'posts:view', $manager),
+            'scope'      => self::authorized(ScopedPost::query(), 'posts:view', $manager)->withGlobalScope('raw', $raw),
+        ];
+
+        foreach ($queries as $name => $query) {
+            self::assertSame(0, $query->count(), $name);
+            self::assertCount(0, $query->get(), $name);
+        }
+    }
+
+    /**
+     * A comment at the end of a raw condition cannot swallow the scope's
+     * condition: the group it sits in is left unclosed, and the database
+     * refuses the query.
+     *
+     * @return void
+     */
+    public function testACommentInARawConditionCannotSwallowTheCondition(): void
+    {
+        $manager = $this->resolveRequest(StubIdentity::create(['id' => 'u1']));
+
+        ScopedPost::query()->create(['title' => 'post', 'status' => 'live']);
+
+        $this->expectException(QueryException::class);
+
+        self::authorized(ScopedPost::query()->whereRaw('status = \'live\' -- '), 'posts:view', $manager)->get();
+    }
+
+    /**
+     * A before-query callback registered after the macro runs before its guard,
+     * so one joining an `or`, taking the conditions out, adding a union or
+     * selecting from another table is refused, and one adding a condition has
+     * it grouped.
+     *
+     * @return void
+     */
+    public function testABeforeQueryCallbackAfterTheMacroCannotEscapeTheCondition(): void
+    {
+        $manager = $this->resolveRequest(StubIdentity::create(['id' => 'u1']));
+
+        self::createPosts(2);
+
+        $callbacks = [
+            'or'    => [RefusalReason::QUERY_OR, static fn (QueryBuilder $query): QueryBuilder => $query->orWhere('title', 'post 0')],
+            'clear' => [RefusalReason::SCOPE_REMOVED, static function (QueryBuilder $query): void {
+                $query->wheres = [];
+            }],
+            'union' => [RefusalReason::QUERY_UNION, static fn (QueryBuilder $query): QueryBuilder => $query->union(ScopedPost::query()->toBase())],
+            'from'  => [RefusalReason::QUERY_FROM, static fn (QueryBuilder $query): QueryBuilder => $query->from('scoped_posts as p')],
+        ];
+
+        foreach ($callbacks as $name => [$reason, $callback]) {
+            $query = self::authorized(ScopedPost::query(), 'posts:view', $manager);
+
+            $query->getQuery()->beforeQuery($callback);
+
+            self::assertSame([$reason], self::refusalOf(static fn (): Collection => $query->get())->reasons(), $name);
+        }
+
+        $added = self::authorized(ScopedPost::query(), 'posts:view', $manager);
+
+        $added->getQuery()->beforeQuery(static fn (QueryBuilder $query): QueryBuilder => $query->whereRaw('1 = 1 OR title = \'post 0\''));
+
+        self::assertCount(0, $added->get());
+    }
+
+    /**
+     * A base query taken with `toBase()` is decided afresh each time it runs,
+     * and refused once it is widened with `or` or given a condition outside the
+     * group.
+     *
+     * @return void
+     */
+    public function testABaseQueryIsDecidedEachTimeItRuns(): void
+    {
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user);
+        $view    = Permission::create(['name' => 'posts:view']);
+
+        self::createPosts(2);
+        $user->givePermission($view);
+
+        $base = self::authorized(ScopedPost::query(), 'posts:view', $manager)->toBase();
+
+        self::assertCount(2, $base->get());
+
+        $user->revokePermission($view);
+
+        self::assertCount(0, $base->get());
+        self::assertSame([RefusalReason::QUERY_OR], self::refusalOf(static fn (): mixed => (clone $base)->orWhere('title', 'post 0')->get())->reasons());
+        self::assertSame([RefusalReason::QUERY_CHANGED], self::refusalOf(static fn (): mixed => (clone $base)->where('title', 'post 0')->get())->reasons());
     }
 
     /**
