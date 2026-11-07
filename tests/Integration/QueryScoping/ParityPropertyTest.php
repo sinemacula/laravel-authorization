@@ -13,21 +13,28 @@ use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Query\AuthorizedQuery;
-use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
+use SineMacula\Laravel\Authorization\Query\DecisionFormula;
+use SineMacula\Laravel\Authorization\Query\KeyConditions;
 use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
+use SineMacula\Laravel\Authorization\Query\RecordAttachments;
+use SineMacula\Laravel\Authorization\Query\ResourcePatterns;
+use SineMacula\Laravel\Authorization\Query\ScopeClasses;
 use SineMacula\Laravel\Authorization\Query\StatementScreen;
 use SineMacula\Laravel\Authorization\Registrars\QueryScopeRegistrar;
+use SineMacula\Laravel\Authorization\Scopes\AuthorizedScope;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\TestCase;
 
 /**
  * The query scoping parity property (AUTHZ-10.1, N64): for random scenarios
- * within this release's subset, the rows `whereAuthorized()` keeps are exactly
- * the rows of the query's candidate set that `check()` allows on a freshly
- * loaded model, a check that throws counting as a denial; and a construct
- * outside the subset that a check would weigh is refused.
+ * within this release's subset, the rows `whereAuthorized()`, or the
+ * model-level scope, keeps are exactly the rows of the query's candidate set
+ * that `check()` allows on a freshly loaded model, a check that throws counting
+ * as a denial; and a construct outside the subset that a check would weigh is
+ * refused.
  *
  * The scenarios are drawn from `AUTHZ_PARITY_SEED`, a random seed when it is
  * not set, and there are `AUTHZ_PARITY_RUNS` of them, 150 by default; a failure
@@ -43,6 +50,12 @@ use Tests\TestCase;
 #[CoversClass(QueryAuthorizer::class)]
 #[CoversClass(StatementScreen::class)]
 #[CoversClass(AuthorizedQuery::class)]
+#[CoversClass(AuthorizedScope::class)]
+#[CoversClass(DecisionFormula::class)]
+#[CoversClass(KeyConditions::class)]
+#[CoversClass(RecordAttachments::class)]
+#[CoversClass(ResourcePatterns::class)]
+#[CoversClass(ScopeClasses::class)]
 final class ParityPropertyTest extends TestCase
 {
     /** @var int The scenarios run when `AUTHZ_PARITY_RUNS` is not set. */
@@ -87,8 +100,10 @@ final class ParityPropertyTest extends TestCase
             $this->inScenario($seed + $run, static function (ParityScenario $scenario): int {
                 $scenario->build(true);
 
-                $query   = $scenario->model::query();
-                $scope   = static fn (): mixed => $query->whereAuthorized($scenario->action, $scenario->context, $scenario->manager); // @phpstan-ignore method.notFound
+                $query = $scenario->model::query();
+                $scope = $scenario->isModelScoped()
+                    ? static fn (): mixed => $query->get()
+                    : static fn (): mixed => $query->whereAuthorized($scenario->action, $scenario->context, $scenario->manager); // @phpstan-ignore method.notFound
                 $refusal = self::refusalOf($scope);
 
                 self::assertNotNull($refusal, "The construct was not refused.\n{$scenario->replay()}");
@@ -131,7 +146,7 @@ final class ParityPropertyTest extends TestCase
 
             $app->make(ConfigRepository::class)->set('authorization.context.sources', []);
 
-            foreach ([ResolutionCache::class, ResolvedTenant::class, CheckContextFactory::class] as $abstract) {
+            foreach ([ResolutionCache::class, ResolvedTenant::class, CheckContextFactory::class, TenantTree::class] as $abstract) {
                 $app->forgetInstance($abstract);
             }
         }
@@ -139,8 +154,7 @@ final class ParityPropertyTest extends TestCase
 
     /**
      * Assert that the scoped query keeps exactly the candidates `check()`
-     * allows, and return 1, or 0 when the scope was refused for admitting rows
-     * of other tenants, which this release does not compile.
+     * allows, and that it is not refused, and return 1.
      *
      * @param  \Tests\Integration\QueryScoping\ParityScenario  $scenario
      * @return int
@@ -155,15 +169,14 @@ final class ParityPropertyTest extends TestCase
 
         try {
             $query  = $constraints($scenario->model::query());
-            $scoped = $after($query->whereAuthorized($scenario->action, $scenario->context, $scenario->manager)); // @phpstan-ignore method.notFound
+            $query  = $scenario->isModelScoped() ? $query : $query->whereAuthorized($scenario->action, $scenario->context, $scenario->manager); // @phpstan-ignore method.notFound
+            $scoped = $after($query);
+            $kept   = self::identities($scoped, $identity);
         } catch (QueryScopeRefusedException $exception) {
-            self::assertSame([RefusalReason::PLATFORM_ADMISSION], $exception->reasons(), $exception->getMessage() . "\n{$scenario->replay()}");
-
-            return 0;
+            self::fail("The scope was refused: {$exception->getMessage()}\n{$scenario->replay()}");
         }
 
-        $kept       = self::identities($scoped, $identity);
-        $candidates = self::identities($after($constraints($scenario->model::query())), $identity);
+        $candidates = self::identities($after($constraints(self::unscoped($scenario))), $identity);
         $allowed    = \array_values(\array_filter($candidates, fn (string $row): bool => $this->isAllowed($scenario, $identity, $row)));
 
         self::assertSame($allowed, $kept, "The scope kept other rows than check() allows.\nSQL: {$scoped->toRawSql()}\n{$scenario->replay()}");
@@ -182,13 +195,24 @@ final class ParityPropertyTest extends TestCase
      */
     private function isAllowed(ParityScenario $scenario, string $identity, string $row): bool
     {
-        $model = $scenario->model::query()->where($identity, $row)->first();
+        $model = self::unscoped($scenario)->where($identity, $row)->first();
 
         try {
             return $model !== null && $scenario->manager->check($scenario->action, $model, $scenario->context)->isAllowed();
         } catch (\Throwable) {
             return false;
         }
+    }
+
+    /**
+     * Return a query of the scenario's model with no model-level scope.
+     *
+     * @param  \Tests\Integration\QueryScoping\ParityScenario  $scenario
+     * @return \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>
+     */
+    private static function unscoped(ParityScenario $scenario): Builder
+    {
+        return $scenario->model::query()->withoutGlobalScope(AuthorizedScope::class);
     }
 
     /**

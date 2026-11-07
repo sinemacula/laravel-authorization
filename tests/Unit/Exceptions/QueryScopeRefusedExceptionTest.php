@@ -31,15 +31,15 @@ final class QueryScopeRefusedExceptionTest extends TestCase
      */
     public function testTheExceptionNamesEveryRefusal(): void
     {
-        $refusals  = [new Refusal(RefusalReason::RESOURCE_PATTERN, 'p', 'p#0'), new Refusal(RefusalReason::RECORD_ATTACHMENT, 'q[2]')];
+        $refusals  = [new Refusal(RefusalReason::RESOURCE_PATTERN, 'p', 'p#0'), new Refusal(RefusalReason::TOO_MANY_ATTACHMENTS, 'q[2]')];
         $exception = new QueryScopeRefusedException('posts:view', 'posts', $refusals);
 
         self::assertSame('posts:view', $exception->action);
         self::assertSame('posts', $exception->resourceType);
         self::assertSame($refusals, $exception->refusals);
-        self::assertSame([RefusalReason::RESOURCE_PATTERN, RefusalReason::RECORD_ATTACHMENT], $exception->reasons());
-        $message = 'whereAuthorized(\'posts:view\') cannot be compiled exactly for \'posts\': '
-            . 'resource_pattern (statement p#0); record_attachment (statement q[2]).';
+        self::assertSame([RefusalReason::RESOURCE_PATTERN, RefusalReason::TOO_MANY_ATTACHMENTS], $exception->reasons());
+        $message = 'The authorized scope for \'posts:view\' cannot be compiled exactly for \'posts\': '
+            . 'resource_pattern (statement p#0); too_many_attachments (statement q[2]).';
 
         self::assertSame($message, $exception->getMessage());
         self::assertInstanceOf(\RuntimeException::class, $exception);

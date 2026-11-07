@@ -8,7 +8,7 @@ use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 
 /**
- * One reason `whereAuthorized()` refused to scope a query, naming what it could
+ * One reason an authorized scope refused to scope a query, naming what it could
  * not compile: the policy and statement, the condition key, namespace, column
  * or seam class, and a fixed phrase. It never carries an operand, a pattern, a
  * context value, a row's value or a tenant id (N64).

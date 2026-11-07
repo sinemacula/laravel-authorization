@@ -56,9 +56,10 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
 - `events.md`: the one marker every event implements, the snapshot payloads, the actor the caller passes, one
   operation id per call, dispatch after commit, the grantees a delete reports, the boundary and guardrail events and the
   document digests.
-- `query-scoping.md`: the `whereAuthorized()` contract over a query's candidate rows, compiling at the call and at
-  every execution, the classes of rows decided through the decision pipeline itself, the statements and tenancies the
-  first release compiles, the guards, every refusal reason, and what the second release adds.
+- `query-scoping.md`: the `whereAuthorized()` and model-level `AuthorizedScope` contract over a query's candidate
+  rows, compiling at the call and at every execution, the classes of rows cut at the tenants the sources sit at and
+  decided through the decision pipeline itself, literal ids, record attachments, the collation and key-kind proofs,
+  the guards, every refusal reason, and the limits.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

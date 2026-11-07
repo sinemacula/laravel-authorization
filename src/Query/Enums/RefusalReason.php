@@ -5,7 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Query\Enums;
 
 /**
- * Why `whereAuthorized()` refused to scope a query (AUTHZ-10.2, N64): the scope
+ * Why an authorized scope, `whereAuthorized()` or the model-level
+ * `AuthorizedScope`, refused to scope a query (AUTHZ-10.2, N64): the scope
  * cannot prove that the rows it keeps are exactly those `check()` allows, so it
  * changes nothing and throws instead.
  *
@@ -50,11 +51,29 @@ enum RefusalReason: string
     /** A statement reads a namespace, or an authentication requirement, through a seam not marked `ScopeInvariant`. */
     case SCOPE_VARIANT_SOURCE = 'scope_variant_source';
 
-    /** The bound tenant tree is not the flat tree, the only tree this release compiles. */
-    case TENANT_TREE = 'tenant_tree';
+    /** The key or a tenant column compares other than byte for byte, under a collation that is not exact. */
+    case COLUMN_COLLATION = 'column_collation';
 
-    /** The subject holds the action platform-wide, which admits rows of other tenants. */
-    case PLATFORM_ADMISSION = 'platform_admission';
+    /** The bound tenant tree's subtree query runs on another connection than the model's. */
+    case SUBTREE_CONNECTION = 'subtree_connection';
+
+    /** The policies attached to records are kept on another connection than the model's. */
+    case ATTACHMENT_CONNECTION = 'attachment_connection';
+
+    /** The column holding an attached record's key has a collation the key's text cannot be compared under: one not byte for byte on SQLite or PostgreSQL, or not utf8mb4 on MySQL. */
+    case ATTACHMENT_COLLATION = 'attachment_collation';
+
+    /** A value the condition must inline, a tenant's, an application's, a policy's or one the tenant tree's subtree query is bound to, cannot be written as the database reads it bound, or that query's text holds a question mark that is not a placeholder. */
+    case INLINE_VALUE = 'inline_value';
+
+    /** The condition reads the authorization tables, which `check()` reads on the write connection, in a query that is not itself run (nested in another, or compiled to text), so cannot be put on the write connection, on a connection with a separate read connection, outside a transaction. */
+    case READ_REPLICA = 'read_replica';
+
+    /** The tenants the subject's grants and the type's policies are kept in, or the classes of rows they make, are more than `authorization.query_scoping` allows. */
+    case TOO_MANY_SCOPES = 'too_many_scopes';
+
+    /** The policies attached to records of the type in one scope are more than `authorization.query_scoping.max_attachments` allows. */
+    case TOO_MANY_ATTACHMENTS = 'too_many_attachments';
 
     /** A policy, guardrail or boundary document cannot be read. */
     case INVALID_POLICY = 'invalid_policy';
@@ -65,11 +84,8 @@ enum RefusalReason: string
     /** A statement that names the action reads the resource namespace. */
     case RESOURCE_NAMESPACE = 'resource_namespace';
 
-    /** A statement that names the action has a resource pattern naming less than the whole type. */
+    /** A statement that names the action has a resource pattern the scope cannot compare with a key, or an integer id outside 64 bits. */
     case RESOURCE_PATTERN = 'resource_pattern';
-
-    /** A policy attached to a record of the type names the action, whatever its principals. */
-    case RECORD_ATTACHMENT = 'record_attachment';
 
     /** The query has a union. */
     case QUERY_UNION = 'query_union';
@@ -85,4 +101,7 @@ enum RefusalReason: string
 
     /** The scope was removed after `whereAuthorized()`, or never applied: called inside a `where` group or a relation's definition, or run past its scopes. */
     case SCOPE_REMOVED = 'scope_removed';
+
+    /** A model-level scope was applied while a scope was being decided: it is on the subject's model, or on a model the decision reads. */
+    case REENTRANT = 'reentrant';
 }

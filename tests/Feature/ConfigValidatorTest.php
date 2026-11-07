@@ -259,6 +259,29 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * The query scoping limits are validated with the rest: the package's
+     * defaults pass, and a limit below 1 is refused under its key.
+     *
+     * @return void
+     */
+    public function testQueryScopingLimitsAreValidated(): void
+    {
+        $config = $this->authorizationConfig();
+
+        self::assertSame(['max_anchors' => 64, 'max_scopes' => 16, 'max_attachments' => 64], $config['query_scoping']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        $config['query_scoping']['max_scopes'] = 0;
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->app),
+            'authorization.query_scoping.max_scopes',
+            'expected a whole number of at least 1, got 0 (int).',
+        );
+    }
+
+    /**
      * A `models` block that is not an array is refused.
      *
      * @return void

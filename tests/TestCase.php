@@ -9,6 +9,7 @@ namespace Tests;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use function Orchestra\Testbench\load_migration_paths;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
@@ -18,6 +19,7 @@ use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use Tests\Feature\Stubs\PermissiveActionCatalogue;
 use Tests\Feature\Stubs\PermissiveContextKeyCatalogue;
+use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 
 // phpcs:enable PSR12.Files.FileHeader
 
@@ -179,12 +181,17 @@ abstract class TestCase extends OrchestraTestCase
      * an integer key, documents with a long string key column that is not the
      * table's primary key (so it can hold null, empty and long keys), each with
      * tenant columns, tickets whose tenant is an integer team id, posts whose
-     * tenant id column is an integer, and documents keyed by a uuid.
+     * tenant id column is an integer, documents keyed by a uuid, posts keyed by
+     * a given 64-bit integer (SQLite's rowid there), and the closure table of
+     * the fixture tenant tree. The document key and the closure table compare
+     * bytes on MySQL, as a key or a tenant compared with a value must.
      *
      * @return void
      */
     private function createQueryScopingTables(): void
     {
+        $isMySql = DB::connection()->getDriverName() === 'mysql';
+
         Schema::create('scoped_posts', static function (Blueprint $schema): void {
             $schema->increments('id');
             $schema->string('title')->nullable();
@@ -193,9 +200,14 @@ abstract class TestCase extends OrchestraTestCase
             $schema->string('tenant_id')->nullable();
         });
 
-        Schema::create('scoped_documents', static function (Blueprint $schema): void {
+        Schema::create('scoped_documents', static function (Blueprint $schema) use ($isMySql): void {
             $schema->increments('row_id');
-            $schema->string('code', 4200)->nullable();
+            $code = $schema->string('code', 4200)->nullable();
+
+            if ($isMySql) {
+                $code->collation('utf8mb4_0900_bin');
+            }
+
             $schema->string('title')->nullable();
             $schema->string('tenant_type')->nullable();
             $schema->string('tenant_id')->nullable();
@@ -217,8 +229,79 @@ abstract class TestCase extends OrchestraTestCase
 
         Schema::create('scoped_uuid_documents', static function (Blueprint $schema): void {
             $schema->uuid('id')->primary();
+            $schema->string('title')->nullable();
             $schema->string('tenant_type')->nullable();
             $schema->string('tenant_id')->nullable();
+        });
+
+        Schema::create('scoped_keyed_posts', static function (Blueprint $schema): void {
+            $isSqlite = DB::connection()->getDriverName() === 'sqlite';
+
+            ($isSqlite ? $schema->integer('id') : $schema->bigInteger('id'))->primary();
+            $schema->string('title')->nullable();
+            $schema->string('tenant_type')->nullable();
+            $schema->string('tenant_id')->nullable();
+        });
+
+        $this->createLooseKeyTables();
+
+        Schema::create(ClosureTenantTree::TABLE, static function (Blueprint $schema) use ($isMySql): void {
+            foreach (['ancestor_type', 'ancestor_id', 'descendant_type', 'descendant_id'] as $column) {
+                $definition = $schema->string($column, 191);
+
+                if (!$isMySql) {
+                    continue;
+                }
+
+                $definition->collation('utf8mb4_0900_bin');
+            }
+
+            $schema->unsignedInteger('depth');
+        });
+    }
+
+    /**
+     * Create the tables whose keys cannot be compared exactly, for the query
+     * scoping tests that refuse them: posts keyed by an integer that is not
+     * SQLite's rowid and is an unsigned `BIGINT` on MySQL, documents whose key
+     * folds case, and attachments whose record keys and tenants fold case
+     * (`NOCASE` on SQLite, `utf8mb4_unicode_ci` on MySQL, a nondeterministic
+     * collation on PostgreSQL).
+     *
+     * @return void
+     */
+    private function createLooseKeyTables(): void
+    {
+        $driver    = DB::connection()->getDriverName();
+        $collation = ['sqlite' => 'nocase', 'mysql' => 'utf8mb4_unicode_ci', 'pgsql' => 'authz_folded'][$driver] ?? null;
+
+        if ($driver === 'pgsql') {
+            DB::statement('CREATE COLLATION IF NOT EXISTS authz_folded (provider = icu, locale = \'und-u-ks-level2\', deterministic = false)');
+        }
+
+        // SQLite gives every integer column of a blueprint the rowid's type.
+        if ($driver === 'sqlite') {
+            DB::statement('create table scoped_loose_posts (id int primary key, title varchar)');
+        } else {
+            Schema::create('scoped_loose_posts', static function (Blueprint $schema) use ($driver): void {
+                ($driver === 'mysql' ? $schema->unsignedBigInteger('id') : $schema->bigInteger('id'))->primary();
+                $schema->string('title')->nullable();
+            });
+        }
+
+        Schema::create('scoped_folded_documents', static function (Blueprint $schema) use ($collation): void {
+            $schema->string('code', 191)->collation((string) $collation)->primary();
+            $schema->string('title')->nullable();
+        });
+
+        Schema::create('scoped_folded_resource_policies', static function (Blueprint $schema) use ($collation): void {
+            $schema->uuid('policy_id');
+            $schema->string('resource_type', 191);
+            $schema->string('resource_id', 191)->collation((string) $collation)->nullable();
+            $schema->string('tenant_type', 191)->collation((string) $collation)->nullable();
+            $schema->string('tenant_id', 191)->collation((string) $collation)->nullable();
+            $schema->boolean('include_subtree')->default(true);
+            $schema->string('application', 191)->nullable();
         });
     }
 

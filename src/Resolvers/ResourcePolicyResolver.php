@@ -59,6 +59,9 @@ final readonly class ResourcePolicyResolver
     /** @var int How many policies attached to records are read at a time. */
     private const int RECORD_PAGE = 100;
 
+    /** @var int How many policies attached to records, whatever their actions, are scanned at most for each one the limit allows. */
+    private const int RECORD_SCAN = 4;
+
     /**
      * Return the policies attached to the resource and to its type, each as a
      * resource policy attached to what it is attached to, and, for a resource
@@ -97,25 +100,28 @@ final readonly class ResourcePolicyResolver
     }
 
     /**
-     * Determine whether a policy attached to a record of the type, in any
-     * tenant and for any application, has a statement naming the action, so
-     * `whereAuthorized()` can refuse it: it compiles no attachment to a record
-     * (N68). The attached policies are read on the write connection, past the
-     * resolution cache, so an attachment made since the last check counts, a
-     * page at a time, each parsed once and none after the first that names the
-     * action; a type with no record attachments reads one empty page. A type
-     * longer than the table stores has none.
+     * Return the policies attached to records of the type in the tenant and
+     * application the check is decided in, those with a statement naming the
+     * action, each once, as attached to the type's records, for an authorized
+     * scope to compare each row's key with what they are attached to; or null
+     * when more than the limit name the action, or more than `RECORD_SCAN`
+     * times the limit are attached to records there whatever their actions, so
+     * the read is bounded by the rows it scans as well as by what it keeps. The
+     * attachments are read on the write connection, past the resolution cache,
+     * so one made since the last check counts, a page at a time. A type longer
+     * than the table stores has none.
      *
      * @param  string  $type
      * @param  string  $action
-     * @return bool
+     * @param  int  $limit
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>|null
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
-    public function hasRecordPolicyFor(string $type, string $action): bool
+    public function recordPoliciesFor(string $type, string $action, int $limit): ?array
     {
         if (\strlen($type) > Reference::MAX_BYTES) {
-            return false;
+            return [];
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
@@ -128,18 +134,31 @@ final readonly class ResourcePolicyResolver
         $policies = $class::query()->withoutGlobalScopes()->useWritePdo()
             ->whereIn($model->getQualifiedKeyName(), static function (Builder $query) use ($table, $type): void {
                 $query->select($table . '.policy_id')->from($table)->where($table . '.resource_type', $type)->whereNotNull($table . self::ATTACHED_KEY);
+
+                TenantScope::currentChain()->grants($query, $table);
+                GrantApplications::only($query, $table, TenantScope::currentApplication());
             })
             ->lazyById(self::RECORD_PAGE);
 
-        $names = static fn (Statement $statement): bool => $statement->coversAction($action);
+        $names   = static fn (Statement $statement): bool => $statement->coversAction($action);
+        $found   = [];
+        $scanned = 0;
 
         foreach ($policies as $policy) {
-            if (\array_filter(GrantResolver::hydrate($policy)->statements, $names) !== []) {
-                return true;
+            $hydrated = GrantResolver::hydrate($policy);
+
+            if (\array_filter($hydrated->statements, $names) !== []) {
+                $found[] = $hydrated->withResource("{$type}:*");
+            }
+
+            // More scanned than the limit's multiple, or more found than the
+            // limit, without overflowing however large the limit is.
+            if (\intdiv($scanned++, self::RECORD_SCAN) >= $limit || \count($found) > $limit) {
+                return null;
             }
         }
 
-        return false;
+        return $found;
     }
 
     /**

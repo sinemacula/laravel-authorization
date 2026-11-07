@@ -102,7 +102,7 @@ final class QueryScopeRegistrarTest extends TestCase
     {
         $user = StubIdentity::create(['id' => 'u1']);
 
-        $user->attachPolicy(self::storedPolicy('record', [['effect' => 'deny', 'actions' => ['posts:view'], 'resources' => [(new ScopedPost)->getMorphClass() . ':1']]]));
+        $user->attachPolicy(self::storedPolicy('record', [['effect' => 'deny', 'actions' => ['posts:view'], 'resources' => [(new ScopedPost)->getMorphClass() . ':?']]]));
 
         self::createPosts(2);
 
@@ -290,27 +290,32 @@ final class QueryScopeRegistrarTest extends TestCase
     }
 
     /**
-     * The leaks a broader scope would have are refused: `-0`, a literal `*`
-     * key, a record's id, a `retrieved` listener and an overridden
-     * `getAttribute()`.
+     * The leaks a broader scope would have are closed: `-0` and a substituted
+     * `*` name no record, as `check()` finds, a record's id names that record
+     * alone; a `retrieved` listener and an overridden `getAttribute()` are
+     * refused.
      *
      * @return void
      */
-    public function testTheLeaksOfABroaderScopeAreRefused(): void
+    public function testTheLeaksOfABroaderScopeAreClosed(): void
     {
         $user    = StubIdentity::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
         $type    = (new ScopedPost)->getMorphClass();
 
-        foreach (['-0', '\*', '1'] as $index => $id) {
+        foreach ([0, 1, 2] as $id) {
+            ScopedPost::query()->create(['id' => $id, 'title' => 'post']);
+        }
+
+        foreach (['-0', '${input.k}', '1'] as $index => $id) {
             $user->attachPolicy(self::storedPolicy('leak-' . $index, [['effect' => 'allow', 'actions' => ['posts:view'], 'resources' => [$type . ':' . $id]]]));
         }
 
         $overriding = SealedModels::overriding('getAttribute')->newQuery();
+        $checked    = \array_values(\array_filter([0, 1, 2], static fn (int $id): bool => $manager->can('posts:view', ScopedPost::query()->find($id), ['k' => '*'])));
 
-        $refusal = self::refusalOf(static fn (): Builder => self::authorized(ScopedPost::query(), 'posts:view', $manager));
-
-        self::assertSame(\array_fill(0, 3, RefusalReason::RESOURCE_PATTERN), $refusal->reasons());
+        self::assertSame([1], $checked);
+        self::assertSame($checked, self::authorized(ScopedPost::query(), 'posts:view', $manager, ['k' => '*'])->pluck('id')->all());
         self::assertSame([RefusalReason::MODEL_OVERRIDE], self::refusalOf(static fn (): Builder => self::authorized($overriding, 'posts:edit', $manager))->reasons());
 
         ScopedDocument::retrieved(static function (ScopedDocument $document): void {

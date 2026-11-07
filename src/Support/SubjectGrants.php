@@ -189,12 +189,15 @@ final class SubjectGrants
     /**
      * Return each policy that has a deny statement with its deny statements
      * alone, each keeping its position, so the trace names it as the policy
-     * does; a policy with none is left out.
+     * does; a policy with none is left out. `whereAuthorized()` reads a
+     * record's own tenant's attached denies through it too.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     *
+     * @internal
      */
-    private static function denialsOf(array $policies): array
+    public static function denialsOf(array $policies): array
     {
         $denials = [];
 

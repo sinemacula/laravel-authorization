@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -283,5 +284,24 @@ final class SubjectGrantsTest extends TestCase
         self::assertFalse(SubjectGrants::holdsRole($subject, 'editor'));
         self::assertFalse(SubjectGrants::holdsPermission($subject, 'posts:edit'));
         self::assertSame([], SubjectGrants::identityPolicies($subject));
+    }
+
+    /**
+     * Each policy with a deny statement keeps its deny statements alone, at
+     * their positions, with its name, version, key and resource; one with none
+     * is left out.
+     *
+     * @return void
+     */
+    public function testTheDenialsOfPoliciesKeepTheirDenyStatementsAlone(): void
+    {
+        $allow  = new Statement(PolicyEffect::ALLOW, ['posts:view']);
+        $deny   = new Statement(PolicyEffect::DENY, ['posts:edit']);
+        $mixed  = new EvaluationPolicy('mixed', [$allow, $deny], 1, 'key', 'posts:*');
+        $denied = SubjectGrants::denialsOf([$mixed, new EvaluationPolicy('allows', [$allow])]);
+
+        self::assertCount(1, $denied);
+        self::assertSame([1 => $deny], $denied[0]->statements);
+        self::assertSame(['mixed', 1, 'key', 'posts:*'], [$denied[0]->name, $denied[0]->version, $denied[0]->id, $denied[0]->resource]);
     }
 }

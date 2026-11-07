@@ -7,9 +7,11 @@ namespace Tests\Feature\Query;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\After;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
@@ -28,9 +30,12 @@ use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Query\Refusal;
+use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ScopesQueries;
@@ -40,8 +45,8 @@ use Tests\Feature\Stubs\RecordingSubjectAttributes;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubTenant;
-use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\NumberedTenantPost;
 use Tests\Fixtures\QueryScoping\ScopedDocument;
 use Tests\Fixtures\QueryScoping\ScopedPost;
@@ -350,56 +355,198 @@ final class QueryAuthorizerTest extends TestCase
     }
 
     /**
-     * A tenant-bearing model is refused under a tenant tree that is not flat,
-     * and when the subject holds the action platform-wide; a tenantless one is
-     * not.
-     *
-     * @return void
-     */
-    public function testATenantBearingModelNeedsAFlatTreeAndNoPlatformAdmission(): void
-    {
-        $user    = StubIdentity::create(['id' => 'u1']);
-        $subject = new Subject($user, $user);
-
-        $user->givePermission(Permission::create(['name' => 'posts:view']));
-
-        self::assertSame([RefusalReason::PLATFORM_ADMISSION], self::refused($subject, new TenantScopedPost, 'posts:view')->reasons());
-        self::assertNotSame(QueryAuthorizer::NO_ROW, self::authorizer()->compile($subject, new ScopedPost, 'posts:view'));
-
-        $this->app?->instance(TenantTree::class, new StubTenantTree);
-
-        self::assertSame([RefusalReason::TENANT_TREE], self::refused($subject, new TenantScopedPost, 'posts:edit')->reasons());
-    }
-
-    /**
-     * A policy attached to a record of the type that names the action is
-     * refused, whichever tenant it is attached in, and one that does not name
-     * it is not; an override, which reads no attachment, refuses nothing.
+     * A subject holding the action platform-wide is admitted to the rows of
+     * every tenant, decided at platform scope, as `check()` admits them: under
+     * the platform's policies and the guardrails of the row's tenant, and with
+     * the denies attached in that tenant, to the type and to its records, but
+     * no allow attached there, so not even one the scope could not compile is
+     * refused.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testARecordAttachmentNamingTheActionIsRefused(): void
+    public function testAPlatformWideGrantAdmitsTheRowsOfEveryTenant(): void
+    {
+        $t1      = StubTenant::query()->create(['id' => 't1']);
+        $type    = $t1->getMorphClass();
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user);
+
+        StubTenant::query()->create(['id' => 't2']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+
+        foreach (['none' => [null, null], 't1' => [$type, 't1'], 't2' => [$type, 't2']] as $title => [$tenantType, $tenantId]) {
+            TenantScopedPost::query()->create(['title' => $title, 'tenant_type' => $tenantType, 'tenant_id' => $tenantId]);
+        }
+
+        $condition = self::authorizer()->compile($manager->currentSubject(), new TenantScopedPost, 'posts:view');
+
+        self::assertSame(['none', 't1', 't2'], TenantScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all());
+        self::assertSame(['none', 't1', 't2'], self::allowed($manager));
+
+        $ids = [];
+
+        foreach (['railed' => 'r1', 'typed' => 'r2', 'denied' => 'r3', 'kept' => 'r3', 'policed' => 'r3'] as $title => $tenant) {
+            StubTenant::query()->firstOrCreate(['id' => $tenant]);
+
+            $ids[$title] = TenantScopedPost::query()->create(['title' => $title, 'tenant_type' => $type, 'tenant_id' => $tenant])->getKey();
+        }
+
+        $deny  = self::storedPolicy('deny', [['effect' => 'deny', 'actions' => ['posts:view']]]);
+        $rail  = self::storedPolicy('edit-only', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
+        $named = (new TenantScopedPost)->getMorphClass() . ':' . (string) $ids['policed']; // @phpstan-ignore cast.string
+        $allow = self::storedPolicy('uncompilable', [
+            ['effect' => 'allow', 'actions' => ['posts:view'], 'resources' => ['posts:?'], 'principals' => [$user->getMorphClass() . ':u1']],
+        ]);
+
+        DB::table('guardrails')->insert(['policy_id' => $rail->getKey(), 'tenant_type' => $type, 'tenant_id' => 'r1']);
+        app(ResourcePolicyService::class)->attach($deny, TenantScopedPost::class, new Reference($type, 'r2'));
+        app(ResourcePolicyService::class)->attach($deny, [TenantScopedPost::class, (string) $ids['denied']], new Reference($type, 'r3')); // @phpstan-ignore cast.string
+        app(ResourcePolicyService::class)->attach($allow, [TenantScopedPost::class, (string) $ids['kept']], new Reference($type, 'r3')); // @phpstan-ignore cast.string
+        $user->attachPolicy(self::storedPolicy('platform-deny', [['effect' => 'deny', 'actions' => ['posts:view'], 'resources' => [$named]]]));
+
+        // The guardrail was written past its service, so the memo is dropped.
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        $manager   = $this->resolveRequest($user);
+        $condition = self::authorizer()->compile($manager->currentSubject(), new TenantScopedPost, 'posts:view');
+
+        self::assertSame(['none', 't1', 't2', 'kept'], self::allowed($manager));
+        self::assertSame(['none', 't1', 't2', 'kept'], TenantScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all());
+    }
+
+    /**
+     * A policy attached to a record is weighed on that record alone: its deny
+     * applies to everyone, its allow to the subjects it names, as `check()`
+     * weighs it; an override, which reads no attachment, ignores it. The
+     * policies one scope attaches to records are at most
+     * `authorization.query_scoping.max_attachments`, or 64 when it is not set
+     * to a whole number; more are refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARecordAttachmentIsWeighedOnItsRecord(): void
     {
         $user    = StubIdentity::create(['id' => 'u1']);
-        $subject = new Subject($user, $user);
+        $manager = $this->resolveRequest($user);
+        $subject = $manager->currentSubject();
 
-        self::attachToResource([ScopedPost::class, '3'], [['effect' => 'deny', 'actions' => ['posts:edit']]]);
+        foreach ([3, 4, 5] as $id) {
+            ScopedPost::query()->create(['id' => $id, 'title' => 'post']);
+        }
 
-        self::assertSame(QueryAuthorizer::NO_ROW, self::authorizer()->compile($subject, new ScopedPost, 'posts:view'));
+        self::attachToResource([ScopedPost::class, '4'], [['effect' => 'deny', 'actions' => ['posts:*']]]);
+        self::attachToResource([ScopedPost::class, '5'], [['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => [$user->getMorphClass() . ':u1']]]);
 
-        $policy = self::attachToResource([ScopedPost::class, '4'], [['effect' => 'deny', 'actions' => ['posts:*']]]);
+        $condition = self::authorizer()->compile($subject, new ScopedPost, 'posts:view');
+        $checked   = \array_values(\array_filter([3, 4, 5], static fn (int $id): bool => $manager->can('posts:view', ScopedPost::query()->find($id))));
 
-        self::attachToResource([ScopedPost::class, '5'], [['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => ['user:other']]]);
+        self::assertSame([5], $checked);
+        self::assertSame($checked, ScopedPost::query()->whereRaw($condition)->pluck('id')->all());
 
-        $refusal = self::refusalOf(static fn (): string => self::authorizer()->compile($subject, new ScopedPost, 'posts:view'));
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
 
-        self::assertSame([RefusalReason::RECORD_ATTACHMENT], $refusal->reasons());
-        self::assertNull($refusal->refusals[0]->policy);
-        self::assertSame('a policy attached to a record of the type names the action', $refusal->refusals[0]->detail);
-        self::assertStringNotContainsString((string) $policy->getKey(), $refusal->getMessage()); // @phpstan-ignore cast.string
-        self::assertSame(QueryAuthorizer::NO_ROW, self::authorizer(self::pipeline()->withPolicies([]))->compile($subject, new ScopedPost, 'posts:view'));
+        self::assertSame([3, 5], ScopedPost::query()->whereRaw(self::authorizer()->compile($subject, new ScopedPost, 'posts:view'))->orderBy('id')->pluck('id')->all());
+        $overridden = self::authorizer(self::pipeline()->withPolicies([]))->compile($subject, new ScopedPost, 'posts:view');
+
+        self::assertSame([3, 4, 5], ScopedPost::query()->whereRaw($overridden)->orderBy('id')->pluck('id')->all());
+
+        $config  = $this->app?->make(ConfigRepository::class);
+        $compile = static fn (): string => self::authorizer()->compile($subject, new ScopedPost, 'posts:view');
+
+        foreach (\range(6, 67) as $id) {
+            self::attachToResource([ScopedPost::class, (string) $id], [['effect' => 'deny', 'actions' => ['posts:view']]]);
+        }
+
+        $config?->set('authorization.query_scoping.max_attachments', 'many');
+
+        self::assertStringContainsString('EXISTS', $compile());
+
+        $config?->set('authorization.query_scoping.max_attachments', 63);
+
+        self::assertSame([RefusalReason::TOO_MANY_ATTACHMENTS], self::refusalOf($compile)->reasons());
+
+        $config?->set('authorization.query_scoping.max_attachments', 'many');
+        self::attachToResource([ScopedPost::class, '68'], [['effect' => 'deny', 'actions' => ['posts:view']]]);
+
+        self::assertSame([RefusalReason::TOO_MANY_ATTACHMENTS], self::refusalOf($compile)->reasons());
+    }
+
+    /**
+     * An allow attached to a record grants only the subjects it names: one
+     * naming another subject grants nothing on its record, one naming the
+     * subject grants its own, as `check()` decides each.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAttachedAllowGrantsOnlyThePrincipalsItNames(): void
+    {
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user);
+
+        foreach ([4, 5] as $id) {
+            ScopedPost::query()->create(['id' => $id, 'title' => 'post']);
+        }
+
+        self::attachToResource([ScopedPost::class, '4'], [['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => [$user->getMorphClass() . ':u2']]]);
+        self::attachToResource([ScopedPost::class, '5'], [['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => [$user->getMorphClass() . ':u1']]]);
+
+        $condition = self::authorizer()->compile($manager->currentSubject(), new ScopedPost, 'posts:view');
+        $checked   = \array_values(\array_filter([4, 5], static fn (int $id): bool => $manager->can('posts:view', ScopedPost::query()->find($id))));
+
+        self::assertSame([5], $checked);
+        self::assertSame($checked, ScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('id')->all());
+    }
+
+    /**
+     * A tenant, and an application, holding question marks, a doubled one, a
+     * quote, a backslash or, where the database stores one, a NUL byte decide
+     * exactly the rows `check()` allows, a deny attached to a record there
+     * included.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATenantOfAnyBytesDecidesAsCheckDoes(): void
+    {
+        $user = StubIdentity::create(['id' => 'u1']);
+        $ids  = ['a??b', 'a?b', 'a\'b', 'a\\', 'a\\\'b', ...(DB::connection()->getDriverName() === 'pgsql' ? [] : ["a\0b"])];
+
+        foreach ($ids as $index => $id) {
+            $tenant      = StubTenant::query()->create(['id' => $id]);
+            $application = 'app?' . $index . '??';
+            $deny        = self::storedPolicy('deny-' . $index, [['effect' => 'deny', 'actions' => ['posts:view']]]);
+
+            $user->givePermission(Permission::firstOrCreate(['name' => 'posts:view']), null, $tenant, true, $application);
+
+            $denied = TenantScopedPost::query()->create(['title' => "denied-{$index}", 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => $id]);
+
+            TenantScopedPost::query()->create(['title' => "kept-{$index}", 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => $id]);
+            app(ResourcePolicyService::class)->attach($deny, [TenantScopedPost::class, (string) $denied->getKey()], $tenant, true, $application); // @phpstan-ignore cast.string
+
+            $manager = $this->resolveRequest($user, $tenant, $application);
+            $checked = [];
+
+            foreach (TenantScopedPost::query()->orderBy('id')->get() as $post) {
+                if (!$manager->can('posts:view', $post)) {
+                    continue;
+                }
+
+                $checked[] = $post->getAttribute('title');
+            }
+
+            $condition = self::authorizer()->compile($manager->currentSubject(), new TenantScopedPost, 'posts:view');
+
+            self::assertSame(["kept-{$index}"], $checked, \bin2hex($id));
+            self::assertSame($checked, TenantScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all(), \bin2hex($id));
+        }
     }
 
     /**
@@ -452,14 +599,14 @@ final class QueryAuthorizerTest extends TestCase
     }
 
     /**
-     * Every material statement that names less than the whole type, or reads
-     * the resource, is refused, all of them together, naming each, the denies
-     * first as a check weighs them; none of their operands, patterns or values
-     * is named.
+     * Every material statement that reads the resource, or whose pattern no key
+     * can be compared with, is refused, all of them together, naming each, the
+     * denies first as a check weighs them; none of their operands, patterns or
+     * values is named. A statement naming records by their keys compiles.
      *
      * @return void
      */
-    public function testStatementsNamingRecordsAreRefusedTogether(): void
+    public function testStatementsTheScopeCannotCompileAreRefusedTogether(): void
     {
         $user    = StubIdentity::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
@@ -468,19 +615,135 @@ final class QueryAuthorizerTest extends TestCase
         $user->attachPolicy(self::storedPolicy('records', [
             ['sid' => 'Literal', 'effect' => 'deny', 'actions' => ['posts:view'], 'resources' => [$type . ':1']],
             ['sid' => 'MinusZero', 'effect' => 'allow', 'actions' => ['posts:view'], 'resources' => [$type . ':-0']],
-            ['sid' => 'Star', 'effect' => 'deny', 'actions' => ['posts:view'], 'resources' => [$type . ':\*']],
+            ['sid' => 'Question', 'effect' => 'allow', 'actions' => ['posts:view'], 'resources' => [$type . ':?']],
             ['sid' => 'Reference', 'effect' => 'deny', 'actions' => ['posts:view'], 'resources' => ['${resource.type}:*']],
             ['sid' => 'Condition', 'effect' => 'deny', 'actions' => ['posts:view'], 'conditions' => ['eq' => ['resource.status' => 'draft']]],
-            ['sid' => 'Elsewhere', 'effect' => 'deny', 'actions' => ['posts:edit'], 'resources' => [$type . ':1']],
+            ['sid' => 'Elsewhere', 'effect' => 'deny', 'actions' => ['posts:edit'], 'resources' => [$type . ':?']],
         ]));
 
         $refusal = self::refusalOf(static fn (): string => self::authorizer()->compile($subject, new ScopedPost, 'posts:view'));
         $reasons = \array_map(static fn ($refusal): string => $refusal->reason->value . ' ' . $refusal->key, $refusal->refusals);
 
-        self::assertSame(['resource_pattern ', 'resource_pattern ', 'resource_namespace resource.type', 'resource_namespace resource.status', 'resource_pattern '], $reasons);
-        self::assertStringNotContainsString(':-0', $refusal->getMessage());
+        self::assertSame(['resource_namespace resource.type', 'resource_namespace resource.status', 'resource_pattern '], $reasons);
+        self::assertStringNotContainsString(':?', $refusal->getMessage());
         self::assertStringNotContainsString('draft', $refusal->getMessage());
-        self::assertStringContainsString('sid="MinusZero"', $refusal->getMessage());
+        self::assertStringContainsString('sid="Question"', $refusal->getMessage());
+    }
+
+    /**
+     * Compiling reads the authorization tables alone, never the model's table,
+     * and the same number of times however many rows there are, with a tree of
+     * subtrees, a platform-wide grant and policies attached to records.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testNoQueryRunsPerRowNorOnTheModelsTable(): void
+    {
+        $this->app?->instance(TenantTree::class, new ClosureTenantTree);
+
+        ClosureTenantTree::add(new Reference('teams', '5'));
+        ClosureTenantTree::add(new Reference('teams', '7'), new Reference('teams', '5'));
+
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user, new Reference('teams', '5'));
+        $counts  = [];
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+
+        foreach ([2, 20] as $rows) {
+            for ($index = TenantScopedPost::query()->count(); $index < $rows; $index++) {
+                $post = TenantScopedPost::query()->create(['title' => 'post', 'tenant_type' => 'teams', 'tenant_id' => (string) [5, 7, 9][$index % 3]]);
+
+                $id = $post->getKey();
+
+                self::attachToResource([TenantScopedPost::class, \is_scalar($id) ? (string) $id : ''], [['effect' => 'deny', 'actions' => ['posts:edit']]]);
+            }
+
+            $this->app?->forgetInstance(ResolutionCache::class);
+            $this->app?->forgetInstance(SchemaInspector::class);
+
+            /** @var \ArrayObject<int, string> $queries */
+            $queries = new \ArrayObject;
+
+            DB::listen(static function (QueryExecuted $query) use ($queries): void {
+                $queries[] = $query->sql;
+            });
+
+            self::authorizer()->compile($manager->currentSubject(), new TenantScopedPost, 'posts:view');
+
+            DB::getEventDispatcher()?->forget(QueryExecuted::class);
+
+            // The table's columns are described, never its rows read.
+            $reads = \array_filter($queries->getArrayCopy(), static fn (string $sql): bool => \preg_match('/\b(?:from|join)\s+[`"]?scoped_posts\b/i', $sql) === 1);
+
+            self::assertSame([], \array_values($reads));
+
+            $counts[] = \count($queries);
+        }
+
+        self::assertSame($counts[0], $counts[1]);
+    }
+
+    /**
+     * A key holding a glob's special characters is named as `check()` names it:
+     * a substituted `*` or `x:*` only as itself, never every record nor the
+     * type, a document's backslash as itself, and an escaped `\${` as text.
+     *
+     * @return void
+     */
+    public function testSpecialKeysAreNamedAsCheckNamesThem(): void
+    {
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user);
+        $type    = (new ScopedDocument)->getMorphClass();
+
+        foreach (['*', 'x:*', 'a\b', 'ab', '${input.k}', 'x:a'] as $code) {
+            ScopedDocument::query()->create(['code' => $code]);
+        }
+
+        $user->attachPolicy(self::storedPolicy('special', [
+            ['effect' => 'allow', 'actions' => ['posts:view'], 'resources' => [$type . ':${input.k}', $type . ':a\b', $type . ':\${input.k}']],
+            ['effect' => 'allow', 'actions' => ['posts:edit'], 'resources' => [$type . ':${input.k}*']],
+        ]));
+
+        foreach ([['k' => '*'], ['k' => 'x:*'], ['k' => 'x:'], []] as $context) {
+            foreach (['posts:view', 'posts:edit'] as $action) {
+                $isAllowed = static fn (mixed $code): bool => $manager->can($action, ScopedDocument::query()->where('code', $code)->first(), $context);
+                $allowed   = \array_values(\array_filter(ScopedDocument::query()->orderBy('row_id')->pluck('code')->all(), $isAllowed));
+                $kept      = ScopedDocument::query()->whereAuthorized($action, $context, $manager)->orderBy('row_id')->pluck('code')->all(); // @phpstan-ignore method.notFound
+
+                self::assertSame($allowed, $kept, $action . ' ' . \json_encode($context));
+            }
+        }
+    }
+
+    /**
+     * A boundary limited to one record caps every other: only that record is
+     * kept, as `check()` keeps it, whatever the subject holds.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABoundaryLimitedToOneRecordKeepsItAlone(): void
+    {
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user);
+
+        foreach ([4, 5, 6] as $id) {
+            ScopedPost::query()->create(['id' => $id, 'title' => 'post']);
+        }
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+
+        $boundary = self::storedPolicy('only-five', [['effect' => 'allow', 'actions' => ['posts:*'], 'resources' => [(new ScopedPost)->getMorphClass() . ':5']]]);
+
+        app(BoundaryService::class)->set($user, $boundary);
+
+        self::assertSame([5], ScopedPost::query()->whereAuthorized('posts:view', [], $manager)->pluck('id')->all()); // @phpstan-ignore method.notFound
+        self::assertSame([], ScopedPost::query()->whereAuthorized('posts:view', [], $manager->capped(['posts:edit']))->pluck('id')->all()); // @phpstan-ignore method.notFound
     }
 
     /**
@@ -571,6 +834,30 @@ final class QueryAuthorizerTest extends TestCase
     private static function refused(Subject $subject, Model $model, string $action): QueryScopeRefusedException
     {
         return self::refusalOf(static fn (): string => self::authorizer()->compile($subject, $model, $action));
+    }
+
+    /**
+     * Return the titles of the tenant-scoped posts the manager allows viewing,
+     * in order.
+     *
+     * @param  \SineMacula\Laravel\Authorization\AuthorizationManager  $manager
+     * @return list<string>
+     */
+    private static function allowed(AuthorizationManager $manager): array
+    {
+        $allowed = [];
+
+        foreach (TenantScopedPost::query()->orderBy('id')->get() as $post) {
+            $title = $post->getAttribute('title');
+
+            if (!$manager->can('posts:view', $post) || !\is_string($title)) {
+                continue;
+            }
+
+            $allowed[] = $title;
+        }
+
+        return $allowed;
     }
 
     /**

@@ -5,23 +5,29 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Query;
 
 /**
- * Tells whether a resolved resource pattern covers every record of a type
- * (N68): `whereAuthorized()` compiles a statement only when every pattern it
- * matches against a record's identifier, `T:` and the record's key, covers
- * every record of the type `T`, whatever the key, so no key is ever compared.
+ * Tells which records of a type a resolved resource pattern matches, as
+ * `Statement::covers()` matches it against each record's identifier, `T:` and
+ * the record's key, so the scope can compare the key in SQL exactly as
+ * `fnmatch()` would.
  *
  * A pattern is read as `fnmatch()` reads it, with no flags: `\x` is the
- * character x, `*` any run of characters. It covers every record when it is
- * `*`, `T:*`, or a shorter literal prefix of `T:` and then `*`. Every other
- * pattern is refused, even one that could cover no record of the type, such as
- * another type's: a literal (a record's id), a longer prefix than `T:` before
- * the `*`, a literal and then `*` that is not a prefix of `T:`, a `*` anywhere
- * but at the end, more than one, a `?`, a `[`, or a trailing lone `\`. So is
- * one of `PHP_MAXPATHLEN` bytes or more, which `fnmatch()` refuses.
+ * character x, `*` any run of characters. A literal names one identifier: the
+ * record whose key is the rest of it, when it starts with `T:`, else none. A
+ * literal and then one `*` names every record when the literal is a prefix of
+ * `T:`, none when the two are disjoint, and otherwise every record whose key
+ * starts with the rest of the literal, byte for byte.
  *
- * A record whose key ends in `:*` is covered only when the pattern covers its
- * identifier without the `*` too (see `Statement::covers()`); a pattern that
- * covers every record does so for that identifier as well.
+ * `covers()` also needs the identifier less its last byte to match when the
+ * identifier ends in `:*`, which a key `*`, or one ending in `:*`, makes it do;
+ * that is decided on the whole identifier. A literal then never names such a
+ * record (it would have to match two identifiers), so a literal whose key is
+ * `*` or ends in `:*`, the escaped `T:\*` included, names none; and a prefix
+ * that is itself such a key leaves the key exactly the prefix out. A pattern
+ * naming every record names every such record too.
+ *
+ * Every other pattern is refused (null): a `*` anywhere but at the end, more
+ * than one, a `?`, a `[`, a trailing lone `\`, or a pattern of `PHP_MAXPATHLEN`
+ * bytes or more, which `fnmatch()` refuses.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,24 +37,76 @@ namespace SineMacula\Laravel\Authorization\Query;
 final class ResourcePatterns
 {
     /**
-     * Determine whether the resolved pattern covers every record of the type,
-     * whatever their keys.
+     * Return which records of the type the resolved pattern matches, or null
+     * when the scope cannot compare it with a key.
      *
      * @param  string  $pattern
      * @param  string  $type
-     * @return bool
+     * @return \SineMacula\Laravel\Authorization\Query\KeyTarget|null
      */
-    public static function coversEveryRecord(string $pattern, string $type): bool
+    public static function targetOf(string $pattern, string $type): ?KeyTarget
     {
         $decoded = \strlen($pattern) < \PHP_MAXPATHLEN ? self::decode($pattern) : null;
 
         if ($decoded === null) {
-            return false;
+            return null;
         }
 
         [$literal, $isStarred] = $decoded;
 
-        return $isStarred && \str_starts_with($type . ':', $literal);
+        return $isStarred ? self::starredTarget($literal, $type . ':') : self::literalTarget($literal, $type . ':');
+    }
+
+    /**
+     * Return which records a literal names: the record whose key is the rest of
+     * it after the type's head, unless that key is empty, `*` or ends in `:*`;
+     * none for any other literal.
+     *
+     * @param  string  $literal
+     * @param  string  $head
+     * @return \SineMacula\Laravel\Authorization\Query\KeyTarget
+     */
+    private static function literalTarget(string $literal, string $head): KeyTarget
+    {
+        $key = \str_starts_with($literal, $head) ? \substr($literal, \strlen($head)) : '';
+
+        return $key === '' || self::endsAsType($key) ? KeyTarget::none() : KeyTarget::equals($key);
+    }
+
+    /**
+     * Return which records a literal and then `*` names: every record when the
+     * literal is a prefix of the type's head, none when the two are disjoint,
+     * else every record whose key starts with the rest of the literal.
+     *
+     * @param  string  $literal
+     * @param  string  $head
+     * @return \SineMacula\Laravel\Authorization\Query\KeyTarget
+     */
+    private static function starredTarget(string $literal, string $head): KeyTarget
+    {
+        if (\str_starts_with($head, $literal)) {
+            return KeyTarget::all();
+        }
+
+        if (!\str_starts_with($literal, $head)) {
+            return KeyTarget::none();
+        }
+
+        $start = \substr($literal, \strlen($head));
+
+        return KeyTarget::prefix($start, self::endsAsType($start));
+    }
+
+    /**
+     * Determine whether a key makes its identifier end in `:*`: it is `*`, or
+     * ends in `:*`.
+     *
+     * @param  string  $key
+     * @return bool
+     */
+    private static function endsAsType(string $key): bool
+    {
+        return $key === '*' || \str_ends_with($key, ':*');
     }
 
     /**
