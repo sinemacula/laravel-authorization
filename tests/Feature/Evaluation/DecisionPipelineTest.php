@@ -4,7 +4,9 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Evaluation;
 
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
@@ -425,6 +427,57 @@ final class DecisionPipelineTest extends TestCase
     }
 
     /**
+     * Preparing reads the policies attached to the records and their type in
+     * one query, keeping each record's, so its check reads none; nothing is
+     * read for no subject, an inactive one, a policy override, a pipeline with
+     * no resource policies, or a record whose identifier is not UTF-8, and a
+     * document that cannot be read is left to the check, which denies it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testPreparingReadsTheAttachedPoliciesAhead(): void
+    {
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $subject = new Subject($user, $user);
+        $records = [ResourceReference::record('posts', '7'), ResourceReference::record('posts', '8'), ResourceReference::type('posts'), null, false];
+
+        self::resourcePolicies()->attach(self::stored('type', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => [$user->getMorphClass() . ':u1']]]), 'posts');
+
+        $suspended            = SuspendableIdentity::create(['id' => 'suspended']);
+        $suspended->suspended = true;
+
+        $idle = [
+            [null, $this->pipeline()],
+            [new Subject($suspended, $suspended), $this->pipeline()],
+            [$subject, $this->pipeline()->withPolicies([])],
+            [$subject, new DecisionPipeline(new PolicyEvaluator, new DefaultPolicyResolver)],
+        ];
+
+        foreach ($idle as [$who, $pipeline]) {
+            self::assertSame(0, self::queriesOf(static fn () => $pipeline->prepare($who, $records)));
+        }
+
+        self::assertSame(0, self::queriesOf(fn () => $this->pipeline()->prepare($subject, [ResourceReference::record('posts', "\xff")])));
+        // The attachments table's key column is inspected once a request.
+        $this->pipeline()->prepare($subject, [ResourceReference::record('posts', '99')]);
+
+        self::assertSame(1, self::queriesOf(fn () => $this->pipeline()->prepare($subject, $records)));
+        self::assertSame(0, self::queriesOf(fn () => $this->pipeline()->decide($subject, 'posts:read', $records[1], []), 'resource_policies'));
+
+        $broken = self::stored('broken', [['effect' => 'deny', 'actions' => ['posts:read']]]);
+
+        self::resourcePolicies()->attach($broken, ['posts', 9]);
+        DB::table('policies')->where('id', $broken->id)->update(['document' => \json_encode(['statements' => [['effect' => 'deny', 'actions' => []]]])]);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+        $this->pipeline()->prepare($subject, [ResourceReference::record('posts', '9'), ResourceReference::record('posts', '*')]);
+
+        self::assertSame(DecisionReason::INVALID_POLICY, $this->pipeline()->decide($subject, 'posts:read', ResourceReference::record('posts', '9'), [])->reason);
+    }
+
+    /**
      * Return a pipeline with every source the service provider gives the
      * manager.
      *
@@ -476,5 +529,27 @@ final class DecisionPipelineTest extends TestCase
     private static function allowing(string $action): EvaluationPolicy
     {
         return EvaluationPolicy::fromArray(['name' => 'override', 'statements' => [['effect' => 'allow', 'actions' => [$action]]]]);
+    }
+
+    /**
+     * Return how many queries the callback ran, of those naming the table when
+     * one is given.
+     *
+     * @param  \Closure(): mixed  $callback
+     * @param  string  $table
+     * @return int
+     */
+    private static function queriesOf(\Closure $callback, string $table = ''): int
+    {
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $callback();
+
+        $queries = \count(\array_filter(DB::getQueryLog(), static fn (array $query): bool => \str_contains($query['query'], $table)));
+
+        DB::disableQueryLog();
+
+        return $queries;
     }
 }

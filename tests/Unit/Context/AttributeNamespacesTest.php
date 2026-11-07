@@ -10,6 +10,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Context\AttributeNamespaces;
 use SineMacula\Laravel\Authorization\Context\AttributeProviders;
+use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Subject;
@@ -17,6 +18,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
+use Tests\Fixtures\BulkChecks\FixedBulkAttributes;
 use Tests\Fixtures\QueryScoping\InvariantSubjectAttributes;
 
 /**
@@ -211,6 +213,28 @@ final class AttributeNamespacesTest extends TestCase
 
         self::assertTrue((new AttributeNamespaces($marked))->isSubjectScopeInvariant($subject));
         self::assertFalse((new AttributeNamespaces($unmarked))->isSubjectScopeInvariant($subject));
+    }
+
+    /**
+     * In a bulk check, the resource's namespace is built from the batch's bulk
+     * read.
+     *
+     * @return void
+     */
+    public function testABulkChecksResourceIsBuiltFromItsBatch(): void
+    {
+        $container = new Container;
+        $provider  = new FixedBulkAttributes;
+        $record    = ResourceReference::record('post', '1');
+
+        $container->instance(FixedBulkAttributes::class, $provider);
+
+        $namespaces = new AttributeNamespaces(new AttributeProviders($container, ['post' => FixedBulkAttributes::class]));
+
+        $batched = $namespaces->builders(null, $record, new ResourceAttributeBatch([$record]))['resource']();
+
+        self::assertSame(['resource' => ['id' => '1', 'type' => 'post', 'status' => 'published']], $batched);
+        self::assertSame(['resource' => ['id' => '1', 'type' => 'post', 'status' => 'draft']], $namespaces->builders(null, $record)['resource']());
     }
 
     /**

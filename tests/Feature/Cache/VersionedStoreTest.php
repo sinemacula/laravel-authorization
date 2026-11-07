@@ -5,7 +5,9 @@ declare(strict_types = 1);
 namespace Tests\Feature\Cache;
 
 use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\Events\RetrievingManyKeys;
 use Illuminate\Cache\Repository;
+use Illuminate\Events\Dispatcher;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -59,6 +61,82 @@ final class VersionedStoreTest extends TestCase
 
         self::assertSame(['value' => ['posts:read']], $store->get('entry'));
         self::assertNull($store->get('missing'));
+    }
+
+    /**
+     * Many entries are read in one read, and their recorded versions in one
+     * more: an entry holds only while every version it recorded is unchanged,
+     * text, and still there; a key with no entry, or one that is not an entry,
+     * is left out; no keys ask the store nothing.
+     *
+     * @return void
+     */
+    public function testManyEntriesAreReadAndCheckedTogether(): void
+    {
+        $repository = new Repository(new ArrayStore);
+        $store      = new VersionedStore($repository, 'authz');
+        $entry      = static fn (array $versions): array => ['versions' => $versions, 'value' => ['posts:read'], 'until' => 100];
+
+        $repository->forever('v1', 'token-1');
+        $repository->forever('v2', 'token-2');
+        $repository->forever('v4', ['token-4']);
+
+        $repository->putMany([
+            'held'    => $entry(['v1' => 'token-1']),
+            'both'    => $entry(['v1' => 'token-1', 'v2' => 'token-2']),
+            'bumped'  => $entry(['v1' => 'token-1', 'v2' => 'old-token']),
+            'evicted' => $entry(['v3' => 'token-3']),
+            'listed'  => $entry(['v1' => ['token-1']]),
+            'odd'     => $entry(['v4' => 'token-4']),
+            'shaped'  => ['value' => ['posts:read']],
+        ], 60);
+
+        self::assertSame(['held', 'both'], \array_keys($store->entries(['held', 'both', 'bumped', 'evicted', 'listed', 'odd', 'shaped', 'missing'])));
+        self::assertSame($entry(['v1' => 'token-1']), $store->entries(['held'])['held']);
+        /** @var \ArrayObject<int, list<int|string>> $reads */
+        $reads  = new \ArrayObject;
+        $events = new Dispatcher;
+
+        $events->listen(RetrievingManyKeys::class, static function (RetrievingManyKeys $event) use ($reads): void {
+            $reads[] = \array_keys($event->keys);
+        });
+
+        $repository->setEventDispatcher($events);
+
+        self::assertSame([], $store->entries(['missing', 'shaped']));
+        self::assertSame([['missing', 'shaped']], $reads->getArrayCopy());
+
+        $driver = new FailingCacheStore;
+        $empty  = new VersionedStore(new Repository($driver), 'authz');
+
+        self::assertSame([], $empty->entries([]));
+        self::assertSame(0, $driver->calls);
+    }
+
+    /**
+     * Many entries are written in one write for each lifetime, and a store that
+     * fails writes none, without throwing.
+     *
+     * @return void
+     */
+    public function testManyEntriesAreWrittenForEachLifetime(): void
+    {
+        $repository = new Repository(new ArrayStore);
+        $store      = new VersionedStore($repository, 'authz');
+
+        $store->putMany([60 => ['a' => ['value' => [1]], 'b' => ['value' => [2]]], 0 => ['c' => ['value' => [3]]]]);
+
+        self::assertSame(['value' => [1]], $repository->get('a'));
+        self::assertSame(['value' => [2]], $repository->get('b'));
+        self::assertNull($repository->get('c'));
+
+        $logger = new RecordingLogger;
+
+        $this->app?->instance('log', $logger);
+
+        (new VersionedStore(new Repository(new FailingCacheStore), 'authz'))->putMany([60 => ['a' => ['value' => [1]]]]);
+
+        self::assertCount(1, $logger->records);
     }
 
     /**

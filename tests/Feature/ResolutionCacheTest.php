@@ -5,7 +5,12 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\Events\RetrievingKey;
+use Illuminate\Cache\Events\RetrievingManyKeys;
+use Illuminate\Cache\Events\WritingKey;
+use Illuminate\Cache\Events\WritingManyKeys;
 use Illuminate\Cache\Repository;
+use Illuminate\Events\Dispatcher;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -965,6 +970,229 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * The records missing from the cache are resolved together, once, and each
+     * is kept under its own key, in the memo and the store, with the versions
+     * pinned once; a record found is not resolved again, and one the resolution
+     * leaves out is left out.
+     *
+     * @return void
+     */
+    public function testManyRecordsPoliciesAreResolvedTogetherAndKeptApart(): void
+    {
+        $sharing = ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']];
+        $policy  = EvaluationPolicy::fromArray(['name' => 'sharing', 'statements' => [$sharing]])->withId('policy-key');
+        $asked   = [];
+        $resolve = function (ResolutionPins $pins, array $missing) use ($policy, &$asked): array {
+            $asked[] = $missing;
+
+            $pins->resourcePolicies('posts');
+
+            $resolutions = [];
+
+            foreach (\array_diff($missing, ['9']) as $id) {
+                $resolutions[$id] = $this->resolve([$policy->withResource("posts:{$id}")]);
+            }
+
+            return $resolutions;
+        };
+
+        $cache = $this->request();
+
+        $cache->rememberResourcePolicies('posts', '1', fn (): Resolution => $this->resolve([]));
+
+        $found = $cache->rememberResourcePoliciesMany('posts', ['1', '7', '9', 'b'], $resolve);
+
+        self::assertSame([['7', '9', 'b']], $asked);
+        self::assertSame([1, 7, 'b'], \array_keys($found));
+        self::assertSame([], $found[1]);
+        self::assertSame('posts:7', $found[7][0]->resource);
+        self::assertSame('posts:b', $cache->rememberResourcePolicies('posts', 'b', fn (): Resolution => $this->resolve([]))[0]->resource);
+        self::assertIsArray($this->store->get('authorization-test:resource-policies:posts:7:platform:every:limits:65536.100.50.512'));
+
+        $next = $this->request();
+
+        self::assertEquals($found[7], $next->rememberResourcePoliciesMany('posts', ['7'], $resolve)[7]);
+        self::assertSame([], $next->rememberResourcePoliciesMany('posts', [], $resolve));
+        self::assertSame([['7', '9', 'b']], $asked);
+        self::assertSame(3, $this->resolutions);
+    }
+
+    /**
+     * The store costs the same for many records as for one: the records the
+     * memo does not hold are read in one read of their entries and one of the
+     * versions those entries recorded, and those missing are written in one
+     * write, cold or warm; a record whose entry no longer holds is resolved
+     * again.
+     *
+     * @return void
+     */
+    public function testManyRecordsCostTheStoreWhatOneCosts(): void
+    {
+        /** @var \ArrayObject<int, string> $operations */
+        $operations = new \ArrayObject;
+        $events     = new Dispatcher;
+
+        $events->listen([RetrievingKey::class, RetrievingManyKeys::class, WritingKey::class, WritingManyKeys::class], static function (object $event) use ($operations): void {
+            $operations[] = $event::class;
+        });
+
+        $this->store->setEventDispatcher($events);
+
+        $resolve = fn (ResolutionPins $pins, array $missing): array => $this->resolveEach($pins, $missing);
+        $counted = function (array $ids) use ($operations, $resolve): array {
+            $operations->exchangeArray([]);
+
+            $found = $this->request()->rememberResourcePoliciesMany('posts', $ids, $resolve);
+
+            return [$operations->getArrayCopy(), \array_map(static fn (array $policies): string => $policies[0]->resource ?? '', $found)];
+        };
+
+        $many = \array_map(strval(...), \range(1, 100));
+
+        // The versions the records' entries share are first given a token.
+        $counted(['0']);
+
+        [$coldOne]              = $counted(['500']);
+        [$coldMany, $resources] = $counted($many);
+        [$warmOne]              = $counted(['500']);
+        [$warmMany, $warmFound] = $counted($many);
+
+        self::assertSame($coldOne, $coldMany);
+        self::assertSame($warmOne, $warmMany);
+        self::assertContains(WritingManyKeys::class, $coldMany);
+        self::assertNotContains(WritingManyKeys::class, $warmMany);
+        self::assertSame(\array_map(static fn (string $id): string => "posts:{$id}", \array_combine($many, $many)), $resources);
+        self::assertSame($resources, $warmFound);
+        self::assertSame(102, $this->resolutions);
+
+        $this->versions()->bump([$this->versions()->resourcePoliciesKey('posts')]);
+
+        $counted(['1', '2']);
+
+        self::assertSame(104, $this->resolutions);
+
+        $cache = $this->request();
+
+        $operations->exchangeArray([]);
+
+        $cache->rememberResourcePoliciesMany('posts', ['1'], $resolve);
+        $cache->rememberResourcePoliciesMany('posts', ['1'], $resolve);
+
+        self::assertSame([RetrievingManyKeys::class, RetrievingManyKeys::class], $operations->getArrayCopy());
+    }
+
+    /**
+     * A stored entry that cannot be read back is discarded, with a warning, and
+     * resolved again, as on its own.
+     *
+     * @return void
+     */
+    public function testACorruptEntryReadInBulkIsResolvedAgain(): void
+    {
+        $logger  = $this->recordLogs();
+        $resolve = fn (ResolutionPins $pins, array $missing): array => $this->resolveEach($pins, $missing);
+
+        $this->request()->rememberResourcePoliciesMany('posts', ['1', '2'], $resolve);
+
+        $key   = 'authorization-test:resource-policies:posts:1:platform:every:limits:65536.100.50.512';
+        $entry = $this->store->get($key);
+
+        self::assertIsArray($entry);
+
+        $this->store->put($key, [...$entry, 'value' => [['not' => 'a policy']]], 60);
+
+        $found = $this->request()->rememberResourcePoliciesMany('posts', ['1', '2'], $resolve);
+
+        self::assertSame(['posts:1', 'posts:2'], [$found[1][0]->resource, $found[2][0]->resource]);
+        self::assertSame(3, $this->resolutions);
+        self::assertCount(1, $logger->records);
+    }
+
+    /**
+     * Within a batch, the tenant tree is asked each question once, unless it is
+     * asked afresh; a write drops the answers, and with no batch open the tree
+     * is asked every time.
+     *
+     * @return void
+     */
+    public function testATreesAnswersAreKeptForABatch(): void
+    {
+        $cache = $this->request();
+        $asked = 0;
+        $read  = static function () use (&$asked): int {
+            return ++$asked;
+        };
+
+        self::assertSame([1, 2], [$cache->answerTree(['q'], $read), $cache->answerTree(['q'], $read)]);
+
+        $answers = $cache->batch(static function () use ($cache, $read): array {
+            $kept = [$cache->answerTree(['q'], $read), $cache->answerTree(['q'], $read), $cache->answerTree(['q'], $read, true)];
+
+            $cache->invalidate([]);
+
+            return [...$kept, $cache->answerTree(['q'], $read)];
+        });
+
+        self::assertSame([3, 3, 4, 5], $answers);
+    }
+
+    /**
+     * Within a batch, the entries of each scope are kept apart as the scope
+     * moves between tenants, so each is resolved once; once the batch closes, a
+     * change of scope drops them again, as without one; a write within it drops
+     * every scope's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABatchKeepsEachScopesEntriesUntilItCloses(): void
+    {
+        $cache  = new ResolutionCache;
+        $tenant = self::createTenant('tenant-a');
+
+        $this->app?->instance(ResolutionCache::class, $cache);
+
+        $result = $cache->batch(function () use ($cache, $tenant): string {
+            $this->permissions($cache);
+
+            foreach ([1, 2] as $pass) {
+                TenantScope::within($tenant, null, fn (): array => $this->permissions($cache));
+                TenantScope::within(null, 'admin', fn (): array => $this->permissions($cache));
+                $this->permissions($cache);
+            }
+
+            self::assertSame(3, $this->resolutions);
+
+            $cache->invalidate([]);
+
+            TenantScope::within($tenant, null, fn (): array => $this->permissions($cache));
+
+            self::assertSame(4, $this->resolutions);
+
+            return 'done';
+        });
+
+        self::assertSame('done', $result);
+
+        TenantScope::within($tenant, null, fn (): array => $this->permissions($cache));
+
+        self::assertSame(5, $this->resolutions);
+
+        try {
+            $cache->batch(self::failing(...));
+        } catch (\RuntimeException) {
+            // The batch is closed however it ends.
+        }
+
+        $this->permissions($cache);
+        TenantScope::within($tenant, null, fn (): array => $this->permissions($cache));
+        $this->permissions($cache);
+
+        self::assertSame(8, $this->resolutions);
+    }
+
+    /**
      * Resolve the grantee's permissions through the cache, pinning the given
      * roles as a resolution does.
      *
@@ -998,6 +1226,30 @@ final class ResolutionCacheTest extends TestCase
         $this->resolutions++;
 
         return new Resolution($value, $expiresIn, $stable);
+    }
+
+    /**
+     * Resolve the policies attached to each record missing, one sharing policy
+     * attached to each, having pinned the versions the posts' attachments
+     * share, as `ResourcePolicyResolver::resolveMany()` does.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
+     * @param  list<string>  $missing
+     * @return array<array-key, \SineMacula\Laravel\Authorization\Cache\Resolution<\SineMacula\Laravel\Authorization\Evaluation\Policy>>
+     */
+    private function resolveEach(ResolutionPins $pins, array $missing): array
+    {
+        $pins->resourcePolicies('posts');
+
+        $sharing     = ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']];
+        $policy      = EvaluationPolicy::fromArray(['name' => 'sharing', 'statements' => [$sharing]])->withId('policy-key');
+        $resolutions = [];
+
+        foreach ($missing as $id) {
+            $resolutions[$id] = $this->resolve([$policy->withResource("posts:{$id}")]);
+        }
+
+        return $resolutions;
     }
 
     /**
@@ -1058,5 +1310,17 @@ final class ResolutionCacheTest extends TestCase
     private static function grantee(): Reference
     {
         return new Reference('user', 'user-1');
+    }
+
+    /**
+     * Fail, as a batch's callback may.
+     *
+     * @return never
+     *
+     * @throws \RuntimeException
+     */
+    private static function failing(): never
+    {
+        throw new \RuntimeException('failed');
     }
 }

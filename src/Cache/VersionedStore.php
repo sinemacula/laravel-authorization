@@ -182,6 +182,54 @@ final class VersionedStore
     }
 
     /**
+     * Return the entries stored at the keys that still hold, keyed by their
+     * key: read in one read, and their recorded versions checked in one more,
+     * an entry holding only while every version it recorded is unchanged. A key
+     * with no entry, or one that no longer holds, is left out, and so is every
+     * key when the store fails; no keys ask the store nothing.
+     *
+     * @param  list<string>  $keys
+     * @return array<string, array{versions: array<string, string>, value: array<mixed>, until: int}>
+     */
+    public function entries(array $keys): array
+    {
+        /** @var array<string, mixed> $stored */
+        $stored  = $keys === [] ? [] : $this->attempt(fn (): array => \iterator_to_array($this->store->getMultiple($keys))) ?? [];
+        $entries = \array_filter($stored, ResolutionCodec::isEntry(...));
+
+        /** @var array<string, array{versions: array<string, string>, value: array<mixed>, until: int}> $entries */
+        $versions = [];
+
+        foreach ($entries as $entry) {
+            $versions += $entry['versions'];
+        }
+
+        $tokens = $versions === [] ? [] : $this->tokens(\array_keys($versions));
+        $held   = \array_filter($tokens ?? [], \is_string(...));
+
+        // Compared as text only once every recorded version is text.
+        $holds = static fn (array $entry): bool => \array_filter($entry['versions'], \is_string(...)) === $entry['versions']
+            && \array_intersect_assoc($entry['versions'], $held)                                      === $entry['versions'];
+
+        return \array_filter($entries, $holds);
+    }
+
+    /**
+     * Store each entry at its key, in one write for the entries of each
+     * lifetime, unless the store fails. A lifetime of zero or less forgets its
+     * keys instead, as an entry that has already lapsed is never stored.
+     *
+     * @param  array<int, array<string, array<string, mixed>>>  $entries
+     * @return void
+     */
+    public function putMany(array $entries): void
+    {
+        foreach ($entries as $seconds => $byKey) {
+            $this->attempt(fn (): bool => $this->store->setMultiple($byKey, $seconds));
+        }
+    }
+
+    /**
      * Return the current token of each key, null for a key that has none, or
      * null in place of the whole map when the store fails.
      *

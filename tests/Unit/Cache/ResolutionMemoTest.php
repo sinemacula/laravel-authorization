@@ -8,6 +8,7 @@ use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Cache\ResolutionMemo;
+use Tests\Fixtures\ScopeKeyHolder;
 
 /**
  * Unit tests for `ResolutionMemo`, the in-memory tier of the resolution cache,
@@ -169,5 +170,403 @@ final class ResolutionMemoTest extends TestCase
         $memo->flush();
 
         self::assertNull($memo->get('other'));
+    }
+
+    /**
+     * Without a batch, a change of scope drops every entry, whether or not the
+     * memo can tell scopes apart.
+     *
+     * @return void
+     */
+    public function testAChangeOfScopeOutsideABatchDropsTheEntries(): void
+    {
+        foreach ([new ResolutionMemo, new ResolutionMemo(static fn (): string => 'tenant-a')] as $memo) {
+            $memo->put(self::KEY, ['editor'], null);
+            $memo->scopeChanged();
+
+            self::assertNull($memo->get(self::KEY));
+        }
+    }
+
+    /**
+     * Within a batch, each scope keeps its own entries: those of the scope left
+     * are set aside and taken back when the scope is read again, and the scope
+     * entered starts with its own, not the one left's.
+     *
+     * @return void
+     */
+    public function testABatchKeepsEachScopesEntriesApart(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $memo  = new ResolutionMemo(static fn (): string => $scope->key);
+
+        $memo->open();
+        $memo->put(self::KEY, ['editor'], null);
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+
+        self::assertNull($memo->get(self::KEY));
+
+        $memo->put(self::KEY, ['viewer'], null);
+
+        $scope->key = 'tenant-a';
+        $memo->scopeChanged();
+
+        self::assertSame(['editor'], $memo->get(self::KEY));
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+
+        self::assertFalse($memo->lapsed(self::KEY));
+        self::assertSame(['viewer'], $memo->get(self::KEY));
+
+        $memo->close();
+    }
+
+    /**
+     * The entries held when a batch opens are the current scope's, kept apart
+     * under it once they are first read; entries held when the scope changes
+     * before any read are dropped, since the scope they hold in is not known.
+     *
+     * @return void
+     */
+    public function testABatchClaimsTheEntriesItOpensWithOnlyOnceRead(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $key   = static fn (): string => $scope->key;
+
+        $claimed = new ResolutionMemo($key);
+        $claimed->put(self::KEY, ['editor'], null);
+        $claimed->open();
+
+        self::assertSame(['editor'], $claimed->get(self::KEY));
+
+        $scope->key = 'tenant-b';
+        $claimed->scopeChanged();
+        $scope->key = 'tenant-a';
+        $claimed->scopeChanged();
+
+        self::assertSame(['editor'], $claimed->get(self::KEY));
+
+        $unread = new ResolutionMemo($key);
+        $unread->put(self::KEY, ['editor'], null);
+        $unread->open();
+        $unread->scopeChanged();
+
+        self::assertNull($unread->get(self::KEY));
+    }
+
+    /**
+     * A flush within a batch drops the entries of every scope, those set aside
+     * included.
+     *
+     * @return void
+     */
+    public function testAFlushWithinABatchDropsEveryScope(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $memo  = new ResolutionMemo(static fn (): string => $scope->key);
+
+        $memo->open();
+        $memo->put(self::KEY, ['editor'], null);
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+        $memo->put(self::KEY, ['viewer'], null);
+        $memo->flush();
+
+        self::assertNull($memo->get(self::KEY));
+
+        $scope->key = 'tenant-a';
+        $memo->scopeChanged();
+
+        self::assertNull($memo->get(self::KEY));
+    }
+
+    /**
+     * Without a way to tell scopes apart, a batch drops the entries on every
+     * change of scope, as no batch does.
+     *
+     * @return void
+     */
+    public function testABatchWithoutScopeKeysDropsTheEntriesOnAChange(): void
+    {
+        $memo = new ResolutionMemo;
+
+        $memo->open();
+        $memo->put(self::KEY, ['editor'], null);
+        $memo->scopeChanged();
+
+        self::assertNull($memo->get(self::KEY));
+
+        $memo->put(self::KEY, ['viewer'], null);
+        $memo->scopeChanged();
+        $memo->close();
+
+        self::assertNull($memo->get(self::KEY));
+    }
+
+    /**
+     * Once the outermost batch closes, the entries set aside are dropped, and
+     * the current ones too when the scope changed since they were taken; a
+     * nested batch closing changes nothing.
+     *
+     * @return void
+     */
+    public function testClosingTheOutermostBatchDropsWhatWasSetAside(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $memo  = new ResolutionMemo(static fn (): string => $scope->key);
+
+        $memo->open();
+        $memo->open();
+        $memo->put(self::KEY, ['editor'], null);
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+        $memo->put('other', ['viewer'], null);
+        $memo->close();
+
+        $scope->key = 'tenant-a';
+        $memo->scopeChanged();
+
+        self::assertSame(['editor'], $memo->get(self::KEY));
+
+        $memo->close();
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+
+        self::assertNull($memo->get('other'));
+
+        $memo->put('other', ['viewer'], null);
+        $memo->open();
+        $memo->forget(self::KEY);
+        $memo->close();
+
+        self::assertSame(['viewer'], $memo->get('other'));
+
+        $memo->open();
+        $memo->get('other');
+        $memo->scopeChanged();
+        $memo->close();
+        $memo->close();
+
+        self::assertNull($memo->get('other'));
+
+        $memo->put('other', ['viewer'], null);
+        $memo->scopeChanged();
+
+        self::assertNull($memo->get('other'));
+    }
+
+    /**
+     * A read of the memo made while the scope's key is read uses the entries as
+     * they are, rather than reading the key again.
+     *
+     * @return void
+     */
+    public function testAReadWhileTheScopeKeyIsReadUsesTheEntriesAsTheyAre(): void
+    {
+        $memo  = null;
+        $reads = 0;
+        $seen  = [];
+        $memo  = new ResolutionMemo(static function () use (&$memo, &$reads, &$seen): string {
+            $reads++;
+            $seen[] = $memo?->get(self::KEY);
+
+            return 'tenant-a';
+        });
+
+        $memo->put(self::KEY, ['editor'], null);
+        $memo->open();
+
+        self::assertSame(['editor'], $memo->get(self::KEY));
+        self::assertSame(1, $reads);
+        self::assertSame([['editor']], $seen);
+
+        $memo->close();
+    }
+
+    /**
+     * Within a batch, an entry whose lifetime ran out while another scope was
+     * current has lapsed, as the first read once its scope is entered again.
+     *
+     * @return void
+     */
+    public function testAnEntryLapsedInAnotherScopeHasLapsedOnReturn(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $memo  = new ResolutionMemo(static fn (): string => $scope->key);
+
+        $memo->open();
+        $memo->put(self::KEY, ['editor'], 1);
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+        $memo->get('other');
+
+        $scope->key = 'tenant-a';
+        $memo->scopeChanged();
+
+        Carbon::setTestNow(Carbon::now()->addSeconds(5));
+
+        self::assertTrue($memo->lapsed(self::KEY));
+
+        $memo->close();
+    }
+
+    /**
+     * Within a batch, forgetting a key as the first read once its scope is
+     * entered again forgets the entry of that scope.
+     *
+     * @return void
+     */
+    public function testForgettingOnReturnToAScopeForgetsItsEntry(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $memo  = new ResolutionMemo(static fn (): string => $scope->key);
+
+        $memo->open();
+        $memo->put(self::KEY, ['editor'], null);
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+        $memo->get('other');
+
+        $scope->key = 'tenant-a';
+        $memo->scopeChanged();
+        $memo->forget(self::KEY);
+
+        self::assertNull($memo->get(self::KEY));
+
+        $memo->close();
+    }
+
+    /**
+     * Closing a batch that is not open leaves no batch open below zero: one
+     * opened after it still keeps each scope's entries apart, and nested
+     * batches close only with the outermost.
+     *
+     * @return void
+     */
+    public function testClosingWithNoBatchOpenLeavesTheNextBatchWhole(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $memo  = new ResolutionMemo(static fn (): string => $scope->key);
+
+        $memo->close();
+        $memo->open();
+        $memo->put(self::KEY, ['editor'], null);
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+        $memo->get('other');
+
+        $scope->key = 'tenant-a';
+        $memo->scopeChanged();
+
+        self::assertSame(['editor'], $memo->get(self::KEY));
+
+        $memo->open();
+        $memo->open();
+        $memo->close();
+        $memo->close();
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+        $scope->key = 'tenant-a';
+        $memo->scopeChanged();
+
+        self::assertSame(['editor'], $memo->get(self::KEY));
+
+        $memo->close();
+    }
+
+    /**
+     * Within a batch, the tenant tree is asked each question once, in every
+     * scope, unless it is asked afresh, which replaces the answer kept; a
+     * question that throws keeps nothing; and with no batch open the tree is
+     * asked every time.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheTreesAnswersAreKeptForTheBatch(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $memo  = new ResolutionMemo(static fn (): string => $scope->key);
+        $asked = 0;
+        $read  = static function () use (&$asked): int {
+            return ++$asked;
+        };
+
+        self::assertSame([1, 2], [$memo->tree(['q'], $read), $memo->tree(['q'], $read)]);
+
+        $memo->open();
+
+        self::assertSame(3, $memo->tree(['q'], $read));
+        self::assertSame(3, $memo->tree(['q'], $read));
+        self::assertSame(4, $memo->tree(['q', 'other'], $read));
+        self::assertSame(5, $memo->tree(["q\0", 'other'], $read));
+        self::assertSame(6, $memo->tree(['q', "\0other"], $read));
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+
+        self::assertSame(3, $memo->tree(['q'], $read));
+        self::assertSame(7, $memo->tree(['q'], $read, true));
+        self::assertSame(7, $memo->tree(['q'], $read));
+
+        $failing = static function () use (&$asked): int {
+            throw new \RuntimeException('unavailable ' . $asked);
+        };
+
+        try {
+            $memo->tree(['broken'], $failing);
+        } catch (\RuntimeException $exception) {
+            self::assertSame('unavailable 7', $exception->getMessage());
+        }
+
+        self::assertSame(8, $memo->tree(['broken'], $read));
+
+        $memo->close();
+
+        self::assertSame(9, $memo->tree(['q'], $read));
+    }
+
+    /**
+     * A flush drops the tree's answers, as closing the outermost batch does, so
+     * the tree is asked again.
+     *
+     * @return void
+     */
+    public function testAFlushOrTheBatchClosingDropsTheTreesAnswers(): void
+    {
+        $memo  = new ResolutionMemo(static fn (): string => 'tenant-a');
+        $asked = 0;
+        $read  = static function () use (&$asked): int {
+            return ++$asked;
+        };
+
+        $memo->open();
+        $memo->tree(['q'], $read);
+        $memo->flush();
+
+        self::assertSame(2, $memo->tree(['q'], $read));
+
+        $memo->close();
+        $memo->open();
+
+        self::assertSame(3, $memo->tree(['q'], $read));
+
+        $memo->open();
+        $memo->close();
+
+        self::assertSame(3, $memo->tree(['q'], $read));
+
+        $memo->close();
     }
 }

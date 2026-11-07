@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Cache;
 
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
@@ -172,6 +173,40 @@ final class ResolutionPins
         }
 
         $this->pin($this->store, [$this->store->guardrailsKey()]);
+    }
+
+    /**
+     * Pin the versions of the current tenant and its ancestors, then, with a
+     * store, read the ancestors again, and report whether the chain held.
+     *
+     * The chain may have been read early in the request or job, before its
+     * versions were pinned, so a tree change in between would otherwise be
+     * pinned with its new version against the old ancestors. Read again after
+     * the pin, a change made before it is seen and one made after it bumps a
+     * pinned version. When the chain moved, the new one is pinned and read
+     * from, but the entry is not stored.
+     *
+     * @return bool
+     */
+    public function isChainHeldOncePinned(): bool
+    {
+        $chain = TenantScope::currentChain();
+
+        $this->tenants($chain);
+
+        if ($this->store === null) {
+            return true;
+        }
+
+        $fresh = TenantScope::refreshChain();
+
+        if ($fresh->isSameAs($chain)) {
+            return true;
+        }
+
+        $this->tenants($fresh);
+
+        return false;
     }
 
     /**

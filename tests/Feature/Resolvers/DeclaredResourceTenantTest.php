@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Resolvers;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +18,8 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Fixtures\BulkChecks\CountingBulkTenants;
+use Tests\Fixtures\BulkChecks\UnreadableTenantPost;
 use Tests\Fixtures\QueryRecorder;
 use Tests\Fixtures\QueryScoping\RecordedTenantPost;
 use Tests\Fixtures\QueryScoping\ScopedPost;
@@ -175,6 +178,128 @@ final class DeclaredResourceTenantTest extends TestCase
         self::assertInstanceOf(DeclaredResourceTenant::class, $this->app?->make(ResourceTenantResolver::class));
         self::assertInstanceOf(ResourceReference::class, $reference);
         self::assertEquals(new Reference('teams', '5'), $reference->tenant);
+    }
+
+    /**
+     * Many models are answered at once, each as it would be on its own: a
+     * declared model from its declaration, one whose tenant cannot be read left
+     * out, and every other through the configured resolver, in bulk when it
+     * answers in bulk, else left out, so each is asked on its own.
+     *
+     * @return void
+     */
+    public function testManyModelsAreAnsweredAsEachWouldBe(): void
+    {
+        $fallback = new FixedResourceTenantResolver(new Reference('fixed', '1'));
+        $resolver = new DeclaredResourceTenant($fallback);
+        $post     = TenantScopedPost::query()->create(['tenant_type' => 'teams', 'tenant_id' => '5']);
+        $partial  = new TenantScopedPost(['id' => 3]);
+        $long     = new TenantScopedPost(['id' => 4, 'tenant_type' => 'teams', 'tenant_id' => \str_repeat('9', 192)]);
+        $other    = StubIdentity::create(['id' => 'u1']);
+
+        $models = ['a' => $post, 'b' => new ScopedPost, 'c' => $partial, 'e' => $long, 'd' => $other];
+
+        self::assertEquals(['a' => new Reference('teams', '5'), 'b' => null], $resolver->tenantsOf($models));
+        self::assertSame([], $fallback->asked);
+        self::assertSame([], $resolver->tenantsOf([]));
+
+        $bulk = new CountingBulkTenants(['u1' => new Reference('bulk', '2')]);
+
+        self::assertEquals(['a' => new Reference('teams', '5'), 'd' => new Reference('bulk', '2')], (new DeclaredResourceTenant($bulk))->tenantsOf(['a' => $post, 'd' => $other]));
+        self::assertSame([['u1']], $bulk->bulkCalls);
+    }
+
+    /**
+     * Many records of a declared type are looked up in one query on the write
+     * connection, each answered as on its own: its tenant, false for a key the
+     * column cannot hold or an integer key no record has, every one none for a
+     * tenantless type; a string key not found under exactly its spelling is
+     * left out, to be looked up on its own.
+     *
+     * @return void
+     */
+    public function testManyRecordsAreLookedUpInOneQuery(): void
+    {
+        $resolver = new DeclaredResourceTenant(new FixedResourceTenantResolver(null, false));
+        $create   = static fn (string $tenant): RecordedTenantPost => RecordedTenantPost::query()->create(['tenant_type' => 'teams', 'tenant_id' => $tenant]);
+        $posts    = \array_map($create, ['5', '6']);
+        $first    = (string) $posts[0]->getKey(); // @phpstan-ignore cast.string
+        $second   = (string) $posts[1]->getKey(); // @phpstan-ignore cast.string
+        $ids      = ['a' => $first, 'b' => $second, 'c' => '0' . $first, 'd' => '999', 'e' => 'abc', 'f' => \str_repeat('9', 19)];
+
+        QueryRecorder::reset();
+
+        $tenants = $resolver->tenantsOfRecords(RecordedTenantPost::class, $ids);
+        $lookups = \array_values(\array_filter(QueryRecorder::recorded(), static fn (QueryBuilder $query): bool => $query->wheres !== []));
+
+        self::assertCount(1, $lookups);
+        self::assertTrue($lookups[0]->useWritePdo);
+        $expected = ['a' => new Reference('teams', '5'), 'b' => new Reference('teams', '6'), 'c' => new Reference('teams', '5'), 'd' => false, 'e' => false, 'f' => false];
+
+        self::assertEquals($expected, $tenants);
+        self::assertSame(\array_keys($ids), \array_keys($tenants));
+
+        foreach ($ids as $key => $id) {
+            self::assertEquals($resolver->tenantOfRecord(RecordedTenantPost::class, $id), $tenants[$key]);
+        }
+
+        self::assertSame(['x' => null, 'y' => null], $resolver->tenantsOfRecords(ScopedPost::class, ['x' => '1', 'y' => '2']));
+        self::assertSame(['e' => false], $resolver->tenantsOfRecords(RecordedTenantPost::class, ['e' => 'abc']));
+
+        TenantScopedDocument::query()->create(['code' => 'doc-a', 'tenant_type' => 'teams', 'tenant_id' => 't1']);
+
+        self::assertEquals(['a' => new Reference('teams', 't1')], $resolver->tenantsOfRecords(TenantScopedDocument::class, ['a' => 'doc-a', 'b' => 'DOC-A', 'c' => 'missing']));
+    }
+
+    /**
+     * A record whose tenant cannot be read, a key too long for a reference or
+     * one holding neither text nor an integer, is left out of the bulk answer,
+     * so its own lookup throws, failing its check alone.
+     *
+     * @return void
+     */
+    public function testARecordWhoseTenantCannotBeReadIsLeftOut(): void
+    {
+        $resolver = new DeclaredResourceTenant(new FixedResourceTenantResolver(null, false));
+        $long     = RecordedTenantPost::query()->create(['tenant_type' => 'teams', 'tenant_id' => \str_repeat('9', 192)]);
+        $odd      = UnreadableTenantPost::query()->create(['tenant_type' => 'teams', 'tenant_id' => UnreadableTenantPost::UNREADABLE]);
+        $fine     = UnreadableTenantPost::query()->create(['tenant_type' => 'teams', 'tenant_id' => '5']);
+        $key      = static fn (Model $post): string => (string) $post->getKey(); // @phpstan-ignore cast.string
+
+        self::assertSame([], $resolver->tenantsOfRecords(RecordedTenantPost::class, ['long' => $key($long)]));
+        self::assertEquals(['fine' => new Reference('teams', '5')], $resolver->tenantsOfRecords(UnreadableTenantPost::class, ['odd' => $key($odd), 'fine' => $key($fine)]));
+
+        $unreadable = [[RecordedTenantPost::class, $long, \InvalidArgumentException::class], [UnreadableTenantPost::class, $odd, \UnexpectedValueException::class]];
+
+        foreach ($unreadable as [$class, $post, $exception]) {
+            try {
+                $resolver->tenantOfRecord($class, $key($post));
+
+                self::fail('The record\'s tenant cannot be read.');
+            } catch (\Throwable $thrown) {
+                self::assertInstanceOf($exception, $thrown);
+            }
+        }
+    }
+
+    /**
+     * Records of a type no model declares are answered by the configured
+     * resolver in bulk when it answers in bulk, and otherwise left out, so each
+     * is asked on its own.
+     *
+     * @return void
+     */
+    public function testOtherRecordsAreLeftToTheConfiguredResolver(): void
+    {
+        $fallback = new FixedResourceTenantResolver(null, false);
+
+        self::assertSame([], (new DeclaredResourceTenant($fallback))->tenantsOfRecords('posts', ['1']));
+        self::assertSame([], $fallback->askedRecords);
+
+        $bulk = new CountingBulkTenants(['1' => new Reference('teams', '5')]);
+
+        self::assertEquals([new Reference('teams', '5'), false], (new DeclaredResourceTenant($bulk))->tenantsOfRecords('posts', ['1', '2']));
+        self::assertSame([['1', '2']], $bulk->bulkCalls);
     }
 
     /**

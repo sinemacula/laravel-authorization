@@ -267,6 +267,29 @@ final class HasPermissionsTest extends TestCase
     }
 
     /**
+     * `canEach()` and `filterAuthorized()` decide the model's checks through
+     * the authorization manager, the full decision included, keyed as given.
+     *
+     * @return void
+     */
+    public function testTheBulkChecksDecideThroughTheManager(): void
+    {
+        $user = StubIdentity::create(['id' => 'bulk-delegate']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+
+        $policy = Policy::create(['name' => 'deny-two', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:2']]]]]);
+
+        $user->attachPolicy($policy);
+
+        self::assertSame(['a' => true, 'b' => false], $user->canEach('posts:read', ['a' => 'posts:1', 'b' => 'posts:2']));
+        self::assertSame([3 => 'posts:3'], $user->filterAuthorized('posts:read', [3 => 'posts:3', 4 => 'posts:2']));
+        self::assertSame(['a' => false], $user->canEach('posts:edit', ['a' => 'posts:1'], ['flag' => 'on']));
+        self::assertSame([0 => 'posts:1'], $user->filterAuthorized('posts:read', collect(['posts:1', 'posts:2']))->all());
+        self::assertFalse(Authorization::lastDecision()?->isAllowed());
+    }
+
+    /**
      * Return the grant table the expiry check reads.
      *
      * @return string

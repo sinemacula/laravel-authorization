@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Database\Query\Builder;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 
 /**
@@ -47,19 +48,35 @@ final readonly class TenantChain
      * Return the chain of the tenant through the given tree, standing just
      * below the tenant when asked, or the platform's for no tenant.
      *
+     * While a batch of checks is open, the tree is asked for a tenant's
+     * ancestors once (see `ResolutionCache::answerTree()`), unless they are
+     * read afresh, which replaces the answer kept.
+     *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
      * @param  bool  $isBelow
+     * @param  bool  $isFresh
      * @return self
      */
-    public static function of(?Reference $tenant, TenantTree $tree, bool $isBelow = false): self
+    public static function of(?Reference $tenant, TenantTree $tree, bool $isBelow = false, bool $isFresh = false): self
     {
-        return $tenant === null ? new self : new self([$tenant, ...$tree->ancestors($tenant)], $isBelow);
+        if ($tenant === null) {
+            return new self;
+        }
+
+        $ancestors = static fn (): array => $tree->ancestors($tenant);
+        $cache     = ResolutionCache::instance();
+
+        /** @var list<\SineMacula\Laravel\Authorization\Support\Reference> $read */
+        $read = $cache === null ? $ancestors() : $cache->answerTree(['ancestors', (string) \spl_object_id($tree), $tenant->type, $tenant->id], $ancestors, $isFresh);
+
+        return new self([$tenant, ...$read], $isBelow);
     }
 
     /**
      * Determine whether the tenant is the ancestor or below it in the bound
-     * tree. The platform is within no tenant.
+     * tree. The platform is within no tenant. While a batch of checks is open,
+     * the tree is asked about each pair of tenants once.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $ancestor
@@ -67,7 +84,17 @@ final readonly class TenantChain
      */
     public static function isWithin(?Reference $tenant, Reference $ancestor): bool
     {
-        return $tenant !== null && self::tree()->isWithin($tenant, $ancestor);
+        if ($tenant === null) {
+            return false;
+        }
+
+        $tree     = self::tree();
+        $isWithin = static fn (): bool => $tree->isWithin($tenant, $ancestor);
+        $cache    = ResolutionCache::instance();
+
+        $question = ['within', (string) \spl_object_id($tree), $tenant->type, $tenant->id, $ancestor->type, $ancestor->id];
+
+        return $cache === null ? $isWithin() : $cache->answerTree($question, $isWithin);
     }
 
     /**

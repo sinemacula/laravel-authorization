@@ -4,8 +4,10 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Support;
 
+use Illuminate\Container\Container;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
@@ -174,5 +176,42 @@ final class ResolvedTenantTest extends TestCase
         self::assertTrue($resolved->chain($tree)->isBelow);
         self::assertTrue($resolved->refreshChain($tree)->isBelow);
         self::assertEquals([new Reference('stub_tenant', 'org')], $resolved->chain($tree)->tenants);
+    }
+
+    /**
+     * Within a batch of checks, a holder reads the chain the tree already gave
+     * for its tenant, and a refresh reads it afresh, in place of the one kept,
+     * so a holder made after it reads the fresh one.
+     *
+     * @return void
+     */
+    public function testWithinABatchTheChainIsReadOnceAndARefreshReplacesIt(): void
+    {
+        $previous  = Container::getInstance();
+        $container = new Container;
+        $cache     = new ResolutionCache;
+        $tenant    = new Reference('stub_tenant', 'account');
+        $org       = new Reference('stub_tenant', 'org');
+        $sibling   = new Reference('stub_tenant', 'sibling');
+        $tree      = $this->createMock(TenantTree::class);
+        $resolver  = self::createStub(SubjectResolver::class);
+
+        $tree->expects(self::exactly(2))->method('ancestors')->with($tenant)->willReturn([$org], [$sibling]);
+        $container->instance(ResolutionCache::class, $cache);
+
+        Container::setInstance($container);
+
+        try {
+            $chains = $cache->batch(static fn (): array => [
+                (new ResolvedTenant($resolver, $tenant))->chain($tree)->tenants,
+                (new ResolvedTenant($resolver, $tenant))->chain($tree)->tenants,
+                (new ResolvedTenant($resolver, $tenant))->refreshChain($tree)->tenants,
+                (new ResolvedTenant($resolver, $tenant))->chain($tree)->tenants,
+            ]);
+        } finally {
+            Container::setInstance($previous);
+        }
+
+        self::assertEquals([[$tenant, $org], [$tenant, $org], [$tenant, $sibling], [$tenant, $sibling]], $chains);
     }
 }

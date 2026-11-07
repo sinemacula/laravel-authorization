@@ -60,6 +60,10 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   rows, compiling at the call and at every execution, the classes of rows cut at the tenants the sources sit at and
   decided through the decision pipeline itself, literal ids, record attachments, the collation and key-kind proofs,
   the guards, every refusal reason, and the limits.
+- `bulk-checks.md`: `checkMany()`, `canEach()` and `filterAuthorized()` deciding every check through the one decision
+  path, the keys and occurrences they keep, what a batch reads once in each scope and what it reads in bulk for each
+  chunk, the bulk tenant and attribute contracts and their fallbacks, one decision event per check and the last
+  decision, and the consistency boundary within which a batch sees a write.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

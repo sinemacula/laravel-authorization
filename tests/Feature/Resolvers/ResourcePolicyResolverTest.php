@@ -483,6 +483,225 @@ final class ResourcePolicyResolverTest extends TestCase
     }
 
     /**
+     * Many resources read exactly what each reads on its own, keyed as they
+     * are: the records of a type in one query, a type alone in one, and the
+     * denies a tenant decided outside attached in one more; a resource with no
+     * type, or one longer than the table stores, none; and once read, each
+     * record reads its own from the cache.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testManyResourcesReadWhatEachReadsAlone(): void
+    {
+        $tenant = self::createTenant('tenant-b');
+        $both   = self::sharing('both');
+
+        self::service()->attach($both, 'posts');
+        self::service()->attach($both, ['posts', 7]);
+        self::service()->attach(self::sharing('record'), ['posts', 8]);
+        self::service()->attach(self::sharing('docs'), 'docs');
+        self::service()->attach(Policy::create(['name' => 'lock', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:delete']]]]]), ['posts', 7], $tenant);
+
+        $resources = [
+            'seven'   => ResourceReference::record('posts', '7'),
+            'eight'   => ResourceReference::record('posts', '8'),
+            9         => ResourceReference::record('posts', '7'),
+            'type'    => ResourceReference::type('posts'),
+            'star'    => ResourceReference::record('posts', '*'),
+            'doc'     => ResourceReference::record('docs', '1'),
+            'opaque'  => new ResourceReference('posts:7'),
+            'none'    => null,
+            'long'    => ResourceReference::record(\str_repeat('p', 192), '7'),
+            'outside' => ResourceReference::record('posts', '7', Reference::of($tenant)),
+        ];
+
+        $alone = \array_map(static fn (?ResourceReference $resource): array => (new ResourcePolicyResolver)->policiesFor($resource), $resources);
+
+        // The attachments table's key column is inspected once a request.
+        ResourcePolicyResolver::resolveMany('posts', [], new ResolutionPins);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $many    = (new ResourcePolicyResolver)->policiesForMany($resources);
+        $queries = \count(DB::getQueryLog());
+
+        DB::disableQueryLog();
+
+        self::assertSame(\array_map(self::described(...), $alone), \array_map(self::described(...), $many));
+        self::assertSame(\array_keys($resources), \array_keys($many));
+        self::assertSame(['lock@posts:7'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name . '@' . $policy->resource, \array_slice($many['outside'], 1)));
+        self::assertSame(4, $queries);
+        self::assertSame(['both@posts:7'], self::readWithoutQueries(ResourceReference::record('posts', '7')));
+        self::assertSame(['both@posts:*', 'record@posts:8'], self::readWithoutQueries(ResourceReference::record('posts', '8')));
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+        $this->app?->offsetUnset(ResolutionCache::class);
+
+        self::assertSame(\array_map(self::described(...), $alone), \array_map(self::described(...), (new ResourcePolicyResolver)->policiesForMany($resources)));
+        self::assertSame([], (new ResourcePolicyResolver)->policiesForMany([]));
+    }
+
+    /**
+     * A record whose policies include a document that cannot be read is left
+     * out of the bulk read, its document read once, and is read on its own,
+     * which throws; a record of a key that is not UTF-8 is read on its own.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARecordThatCannotBeReadInBulkIsReadOnItsOwn(): void
+    {
+        $logger = new RecordingLogger;
+        $this->app?->instance('log', $logger);
+
+        $broken = self::sharing('broken');
+
+        self::service()->attach(self::sharing('type'), 'posts');
+        self::service()->attach($broken, ['posts', 8]);
+
+        DB::table('policies')->where('id', $broken->id)->update(['document' => \json_encode(['statements' => [['effect' => 'deny', 'actions' => []]]])]);
+
+        $read = ResourcePolicyResolver::resolveMany('posts', ['7', '8', '9'], new ResolutionPins);
+
+        self::assertSame([7, 9], \array_keys($read));
+        self::assertSame(['type'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $read[7]->value));
+        self::assertCount(1, $logger->records);
+
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            $read = (new ResourcePolicyResolver)->policiesForMany([ResourceReference::record('posts', "\xff")])[0];
+
+            self::assertSame(['type@posts:*'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name . '@' . $policy->resource, $read));
+        }
+
+        $this->expectException(InvalidPolicyDocumentException::class);
+
+        (new ResourcePolicyResolver)->policiesForMany([ResourceReference::record('posts', '7'), ResourceReference::record('posts', '8')]);
+    }
+
+    /**
+     * Several records of one tenant decided outside it each read the denies
+     * attached to them in that tenant, as each does on its own.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRecordsOfOneTenantDecidedOutsideItEachReadItsDenies(): void
+    {
+        $tenant = self::createTenant('tenant-b');
+
+        foreach (['7', '8'] as $id) {
+            $lock = Policy::create(['name' => "lock-{$id}", 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:delete']]]]]);
+
+            self::service()->attach($lock, ['posts', $id], $tenant);
+        }
+
+        $resources = ['seven' => ResourceReference::record('posts', '7', Reference::of($tenant)), 'eight' => ResourceReference::record('posts', '8', Reference::of($tenant))];
+        $alone     = \array_map(static fn (ResourceReference $resource): array => (new ResourcePolicyResolver)->policiesFor($resource), $resources);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        $many  = (new ResourcePolicyResolver)->policiesForMany($resources);
+        $names = static fn (array $policies): array => \array_map(static fn (EvaluationPolicy $policy): string => $policy->name . '@' . $policy->resource, $policies);
+
+        self::assertSame(['seven' => ['lock-7@posts:7'], 'eight' => ['lock-8@posts:8']], \array_map($names, $many));
+        self::assertSame(\array_map(self::described(...), $alone), \array_map(self::described(...), $many));
+    }
+
+    /**
+     * A document attached to the type that cannot be read is hydrated once
+     * however many records are read with it, so it is written to the log
+     * channel once, and every record is left out, to be read on its own.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATypesUnreadableDocumentIsHydratedOnce(): void
+    {
+        $logger = new RecordingLogger;
+        $this->app?->instance('log', $logger);
+
+        $broken = self::sharing('broken');
+
+        self::service()->attach($broken, 'posts');
+
+        DB::table('policies')->where('id', $broken->id)->update(['document' => \json_encode(['statements' => [['effect' => 'deny', 'actions' => []]]])]);
+
+        self::assertSame([], ResourcePolicyResolver::resolveMany('posts', ['7', '8', '9'], new ResolutionPins));
+        self::assertCount(1, $logger->records);
+    }
+
+    /**
+     * A type exactly as long as the table stores is read as any other; one byte
+     * longer has no attachments.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATypeAsLongAsTheTableStoresIsRead(): void
+    {
+        $type = \str_repeat('p', Reference::MAX_BYTES);
+
+        self::service()->attach(self::sharing('longest'), $type);
+
+        $read = (new ResourcePolicyResolver)->policiesForMany([ResourceReference::record($type, '7'), ResourceReference::record($type . 'p', '7')]);
+
+        self::assertSame(['longest'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $read[0]));
+        self::assertSame([], $read[1]);
+    }
+
+    /**
+     * A table whose key column folds case is never read in bulk: each record
+     * reads its own, under the column's comparison, so a record finds an
+     * attachment of its key in another case as it does on its own.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATableFoldingKeysIsReadForEachRecordOnItsOwn(): void
+    {
+        $this->app?->make('config')->set('authorization.tables.resource_policies', 'scoped_folded_resource_policies');
+
+        $policy = self::sharing('folded');
+
+        DB::table('scoped_folded_resource_policies')->insert(['policy_id' => $policy->getKey(), 'resource_type' => 'docs', 'resource_id' => 'ABC']);
+
+        $records = [ResourceReference::record('docs', 'abc'), ResourceReference::record('docs', 'ABC'), ResourceReference::record('docs', 'abd')];
+        $alone   = \array_map(static fn (ResourceReference $resource): array => (new ResourcePolicyResolver)->policiesFor($resource), $records);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        self::assertSame([], ResourcePolicyResolver::resolveMany('docs', ['abc', 'ABC'], new ResolutionPins));
+        self::assertSame(\array_map(self::described(...), $alone), \array_map(self::described(...), (new ResourcePolicyResolver)->policiesForMany($records)));
+        self::assertSame(['folded@docs:ABC'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name . '@' . $policy->resource, $alone[0]));
+    }
+
+    /**
+     * Describe each policy by its id, its name, what it is attached to and its
+     * document, sorted, as the order the rows are read in decides nothing.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
+     * @return list<string>
+     */
+    private static function described(array $policies): array
+    {
+        $described = \array_map(static fn (EvaluationPolicy $policy): string => "{$policy->id} {$policy->name}@{$policy->resource} " . \json_encode($policy->toArray()), $policies);
+
+        \sort($described);
+
+        return $described;
+    }
+
+    /**
      * Return the resource policy service the container binds.
      *
      * @return \SineMacula\Laravel\Authorization\Services\ResourcePolicyService

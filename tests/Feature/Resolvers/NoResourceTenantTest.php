@@ -139,4 +139,20 @@ final class NoResourceTenantTest extends TestCase
         self::assertTrue($decision->isAllowed());
         self::assertNotSame(DecisionReason::TENANT_SCOPE, $decision->reason);
     }
+
+    /**
+     * In bulk, no model and no record has a tenant, each keyed as given.
+     *
+     * @return void
+     */
+    public function testNoResourceHasATenantInBulk(): void
+    {
+        $resolver = new NoResourceTenant;
+        $models   = ['a' => new StubTenant(['id' => 't1']), 4 => new StubIdentity(['id' => 'u1'])];
+
+        self::assertSame(['a' => null, 4 => null], $resolver->tenantsOf($models));
+        self::assertSame(['x' => null, 2 => null], $resolver->tenantsOfRecords('posts', ['x' => '1', 2 => '9']));
+        self::assertSame([], $resolver->tenantsOf([]));
+        self::assertSame([], $resolver->tenantsOfRecords('posts', []));
+    }
 }

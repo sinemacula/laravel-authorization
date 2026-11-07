@@ -105,18 +105,21 @@ final readonly class CheckContextFactory
      * Make the context of one check, holding what the caller passes under
      * `input`, and the check's subject and resource under `subject` and
      * `resource`, judging its authentication requirements for the subject, whom
-     * a resource policy's `principals` may name.
+     * a resource policy's `principals` may name. A check of a bulk check reads
+     * its resource's attributes through the batch's (see
+     * `ResourceAttributeBatch`).
      *
      * @param  array<array-key, mixed>  $input
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
+     * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $batch
      * @return \SineMacula\Laravel\Authorization\Evaluation\CheckContext
      */
-    public function make(array $input = [], ?Subject $subject = null, ?ResourceReference $resource = null): CheckContext
+    public function make(array $input = [], ?Subject $subject = null, ?ResourceReference $resource = null, ?ResourceAttributeBatch $batch = null): CheckContext
     {
         return new CheckContext(
             [self::INPUT => $input],
-            [...$this->builders, ...$this->attributes->builders($subject, $resource)],
+            [...$this->builders, ...$this->attributes->builders($subject, $resource, $batch)],
             new RequirementCheck($this->requirements, $subject),
             $subject === null ? null : new PrincipalSelectors($subject),
         );
