@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ReshapesResources;
 use Tests\Concerns\ScopesQueries;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\StubIdentity;
@@ -45,7 +46,7 @@ use Tests\TestCase;
 #[CoversClass(RecordAttachments::class)]
 final class RecordAttachmentsTest extends TestCase
 {
-    use ScopesQueries, UsesAnAuthorizationConnection;
+    use ReshapesResources, ScopesQueries, UsesAnAuthorizationConnection;
 
     /**
      * With no policy attached to a record of the type, nothing is read further
@@ -65,8 +66,9 @@ final class RecordAttachmentsTest extends TestCase
 
     /**
      * A policy attached to a record holds on that record alone, in the scope it
-     * holds in: another record, a policy attached in another tenant and a key
-     * no attachment can name (`*`, one over 191 bytes) do not meet it.
+     * holds in: another record, a policy attached in another tenant, the same
+     * policy attached there to another record, and a key no attachment can name
+     * (`*`, one over 191 bytes) do not meet it.
      *
      * @return void
      *
@@ -84,8 +86,17 @@ final class RecordAttachmentsTest extends TestCase
 
         $elsewhere = self::attachToResource([ScopedDocument::class, 'abc '], [['effect' => 'deny', 'actions' => ['posts:*']]]);
 
+        $attached = ['policy_id' => $policy->getKey(), 'resource_type' => (new ScopedDocument)->getMorphClass()];
+
         DB::table('resource_policies')->where('policy_id', $elsewhere->getKey())->update(['tenant_type' => 'teams', 'tenant_id' => '5']);
-        DB::table('resource_policies')->insert(['policy_id' => $policy->getKey(), 'resource_type' => (new ScopedDocument)->getMorphClass(), 'resource_id' => '*']);
+        DB::table('resource_policies')->insert([...$attached, 'resource_id' => '*']);
+        DB::table('resource_policies')->insert([...$attached, 'resource_id' => 'abc ', 'tenant_type' => 'teams', 'tenant_id' => '5']);
+
+        // SQLite keeps a key longer than the column, which no other database
+        // would store, and which `check()` never looks up.
+        if (DB::connection()->getDriverName() === 'sqlite') {
+            DB::table('resource_policies')->insert([...$attached, 'resource_id' => \str_repeat('k', 192)]);
+        }
 
         [$attachments, $screen] = $this->reader(new ScopedDocument);
 
@@ -426,6 +437,51 @@ final class RecordAttachmentsTest extends TestCase
     }
 
     /**
+     * The policies read in one application are not reused in another, where a
+     * policy attached only there holds.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testThePoliciesOfOneApplicationAreNotReusedInAnother(): void
+    {
+        $policy = self::attachToResource([ScopedPost::class, '1'], [['effect' => 'deny', 'actions' => ['posts:*']]]);
+
+        DB::table('resource_policies')->where('policy_id', $policy->getKey())->update(['application' => 'admin']);
+
+        [$attachments, $screen] = $this->reader(new ScopedPost);
+
+        self::assertSame([], TenantScope::within(null, 'web', static fn (): array => $attachments->inScope('posts:view', $screen, false)));
+        self::assertCount(1, TenantScope::within(null, 'admin', static fn (): array => $attachments->inScope('posts:view', $screen, false)));
+    }
+
+    /**
+     * A key whose text holds a question mark that is no placeholder cannot be
+     * inlined, so the attachments are refused, on every database; a model whose
+     * connection is not known is refused as kept on another connection.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAKeyThatCannotBeInlinedOrAnUnknownConnectionIsRefused(): void
+    {
+        self::attachToResource([ScopedPost::class, '1'], [['effect' => 'deny', 'actions' => ['posts:*']]]);
+
+        $shape  = ResourceShape::of(new ScopedPost, 'posts:view', new SchemaInspector);
+        $marked = $this->readerOf(self::reshaped($shape, ['key' => '"k?"']));
+
+        self::assertCount(1, $marked[0]->inScope('posts:view', $marked[1], false));
+        self::assertSame([[RefusalReason::INLINE_VALUE, 'resource_id']], self::refused($marked[1]));
+
+        $unknown = $this->readerOf(self::reshaped($shape, ['connection' => null]));
+
+        self::assertSame([], $unknown[0]->inScope('posts:view', $unknown[1], false));
+        self::assertSame([[RefusalReason::ATTACHMENT_CONNECTION, 'resource_id']], self::refused($unknown[1]));
+    }
+
+    /**
      * Return a reader of the model's record attachments, at most the limit of
      * them, and a screen of `posts:view` to keep its refusals.
      *
@@ -435,11 +491,22 @@ final class RecordAttachmentsTest extends TestCase
      */
     private function reader(Model $model, int $limit = 64): array
     {
-        $user      = StubIdentity::query()->firstOrCreate(['id' => 'reader']);
-        $inspector = new SchemaInspector;
-        $shape     = ResourceShape::of($model, 'posts:view', $inspector);
+        return $this->readerOf(ResourceShape::of($model, 'posts:view', new SchemaInspector), $limit);
+    }
 
-        return [new RecordAttachments(new ResourcePolicyResolver, $shape, $inspector, $limit), new StatementScreen('posts:view', $shape, new Subject($user, $user))];
+    /**
+     * Return a reader of the shape's record attachments, at most the limit of
+     * them, and a screen of `posts:view` to keep its refusals.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Query\ResourceShape  $shape
+     * @param  int  $limit
+     * @return array{\SineMacula\Laravel\Authorization\Query\RecordAttachments, \SineMacula\Laravel\Authorization\Query\StatementScreen}
+     */
+    private function readerOf(ResourceShape $shape, int $limit = 64): array
+    {
+        $user = StubIdentity::query()->firstOrCreate(['id' => 'reader']);
+
+        return [new RecordAttachments(new ResourcePolicyResolver, $shape, new SchemaInspector, $limit), new StatementScreen('posts:view', $shape, new Subject($user, $user))];
     }
 
     /**

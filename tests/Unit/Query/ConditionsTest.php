@@ -36,6 +36,20 @@ final class ConditionsTest extends TestCase
     }
 
     /**
+     * A conjunction and a disjunction left with one condition after dropping
+     * the constants before it, or a repeat, return that condition alone.
+     *
+     * @return void
+     */
+    public function testALoneConditionAfterTheDroppedOnesIsReturned(): void
+    {
+        self::assertSame('a', Conditions::all([QueryAuthorizer::EVERY_ROW, 'a']));
+        self::assertSame('(a AND b)', Conditions::all(['a', 'a', 'b']));
+        self::assertSame('a', Conditions::any([QueryAuthorizer::NO_ROW, 'a']));
+        self::assertSame('(a OR b)', Conditions::any(['a', 'a', 'b']));
+    }
+
+    /**
      * A disjunction drops every condition no row meets, and repeats, and is
      * every row's when one is.
      *

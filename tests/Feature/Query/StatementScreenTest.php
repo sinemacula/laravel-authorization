@@ -58,8 +58,8 @@ final class StatementScreenTest extends TestCase
 
     /**
      * A literal id compares the key, a longer prefix the start of its text, a
-     * pattern of another type names no row, and `not_resources` names the rows
-     * none of its patterns covers.
+     * pattern of another type names no row, and `not_resources` names, both
+     * matching and applying to, the rows none of its patterns covers.
      *
      * @return void
      */
@@ -79,7 +79,7 @@ final class StatementScreenTest extends TestCase
         self::assertSame(QueryAuthorizer::NO_ROW, $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], ['other:5']))[1]);
         $negated = new Statement(PolicyEffect::DENY, ['posts:view'], null, notResources: [self::type() . ':5']);
 
-        self::assertSame("NOT COALESCE({$key} = 5, 1 = 1)", $this->terms($screen, $subject, $negated)[1]);
+        self::assertSame(["NOT COALESCE({$key} = 5, 1 = 1)", "NOT COALESCE({$key} = 5, 1 = 1)", true], $this->terms($screen, $subject, $negated));
         self::assertSame(QueryAuthorizer::NO_ROW, $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], null, notResources: ['*']))[1]);
         self::assertSame([], $screen->refusals());
     }
@@ -101,6 +101,11 @@ final class StatementScreenTest extends TestCase
         self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::EVERY_ROW, false], $this->terms($screen, $subject, $unresolved));
         self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::EVERY_ROW, false], $this->terms($screen, $subject, $negated));
         self::assertSame(QueryAuthorizer::EVERY_ROW, $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'], ['${input.type}:*']))[0]);
+
+        $key   = DB::connection()->getQueryGrammar()->wrap('scoped_posts.id');
+        $mixed = new Statement(PolicyEffect::ALLOW, ['posts:view'], ['${input.missing}', self::type() . ':5']);
+
+        self::assertSame(["{$key} = 5", QueryAuthorizer::EVERY_ROW, true], $this->terms($screen, $subject, $mixed));
         self::assertSame([], $screen->refusals());
     }
 
@@ -122,9 +127,9 @@ final class StatementScreenTest extends TestCase
     }
 
     /**
-     * A pattern no key can be compared with is refused, and so is a statement
-     * that cannot be evaluated once its target names a row; one whose target
-     * names none is not.
+     * A pattern no key can be compared with is refused, naming no row though a
+     * pattern resolved, and so is a statement that cannot be evaluated once its
+     * target names a row; one whose target names none is not.
      *
      * @return void
      */
@@ -133,7 +138,7 @@ final class StatementScreenTest extends TestCase
         [$screen, $subject] = $this->screen();
         $broken             = ['no_such_operator' => ['input.x' => 1]];
 
-        $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], [self::type() . ':?']), 'question');
+        $question = $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], [self::type() . ':?']), 'question');
         $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'], null, $broken, notResources: ['*']), 'unreached');
         $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'], ['other:1'], $broken), 'elsewhere');
         $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'], null, $broken), 'broken');
@@ -144,12 +149,14 @@ final class StatementScreenTest extends TestCase
         $expected = [['question#0', RefusalReason::RESOURCE_PATTERN], ['broken#0', RefusalReason::INVALID_STATEMENT], ['beyond#0', RefusalReason::RESOURCE_PATTERN]];
 
         self::assertSame($expected, $refused);
+        self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::NO_ROW, true], $question);
     }
 
     /**
      * Without a context factory a check reads only what the caller passes and
      * the subject's built-ins, so only a read of the resource is refused,
-     * whether in a condition's key, a string operand or a pattern.
+     * whether in a condition's key, a string operand or a pattern; a refused
+     * statement names no row, and no pattern is matched for it.
      *
      * @return void
      */
@@ -158,13 +165,14 @@ final class StatementScreenTest extends TestCase
         [$screen, $subject] = $this->screen();
 
         $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], null, ['eq' => ['plan.tier' => 'pro', 'subject.id' => '${request.ip}']]));
-        $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], null, ['eq' => ['input.owner' => '${resource.owner}']]));
+        $owner = $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], null, ['eq' => ['input.owner' => '${resource.owner}']]));
         $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], [self::type() . ':${resource.id}']));
 
         self::assertSame(['resource.owner', 'resource.id'], \array_map(static fn (Refusal $refusal): ?string => $refusal->key, $screen->refusals()));
         $reasons = \array_map(static fn (Refusal $refusal): RefusalReason => $refusal->reason, $screen->refusals());
 
         self::assertSame([RefusalReason::RESOURCE_NAMESPACE, RefusalReason::RESOURCE_NAMESPACE], $reasons);
+        self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::NO_ROW, false], $owner);
     }
 
     /**

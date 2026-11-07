@@ -151,6 +151,31 @@ final class DecisionFormulaTest extends TestCase
     }
 
     /**
+     * A statement whose only pattern cannot be resolved applies to every row
+     * but matches none: as a deny it keeps every row out, as an allow it lets
+     * none in, whether weighed on every row or where its policy is attached.
+     *
+     * @return void
+     */
+    public function testAnUnresolvedPatternAppliesWithoutMatching(): void
+    {
+        [$screen, $subject] = $this->screen();
+
+        /** @var \Tests\Feature\Stubs\StubIdentity $user */
+        $user     = $subject->subject;
+        $deny     = new Statement(PolicyEffect::DENY, [self::ACTION], ['${input.missing}']);
+        $allow    = new Statement(PolicyEffect::ALLOW, [self::ACTION], ['${input.missing}']);
+        $named    = new Statement(PolicyEffect::ALLOW, [self::ACTION], ['${input.missing}'], principals: [$user->getMorphClass() . ':u1']);
+        $anyone   = new Policy('anyone', [new Statement(PolicyEffect::ALLOW, [self::ACTION])]);
+        $attached = static fn (Statement $statement): Policy => (new Policy('attached', [$statement]))->withResource(self::type() . ':*');
+
+        self::assertSame(QueryAuthorizer::NO_ROW, DecisionFormula::of(self::ACTION, $screen, $this->sources($subject, [$anyone, new Policy('deny', [$deny])]), false)[0]);
+        self::assertSame('NOT COALESCE(here, 1 = 1)', DecisionFormula::of(self::ACTION, $screen, $this->sources($subject, []), true, [[$attached($deny), 'here', true]])[0]);
+        self::assertSame(QueryAuthorizer::NO_ROW, DecisionFormula::of(self::ACTION, $screen, $this->sources($subject, [new Policy('allow', [$allow])]), false)[0]);
+        self::assertSame(QueryAuthorizer::NO_ROW, DecisionFormula::of(self::ACTION, $screen, $this->sources($subject, []), false, [[$attached($named), 'here', false]])[0]);
+    }
+
+    /**
      * Return a screen of `posts:view` on posts, for a stored subject.
      *
      * @return array{\SineMacula\Laravel\Authorization\Query\StatementScreen, \SineMacula\Laravel\Authorization\Subject}

@@ -186,6 +186,21 @@ final class InlinedQueryTest extends TestCase
     }
 
     /**
+     * A closure of the query's own builder compiling it, as a cursor's
+     * generator does, runs it; a closure bound to the query but defined in
+     * another class does not.
+     *
+     * @return void
+     */
+    public function testOnlyTheBuildersOwnClosureRunsTheQuery(): void
+    {
+        $query = DB::table('inlined_values');
+
+        self::assertTrue(\Closure::bind(fn (): bool => InlinedQuery::isRunning($query), $query, Builder::class)());
+        self::assertFalse(\Closure::bind(fn (): bool => InlinedQuery::isRunning($query), $query, self::class)());
+    }
+
+    /**
      * Create the table of values, store each, and return them; a NUL byte is
      * stored too where the database can hold one.
      *

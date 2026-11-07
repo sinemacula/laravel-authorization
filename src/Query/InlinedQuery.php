@@ -53,7 +53,7 @@ final class InlinedQuery
     public static function sqlOf(Builder $query, Dialect $dialect): ?string
     {
         $parts    = \explode('?', $query->toSql());
-        $literals = \array_map($dialect->parameter(...), \array_values($query->getConnection()->prepareBindings($query->getBindings())));
+        $literals = \array_map($dialect->parameter(...), $query->getConnection()->prepareBindings($query->getBindings()));
 
         if (\count($parts) !== \count($literals) + 1 || \in_array(null, $literals, true)) {
             return null;
