@@ -7,6 +7,7 @@ namespace Tests\Unit\Support;
 use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
@@ -48,10 +49,24 @@ final class ResourceReferenceTest extends TestCase
      */
     public function testKeepsEveryPartGiven(): void
     {
-        $tenant    = new Reference('stub_tenant', '7');
-        $model     = new class extends Model {};
-        $reference = new ResourceReference('custom', 'post', '42', $tenant, $model);
+        $tenant = new Reference('stub_tenant', '7');
+        $model  = new class extends Model {};
+        $source = new class implements AuthorizableResource {
+            /**
+             * Return the reference to the resource.
+             *
+             * @return \SineMacula\Laravel\Authorization\Support\ResourceReference
+             */
+            #[\Override]
+            public function toResourceReference(): ResourceReference
+            {
+                return new ResourceReference('custom');
+            }
+        };
+        $reference = new ResourceReference('custom', 'post', '42', $tenant, $model, $source);
 
+        self::assertSame($source, $reference->source);
+        self::assertNull((new ResourceReference('custom'))->source);
         self::assertSame('custom', $reference->identifier);
         self::assertSame('post', $reference->type);
         self::assertSame('42', $reference->id);

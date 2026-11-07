@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * deleted, against the rules guardrails keep (AUTHZ-7.6), naming the reason.
  *
  * - `not_permitted`: the actor may not change the guardrails of the scope. It
- *   must hold `authorization:guardrails:manage` effectively, through a grant
+ *   must hold `authorization:guardrail.manage` effectively, through a grant
  *   whose reach covers the scope from above it: for a tenant, a grant held at
  *   an ancestor of the tenant that reaches below it, or platform-wide, never
  *   one held within the tenant itself; for the platform, a platform-wide grant.
@@ -75,7 +75,7 @@ final class GuardrailException extends \LogicException
      */
     public static function notPermitted(Reference $actor, ?Reference $tenant): self
     {
-        $permission = PackagePermissions::GUARDRAILS_MANAGE;
+        $permission = PackagePermissions::GUARDRAIL_MANAGE;
         $scope      = $tenant === null ? 'the platform' : "tenant '{$tenant->type}:{$tenant->id}'";
         $grant      = $tenant === null
             ? 'a platform-wide grant'

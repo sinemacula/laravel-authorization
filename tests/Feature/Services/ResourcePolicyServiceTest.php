@@ -4,12 +4,16 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached;
@@ -18,12 +22,17 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidResourceException;
 use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
 use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
+use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\InterleavesWrites;
 use Tests\Concerns\ReadsDispatchedEvents;
@@ -46,7 +55,7 @@ use Tests\TestCase;
 #[CoversClass(ResourcePolicyService::class)]
 final class ResourcePolicyServiceTest extends TestCase
 {
-    use ActsAsTenant, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents;
 
     /**
      * The service is bound once in the container.
@@ -62,7 +71,7 @@ final class ResourcePolicyServiceTest extends TestCase
     /**
      * A policy is attached to a record and to a whole type, each in its own
      * row, platform-wide and for every application by default, and each
-     * attachment is reported once with the actor.
+     * attachment is reported once, as trusted work with no actor.
      *
      * @return void
      *
@@ -73,9 +82,8 @@ final class ResourcePolicyServiceTest extends TestCase
         Event::fake([PolicyAttached::class]);
 
         $policy = self::sharing();
-        $actor  = new Reference('admin', '1');
 
-        self::assertSame(GrantOutcome::GRANTED, self::service()->attach($policy, ['posts', 7], actor: $actor));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->attach($policy, ['posts', 7]));
         self::assertSame(GrantOutcome::GRANTED, self::service()->attach($policy, 'posts'));
 
         $columns = ['resource_type', 'resource_id', 'tenant_type', 'tenant_id', 'include_subtree', 'application'];
@@ -91,7 +99,8 @@ final class ResourcePolicyServiceTest extends TestCase
         self::assertCount(2, $events);
         self::assertSame(['posts', '7', 'sharing'], [$events[0]->resourceType, $events[0]->resourceId, $events[0]->name]);
         self::assertTrue(self::refersTo($events[0]->policy, $policy));
-        self::assertTrue(self::refersTo($events[0]->operation->actor, $actor));
+        self::assertNull($events[0]->operation->actor);
+        self::assertSame([PackagePermissions::RESOURCE_POLICY_ATTACH], $events[0]->operation->actions);
         self::assertNull($events[0]->scope->tenant);
         self::assertSame(['posts', null], [$events[1]->resourceType, $events[1]->resourceId]);
         self::assertNull($events[1]->operation->actor);
@@ -401,7 +410,9 @@ final class ResourcePolicyServiceTest extends TestCase
 
         self::assertSame(0, self::service()->detach($policy, ['posts', 7]));
         self::assertSame(0, self::service()->detach($policy, ['posts', 7], $tenant));
-        self::assertSame(1, self::service()->detach($policy, ['posts', 7], $tenant, 'admin', new Reference('admin', '1')));
+        $admin = self::administrator();
+
+        self::assertSame(1, self::service()->detach($policy, ['posts', 7], $tenant, 'admin', $admin));
         self::assertSame(0, self::service()->detach($policy, ['posts', 7], $tenant, 'admin'));
         self::assertSame(1, self::service()->detach($policy, 'posts'));
         self::assertSame(0, DB::table('resource_policies')->count());
@@ -412,9 +423,135 @@ final class ResourcePolicyServiceTest extends TestCase
         self::assertSame(['posts', '7', 'sharing', 'admin'], [$events[0]->resourceType, $events[0]->resourceId, $events[0]->name, $events[0]->scope->application]);
         self::assertFalse($events[0]->scope->includeSubtree);
         self::assertTrue(self::refersTo($events[0]->scope->tenant, $tenant));
-        self::assertTrue(self::refersTo($events[0]->operation->actor, new Reference('admin', '1')));
+        self::assertTrue(self::refersTo($events[0]->operation->actor, $admin->principal()));
+        self::assertSame([PackagePermissions::RESOURCE_POLICY_DETACH], $events[0]->operation->actions);
+        self::assertSame([PackagePermissions::RESOURCE_POLICY_DETACH], $events[1]->operation->actions);
         self::assertSame([null, null], [$events[1]->resourceId, $events[1]->scope->tenant]);
         self::assertTrue($events[1]->scope->includeSubtree);
+    }
+
+    /**
+     * A delegated change to a resource's policies is decided under its action
+     * before anything is written: an attachment, or the detachment of a policy
+     * that denies, widens authority and is refused as unprovable; an actor
+     * without the action is refused a detachment, whether or not anything is
+     * attached; and one with it detaches nothing from a record with nothing
+     * attached, the detachment still decided.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedResourcePolicyChangeIsRefused(): void
+    {
+        $admin  = self::administrator();
+        $nobody = self::administrator([], 'nobody');
+        $policy = self::sharing();
+        $deny   = self::policy('deny', [['effect' => 'deny', 'actions' => ['posts:read']]]);
+        $other  = self::sharing('other');
+
+        self::service()->attach($policy, ['posts', 7]);
+        self::service()->attach($deny, ['posts', 7]);
+
+        $unprovable = DecisionReason::ADMINISTRATION_UNPROVABLE;
+
+        self::assertDelegatedRefusal($unprovable, static fn (): GrantOutcome => self::service()->attach($other, ['posts', 7], actor: $admin));
+        self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->detach($deny, ['posts', 7], actor: $admin));
+        self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->detachAll(['posts', 7], $admin));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->detach($policy, ['posts', 7], actor: $nobody));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->detachAll(['posts', 7], $nobody));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->detachAll(['posts', 8], $nobody));
+
+        self::fakePackageEvents();
+
+        self::assertSame(0, self::service()->detachAll(['posts', 8], $admin));
+        self::assertSame([PackagePermissions::RESOURCE_POLICY_DETACH], self::actionsDecided());
+    }
+
+    /**
+     * A detachment names the resource it detaches from as its grantee: a record
+     * by its key, and a whole type as `*`, so a policy can condition the right
+     * on which it is.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADetachmentNamesTheRecordOrTheWholeType(): void
+    {
+        $admin  = self::administrator([]);
+        $policy = self::sharing();
+
+        self::service()->attach($policy, ['posts', 7]);
+        self::service()->attach($policy, 'posts');
+
+        $statement = [
+            'effect'     => 'allow',
+            'actions'    => [PackagePermissions::RESOURCE_POLICY_DETACH],
+            'resources'  => [OperationResource::TYPE . ':*'],
+            'conditions' => ['eq' => ['resource.grantee_type' => 'posts', 'resource.grantee_id' => '7']],
+        ];
+
+        GrantService::instance()?->attachPolicy($admin->subject->subject, self::policy('detacher', [$statement]));
+
+        self::assertDelegatedRefusal(DecisionReason::CONDITION_FAILED, static fn (): int => self::service()->detach($policy, 'posts', actor: $admin));
+        self::assertSame(1, self::service()->detach($policy, ['posts', 7], actor: $admin));
+    }
+
+    /**
+     * A detachment from the platform is decided at platform scope, so an actor
+     * holding the action only in the tenant the request is in is refused it,
+     * and one holding it platform-wide makes it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADetachmentFromThePlatformIsDecidedAtPlatformScope(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $policy = self::sharing();
+        $detach = Permission::query()->create(['name' => PackagePermissions::RESOURCE_POLICY_DETACH]);
+        $local  = StubIdentity::create(['id' => 'tenant-admin']);
+        $wide   = StubIdentity::create(['id' => 'platform-admin']);
+
+        self::service()->attach($policy, ['posts', 7]);
+        GrantService::instance()?->grantPermission($local, $detach, tenant: $tenant, includeSubtree: false);
+        GrantService::instance()?->grantPermission($wide, $detach);
+
+        $this->actAsTenant($tenant);
+
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->detach($policy, ['posts', 7], actor: ActingContext::for($local)));
+        self::assertSame(1, self::service()->detach($policy, ['posts', 7], actor: ActingContext::for($wide)));
+    }
+
+    /**
+     * A trusted detachment reads the policy once, decides nothing and builds no
+     * operation resource, so it costs what it did before delegated
+     * administration.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATrustedDetachmentReadsThePolicyOnce(): void
+    {
+        $policy = self::sharing();
+
+        self::service()->attach($policy, ['posts', 7]);
+
+        $reads = 0;
+
+        DB::listen(static function (QueryExecuted $query) use (&$reads): void {
+            if (\preg_match('/^select .* from \W?policies\W? /i', $query->sql) !== 1) {
+                return;
+            }
+
+            $reads++;
+        });
+
+        self::assertSame(1, self::service()->detach($policy, ['posts', 7]));
+        self::assertSame(1, $reads);
     }
 
     /**
@@ -550,7 +687,9 @@ final class ResourcePolicyServiceTest extends TestCase
         self::service()->attach($policy, ['posts', 8]);
         self::service()->attach($policy, 'posts');
 
-        self::assertSame(3, self::service()->detachAll(['posts', 7], new Reference('admin', '1')));
+        $admin = self::administrator();
+
+        self::assertSame(3, self::service()->detachAll(['posts', 7], $admin));
         self::assertSame(0, self::service()->detachAll(['posts', 7]));
 
         $rows = \array_map(self::identifierOf(...), DB::table('resource_policies')->get(['resource_type', 'resource_id'])->all());
@@ -565,7 +704,8 @@ final class ResourcePolicyServiceTest extends TestCase
         \sort($scopes);
 
         self::assertSame(['other@platform/every/subtree on posts:7', 'sharing@platform/every/subtree on posts:7', 'sharing@tenant-a/admin/own on posts:7'], $scopes);
-        self::assertTrue(self::refersTo($events[0]->operation->actor, new Reference('admin', '1')));
+        self::assertTrue(self::refersTo($events[0]->operation->actor, $admin->principal()));
+        self::assertSame([PackagePermissions::RESOURCE_POLICY_DETACH], $events[0]->operation->actions);
 
         $this->expectException(InvalidResourceException::class);
 

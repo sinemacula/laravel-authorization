@@ -723,6 +723,41 @@ final class GrantTableTest extends TestCase
     }
 
     /**
+     * The live rows are those held in the scope, among the given ones, whose
+     * grant has not expired: one that expires later is live, one that has
+     * expired is not, and one not asked about is not read.
+     *
+     * @return void
+     */
+    public function testTheLiveRowsAreTheHeldOnesNotYetExpired(): void
+    {
+        $forever = Role::create(['name' => 'forever']);
+        $later   = Role::create(['name' => 'later']);
+        $expired = Role::create(['name' => 'expired']);
+        $unasked = Role::create(['name' => 'unasked']);
+        $table   = self::table();
+
+        $table->grant($forever->id, null);
+        $table->grant($later->id, Carbon::parse(self::NOW)->addDay());
+        $table->grant($expired->id, Carbon::parse(self::NOW)->subDay());
+        $table->grant($unasked->id, null);
+        self::table('user-2')->grant($forever->id, null);
+
+        $live = $table->live([$forever->id, $later->id, $expired->id]);
+
+        \sort($live);
+
+        $expected = [$forever->id, $later->id];
+
+        \sort($expected);
+
+        self::assertSame($expected, $live);
+        self::assertSame([], self::table(tenant: self::tenant())->live([$forever->id]));
+        self::assertSame([], $table->live([]));
+        self::assertSame([$forever->id], $table->live([$forever->id, $later->id], Carbon::parse(self::NOW)->addDays(2)));
+    }
+
+    /**
      * Return a grant table writer for a stub identity's roles, recording the
      * given actor on the rows it writes.
      *

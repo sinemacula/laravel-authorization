@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Console\Support\ActorOption;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubIdentity;
@@ -47,6 +48,36 @@ final class ActorOptionTest extends TestCase
     public function testNoOptionIsNoActor(): void
     {
         self::assertNull(ActorOption::parse(null));
+    }
+
+    /**
+     * A command writing through a management service names the actor as an
+     * acting context, its subject the actor's row; without the option it names
+     * none, and a malformed value or a missing row is refused as for a
+     * reference.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testNamesTheActorAsAnActingContext(): void
+    {
+        $admin = StubIdentity::create(['id' => 'admin-1']);
+        $actor = ActorOption::acting(StubIdentity::class . ':admin-1');
+
+        self::assertNull(ActorOption::acting(null));
+        self::assertInstanceOf(ActingContext::class, $actor);
+        self::assertTrue($admin->is($actor->subject->subject));
+        self::assertNull($actor->subject->session);
+
+        foreach (['admin-1', StubIdentity::class . ':missing'] as $value) {
+            try {
+                ActorOption::acting($value);
+                self::fail("'{$value}' was not refused.");
+            } catch (\InvalidArgumentException) {
+                self::assertTrue(true);
+            }
+        }
     }
 
     /**

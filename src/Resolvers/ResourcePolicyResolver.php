@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Resolvers;
 
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Database\Query\Builder;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
@@ -94,10 +95,10 @@ final readonly class ResourcePolicyResolver
             return [];
         }
 
-        // No attachment can name a key the table cannot store, so a record of
-        // such a key has only its type's.
+        // No attachment can name a key the table cannot store, nor one
+        // administration operation, so such a record has only its type's.
         $type     = $resource->type;
-        $id       = self::isStorableKey($resource->id) ? $resource->id : null;
+        $id       = self::recordKeyOf($resource);
         $policies = self::read($type, $id);
         $tenant   = $resource->tenant;
 
@@ -397,15 +398,17 @@ final readonly class ResourcePolicyResolver
             /** @var string $type */
             $type = $resource->type;
 
-            if (self::isReadInBulk($resource->id)) {
+            $id = self::recordKeyOf($resource);
+
+            if (self::isReadInBulk($id)) {
                 $records["#{$type}"][0]   = $type;
-                $records["#{$type}"][1][] = $resource->id;
+                $records["#{$type}"][1][] = $id;
                 $queued[$entry]           = true;
 
                 continue;
             }
 
-            $read[$entry] = self::read($type, self::isStorableKey($resource->id) ? $resource->id : null);
+            $read[$entry] = self::read($type, $id);
         }
 
         foreach ($records as [$type, $ids]) {
@@ -487,7 +490,22 @@ final readonly class ResourcePolicyResolver
             return null;
         }
 
-        return $resource->type . "\0" . (self::isStorableKey($resource->id) ? $resource->id : '*');
+        return $resource->type . "\0" . (self::recordKeyOf($resource) ?? '*');
+    }
+
+    /**
+     * Return the key of the record an attachment to the resource can name, or
+     * null when none can: for a key the table cannot store, and for an
+     * administration operation, whose id names one operation alone, so nothing
+     * is ever attached to it and its type's attachments alone are read, under
+     * the one entry every operation shares.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @return string|null
+     */
+    private static function recordKeyOf(ResourceReference $resource): ?string
+    {
+        return $resource->type !== OperationResource::TYPE && self::isStorableKey($resource->id) ? $resource->id : null;
     }
 
     /**

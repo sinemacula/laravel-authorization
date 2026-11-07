@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
+use SineMacula\Laravel\Authorization\Administration\OperationConstraints;
 use SineMacula\Laravel\Authorization\Context\AttributeNamespaces;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
@@ -216,7 +217,7 @@ final class DecisionPipeline
     public function sources(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes = null): CheckSources
     {
         $policies   = $this->gatherPolicies($subject, $resource);
-        $guardrails = $action === PackagePermissions::GUARDRAILS_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
+        $guardrails = $action === PackagePermissions::GUARDRAIL_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
         $boundaries = SubjectGrants::boundaries($subject);
 
         // What the caller passes is held under `input` alone, never promoted
@@ -297,7 +298,7 @@ final class DecisionPipeline
      * The guardrails are those of the resource's tenant when it has one, also
      * when a platform-wide grant admitted it from outside the scope, else of
      * the tenant the check is decided in (see `GuardrailResolver`). A check of
-     * exactly `authorization:guardrails:manage` is exempt from them: no
+     * exactly `authorization:guardrail.manage` is exempt from them: no
      * guardrail is read for it, so none of their denies or allows applies, nor
      * does one that cannot be read, and the guardrail stage records it as
      * exempt. A guardrail therefore never keeps anyone from changing the
@@ -319,6 +320,11 @@ final class DecisionPipeline
      * guardrails, the subject's boundaries, the session caps and its
      * permissions still count.
      *
+     * An allow of an administration action on an operation resource of that
+     * action then passes the operation's constraints, at the administration
+     * stage, which can only refuse it (see `OperationConstraints`); a further
+     * check they need is decided here, as this one is, in its scope.
+     *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
@@ -334,7 +340,9 @@ final class DecisionPipeline
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }
 
-        return $this->weigh($sources, $action, $resource);
+        $decide = fn (string $further): Decision => $this->decideGrants($subject, $further, $resource, $context, $attributes);
+
+        return OperationConstraints::weigh($this->weigh($sources, $action, $resource), $action, $resource, $decide);
     }
 
     /**

@@ -6,6 +6,8 @@ namespace Tests\Feature\Evaluation;
 
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
@@ -21,6 +23,7 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
@@ -28,6 +31,7 @@ use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -311,17 +315,17 @@ final class DecisionPipelineTest extends TestCase
         $user    = StubIdentity::create(['id' => 'guardrail-admin']);
         $subject = new Subject($user, $user);
 
-        $user->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
+        $user->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
         $user->givePermission(Permission::create(['name' => 'users:read']));
 
         $guardrails = GuardrailService::instance();
 
         self::assertInstanceOf(GuardrailService::class, $guardrails);
 
-        $guardrails->set(self::stored('posts-only', [['effect' => 'allow', 'actions' => ['posts:*']]]), null, $user);
+        $guardrails->set(self::stored('posts-only', [['effect' => 'allow', 'actions' => ['posts:*']]]), null, ActingContext::for($user));
 
         $pipeline = $this->pipeline();
-        $exempt   = $pipeline->decide($subject, PackagePermissions::GUARDRAILS_MANAGE, null, []);
+        $exempt   = $pipeline->decide($subject, PackagePermissions::GUARDRAIL_MANAGE, null, []);
 
         self::assertTrue($exempt->isAllowed());
         self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::EXEMPT), $exempt->trace[0]);
@@ -332,7 +336,67 @@ final class DecisionPipelineTest extends TestCase
 
         self::assertTrue($read->isAllowed());
         self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::UNCAPPED), $read->trace[0]);
-        self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::EXEMPT), $unguarded->decide($subject, PackagePermissions::GUARDRAILS_MANAGE, null, [])->trace[0]);
+        self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::EXEMPT), $unguarded->decide($subject, PackagePermissions::GUARDRAIL_MANAGE, null, [])->trace[0]);
+    }
+
+    /**
+     * The exemption is for exactly the action: the old spelling of the right, a
+     * pattern covering it, and every other administration action are capped by
+     * the guardrails as any check is.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testOnlyTheGuardrailRightItselfIsExempt(): void
+    {
+        $user    = StubIdentity::create(['id' => 'guardrail-admin']);
+        $subject = new Subject($user, $user);
+
+        $user->givePermission(Permission::create(['name' => '*']));
+
+        GuardrailService::instance()?->set(self::stored('posts-only', [['effect' => 'allow', 'actions' => ['posts:*']]]), null, ActingContext::for($user));
+
+        $pipeline = $this->pipeline();
+
+        self::assertTrue($pipeline->decide($subject, 'authorization:guardrail.manage', null, [])->isAllowed());
+
+        $capped = ['authorization:guardrails:manage', 'authorization:guardrail.*', PackagePermissions::ROLE_GRANT, PackagePermissions::BOUNDARY_REMOVE];
+
+        foreach ([...$capped, PackagePermissions::POLICY_UPDATE] as $action) {
+            self::assertSame(DecisionReason::GUARDRAIL, $pipeline->decide($subject, $action, null, [])->reason, $action);
+        }
+    }
+
+    /**
+     * An allow of an administration action on its operation resource passes the
+     * administration stage inside the decision, the subject's own further
+     * checks decided in the same scope: a widening operation is refused there,
+     * and a narrowing one allowed, each step in the trace.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheAdministrationStageFollowsTheAllow(): void
+    {
+        $user    = StubIdentity::create(['id' => 'admin-1']);
+        $subject = new Subject($user, $user);
+        $role    = Role::create(['name' => 'editor']);
+
+        $user->givePermission(Permission::create(['name' => 'authorization:*']));
+
+        $pipeline = $this->pipeline();
+        $grant    = OperationResource::grant(PackagePermissions::ROLE_GRANT, new Reference('user', '1'), $role, GrantScope::platform());
+        $revoke   = OperationResource::revoke(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), $role, GrantScope::platform());
+        $refused  = $pipeline->decide($subject, PackagePermissions::ROLE_GRANT, $grant->toResourceReference(), []);
+        $allowed  = $pipeline->decide($subject, PackagePermissions::ROLE_REVOKE, $revoke->actedBy(new Reference('support', '9'))->toResourceReference(), []);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $refused->reason);
+        self::assertSame(DecisionStage::ADMINISTRATION, $refused->stage);
+        self::assertTrue($allowed->isAllowed());
+        self::assertEquals(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED), $allowed->trace[\count($allowed->trace) - 1]);
+        self::assertTrue($pipeline->decide($subject, PackagePermissions::ROLE_GRANT, null, [])->isAllowed());
     }
 
     /**
@@ -395,7 +459,7 @@ final class DecisionPipelineTest extends TestCase
         self::assertTrue($pipeline->weigh($sources, 'posts:view', null)->isAllowed());
         self::assertFalse($pipeline->weigh($pipeline->sources($subject, 'posts:view', null, ['flag' => 'off']), 'posts:view', null)->isAllowed());
         self::assertSame('posts:edit', ($pipeline->sources($subject, 'posts:edit', null, [])->permission)());
-        self::assertNull($pipeline->sources($subject, PackagePermissions::GUARDRAILS_MANAGE, null, [])->guardrails);
+        self::assertNull($pipeline->sources($subject, PackagePermissions::GUARDRAIL_MANAGE, null, [])->guardrails);
     }
 
     /**

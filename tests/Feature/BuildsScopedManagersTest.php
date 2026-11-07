@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Subject;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
@@ -59,6 +60,11 @@ final class BuildsScopedManagersTest extends TestCase
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver);
 
         self::assertSame($user, Authorization::for($user)->currentSubject()?->identity);
+
+        $subject = new Subject($user, $other, null, 'admin', 'web', 'session-1');
+
+        self::assertSame($subject, Authorization::for($subject)->currentSubject());
+        self::assertTrue(Authorization::for($subject)->can('posts:read'));
     }
 
     /**

@@ -32,6 +32,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\CustomRole;
@@ -82,6 +83,23 @@ final class GrantTargetTest extends TestCase
         self::assertSame($table, $kind->table());
         self::assertSame($column, $kind->column());
         self::assertSame($relation, $kind->relation());
+    }
+
+    /**
+     * Each kind's grant and revocation are decided under its own administration
+     * action.
+     *
+     * @return void
+     */
+    public function testNamesTheAdministrationActionOfEachChange(): void
+    {
+        $expected = [
+            [PackagePermissions::ROLE_GRANT, PackagePermissions::ROLE_REVOKE],
+            [PackagePermissions::PERMISSION_GRANT, PackagePermissions::PERMISSION_REVOKE],
+            [PackagePermissions::POLICY_ATTACH, PackagePermissions::POLICY_DETACH],
+        ];
+
+        self::assertSame($expected, \array_map(static fn (GrantTarget $kind): array => [$kind->grantAction(), $kind->revokeAction()], GrantTarget::cases()));
     }
 
     /**

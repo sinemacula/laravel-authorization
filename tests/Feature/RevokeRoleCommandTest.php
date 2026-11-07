@@ -10,8 +10,10 @@ use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -177,7 +179,10 @@ final class RevokeRoleCommandTest extends TestCase
     }
 
     /**
-     * `--actor` names the actor making the revocation, which its event carries.
+     * `--actor` names the actor making the revocation, which is then decided as
+     * delegated administration: a revocation of a role no deny is attached to
+     * only narrows, so an actor allowed `authorization:role.revoke` makes it,
+     * and its event carries the actor.
      *
      * @return void
      *
@@ -188,7 +193,7 @@ final class RevokeRoleCommandTest extends TestCase
         $role = Role::create(['name' => 'editor', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => 'user-1']);
 
-        StubIdentity::create(['id' => 'admin-1']);
+        StubIdentity::create(['id' => 'admin-1'])->givePermission(Permission::create(['name' => PackagePermissions::ROLE_REVOKE]));
         app(GrantService::class)->grantRole($user, $role);
 
         Event::fake([RoleRevoked::class]);

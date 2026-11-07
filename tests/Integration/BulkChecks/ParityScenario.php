@@ -10,6 +10,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Support\Carbon;
 use Random\Engine\Mt19937;
 use Random\Randomizer;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
@@ -158,7 +159,7 @@ final class ParityScenario
 
         for ($index = $this->random->getInt(1, 12); $index > 0; $index--) {
             $key += $this->random->getInt(1, 3);
-            $action   = $this->pick([...self::ACTIONS, ...self::ACTIONS, PackagePermissions::GUARDRAILS_MANAGE]);
+            $action   = $this->pick([...self::ACTIONS, ...self::ACTIONS, PackagePermissions::GUARDRAIL_MANAGE]);
             $resource = $this->resource();
             $context  = $this->pick([[], ['flag' => 'on']]);
             $check    = new CheckInput($action, $resource, $context);
@@ -255,7 +256,7 @@ final class ParityScenario
     private function grants(): void
     {
         for ($index = $this->random->getInt(1, 3); $index > 0; $index--) {
-            $permission = Permission::query()->firstOrCreate(['name' => $this->pick([...self::ACTIONS, 'posts:*', PackagePermissions::GUARDRAILS_MANAGE])]);
+            $permission = Permission::query()->firstOrCreate(['name' => $this->pick([...self::ACTIONS, 'posts:*', PackagePermissions::GUARDRAIL_MANAGE])]);
             $tenant     = $this->pick($this->tenants);
             $expiry     = $this->pick([null, null, Carbon::parse(self::START)->addDay(), Carbon::parse(self::START)->addMinutes(10)]);
             $app        = $this->pick([null, null, 'admin', 'mobile']);
@@ -325,8 +326,8 @@ final class ParityScenario
         $admin  = StubIdentity::create(['id' => 'guardrail-admin']);
         $tenant = $this->pick($this->tenants);
 
-        $admin->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
-        app(GuardrailService::class)->set($this->policy('guardrail', $this->capStatements()), $tenant, $admin);
+        $admin->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
+        app(GuardrailService::class)->set($this->policy('guardrail', $this->capStatements()), $tenant, ActingContext::for($admin));
 
         $this->log[] = 'guardrail in ' . self::nameOf($tenant);
     }

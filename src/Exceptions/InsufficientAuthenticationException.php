@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 
 use Illuminate\Auth\Access\AuthorizationException as LaravelAuthorizationException;
 use Illuminate\Contracts\Translation\Translator;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Support\Messages;
 
@@ -38,9 +39,20 @@ final class InsufficientAuthenticationException extends LaravelAuthorizationExce
      *
      * @param  list<\SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement>  $requirements
      * @param  string|null  $message
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision|null  $decision
      */
-    public function __construct(array $requirements, ?string $message = null)
-    {
+    public function __construct(
+
+        // The candidate requirements, each with its unmet parts, kept once
+        // each.
+        array $requirements,
+
+        // Translated message; null keeps Laravel's English default.
+        ?string $message = null,
+
+        /** The decision that denied the request; null when none is given. */
+        private readonly ?Decision $decision = null,
+    ) {
         parent::__construct($message, 403);
 
         $unique = [];
@@ -61,11 +73,12 @@ final class InsufficientAuthenticationException extends LaravelAuthorizationExce
      *
      * @param  list<\SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement>  $requirements
      * @param  \Illuminate\Contracts\Translation\Translator|null  $translator
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision|null  $decision
      * @return self
      */
-    public static function translated(array $requirements, ?Translator $translator): self
+    public static function translated(array $requirements, ?Translator $translator, ?Decision $decision = null): self
     {
-        return new self($requirements, Messages::line(Messages::DENIED, $translator));
+        return new self($requirements, Messages::line(Messages::DENIED, $translator), $decision);
     }
 
     /**
@@ -88,5 +101,16 @@ final class InsufficientAuthenticationException extends LaravelAuthorizationExce
     public function requirements(): array
     {
         return $this->requirements;
+    }
+
+    /**
+     * Return the decision that denied the request, for audit; null when none
+     * was given. Its detail is not for the client.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
+     */
+    public function getDecision(): ?Decision
+    {
+        return $this->decision;
     }
 }

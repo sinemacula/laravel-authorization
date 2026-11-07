@@ -29,7 +29,7 @@ use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Fixtures\ExtendedRole;
 use Tests\Fixtures\QueryRecorder;
@@ -463,8 +463,8 @@ final class HasSystemProtectionTest extends TestCase
     }
 
     /**
-     * An override used through a management service names the service call's
-     * actor.
+     * An override used through a management service carries the service call's
+     * operation: a trusted one, with no actor, under the call's action.
      *
      * @return void
      *
@@ -472,14 +472,14 @@ final class HasSystemProtectionTest extends TestCase
      */
     public function testAnOverrideUsedThroughAServiceNamesTheActor(): void
     {
-        $role  = $this->makeSystemRole('super-admin');
-        $actor = new Reference('user', 'admin-1');
+        $role = $this->makeSystemRole('super-admin');
 
         Event::fake([SystemOverrideUsed::class]);
 
-        app(RoleService::class)->describe($role->forceSystem(), 'Forced.', $actor);
+        app(RoleService::class)->describe($role->forceSystem(), 'Forced.');
 
-        Event::assertDispatched(SystemOverrideUsed::class, static fn (SystemOverrideUsed $event): bool => $event->operation->actor === $actor
+        Event::assertDispatched(SystemOverrideUsed::class, static fn (SystemOverrideUsed $event): bool => $event->operation->actor === null
+            && $event->operation->actions                                                                                          === [PackagePermissions::ROLE_UPDATE]
             && $event->protectedOperation                                                                                          === 'modify');
     }
 

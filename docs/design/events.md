@@ -58,10 +58,15 @@ named and the operation they belong to, and are dispatched only once the write c
    class under the application's morph map, never a hard-coded class name, and its key as a string, each at most 191
    bytes. The references every member of the suite writes therefore match.
 
-4. **The actor the caller passed.** Every change event carries `operation->actor`: the actor the management service
-   call named, as a model or a reference, or null for console and system work. It is never read from `Auth::user()` or
-   the subject resolver. Every grant row the call writes records it in `granted_by_type` and `granted_by_id`. The
-   commands that write take `--actor={morphType}:{key}`.
+4. **The call's actor and mode.** Every change event carries `operation`: `actor`, the acting context's principal, or
+   null for trusted work (a reference a trusted command names for the record alone); `identity`, the identity behind
+   it; `isTrusted`, true for a call made without an acting context; `impersonator`, whoever was impersonating the
+   actor; and `actions`, the administration actions the call's changes fall under, decided through `check()` only when
+   `isTrusted` is false (a trusted call names them too, a sync names both its grant and its revoke action, and a write
+   made through a model outside the services, or `authorization:sync`, names none). The actor is never read from
+   `Auth::user()` or the subject resolver. Every grant row the call writes records it in `granted_by_type` and
+   `granted_by_id`. The commands that write take `--actor={morphType}:{key}`. A delegated call's decisions name the
+   operation resource `authorization:operation:{operation id}`, so a decision and the write it allowed share the id.
 
 5. **One operation per call.** Every event one service call dispatches carries the same `operation->id`, a UUID, and
    `operation->at`, when the call was made. A write made through a model outside the services is an operation of its
@@ -119,10 +124,10 @@ Event::listen(static function (RoleAssigned $event): void {
     $event->scope;              // GrantScope::platform()
     $event->expiresAt;          // DateTimeImmutable in UTC, or null
     $event->operation->id;      // shared by every event of the call
-    $event->operation->actor;   // Reference to the actor, or null
+    $event->operation->actor;   // Reference to the acting principal, or null for trusted work
 });
 
-app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
+app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 ```
 
 ## Failure / Edge Cases
@@ -148,10 +153,11 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
   dispatches `BoundarySet` again, with no `previous`. A guardrail holds in every application and, on a tenant, always
   in the tenants below it, so its events' scope names no application and reaches below; on the platform it is
   `GrantScope::platform()`.
-- **Guardrail changes are refused before they are reported.** An actor that does not hold
-  `authorization:guardrails:manage` from above the scope is refused with `GuardrailException` before the transaction
-  opens, so a refused change dispatches nothing; the check that refused it is a decision like any other, so it
-  dispatches `DecisionEvaluated`.
+- **Refused changes are never reported.** A delegated change that is refused, and a guardrail change by an actor that
+  does not hold `authorization:guardrail.manage` from above the scope, is refused inside the call's transaction before
+  anything is written, so it dispatches no change event; the check that refused it is a decision like any other, so it
+  dispatches `DecisionEvaluated`, and a delegated refusal `AuthorizationFailed`, straight away. The transaction rolls
+  back, so an audit store must persist a denial outside it.
 
 ## Implementation Anchors
 

@@ -29,13 +29,20 @@ trait BuildsScopedManagers
      * Return a scoped manager deciding about the supplied subject.
      *
      * The decisions keep the current request's tenant, application and guard,
-     * as the resolver reports them; with no subject resolved, they have none.
+     * as the resolver reports them; with no subject resolved, they have none. A
+     * resolved `Subject` is taken as it is, its identity, guard and session
+     * kept, as an acting context names its actor (see
+     * `Administration\ActingContext`).
      *
      * @param  object  $subject
      * @return self
      */
     public function for(object $subject): self
     {
+        if ($subject instanceof Subject) {
+            return $this->scopedTo($subject);
+        }
+
         return $this->scopedTo($this->currentSubject()?->withSubject($subject) ?? new Subject($subject, $subject));
     }
 

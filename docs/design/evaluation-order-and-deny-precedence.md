@@ -222,14 +222,14 @@ A guardrail (AUTHZ-7.6, N41) is a managed policy set on a tenant, or on the plat
   policy's allows would be, conditions and `not_actions` included; passing it only lets the boundaries and the allows
   be weighed. Its deny statements are explicit denies at the deny stage, after every policy's and before every
   boundary's. It never names `principals`, so its allows apply to every subject.
-- **Who may change them.** Only an actor holding `authorization:guardrails:manage`, a permission the package declares
+- **Who may change them.** Only an actor holding `authorization:guardrail.manage`, a permission the package declares
   in its own catalogue (`Support\PackagePermissions`), from above the scope. The right is decided through `check()`
   (D22), so every deny and boundary that applies to the actor counts, run just below the parent of the tenant changed
   (`TenantScope::within()` with `isBelow`): a grant held at an ancestor counts only when it reaches below it, a
   platform-wide grant counts, and one held within the tenant itself never does. A tenant with no parent, and the
   platform, are decided at platform scope, where only a platform-wide grant counts (`GuardrailAuthority`). An actor
   refused is refused with `GuardrailException` (`not_permitted`) before anything is read or written.
-- **No guardrail lockout (N49).** A check of exactly `authorization:guardrails:manage`, the guardrail service's or any
+- **No guardrail lockout (N49).** A check of exactly `authorization:guardrail.manage`, the guardrail service's or any
   other, is exempt from the guardrail stage: `AuthorizationManager` reads no guardrail for it and gives the evaluator
   none at all (`null`), so no guardrail's deny or allow applies, nor does a guardrail that cannot be read, and the
   stage records `[guardrail] guardrails: exempt`. No guardrail, a platform guardrail included, can therefore keep an
@@ -313,7 +313,8 @@ refuses never reads the permissions, since the session stage runs before the all
 
 1. **The stages run in order, and the first that decides ends the decision (AUTHZ-7.1).** No allow of any source is
    weighed before every deny and every cap has run, so a deny, or a cap that does not allow the check, beats every
-   allow: a policy's, a resource policy's, a permission held and an `insufficient_authentication` candidate alike.
+   allow: a policy's, a resource policy's, a permission held and an `insufficient_authentication` candidate alike. An
+   allow is final except where the administration stage (7) refuses it.
    1. *Admission*, three stages that run before any policy is read:
       - *Subject*: no subject denies as `subject_unresolved`; an inactive subject, or one whose identity is inactive,
         denies as `subject_inactive`. Nothing else is read.
@@ -336,7 +337,7 @@ refuses never reads the permissions, since the session stage runs before the all
       at all included, denies as `guardrail`, and each guardrail that refuses adds a `refused` step naming it. An allow
       whose authentication requirement is unmet does not allow, so the guardrail denies as `guardrail`, never as a
       step-up. With no guardrail the stage records `uncapped` and caps nothing. A check of exactly
-      `authorization:guardrails:manage` is exempt: the stage records `exempt`, and the deny stage weighs no guardrail's
+      `authorization:guardrail.manage` is exempt: the stage records `exempt`, and the deny stage weighs no guardrail's
       denies for it (N49).
    4. *Boundary*: every permission boundary of the principal and of its identity that applies must allow the check,
       each through its allow statements, conditions included (see [Permission Boundaries](#permission-boundaries)).
@@ -357,7 +358,18 @@ refuses never reads the permissions, since the session stage runs before the all
       statement matched and none was invalid, and its step names the held permission that allowed. This is the only
       place a permission held is weighed: no stage, and no entry point, answers a check from the permissions before
       every deny and cap has run, and the tenant stage's platform-wide grant only admits a resource, never allows it.
-   7. *Implicit*: nothing allowed. The denial is `insufficient_authentication` when an allow statement names the action
+   7. *Administration* (AUTHZ-11.1): runs only for a check of an administration action whose resource is that action's
+      own operation resource (`authorization:operation:*`, see [Delegated administration](delegated-administration.md)),
+      and only once the allow stage allowed. It weighs the operation's constraints and can only refuse, never allow:
+      the first that fails denies with its `administration.*` reason (`administration.impersonating`, then
+      `administration.unprovable` in this release; `administration.scope`, `administration.owner`,
+      `administration.rank_uncomparable`, `administration.rank`, `administration.self` and
+      `administration.not_grantable` are reserved for the later parts) and adds a `refused` step naming it; when every
+      one holds, it adds one `satisfied` step and the allow stands. A further check a constraint needs, such as
+      `authorization:administration.impersonated`, is decided through `decideGrants()` in the same scope, on the same
+      resource. A check of an administration action with no operation resource, or with another action's, passes the
+      stage untouched and records nothing.
+   8. *Implicit*: nothing allowed. The denial is `insufficient_authentication` when an allow statement names the action
       and the resource and only its authentication requirement is unmet (invariant 7); `condition_failed` when an allow
       statement names them but its conditions do not hold or cannot be decided; and `no_match` otherwise.
 
@@ -372,8 +384,9 @@ refuses never reads the permissions, since the session stage runs before the all
    assessed with the deny stage's, after every policy's, the guardrails' before the boundaries', and each cap's allow
    statements together at its own stage, the guardrails and the boundaries each in the same order. A stage that decides
    ends the decision: once a deny decided, no cap and no allow statement is assessed (N4), and once a cap denied, no
-   allow is. What each policy gives (its statements split by effect, their references and its sort key) is worked out
-   once per policy object (`StatementEntries`), not once a check.
+   allow is; an allow is final except where the administration stage refuses it. What each policy gives (its statements
+   split by effect, their references and its sort key) is worked out once per policy object (`StatementEntries`), not
+   once a check.
 
 3. **RBAC is additive / allow-only, and an allow source at the allow stage alone (AUTHZ-7.7, N43).** Direct
    permission grants and role-inherited permissions are unioned on read. There is no RBAC-layer deny: every permission
@@ -455,7 +468,7 @@ refuses never reads the permissions, since the session stage runs before the all
     and one that cannot be read or evaluated denies as `invalid_policy` (invariant 6). The check's tenant is the
     resource's when it has one, so a platform-wide permission that admits a resource of another tenant never gets past
     that tenant's guardrails. A guardrail changes only through `GuardrailService`, for an actor holding
-    `authorization:guardrails:manage` from above the scope, decided through `check()`, and its policy is neither
+    `authorization:guardrail.manage` from above the scope, decided through `check()`, and its policy is neither
     edited nor deleted while it is one, so a tenant can never lift the guardrails it is set under. That one check is
     exempt from the guardrails (N49), so no guardrail can ever lock the guardrails.
 
@@ -605,7 +618,7 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - **An unreadable guardrail**: a guardrail whose document cannot be hydrated, or is over a limit, denies every check in
   its scope as `invalid_policy` at the deny stage (every check, for a platform guardrail), logged as an unreadable
   policy is. Its policy cannot be edited while it is a guardrail, so it is fixed by removing the guardrail, correcting
-  the policy and setting it again. The check of `authorization:guardrails:manage` reads no guardrail, so an unreadable
+  the policy and setting it again. The check of `authorization:guardrail.manage` reads no guardrail, so an unreadable
   guardrail, a platform one included, never blocks its own removal through the service.
 - **A guardrail and `withPolicies()`**: the override replaces the policies, never the guardrails, so an override never
   lifts a guardrail.
@@ -613,10 +626,10 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - **A resource admitted from outside the scope**: a subject admitted at platform scope to another tenant's resource
   through a platform-wide permission is capped by that tenant's guardrails and its ancestors', read in the resource's
   tenant, besides the platform's.
-- **A guardrail that does not allow managing guardrails**: the check of `authorization:guardrails:manage` is exempt
+- **A guardrail that does not allow managing guardrails**: the check of `authorization:guardrail.manage` is exempt
   from the guardrails, so such a guardrail, or one that denies the permission, caps every other check in its scope but
   never that one, and keeps no actor from changing the guardrails of any scope, its own removal included.
-- **A check of another `authorization:` action**: only the exact action `authorization:guardrails:manage` is exempt;
+- **A check of another `authorization:` action**: only the exact action `authorization:guardrail.manage` is exempt;
   any other action, one a pattern of it would match included, is capped by the guardrails as ever.
 - **No authorization manager bound**: `GuardrailAuthority` refuses every actor, so no guardrail is changed unchecked.
 - **No session policy source bound**: the default `NoSessionPolicy` answers null for every subject, so no credential
@@ -640,19 +653,22 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   still denies it.
 - **A session policy source that throws**: the check is aborted with the exception, and no decision is made, recorded
   or dispatched.
-- **Nothing declared**: the package declares `authorization:guardrails:manage` whatever the application configures,
-  but the shipped `DeclaredActionCatalogue` holds the application's declarations alone. With none, a policy whose
-  patterns need any action but the package's own is refused with the one reason that nothing is declared
-  (`PolicyValidator::NOTHING_DECLARED`), and one naming only the package's own, such as `authorization:*`, is
-  written (N50).
+- **Nothing declared**: the package declares its own administration actions, `authorization:guardrail.manage` among
+  them, whatever the application configures, but the shipped `DeclaredActionCatalogue` holds the application's
+  declarations alone. With none, a policy whose patterns need any action but the package's own is refused with the one
+  reason that nothing is declared (`PolicyValidator::NOTHING_DECLARED`), and one naming only the package's own, such
+  as `authorization:*`, is written (N50).
 
 ## Implementation Anchors
 
 - `AuthorizationManager::check()` -- the core decision and its recording; `DecisionPipeline::decide()` -- the subject
   and resource stages; `DecisionPipeline::sources()` -- the check's context (`CheckContextFactory::make()`), the
-  policies, the guardrails (none at all, `null`, for the exempt `authorization:guardrails:manage`), the boundaries, the
+  policies, the guardrails (none at all, `null`, for the exempt `authorization:guardrail.manage`), the boundaries, the
   permission callback and the session caps; `DecisionPipeline::weigh()` -- the evaluator given those sources under the
-  session caps; `DecisionPipeline::decideGrants()` -- `invalid_policy` when the sources cannot be gathered;
+  session caps; `DecisionPipeline::decideGrants()` -- `invalid_policy` when the sources cannot be gathered, and the
+  weighed decision passed through `Administration\OperationConstraints::weigh()`;
+  `Administration\OperationConstraints::weigh()` -- the administration stage, which can only refuse an allow of an
+  administration action on its own operation resource;
   `AuthorizationManager::capped()` and `DecisionPipeline::capped()` -- the scoped manager carrying the explicit caps;
   `AuthorizationManager::any()` and `all()`, over `Support\ActionList` -- several actions decided in order, stopping at
   the first that settles the answer.

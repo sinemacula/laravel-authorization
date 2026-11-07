@@ -116,6 +116,20 @@ final class TraceEntryTest extends TestCase
     }
 
     /**
+     * toString() names the administration constraint that refused a check by
+     * its reason code, and the stage's constraints when they all held.
+     *
+     * @return void
+     */
+    public function testToStringNamesTheAdministrationConstraints(): void
+    {
+        $refused = new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, null, [], 'administration.unprovable');
+
+        self::assertSame('[administration] administration.unprovable: refused', $refused->toString());
+        self::assertSame('[administration] administration constraints: satisfied', (new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED))->toString());
+    }
+
+    /**
      * toString() names the session cap a session step is about, by its name,
      * whether it covered the action or refused it.
      *

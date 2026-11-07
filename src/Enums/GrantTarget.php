@@ -30,6 +30,7 @@ use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -86,6 +87,35 @@ enum GrantTarget: string
             self::ROLE       => 'roles',
             self::PERMISSION => 'permissions',
             self::POLICY     => 'policies',
+        };
+    }
+
+    /**
+     * Return the administration action a grant of this kind is decided under.
+     *
+     * @return string
+     */
+    public function grantAction(): string
+    {
+        return match ($this) {
+            self::ROLE       => PackagePermissions::ROLE_GRANT,
+            self::PERMISSION => PackagePermissions::PERMISSION_GRANT,
+            self::POLICY     => PackagePermissions::POLICY_ATTACH,
+        };
+    }
+
+    /**
+     * Return the administration action a revocation of this kind is decided
+     * under.
+     *
+     * @return string
+     */
+    public function revokeAction(): string
+    {
+        return match ($this) {
+            self::ROLE       => PackagePermissions::ROLE_REVOKE,
+            self::PERMISSION => PackagePermissions::PERMISSION_REVOKE,
+            self::POLICY     => PackagePermissions::POLICY_DETACH,
         };
     }
 

@@ -49,6 +49,9 @@ enum TraceOutcome: string
     /** No guardrail, boundary or session cap applies at the stage, so it caps nothing. */
     case UNCAPPED = 'uncapped';
 
-    /** The check is exempt from the stage, so none of its caps is read or weighed: the guardrail stage for `authorization:guardrails:manage`. */
+    /** The check is exempt from the stage, so none of its caps is read or weighed: the guardrail stage for `authorization:guardrail.manage`. */
     case EXEMPT = 'exempt';
+
+    /** Every constraint of the administration operation the check is about holds. */
+    case SATISFIED = 'satisfied';
 }

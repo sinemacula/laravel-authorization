@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Services\Support;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
+use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
@@ -115,6 +116,19 @@ final readonly class GrantTable extends ExpiringGrants
     public function held(?array $ids = null): array
     {
         return self::keys($this->inScope()->distinct(), $this->column, $ids);
+    }
+
+    /**
+     * Return the keys of the rows the grantee holds in the scope, among the
+     * given ones, whose grant has not expired at the instant given, else now.
+     *
+     * @param  list<string>  $ids
+     * @param  \Illuminate\Support\Carbon|null  $now
+     * @return list<string>
+     */
+    public function live(array $ids, ?Carbon $now = null): array
+    {
+        return self::keys(LiveGrants::only($this->inScope(), $this->table, $now)->distinct(), $this->column, $ids);
     }
 
     /**

@@ -24,7 +24,8 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Services\GrantService;
-use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\CatchesRefusals;
@@ -546,7 +547,8 @@ final class RoleObserverTest extends TestCase
     }
 
     /**
-     * A role written through the role service reports the service call's actor.
+     * A role written inside an operation reports the operation's actor, as a
+     * trusted command names one.
      *
      * @return void
      *
@@ -556,7 +558,7 @@ final class RoleObserverTest extends TestCase
     {
         Event::fake([RoleCreated::class]);
 
-        app(RoleService::class)->create('editor', actor: new Reference('user', 'admin-1'));
+        OperationScope::run(Operation::begin(new Reference('user', 'admin-1')), static fn (): Role => Role::query()->create(['name' => 'editor']));
 
         Event::assertDispatched(RoleCreated::class, static fn (RoleCreated $event): bool => self::refersTo($event->operation->actor, new Reference('user', 'admin-1')));
     }

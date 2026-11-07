@@ -11,7 +11,9 @@ use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\GrantRoleCommand;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -348,10 +350,14 @@ final class GrantRoleCommandTest extends TestCase
     }
 
     /**
-     * `--actor` names the actor making the grant, which the grant's event
-     * carries and its row records; without it the grant records none.
+     * `--actor` names the actor making the grant, which is then decided as
+     * delegated administration: a grant can widen what the grantee may do, so
+     * it is refused as unprovable and grants nothing, however the actor is
+     * permitted. Without it the grant is trusted work and records no actor.
      *
      * @return void
+     *
+     * @throws \Throwable
      */
     public function testRecordsTheActorTheOptionNames(): void
     {
@@ -360,21 +366,21 @@ final class GrantRoleCommandTest extends TestCase
         Role::create(['name' => 'editor', 'guard' => 'web']);
         Role::create(['name' => 'author', 'guard' => 'web']);
         StubIdentity::create(['id' => 'user-1']);
-        StubIdentity::create(['id' => 'admin-1']);
+
+        $admin = StubIdentity::create(['id' => 'admin-1']);
+
+        $admin->givePermission(Permission::create(['name' => PackagePermissions::ROLE_GRANT]));
 
         self::assertSame(
-            0,
+            1,
             Artisan::call('authorization:grant', ['identity' => StubIdentity::class . ':user-1', 'role' => 'editor', '--actor' => StubIdentity::class . ':admin-1']),
         );
         self::assertSame(0, Artisan::call('authorization:grant', ['identity' => StubIdentity::class . ':user-1', 'role' => 'author']));
 
-        self::assertEqualsCanonicalizing(
-            [[StubIdentity::class, 'admin-1'], [null, null]],
-            DB::table('authorizable_roles')->get(['granted_by_type', 'granted_by_id'])->map(static fn (object $row): array => \array_values((array) $row))->all(),
-        );
-        Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->name === 'editor'
-            && $event->operation->actor?->type                                                             === StubIdentity::class
-            && $event->operation->actor->id                                                                === 'admin-1');
+        $rows = DB::table('authorizable_roles')->where('authorizable_id', 'user-1')->get(['granted_by_type', 'granted_by_id']);
+
+        self::assertSame([[null, null]], $rows->map(static fn (object $row): array => \array_values((array) $row))->all());
+        Event::assertNotDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->name === 'editor');
         Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->name === 'author' && $event->operation->actor === null);
     }
 

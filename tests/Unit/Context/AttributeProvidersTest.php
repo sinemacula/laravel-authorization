@@ -9,6 +9,8 @@ use Illuminate\Container\Container;
 use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Administration\OperationAttributes;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Context\AttributeProviders;
 use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
 use SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider;
@@ -310,14 +312,16 @@ final class AttributeProvidersTest extends TestCase
 
     /**
      * The providers of `authorization.attributes` are those the configuration
-     * registers.
+     * registers, with the package's own provider of the administration
+     * operation resources, which a provider configured for their type never
+     * replaces.
      *
      * @return void
      */
     public function testFromConfigReadsTheConfiguredProviders(): void
     {
         $this->container->instance('config', new Repository(['authorization' => ['attributes' => [
-            'resources' => ['post' => RecordingResourceAttributes::class],
+            'resources' => ['post' => RecordingResourceAttributes::class, OperationResource::TYPE => RecordingResourceAttributes::class],
             'subjects'  => ['user' => RecordingSubjectAttributes::class],
         ]]]));
 
@@ -326,9 +330,11 @@ final class AttributeProvidersTest extends TestCase
         self::assertSame(['status' => 'draft', 'owner' => ['id' => '7']], $providers->resourceValues(ResourceReference::record('post', '1')));
         self::assertSame(['department' => 'sales'], $providers->subjectValues(new \stdClass, 'user'));
 
+        self::assertSame([OperationAttributes::class], \array_keys(\array_diff_key($providers->declarations()['resource'], [RecordingResourceAttributes::class => true])));
+
         $this->container->instance('config', new Repository);
 
-        self::assertSame([], AttributeProviders::fromConfig($this->container)->declarations());
+        self::assertSame(['resource' => [OperationAttributes::class => (new OperationAttributes)->attributes()]], AttributeProviders::fromConfig($this->container)->declarations());
     }
 
     /**
@@ -343,7 +349,7 @@ final class AttributeProvidersTest extends TestCase
 
         $providers = AttributeProviders::fromConfig($this->container);
 
-        self::assertSame([], $providers->declarations());
+        self::assertSame(['resource' => [OperationAttributes::class => (new OperationAttributes)->attributes()]], $providers->declarations());
         self::assertSame([], $providers->resourceValues(ResourceReference::record('post', '1')));
         self::assertSame([], $providers->subjectValues(new \stdClass, 'user'));
     }

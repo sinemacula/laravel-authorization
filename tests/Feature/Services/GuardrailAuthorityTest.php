@@ -9,17 +9,21 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\GuardrailException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\Support\GuardrailAuthority;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
@@ -77,6 +81,8 @@ final class GuardrailAuthorityTest extends TestCase
      * guardrails and every tenant's.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     public function testAPlatformGrantChangesEveryScope(): void
     {
@@ -95,6 +101,8 @@ final class GuardrailAuthorityTest extends TestCase
      * ancestor itself, nor the platform's.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     public function testAnAncestorsGrantChangesTheTenantsBelowIt(): void
     {
@@ -114,6 +122,8 @@ final class GuardrailAuthorityTest extends TestCase
      * guardrails, only those of the tenants below it.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     public function testAGrantThatDoesNotReachTheTenantFromAboveIsRefused(): void
     {
@@ -135,6 +145,8 @@ final class GuardrailAuthorityTest extends TestCase
      * grant held within it is refused.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     public function testARootTenantIsChangedFromThePlatform(): void
     {
@@ -150,6 +162,8 @@ final class GuardrailAuthorityTest extends TestCase
      * whatever else it holds.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     public function testAnActorWithoutTheRightIsRefused(): void
     {
@@ -167,6 +181,8 @@ final class GuardrailAuthorityTest extends TestCase
      * request's tenant has no bearing on where it is decided.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     public function testTheRightCountsThroughARole(): void
     {
@@ -210,6 +226,8 @@ final class GuardrailAuthorityTest extends TestCase
      * permitted, and the decision records the guardrail stage as exempt.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     public function testTheGuardrailsNeverCountAgainstTheRight(): void
     {
@@ -246,6 +264,8 @@ final class GuardrailAuthorityTest extends TestCase
      * afterwards.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     public function testTheRightIsDecidedThroughCheck(): void
     {
@@ -256,9 +276,9 @@ final class GuardrailAuthorityTest extends TestCase
 
         Event::fake([DecisionEvaluated::class]);
 
-        GuardrailAuthority::assertPermitted($actor, Reference::of($this->account));
+        GuardrailAuthority::assertPermitted(self::acting($actor), Reference::of($this->account));
 
-        $decided = static fn (DecisionEvaluated $event): bool => $event->action === PackagePermissions::GUARDRAILS_MANAGE && $event->decision->isAllowed();
+        $decided = static fn (DecisionEvaluated $event): bool => $event->action === PackagePermissions::GUARDRAIL_MANAGE && $event->decision->isAllowed();
 
         Event::assertDispatched(DecisionEvaluated::class, $decided);
         self::assertSame([$this->team->getMorphClass(), 'team'], TenantScope::currentTenant());
@@ -266,9 +286,47 @@ final class GuardrailAuthorityTest extends TestCase
     }
 
     /**
+     * An actor someone is impersonating is refused as impersonating, with the
+     * decision, though it holds the right from above the scope, unless it is
+     * also allowed `authorization:administration.impersonated` there, decided
+     * from above the scope as the right is.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnImpersonatedActorNeedsTheImpersonatedRight(): void
+    {
+        $actor = self::actor('org-admin');
+
+        $actor->givePermission(self::right(), tenant: $this->org);
+
+        $impersonated = self::acting($actor)->impersonatedBy(new Reference('support', '9'));
+        $refused      = self::impersonationRefusal($impersonated, $this->account);
+
+        $trace = $refused?->getDecision()->trace ?? [];
+
+        self::assertSame(DecisionStage::ADMINISTRATION, $refused?->getDecision()?->stage);
+        self::assertEquals(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, null, [], 'administration.impersonating'), \array_reverse($trace)[0] ?? null);
+
+        $impersonatedRight = Permission::create(['name' => PackagePermissions::ADMINISTRATION_IMPERSONATED]);
+
+        $actor->givePermission($impersonatedRight, tenant: $this->account);
+
+        self::assertNotNull(self::impersonationRefusal($impersonated, $this->account));
+
+        $actor->givePermission($impersonatedRight, tenant: $this->org);
+
+        self::assertNull(self::impersonationRefusal($impersonated, $this->account));
+        self::assertPermitted($actor, $this->account);
+    }
+
+    /**
      * With no authorization manager bound, every actor is refused.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     public function testWithoutAManagerEveryActorIsRefused(): void
     {
@@ -288,16 +346,40 @@ final class GuardrailAuthorityTest extends TestCase
     }
 
     /**
+     * Return the refusal of the impersonated actor's change to the guardrails
+     * of the tenant, which must be as impersonating, or null when it is
+     * permitted.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
+     * @param  \Tests\Feature\Stubs\StubTenant  $tenant
+     * @return \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException|null
+     */
+    private static function impersonationRefusal(ActingContext $actor, StubTenant $tenant): ?AuthorizationException
+    {
+        try {
+            GuardrailAuthority::assertPermitted($actor, Reference::of($tenant));
+        } catch (AuthorizationException $exception) {
+            self::assertSame(DecisionReason::ADMINISTRATION_IMPERSONATING, $exception->getReason());
+
+            return $exception;
+        }
+
+        return null;
+    }
+
+    /**
      * Assert the actor may change the guardrails of the tenant, or of the
      * platform when it is null.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $actor
      * @param  \Tests\Feature\Stubs\StubTenant|null  $tenant
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     private static function assertPermitted(Model $actor, ?StubTenant $tenant): void
     {
-        GuardrailAuthority::assertPermitted($actor, $tenant === null ? null : Reference::of($tenant));
+        GuardrailAuthority::assertPermitted(self::acting($actor), $tenant === null ? null : Reference::of($tenant));
 
         self::assertTrue(true);
     }
@@ -309,19 +391,34 @@ final class GuardrailAuthorityTest extends TestCase
      * @param  \Illuminate\Database\Eloquent\Model  $actor
      * @param  \Tests\Feature\Stubs\StubTenant|null  $tenant
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     private static function assertRefused(Model $actor, ?StubTenant $tenant): void
     {
         $scope = $tenant === null ? null : Reference::of($tenant);
 
         try {
-            GuardrailAuthority::assertPermitted($actor, $scope);
+            GuardrailAuthority::assertPermitted(self::acting($actor), $scope);
             self::fail('The actor was not refused.');
         } catch (GuardrailException $exception) {
             self::assertSame(GuardrailException::NOT_PERMITTED, $exception->getReason());
             self::assertEquals(Reference::of($actor), $exception->getActor());
             self::assertEquals([$scope], $exception->getTenants());
         }
+    }
+
+    /**
+     * Return the acting context of the actor, its subject named as itself.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $actor
+     * @return \SineMacula\Laravel\Authorization\Administration\ActingContext
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    private static function acting(Model $actor): ActingContext
+    {
+        return ActingContext::for(new Subject($actor, $actor));
     }
 
     /**
@@ -342,6 +439,6 @@ final class GuardrailAuthorityTest extends TestCase
      */
     private static function right(): Permission
     {
-        return Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAILS_MANAGE]);
+        return Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAIL_MANAGE]);
     }
 }

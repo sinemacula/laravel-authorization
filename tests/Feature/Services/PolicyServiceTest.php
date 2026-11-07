@@ -82,7 +82,7 @@ final class PolicyServiceTest extends TestCase
 
     /**
      * An inline policy is created for its grantee, a model or a reference,
-     * through the configured class, reported by the observer with the actor,
+     * through the configured class, reported by the observer as trusted work,
      * and validated as any policy is.
      *
      * @return void
@@ -96,15 +96,14 @@ final class PolicyServiceTest extends TestCase
         Event::fake([PolicyCreated::class]);
 
         $user   = StubIdentity::create(['id' => 'user-1']);
-        $actor  = new Reference('admin', '1');
-        $policy = self::service()->createInline($user, 'mine', self::READ, 'Mine alone', $actor);
+        $policy = self::service()->createInline($user, 'mine', self::READ, 'Mine alone');
         $theirs = self::service()->createInline(new Reference('team', '7'), 'theirs', \json_encode(self::READ, \JSON_THROW_ON_ERROR));
 
         self::assertInstanceOf(CustomPolicy::class, $policy);
         self::assertSame(['mine', 'Mine alone', $user->getMorphClass(), 'user-1'], [$policy->name, $policy->description, $policy->owner_type, $policy->owner_id]);
         self::assertEquals(new Reference('team', '7'), InlinePolicies::ownerOf($theirs));
         self::assertNull(Reference::tenantOf($policy));
-        Event::assertDispatched(PolicyCreated::class, static fn (PolicyCreated $event): bool => $event->name === 'mine' && self::refersTo($event->operation->actor, $actor));
+        Event::assertDispatched(PolicyCreated::class, static fn (PolicyCreated $event): bool => $event->name === 'mine' && $event->operation->actor === null);
 
         try {
             self::service()->createInline($user, 'broken', ['statements' => [['effect' => 'allow']]]);
@@ -292,8 +291,8 @@ final class PolicyServiceTest extends TestCase
     }
 
     /**
-     * Rewriting a policy reports, with the caller's actor, the version and
-     * digest of the document before and after, never the documents.
+     * Rewriting a policy reports, as trusted work, the version and digest of
+     * the document before and after, never the documents.
      *
      * @return void
      *
@@ -303,18 +302,17 @@ final class PolicyServiceTest extends TestCase
     {
         $policy = self::service()->create('audit', ['version' => 1, 'statements' => []]);
         $before = DocumentDigest::of($policy->document)->digest;
-        $actor  = new Reference('user', 'admin-1');
 
         Event::fake([PolicyUpdated::class]);
 
-        $policy = self::service()->rewrite($policy, ['version' => 1, 'statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['*']]]], $actor);
+        $policy = self::service()->rewrite($policy, ['version' => 1, 'statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['*']]]]);
         $after  = DocumentDigest::of($policy->document)->digest;
 
         Event::assertDispatchedTimes(PolicyUpdated::class, 1);
-        Event::assertDispatched(PolicyUpdated::class, static function (PolicyUpdated $event) use ($actor, $before, $after): bool {
+        Event::assertDispatched(PolicyUpdated::class, static function (PolicyUpdated $event) use ($before, $after): bool {
             $payload = \json_encode((array) $event, JSON_THROW_ON_ERROR);
 
-            return self::refersTo($event->operation->actor, $actor)
+            return $event->operation->actor          === null
                 && $event->previousDocument?->digest === $before
                 && $event->document->digest          === $after
                 && $event->document->version         === 1
@@ -324,8 +322,8 @@ final class PolicyServiceTest extends TestCase
     }
 
     /**
-     * Deleting a policy through the service reports, with the caller's actor,
-     * every grantee it was attached to.
+     * Deleting a policy through the service reports, as trusted work, every
+     * grantee it was attached to.
      *
      * @return void
      *
@@ -334,17 +332,16 @@ final class PolicyServiceTest extends TestCase
     public function testDeletingAPolicyReportsWhoLostIt(): void
     {
         $policy = self::service()->create('audit', ['version' => 1, 'statements' => []]);
-        $actor  = new Reference('user', 'admin-1');
 
         app(GrantService::class)->attachPolicy(new Reference('user', '1'), $policy);
 
         Event::fake([PolicyDeleted::class]);
 
-        self::service()->delete($policy, $actor);
+        self::service()->delete($policy);
 
         Event::assertDispatchedTimes(PolicyDeleted::class, 1);
-        Event::assertDispatched(PolicyDeleted::class, static fn (PolicyDeleted $event): bool => self::refersTo($event->operation->actor, $actor)
-            && self::keysOf($event->grantees) === ['user:1']);
+        Event::assertDispatched(PolicyDeleted::class, static fn (PolicyDeleted $event): bool => $event->operation->actor === null
+            && self::keysOf($event->grantees)                                                                            === ['user:1']);
     }
 
     /**

@@ -492,7 +492,7 @@ final class PolicyValidatorTest extends TestCase
 
         foreach ([$this->declaring([], []), $this->bound(new EmptyActionCatalogue)] as $validator) {
             self::assertSame([$reason], $validator->errors(self::document([['effect' => 'allow', 'actions' => ['posts:create']], ['effect' => 'deny', 'actions' => ['*']]])));
-            self::assertSame([$reason], $validator->errors(self::document([['effect' => 'allow', 'actions' => [PackagePermissions::GUARDRAILS_MANAGE, 'posts:create']]])));
+            self::assertSame([$reason], $validator->errors(self::document([['effect' => 'allow', 'actions' => [PackagePermissions::GUARDRAIL_MANAGE, 'posts:create']]])));
             self::assertSame([$reason], $validator->errors(self::document([['effect' => 'deny', 'not_actions' => ['posts:*']]])));
         }
     }
@@ -508,8 +508,8 @@ final class PolicyValidatorTest extends TestCase
     public function testAcceptsThePackagesOwnPermissionsWhenNothingIsDeclared(): void
     {
         foreach ([$this->declaring([], []), $this->bound(new EmptyActionCatalogue)] as $validator) {
-            self::assertSame([], $validator->errors(self::document([['effect' => 'allow', 'actions' => [PackagePermissions::GUARDRAILS_MANAGE, 'authorization:*']]])));
-            $wide = [['effect' => 'deny', 'actions' => ['*']], ['effect' => 'allow', 'not_actions' => ['authorization:guardrails:*']]];
+            self::assertSame([], $validator->errors(self::document([['effect' => 'allow', 'actions' => [PackagePermissions::GUARDRAIL_MANAGE, 'authorization:*']]])));
+            $wide = [['effect' => 'deny', 'actions' => ['*']], ['effect' => 'allow', 'not_actions' => ['authorization:guardrail.*']]];
 
             self::assertSame([], $validator->errors(self::document($wide)));
             self::assertSame([], $validator->errors(self::document([])));
@@ -527,7 +527,7 @@ final class PolicyValidatorTest extends TestCase
     {
         $validator = $this->declaring([CataloguePermission::class], []);
 
-        self::assertSame([], $validator->errors(self::document([['effect' => 'allow', 'actions' => ['posts:create', PackagePermissions::GUARDRAILS_MANAGE, 'authorization:*']]])));
+        self::assertSame([], $validator->errors(self::document([['effect' => 'allow', 'actions' => ['posts:create', PackagePermissions::GUARDRAIL_MANAGE, 'authorization:*']]])));
         self::assertSame(
             ['Policy statement #0 actions pattern \'authorization:roles:*\' matches no declared permission.'],
             $validator->errors(self::document([['effect' => 'allow', 'actions' => ['authorization:roles:*']]])),

@@ -15,7 +15,8 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Services\GrantService;
-use SineMacula\Laravel\Authorization\Services\PermissionService;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
@@ -143,8 +144,8 @@ final class PermissionObserverTest extends TestCase
     }
 
     /**
-     * A permission written through the permission service reports the service
-     * call's actor.
+     * A permission written inside an operation reports the operation's actor,
+     * as a trusted command names one.
      *
      * @return void
      *
@@ -154,7 +155,7 @@ final class PermissionObserverTest extends TestCase
     {
         Event::fake([PermissionCreated::class]);
 
-        app(PermissionService::class)->create('posts:edit', actor: new Reference('user', 'admin-1'));
+        OperationScope::run(Operation::begin(new Reference('user', 'admin-1')), static fn (): Permission => Permission::query()->create(['name' => 'posts:edit']));
 
         Event::assertDispatched(PermissionCreated::class, static fn (PermissionCreated $event): bool => self::refersTo($event->operation->actor, new Reference('user', 'admin-1')));
     }

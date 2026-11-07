@@ -235,7 +235,8 @@ final class PermissionServiceTest extends TestCase
     }
 
     /**
-     * A change made through the service carries the caller's actor.
+     * A change made through the service carries the trusted operation, with no
+     * actor.
      *
      * @return void
      *
@@ -243,21 +244,20 @@ final class PermissionServiceTest extends TestCase
      */
     public function testAChangeCarriesTheActor(): void
     {
-        $actor = new Reference('user', 'admin-1');
 
         self::service()->create('posts:edit');
 
         Event::fake([PermissionUpdated::class]);
 
-        self::service()->rename('posts:edit', 'posts:write', $actor);
+        self::service()->rename('posts:edit', 'posts:write');
 
-        Event::assertDispatched(PermissionUpdated::class, static fn (PermissionUpdated $event): bool => self::refersTo($event->operation->actor, $actor)
-            && $event->name === 'posts:write');
+        Event::assertDispatched(PermissionUpdated::class, static fn (PermissionUpdated $event): bool => $event->operation->actor === null
+            && $event->name                                                                                                      === 'posts:write');
     }
 
     /**
-     * Deleting a permission through the service reports, with the caller's
-     * actor, every grantee that held it and every role that carried it.
+     * Deleting a permission through the service reports, as trusted work, every
+     * grantee that held it and every role that carried it.
      *
      * @return void
      *
@@ -267,19 +267,18 @@ final class PermissionServiceTest extends TestCase
     {
         $permission = self::service()->create('posts:edit');
         $role       = Role::query()->create(['name' => 'editor']);
-        $actor      = new Reference('user', 'admin-1');
 
         $role->permissions()->attach($permission->id);
         app(GrantService::class)->grantPermission(new Reference('user', '1'), $permission);
 
         Event::fake([PermissionDeleted::class]);
 
-        self::service()->delete($permission, $actor);
+        self::service()->delete($permission);
 
         Event::assertDispatchedTimes(PermissionDeleted::class, 1);
-        Event::assertDispatched(PermissionDeleted::class, static fn (PermissionDeleted $event): bool => self::refersTo($event->operation->actor, $actor)
-            && self::keysOf($event->grantees) === ['user:1']
-            && self::keysOf($event->roles)    === self::keysOf([Reference::of($role)]));
+        Event::assertDispatched(PermissionDeleted::class, static fn (PermissionDeleted $event): bool => $event->operation->actor === null
+            && self::keysOf($event->grantees)                                                                                    === ['user:1']
+            && self::keysOf($event->roles)                                                                                       === self::keysOf([Reference::of($role)]));
     }
 
     /**

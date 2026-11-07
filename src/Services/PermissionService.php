@@ -6,12 +6,12 @@ namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 
 /**
  * Creates, renames, describes, deletes and lists permissions.
@@ -23,11 +23,19 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * a permission model that has not been saved is refused with
  * `UnsavedRecordException`, so a change never creates one outside `create()`.
  *
- * Each method takes the actor making the call as `$actor`, a model or a
- * reference, the reads as well as the writes: null for console and system work.
- * Every event a write dispatches carries it, with one operation id the call's
- * events share, once the write commits; it is never read from the authenticated
- * user.
+ * Each method takes the acting context making the call as `$actor`, the reads
+ * as well as the writes: null for trusted system work, such as seeders,
+ * migrations and console commands (N75). A write with an acting context is
+ * delegated administration (AUTHZ-11.1): it is decided as the actor, through
+ * `check()`, on the definition's operation resource, under
+ * `authorization:permission.create`, `.rename`, `.update` or `.delete`, inside
+ * its transaction before anything is written, and refused with the decision's
+ * `AuthorizationException` when it is not allowed. Every change to a definition
+ * waits for the owner and impact rules of the later parts of BL-65, so each is
+ * refused as `administration.unprovable` once the action is allowed. A read is
+ * not decided yet. Every event a write dispatches carries the operation, with
+ * the actor, its mode and the action, once the write commits; the actor is
+ * never read from the authenticated user.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,7 +52,7 @@ final class PermissionService
      * @param  string|null  $description
      * @param  string|null  $category
      * @param  string|null  $id
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Permission
      *
      * @throws \Throwable
@@ -55,17 +63,15 @@ final class PermissionService
         ?string $description = null,
         ?string $category = null,
         ?string $id = null,
-        Model|Reference|null $actor = null,
+        ?ActingContext $actor = null,
     ): Permission {
         $class = self::permissionClass();
-        $model = new $class;
 
-        return RecordWriter::save($actor, static fn (): Permission => $model, [
-            $model->getKeyName() => $id,
-            'name'               => $name,
-            'guard'              => $guard,
-            'description'        => $description,
-            'category'           => $category,
+        return RecordWriter::create($actor, PackagePermissions::PERMISSION_CREATE, new $class, $id, [
+            'name'        => $name,
+            'guard'       => $guard,
+            'description' => $description,
+            'category'    => $category,
         ]);
     }
 
@@ -74,14 +80,14 @@ final class PermissionService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  string  $name
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Permission
      *
      * @throws \Throwable
      */
-    public function rename(Permission|string $permission, string $name, Model|Reference|null $actor = null): Permission
+    public function rename(Permission|string $permission, string $name, ?ActingContext $actor = null): Permission
     {
-        return RecordWriter::save($actor, static fn (): Permission => self::resolve($permission), ['name' => $name]);
+        return RecordWriter::save($actor, PackagePermissions::PERMISSION_RENAME, static fn (): Permission => self::resolve($permission), ['name' => $name]);
     }
 
     /**
@@ -89,14 +95,14 @@ final class PermissionService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  string|null  $description
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Permission
      *
      * @throws \Throwable
      */
-    public function describe(Permission|string $permission, ?string $description, Model|Reference|null $actor = null): Permission
+    public function describe(Permission|string $permission, ?string $description, ?ActingContext $actor = null): Permission
     {
-        return RecordWriter::save($actor, static fn (): Permission => self::resolve($permission), ['description' => $description]);
+        return RecordWriter::save($actor, PackagePermissions::PERMISSION_UPDATE, static fn (): Permission => self::resolve($permission), ['description' => $description]);
     }
 
     /**
@@ -104,14 +110,14 @@ final class PermissionService
      * lists every grantee that held it directly and every role that carried it.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return void
      *
      * @throws \Throwable
      */
-    public function delete(Permission|string $permission, Model|Reference|null $actor = null): void
+    public function delete(Permission|string $permission, ?ActingContext $actor = null): void
     {
-        RecordWriter::delete($actor, static fn (): Permission => self::resolve($permission));
+        RecordWriter::delete($actor, PackagePermissions::PERMISSION_DELETE, static fn (): Permission => self::resolve($permission));
     }
 
     /**
@@ -136,10 +142,10 @@ final class PermissionService
      * those of that guard or guard-agnostic.
      *
      * @param  string|null  $guard
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission>
      */
-    public function list(?string $guard = null, Model|Reference|null $actor = null): Collection
+    public function list(?string $guard = null, ?ActingContext $actor = null): Collection
     {
         // @phpstan-ignore staticMethod.dynamicCall
         return self::permissionClass()::query()

@@ -236,6 +236,32 @@ final class BoundaryTableTest extends TestCase
     }
 
     /**
+     * The boundary held in the scope, and those held in every scope, are read
+     * without removing anything, so a removal can be decided first.
+     *
+     * @return void
+     */
+    public function testReadsTheBoundariesWithoutRemovingThem(): void
+    {
+        $policy = self::policy('cap');
+        $tenant = new Reference('stub_tenant', 'tenant-a');
+
+        self::assertNull(self::table($tenant)->held());
+        self::assertSame([], self::table(null)->everywhere());
+
+        self::table($tenant, false)->set($policy);
+        self::table(null)->set($policy);
+
+        $everywhere = self::table(null)->everywhere();
+
+        \usort($everywhere, static fn (array $left, array $right): int => \strcmp((string) $left[1]->tenant?->id, (string) $right[1]->tenant?->id));
+
+        self::assertSame([$policy, false], self::table($tenant)->held());
+        self::assertEquals([[$policy, new GrantScope(null, null, true)], [$policy, new GrantScope($tenant, null, false)]], $everywhere);
+        self::assertSame(2, DB::table('authorizable_boundaries')->count());
+    }
+
+    /**
      * Return the writer of `user:user-1`'s boundary in the scope.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant

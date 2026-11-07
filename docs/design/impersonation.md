@@ -13,10 +13,12 @@ identity.
    mutated. Two concurrent `for()` calls produce two independent scopes that cannot interfere with each other or with
    the ambient resolution path.
 
-2. **`for()` keeps the request's tenant and application.** The subject named replaces the request's subject only: the
-   tenant, application and guard stay the ones the subject resolver reports for the request (none when it resolves no
-   subject). A check never takes its tenant from the caller here; naming a tenant explicitly is for the administration
-   and preview API.
+2. **`for()` keeps the request's tenant and application for a model.** A model named replaces the request's subject
+   only: the tenant, application and guard stay the ones the subject resolver reports for the request (none when it
+   resolves no subject). A resolved `Subject` is taken as it is, its identity, tenant, application, guard and session
+   kept, as an acting context names its actor (see [Delegated administration](delegated-administration.md)). A check
+   never takes its tenant from the caller here otherwise; naming a tenant explicitly is for the administration and
+   preview API.
 
 3. **`for()` does NOT change `$request->user()`.** The scoped manager only affects authorization evaluation -- it
    overrides `currentSubject()` on the clone. The Laravel auth guard, `$request->user()`, session state, and any other
@@ -101,7 +103,8 @@ it hands over.
 
 ## Implementation Anchors
 
-- `AuthorizationManager::for()` -- the scoped-clone factory.
+- `AuthorizationManager::for()`, in `Concerns\BuildsScopedManagers` -- the scoped-clone factory, which reads the
+  subject resolver once when it names a model, and takes a resolved `Subject` as it is.
 - `AuthorizationManager::withPolicies()` and `capped()` -- the policy-override and capped clones, over
   `Evaluation\DecisionPipeline::withPolicies()` and `capped()`.
 - `AuthorizationManager::forUser()` -- the scoped clone for a user the subject resolver translates.
@@ -112,7 +115,10 @@ it hands over.
 ## Authoritative Tests
 
 - `AuthorizationManagerTest::testForOverridesResolver` (Unit) -- `for()` decides about the model named instead of the
-  resolver's subject, reading the resolver once, when `for()` is called, to keep the tenant and application.
+  resolver's subject, reading the resolver once, when `for()` is called with a model, to keep the tenant and
+  application.
+- `BuildsScopedManagersTest::testForAndForUserNameTheSubject` (Feature) -- a resolved `Subject` named through `for()`
+  is kept as it is, its identity, tenant, application, guard and session included.
 - `AuthorizationManagerTest::testForReturnsCloneNotSelf` (Unit) -- `for()` returns a distinct instance.
 - `AuthorizationManagerTest::testForKeepsTheRequestsTenantApplicationAndGuard` (Unit) -- `for()` keeps the request's
   tenant, application and guard.

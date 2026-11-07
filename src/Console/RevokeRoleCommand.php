@@ -17,8 +17,11 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
  * `AuthorizableIdentity` contract, and revokes the role through the grant
  * service. A role the identity does not hold is reported as not held.
  *
- * `--actor={morphType}:{key}` names the actor making the change, which the
- * revocation's event carries; without it the revocation records no actor.
+ * `--actor={morphType}:{key}` names the actor making the change: the revocation
+ * is then delegated administration, decided as that actor under
+ * `authorization:role.revoke` (see `GrantService`), and its event carries the
+ * actor. Without it the revocation is trusted system work and records no actor
+ * (N75).
  *
  * The role name is revoked from the roles the identity holds within the tenant
  * scope, like any other query: every held role of that name is revoked, the
@@ -38,7 +41,7 @@ final class RevokeRoleCommand extends Command
         authorization:revoke
                                     {identity : Identity in morphType:key format (e.g. user:123)}
                                     {role : Role name to revoke}
-                                    {--actor= : The actor making the change, in morphType:key format (e.g. user:1); none for system work}
+                                    {--actor= : The actor the change is decided as, in morphType:key format (e.g. user:1); none for trusted system work}
         EOD;
 
     /** @var string The console command description. */
@@ -65,7 +68,7 @@ final class RevokeRoleCommand extends Command
         }
 
         try {
-            $revoked = $grants->revokeRole($model, $roleName, ActorOption::parse($this->option('actor')));
+            $revoked = $grants->revokeRole($model, $roleName, ActorOption::acting($this->option('actor')));
         } catch (\Throwable $e) {
             $this->error($e->getMessage());
 

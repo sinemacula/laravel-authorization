@@ -1,0 +1,435 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Feature\Administration;
+
+use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Container\Container;
+use Illuminate\Support\Facades\Event;
+use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\SessionScopes;
+use Tests\Concerns\CatchesRefusals;
+use Tests\Feature\Stubs\FixedSubjectResolver;
+use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubMachine;
+use Tests\Feature\Stubs\StubSessionPolicySource;
+use Tests\TestCase;
+
+/**
+ * Feature tests for `ActingContext`, who makes a delegated administration call.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ */
+#[CoversClass(ActingContext::class)]
+final class ActingContextTest extends TestCase
+{
+    use CatchesRefusals;
+
+    /**
+     * The current acting context is the request's subject as `check()` resolves
+     * it, its identity, guard and session kept.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testTheCurrentContextKeepsTheRequestsSubjectAndSession(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $subject = new Subject($user, $user, null, 'admin', 'web', 'session-1');
+
+        $this->resolving($subject);
+
+        $actor = ActingContext::current();
+
+        self::assertSame($subject, $actor->subject);
+        self::assertSame('session-1', $actor->subject->session);
+        self::assertEquals(Reference::of($user), $actor->principal());
+        self::assertEquals(Reference::of($user), $actor->identity());
+        self::assertFalse($actor->isImpersonating());
+        self::assertSame([], $actor->caps);
+    }
+
+    /**
+     * A model is named as `Authorization::for()` names it, with no session; a
+     * resolved subject is kept as it is.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testAModelIsNamedWithoutASessionAndASubjectAsItIs(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $admin   = StubIdentity::create(['id' => 'admin-1']);
+        $subject = new Subject($admin, $user, null, null, 'web', 'session-1');
+
+        $this->resolving(new Subject($user, $user, null, 'admin', 'web', 'session-1'));
+
+        $named = ActingContext::for($admin);
+
+        self::assertSame($admin, $named->subject->subject);
+        self::assertNull($named->subject->session);
+        self::assertSame('admin', $named->subject->application);
+        self::assertSame($subject, ActingContext::for($subject)->subject);
+        self::assertEquals(Reference::of($user), ActingContext::for($subject)->identity());
+    }
+
+    /**
+     * An acting subject that cannot be resolved refuses as
+     * `subject_unresolved`, with the decision, and never falls back to a
+     * trusted call: none for the request, an unsaved model, a model without a
+     * key, and an identity that is not a saved model reads as none.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testAnActorThatCannotBeResolvedRefuses(): void
+    {
+        $this->resolving(null);
+
+        $resolutions = [
+            static fn (): ActingContext => ActingContext::current(),
+            static fn (): ActingContext => ActingContext::for(new StubIdentity(['id' => 'ghost'])),
+            static fn (): ActingContext => ActingContext::for(new Subject(new \stdClass)),
+            static fn (): ActingContext => ActingContext::for(new Subject(self::keyless())),
+        ];
+
+        foreach ($resolutions as $resolve) {
+            $refusal = self::refusalOf($resolve);
+
+            self::assertInstanceOf(AuthorizationException::class, $refusal);
+            self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $refusal->getReason());
+            self::assertSame(DecisionStage::SUBJECT, $refusal->getDecision()?->stage);
+            self::assertSame('This action is unauthorized.', $refusal->getMessage());
+        }
+
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        self::assertNull(ActingContext::for(new Subject($user, new \stdClass))->identity());
+        self::assertNull(ActingContext::for(new Subject($user, new StubIdentity(['id' => 'ghost'])))->identity());
+    }
+
+    /**
+     * With no authorization manager bound, a model cannot be named, and a
+     * resolved subject is refused once it is decided about.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testWithoutAManagerNothingIsDecided(): void
+    {
+        $user      = StubIdentity::create(['id' => 'user-1']);
+        $actor     = ActingContext::for(new Subject($user, $user));
+        $container = Container::getInstance();
+
+        Container::setInstance(new Container);
+
+        try {
+            self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, self::reasonOf(static fn (): ActingContext => ActingContext::for($user)));
+            self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, self::reasonOf(static fn (): Decision => $actor->decide('posts:edit')));
+        } finally {
+            Container::setInstance($container);
+        }
+    }
+
+    /**
+     * The acting subject is decided about through `check()`, with every cap the
+     * call adds: an action none of a cap covers is refused at the session
+     * stage, and caps intersect.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheCallsCapsCapEveryDecision(): void
+    {
+        $admin = StubIdentity::create(['id' => 'admin-1']);
+
+        $admin->givePermission(Permission::create(['name' => 'posts:*']));
+
+        $actor = ActingContext::for($admin);
+
+        self::assertTrue($actor->decide('posts:edit')->isAllowed());
+        self::assertTrue($actor->capped(['posts:*'])->decide('posts:edit')->isAllowed());
+        self::assertSame(DecisionReason::SESSION_POLICY, $actor->capped(['posts:read'])->decide('posts:edit')->reason);
+        self::assertSame(DecisionReason::SESSION_POLICY, $actor->capped(['posts:*'])->capped(['posts:read'])->decide('posts:edit')->reason);
+        self::assertSame([['posts:*'], ['posts:read']], $actor->capped(['posts:*'])->capped(['posts:read'])->caps);
+    }
+
+    /**
+     * A machine actor keeps the scopes of its credential, which cap what it may
+     * administer as they cap its other checks: none allow nothing, and an
+     * administration action they do not cover is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAMachineActorKeepsItsCredentialsCaps(): void
+    {
+        $machine = StubMachine::create(['id' => 'svc-1']);
+
+        $machine->givePermission(Permission::create(['name' => 'authorization:*']));
+
+        $edit   = Permission::create(['name' => 'posts:edit']);
+        $revoke = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, new Reference('user', '1'), $edit, GrantScope::platform());
+
+        self::assertSame(DecisionReason::SESSION_POLICY, ActingContext::for($machine)->check($revoke)->reason);
+
+        $this->withCredential(['authorization:role.*']);
+
+        self::assertSame(DecisionReason::SESSION_POLICY, ActingContext::for($machine)->check($revoke)->reason);
+
+        $this->withCredential(['authorization:permission.revoke']);
+
+        self::assertTrue(ActingContext::for($machine)->check($revoke)->isAllowed());
+    }
+
+    /**
+     * An impersonated acting context names its impersonator, a model or a
+     * reference, and keeps its subject and caps.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testAnImpersonatedContextNamesItsImpersonator(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $support = StubIdentity::create(['id' => 'support-1']);
+        $actor   = ActingContext::for($user)->capped(['posts:*']);
+
+        self::assertTrue($actor->impersonatedBy($support)->isImpersonating());
+        self::assertEquals(Reference::of($support), $actor->impersonatedBy($support)->impersonator);
+        self::assertEquals(new Reference('support', '9'), $actor->impersonatedBy(new Reference('support', '9'))->impersonator);
+        self::assertSame($actor->subject, $actor->impersonatedBy($support)->subject);
+        self::assertSame([['posts:*']], $actor->impersonatedBy($support)->caps);
+        self::assertSame([['posts:*'], ['posts:read']], $actor->impersonatedBy($support)->capped(['posts:read'])->caps);
+        self::assertEquals(Reference::of($support), $actor->impersonatedBy($support)->capped(['posts:read'])->impersonator);
+    }
+
+    /**
+     * A screen checking an operation gets the decision a service's
+     * authorization makes: allowed for a change that only narrows, and refused
+     * with the decision, reported with `AuthorizationFailed`, for one that
+     * widens.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testCheckAndAuthorizeMakeTheSameDecision(): void
+    {
+        Event::fake([AuthorizationFailed::class]);
+
+        $admin = StubIdentity::create(['id' => 'admin-1']);
+
+        $admin->givePermission(Permission::create(['name' => 'authorization:*']));
+
+        $actor  = ActingContext::for($admin);
+        $role   = Role::create(['name' => 'editor']);
+        $grant  = OperationResource::grant(PackagePermissions::ROLE_GRANT, new Reference('user', '1'), $role, GrantScope::platform());
+        $revoke = OperationResource::revoke(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), $role, GrantScope::platform());
+
+        self::assertTrue($actor->check($revoke)->isAllowed());
+
+        $actor->authorize($revoke);
+
+        $screen  = $actor->check($grant);
+        $refusal = self::refusalOf(static fn () => $actor->authorize($grant));
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertEquals($screen, $refusal->getDecision());
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $refusal->getReason());
+        Event::assertDispatchedTimes(AuthorizationFailed::class, 1);
+        Event::assertDispatched(
+            AuthorizationFailed::class,
+            static fn (AuthorizationFailed $event): bool => $event->principal === $admin && $event->action === PackagePermissions::ROLE_GRANT,
+        );
+    }
+
+    /**
+     * Every change an operation makes is decided in order, each correlated with
+     * the operation by its id, until the first refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryChangeOfAnOperationIsDecidedWithItsId(): void
+    {
+        Event::fake([DecisionEvaluated::class]);
+
+        $admin = StubIdentity::create(['id' => 'admin-1']);
+
+        $admin->givePermission(Permission::create(['name' => PackagePermissions::ROLE_REVOKE]));
+
+        $actor     = ActingContext::for($admin);
+        $operation = Operation::begin($actor);
+        $role      = Role::create(['name' => 'editor']);
+        $revoke    = OperationResource::revoke(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), $role, GrantScope::platform());
+
+        $actor->authorizeIn($operation, $revoke, $revoke);
+        $actor->authorizeIn($operation);
+
+        Event::assertDispatchedTimes(DecisionEvaluated::class, 2);
+        Event::assertNotDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->resource !== OperationResource::TYPE . ':' . $operation->id);
+
+        $refusal = self::refusalOf(static fn () => $actor->impersonatedBy(new Reference('support', '9'))->authorizeIn($operation, $revoke, $revoke));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_IMPERSONATING, $refusal instanceof AuthorizationException ? $refusal->getReason() : null);
+        Event::assertDispatchedTimes(DecisionEvaluated::class, 3);
+    }
+
+    /**
+     * The changes of an operation are decided as `authorizeIn()` decides them,
+     * and, when it makes none, the changes it was asked for that change
+     * nothing, so an actor without the action is refused either way.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnOperationThatChangesNothingDecidesWhatItWasAskedFor(): void
+    {
+        Event::fake([DecisionEvaluated::class]);
+
+        $admin = StubIdentity::create(['id' => 'admin-1']);
+
+        $admin->givePermission(Permission::create(['name' => PackagePermissions::ROLE_REVOKE]));
+
+        $actor     = ActingContext::for($admin);
+        $operation = Operation::begin($actor);
+        $role      = Role::create(['name' => 'editor']);
+        $revoke    = OperationResource::revoke(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), $role, GrantScope::platform());
+        $kept      = OperationResource::unchanged(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), null, GrantScope::platform());
+        $removal   = OperationResource::unchanged(PackagePermissions::BOUNDARY_REMOVE, new Reference('user', '1'), null, GrantScope::platform());
+
+        $actor->authorizeChanges($operation, [$revoke], $removal);
+        $actor->authorizeChanges($operation, [], $kept, $kept);
+
+        Event::assertDispatchedTimes(DecisionEvaluated::class, 3);
+        Event::assertNotDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->action !== PackagePermissions::ROLE_REVOKE);
+
+        $refusal = self::refusalOf(static fn () => $actor->authorizeChanges($operation, [], $removal));
+
+        self::assertSame(DecisionReason::NO_MATCH, $refusal instanceof AuthorizationException ? $refusal->getReason() : null);
+    }
+
+    /**
+     * A refusal is the decision's `AuthorizationException`, its reason the
+     * decision's, its message the translated `denied` line, and no reason a
+     * refusal names reads as `no_match`.
+     *
+     * @return void
+     */
+    public function testARefusalCarriesTheDecision(): void
+    {
+        $this->app?->make('translator')->addLines(['authorization.denied' => 'Refusé.'], 'fr', 'authorization'); // @phpstan-ignore method.notFound
+        $this->app?->setLocale('fr');
+
+        $decision = Decision::deny(DecisionReason::ADMINISTRATION_SCOPE, DecisionStage::ADMINISTRATION);
+        $refusal  = ActingContext::refusal($decision);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, $refusal->getReason());
+        self::assertSame($decision, $refusal->getDecision());
+        self::assertSame('Refusé.', $refusal->getMessage());
+        self::assertSame(DecisionReason::NO_MATCH, ActingContext::refusal(Decision::allow(DecisionStage::ALLOW))->getReason());
+    }
+
+    /**
+     * Bind a subject resolver answering with the subject, for the next facade
+     * call.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
+     * @return void
+     */
+    private function resolving(?Subject $subject): void
+    {
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver($subject));
+        $this->forgetTheManager();
+    }
+
+    /**
+     * Bind a session policy source answering every check with the scopes, for
+     * the next facade call.
+     *
+     * @param  list<string>  $scopes
+     * @return void
+     */
+    private function withCredential(array $scopes): void
+    {
+        $this->app?->instance(SessionPolicySource::class, new StubSessionPolicySource($scopes));
+        $this->app?->make(ConfigRepository::class)->set('authorization.session.scopes', []); // @phpstan-ignore method.nonObject
+        $this->app?->forgetInstance(SessionScopes::class);
+        $this->forgetTheManager();
+    }
+
+    /**
+     * Forget the resolved authorization manager, so the next call builds one
+     * from the bindings in place.
+     *
+     * @return void
+     */
+    private function forgetTheManager(): void
+    {
+        foreach (['authorization', AuthorizationManager::class] as $abstract) {
+            $this->app?->forgetInstance($abstract);
+        }
+
+        Authorization::clearResolvedInstance('authorization');
+    }
+
+    /**
+     * Return the reason the call is refused with.
+     *
+     * @param  \Closure(): mixed  $call
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
+     */
+    private static function reasonOf(\Closure $call): ?DecisionReason
+    {
+        $refusal = self::refusalOf($call);
+
+        return $refusal instanceof AuthorizationException ? $refusal->getReason() : null;
+    }
+
+    /**
+     * Return a saved identity whose key is empty.
+     *
+     * @return \Tests\Feature\Stubs\StubIdentity
+     */
+    private static function keyless(): StubIdentity
+    {
+        $identity = new StubIdentity(['id' => '']);
+
+        $identity->exists = true;
+
+        return $identity;
+    }
+}

@@ -98,7 +98,7 @@ times as many in all whatever their actions, so the read is bounded by the rows 
 a C class the platform's whole, and the anchor chain's denies alone.
 
 The class's condition is compiled stage by stage, as `PolicyEvaluator` decides (`DecisionFormula`): no deny applies,
-every guardrail (unless the action is `authorization:guardrails:manage`) and every boundary has a matching allow,
+every guardrail (unless the action is `authorization:guardrail.manage`) and every boundary has a matching allow,
 every session cap covers the action, and an allow matches or the permission is held in the class's scope. Each
 statement a check would weigh is compiled by the statement screen (`StatementScreen`): its conditions are assessed
 once by `Statement::assess()` on the statement without its resources, which they never read; its target is compiled

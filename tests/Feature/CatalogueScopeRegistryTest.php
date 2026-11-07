@@ -60,7 +60,7 @@ final class CatalogueScopeRegistryTest extends TestCase
     {
         $registry = $this->registry(['editor' => ['posts:*']]);
 
-        foreach (['editor', 'posts:create', 'posts:*', 'reports:export', '*', PackagePermissions::GUARDRAILS_MANAGE, 'authorization:*'] as $scope) {
+        foreach (['editor', 'posts:create', 'posts:*', 'reports:export', '*', PackagePermissions::GUARDRAIL_MANAGE, 'authorization:*'] as $scope) {
             self::assertTrue($registry->isValid($scope), $scope);
         }
 
@@ -99,7 +99,7 @@ final class CatalogueScopeRegistryTest extends TestCase
 
         $registry = $this->registry(['editor' => ['posts:*'], 'posts:create']);
 
-        self::assertSame(['editor', 'posts:create', PackagePermissions::GUARDRAILS_MANAGE, 'posts:delete', 'reports:export'], $registry->scopes());
+        self::assertSame(['editor', 'posts:create', ...self::packagePermissions(), 'posts:delete', 'reports:export'], $registry->scopes());
     }
 
     /**
@@ -170,5 +170,15 @@ final class CatalogueScopeRegistryTest extends TestCase
     {
         /** @var \Illuminate\Config\Repository */
         return $this->app?->make(ConfigRepository::class);
+    }
+
+    /**
+     * Return the name of every permission the package declares, in its order.
+     *
+     * @return list<string>
+     */
+    private static function packagePermissions(): array
+    {
+        return \array_map(static fn (PermissionDefinition $definition): string => $definition->name, (new PackagePermissions)->permissions());
     }
 }

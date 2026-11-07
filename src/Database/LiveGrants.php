@@ -22,18 +22,22 @@ use Illuminate\Support\Carbon;
 final class LiveGrants
 {
     /**
-     * Limit the query to the rows of the table whose expiry has not passed.
+     * Limit the query to the rows of the table whose expiry has not passed at
+     * the instant given, else now.
      *
      * @template TQuery of \Illuminate\Contracts\Database\Query\Builder
      *
      * @param  TQuery  $query
      * @param  string  $table
+     * @param  \Illuminate\Support\Carbon|null  $now
      * @return TQuery
      */
-    public static function only(Builder $query, string $table): Builder
+    public static function only(Builder $query, string $table, ?Carbon $now = null): Builder
     {
-        $query->where(static function (Builder $query) use ($table): void {
-            $query->whereNull($table . '.expires_at')->orWhere($table . '.expires_at', '>', Carbon::now('UTC'));
+        $at = $now ?? Carbon::now('UTC');
+
+        $query->where(static function (Builder $query) use ($table, $at): void {
+            $query->whereNull($table . '.expires_at')->orWhere($table . '.expires_at', '>', $at);
         });
 
         return $query;

@@ -75,7 +75,7 @@ final class DeclaredActionCatalogueTest extends TestCase
         $catalogue = $this->catalogue([], []);
 
         self::assertFalse($catalogue->covers('*'));
-        self::assertFalse($catalogue->covers('authorization:guardrails:manage'));
+        self::assertFalse($catalogue->covers('authorization:guardrail.manage'));
         self::assertFalse($catalogue->covers('posts:create'));
     }
 
@@ -88,14 +88,14 @@ final class DeclaredActionCatalogueTest extends TestCase
     public function testLeavesOutThePackagesOwnPermissions(): void
     {
         ConfigurablePermissionProvider::$permissions = [
-            new PermissionDefinition(name: 'authorization:guardrails:manage', description: 'Set and remove guardrails from above the scope they cap.', category: 'authorization'),
+            new PermissionDefinition(name: 'authorization:guardrail.manage', description: 'Set and remove guardrails from above the scope they cap.', category: 'authorization'),
         ];
 
         $catalogue = $this->catalogue([CataloguePermission::class], [ConfigurablePermissionProvider::class]);
 
         self::assertTrue($catalogue->covers('*'));
         self::assertTrue($catalogue->covers('posts:create'));
-        self::assertFalse($catalogue->covers('authorization:guardrails:manage'));
+        self::assertFalse($catalogue->covers('authorization:guardrail.manage'));
         self::assertFalse($catalogue->covers('authorization:*'));
     }
 

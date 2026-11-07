@@ -6,10 +6,10 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use SineMacula\Laravel\Authorization\Administration\RankComparison;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
-use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
@@ -205,42 +205,24 @@ trait HasRoles // @phpstan-ignore trait.unused
     // ------------------------------------------------------------------
 
     /**
-     * Determine whether this identity can act on the given target based on role
-     * rank seniority.
+     * Determine whether rank lets this identity act on the given target, as
+     * `RankComparison` compares them (N76): strictly senior, an unranked target
+     * the most junior, an unranked actor acting on no one, and either side
+     * whose roles cannot be read not comparable. Both are resolved the same
+     * way, in the current tenant and application, an expired grant never
+     * counting. With `authorization.rank.enabled` false, rank is no constraint,
+     * so it returns true.
      *
-     * Both `$this` and `$target` must implement `SupportsRoles`; returns false
-     * otherwise. When `authorization.rank.enabled` is false the check is
-     * bypassed and the method returns true unconditionally (rank feature
-     * disabled).
-     *
-     * Semantics:
-     * - Actor has no ranked roles -> false (cannot assert rank authority).
-     * - Target has no ranked roles -> true (unranked targets are freely
-     *   actable-on).
-     * - Otherwise: actor's best rank must be strictly less than target's best
-     *   rank (strict-senior — equal rank = cannot act).
+     * It returns the comparison alone and grants nothing: rank is never an
+     * allow (AUTHZ-3.5), and delegated administration weighs it beside every
+     * other check, never in place of one.
      *
      * @param  object  $target
      * @return bool
      */
     public function canActOn(object $target): bool
     {
-        /** @var bool $enabled */
-        $enabled = config('authorization.rank.enabled', true);
-
-        if (!$enabled) {
-            return true;
-        }
-
-        $actorRank = $this instanceof SupportsRoles ? $this->highestRank() : null;
-
-        if ($actorRank === null || !($target instanceof SupportsRoles) || !\method_exists($target, 'roles')) {
-            return false;
-        }
-
-        $targetRank = $this->computeHighestRank($target->roles()->get());
-
-        return $targetRank === null || $actorRank < $targetRank;
+        return RankComparison::canActOn($this, $target);
     }
 
     // ------------------------------------------------------------------
@@ -266,47 +248,5 @@ trait HasRoles // @phpstan-ignore trait.unused
     public function getRoleNames(): array
     {
         return $this->getRoles();
-    }
-
-    /**
-     * Return the lowest `rank` value across this identity's roles, or null if
-     * none of the assigned roles are ranked.
-     *
-     * Lower rank = more senior (0 is the most senior).
-     *
-     * @return int|null
-     */
-    private function highestRank(): ?int
-    {
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-        $roles = $this->authorizationLoadedGrants('roles');
-
-        return $this->computeHighestRank($roles);
-    }
-
-    /**
-     * Scan a collection of roles and return the lowest `rank` value (most
-     * senior), or null when no role in the set is ranked.
-     *
-     * @param  iterable<int, \SineMacula\Laravel\Authorization\Models\Role>  $roles
-     * @return int|null
-     */
-    private function computeHighestRank(iterable $roles): ?int
-    {
-        $best = null;
-
-        foreach ($roles as $role) {
-            if ($role->rank === null) {
-                continue;
-            }
-
-            if ($best !== null && $role->rank >= $best) {
-                continue;
-            }
-
-            $best = $role->rank;
-        }
-
-        return $best;
     }
 }

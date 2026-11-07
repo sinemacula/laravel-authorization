@@ -879,6 +879,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertInstanceOf(Decision::class, $decision);
         self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
         self::assertSame($decision->reason, $exception->getReason());
+        self::assertSame($decision, $exception->getDecision());
         self::assertCount(2, $reported);
         self::assertInstanceOf(DecisionEvaluated::class, $reported[0]);
         self::assertSame($decision, $reported[0]->decision);

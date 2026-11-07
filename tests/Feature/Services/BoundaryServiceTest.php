@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundarySet;
 use SineMacula\Laravel\Authorization\Exceptions\BoundaryException;
@@ -22,12 +23,17 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\AssertsDelegatedRefusals;
+use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\InterleavesWrites;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\VanishedPolicy;
 use Tests\TestCase;
 
 /**
@@ -44,7 +50,7 @@ use Tests\TestCase;
 #[CoversClass(BoundaryService::class)]
 final class BoundaryServiceTest extends TestCase
 {
-    use ActsAsTenant, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, CatchesRefusals, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents;
 
     /**
      * The service is bound once in the container.
@@ -58,9 +64,9 @@ final class BoundaryServiceTest extends TestCase
     }
 
     /**
-     * A boundary is set platform-wide by default, its row recording the actor,
-     * and reported once with the operation, the grantee, the policy and the
-     * scope, naming no policy replaced.
+     * A boundary is set platform-wide by default, as trusted work its row
+     * recording no actor, and reported once with the operation, the grantee,
+     * the policy and the scope, naming no policy replaced.
      *
      * @return void
      *
@@ -72,13 +78,12 @@ final class BoundaryServiceTest extends TestCase
 
         $user   = StubIdentity::create(['id' => 'user-1']);
         $policy = self::cap('read-only');
-        $actor  = new Reference('admin', '1');
 
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($user, $policy, actor: $actor));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($user, $policy));
 
         $row = (array) DB::table('authorizable_boundaries')->sole();
 
-        self::assertSame([$user->getMorphClass(), 'user-1', null, null, 'admin', '1'], [
+        self::assertSame([$user->getMorphClass(), 'user-1', null, null, null, null], [
             $row['authorizable_type'], $row['authorizable_id'], $row['tenant_type'], $row['tenant_id'], $row['granted_by_type'], $row['granted_by_id'],
         ]);
         self::assertSame($policy->id, $row['policy_id']);
@@ -89,7 +94,8 @@ final class BoundaryServiceTest extends TestCase
         self::assertCount(1, $events);
         self::assertTrue(self::refersTo($events[0]->grantee, $user));
         self::assertTrue(self::refersTo($events[0]->policy, $policy));
-        self::assertTrue(self::refersTo($events[0]->operation->actor, $actor));
+        self::assertNull($events[0]->operation->actor);
+        self::assertSame([PackagePermissions::BOUNDARY_SET], $events[0]->operation->actions);
         self::assertSame('read-only', $events[0]->name);
         self::assertNull($events[0]->scope->tenant);
         self::assertNull($events[0]->scope->application);
@@ -122,12 +128,12 @@ final class BoundaryServiceTest extends TestCase
         self::assertSame([], self::dispatchedEvents(BoundarySet::class));
         self::assertSame(GrantOutcome::REACH_CHANGED, self::service()->set($user, $first, $tenant, false));
         self::assertFalse((bool) DB::table('authorizable_boundaries')->value('include_subtree'));
-        self::assertSame(GrantOutcome::REPLACED, self::service()->set($user, $second, $tenant, false, new Reference('admin', '2')));
+        self::assertSame(GrantOutcome::REPLACED, self::service()->set($user, $second, $tenant, false));
 
         $row = (array) DB::table('authorizable_boundaries')->sole();
 
         self::assertSame($second->id, $row['policy_id']);
-        self::assertSame('2', $row['granted_by_id']);
+        self::assertNull($row['granted_by_id']);
 
         $events = self::dispatchedEvents(BoundarySet::class);
 
@@ -181,7 +187,7 @@ final class BoundaryServiceTest extends TestCase
         Event::fake([BoundaryRemoved::class]);
 
         self::assertFalse(self::service()->remove($user));
-        self::assertTrue(self::service()->remove($user, $tenant, new Reference('admin', '1')));
+        self::assertTrue(self::service()->remove($user, $tenant));
         self::assertFalse(self::service()->remove($user, $tenant));
         self::assertSame(0, DB::table('authorizable_boundaries')->count());
 
@@ -190,10 +196,100 @@ final class BoundaryServiceTest extends TestCase
         self::assertCount(1, $events);
         self::assertTrue(self::refersTo($events[0]->grantee, $user));
         self::assertTrue(self::refersTo($events[0]->policy, $policy));
-        self::assertTrue(self::refersTo($events[0]->operation->actor, new Reference('admin', '1')));
+        self::assertNull($events[0]->operation->actor);
         self::assertSame('tenant-cap', $events[0]->name);
+        self::assertSame([PackagePermissions::BOUNDARY_REMOVE], $events[0]->operation->actions);
         self::assertTrue(self::refersTo($events[0]->scope->tenant, $tenant));
         self::assertFalse($events[0]->scope->includeSubtree);
+    }
+
+    /**
+     * A delegated boundary change is decided under its action before anything
+     * is written: setting a boundary, and removing one, widen authority, so an
+     * actor allowed every action is refused as unprovable, and one without the
+     * action as no match, or as out of scope for a tenant's boundary when no
+     * tenant is active.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedBoundaryChangeIsRefused(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $admin  = self::administrator();
+        $nobody = self::administrator([], 'nobody');
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $cap    = self::cap('cap');
+        $other  = self::cap('other');
+
+        $platform = StubIdentity::create(['id' => 'user-2']);
+
+        self::service()->set($user, $cap, $tenant, false);
+        self::service()->set($user, $cap);
+        self::service()->set($platform, $cap);
+
+        $unprovable = DecisionReason::ADMINISTRATION_UNPROVABLE;
+
+        self::assertDelegatedRefusal($unprovable, static fn (): GrantOutcome => self::service()->set($user, $other, actor: $admin));
+        self::assertDelegatedRefusal($unprovable, static fn (): bool => self::service()->remove($user, $tenant, $admin));
+        self::assertDelegatedRefusal($unprovable, static fn (): bool => self::service()->remove($user, actor: $admin));
+        self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->removeAll($user, $admin));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): GrantOutcome => self::service()->set($user, $other, actor: $nobody));
+        self::assertDelegatedRefusal(DecisionReason::TENANT_SCOPE, static fn (): bool => self::service()->remove($user, $tenant, $nobody));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): bool => self::service()->remove($user, actor: $nobody));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->removeAll($platform, $nobody));
+        self::assertSame([PackagePermissions::BOUNDARY_REMOVE], self::actionsDecided());
+    }
+
+    /**
+     * A delegated removal of a boundary the grantee does not have is still
+     * decided on its action, so an actor without it is refused whether or not
+     * there is a boundary to remove, and one with it removes nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedRemovalOfNothingIsStillDecided(): void
+    {
+        $actor  = self::administrator([PackagePermissions::BOUNDARY_REMOVE]);
+        $nobody = self::administrator([], 'nobody');
+        $user   = StubIdentity::create(['id' => 'user-1']);
+
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): bool => self::service()->remove($user, actor: $nobody));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->removeAll($user, $nobody));
+
+        self::fakePackageEvents();
+
+        self::assertFalse(self::service()->remove($user, actor: $actor));
+        self::assertSame(0, self::service()->removeAll($user, $actor));
+        self::assertSame([PackagePermissions::BOUNDARY_REMOVE, PackagePermissions::BOUNDARY_REMOVE], self::actionsDecided());
+        self::assertSame([], self::changesDispatched());
+    }
+
+    /**
+     * The delegated removal of a boundary whose policy can no longer be read is
+     * refused before anything is decided or removed, since what it removes
+     * cannot be named.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedRemovalOfABoundaryWhosePolicyIsGoneIsRefused(): void
+    {
+        $actor = self::administrator();
+        $user  = StubIdentity::create(['id' => 'user-1']);
+
+        self::service()->set($user, self::cap('cap'));
+
+        config()->set('authorization.models.policy', VanishedPolicy::class);
+
+        foreach ([static fn (): bool => self::service()->remove($user, actor: $actor), static fn (): int => self::service()->removeAll($user, $actor)] as $call) {
+            self::assertInstanceOf(InvalidGrantTargetException::class, self::refusalOf($call));
+            self::assertSame(1, DB::table('authorizable_boundaries')->count());
+        }
     }
 
     /**
@@ -244,9 +340,8 @@ final class BoundaryServiceTest extends TestCase
 
     /**
      * Removing all of a grantee's boundaries removes each, in every scope, in
-     * one operation for the actor named, dispatching a `BoundaryRemoved` for
-     * each and returning how many there were; a grantee with none removes
-     * nothing.
+     * one trusted operation, dispatching a `BoundaryRemoved` for each and
+     * returning how many there were; a grantee with none removes nothing.
      *
      * @return void
      *
@@ -263,7 +358,7 @@ final class BoundaryServiceTest extends TestCase
 
         Event::fake([BoundaryRemoved::class]);
 
-        self::assertSame(2, self::service()->removeAll(Reference::of($user), new Reference('admin', '1')));
+        self::assertSame(2, self::service()->removeAll(Reference::of($user)));
 
         $events = self::dispatchedEvents(BoundaryRemoved::class);
         $names  = \array_map(static fn (BoundaryRemoved $event): string => $event->name, $events);
@@ -272,7 +367,8 @@ final class BoundaryServiceTest extends TestCase
 
         self::assertSame(['platform', 'tenant'], $names);
         self::assertSame($events[0]->operation->id, $events[1]->operation->id);
-        self::assertSame('admin', $events[0]->operation->actor?->type);
+        self::assertTrue($events[0]->operation->isTrusted);
+        self::assertSame([PackagePermissions::BOUNDARY_REMOVE], $events[0]->operation->actions);
         self::assertSame(['user-2'], DB::table('authorizable_boundaries')->pluck('authorizable_id')->all());
         self::assertSame(0, self::service()->removeAll($user));
         self::assertCount(2, self::dispatchedEvents(BoundaryRemoved::class));
