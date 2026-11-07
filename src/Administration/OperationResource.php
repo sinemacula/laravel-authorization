@@ -58,6 +58,12 @@ final readonly class OperationResource implements AuthorizableResource
     /** @var string The id of an operation resource no service runs, such as one a screen builds. */
     public const string PROPOSED = 'proposed';
 
+    /** @var \SineMacula\Laravel\Authorization\Administration\OperationChange|null The grant or removal the change makes, as values; null for a change to a definition. */
+    public ?OperationChange $change;
+
+    /** @var \SineMacula\Laravel\Authorization\Administration\DefinitionChange|null The change to a definition the change makes, as values; null for a grant or a removal. */
+    public ?DefinitionChange $definition;
+
     /**
      * Create a new operation resource.
      *
@@ -65,7 +71,7 @@ final readonly class OperationResource implements AuthorizableResource
      * @param  bool  $isNarrowing
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  array<string, mixed>  $attributes
-     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange|null  $change
+     * @param  \SineMacula\Laravel\Authorization\Administration\DefinitionChange|\SineMacula\Laravel\Authorization\Administration\OperationChange|null  $change
      * @param  string  $id
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $impersonator
      */
@@ -83,15 +89,19 @@ final readonly class OperationResource implements AuthorizableResource
         /** What the change names, as policies read it under `resource`. */
         private array $attributes,
 
-        /** The grant or removal the change makes, as values; null for a change to a definition. */
-        public ?OperationChange $change = null,
+        // The grant or removal the change makes, or the change to a definition,
+        // as values.
+        DefinitionChange|OperationChange|null $change = null,
 
         /** The id of the operation that makes the change, or `proposed`. */
         public string $id = self::PROPOSED,
 
         /** Who is impersonating the actor making the change, or null when no one is. */
         public ?Reference $impersonator = null,
-    ) {}
+    ) {
+        $this->change     = $change instanceof OperationChange ? $change : null;
+        $this->definition = $change instanceof DefinitionChange ? $change : null;
+    }
 
     /**
      * Return the operation resource of a grant, an attachment or a boundary
@@ -160,17 +170,21 @@ final readonly class OperationResource implements AuthorizableResource
     /**
      * Return the operation resource of a change to a definition: creating,
      * renaming, updating, re-parenting or deleting a role, permission or
-     * policy, with the proposed change, each value a scalar or null. It is
-     * decided in the tenant that owns the record, and never only narrows.
+     * policy, with the proposed change, each value a scalar or null, and, for a
+     * policy given a new document, that document as it would be stored. It is
+     * decided in the tenant that owns the record, as read before the change,
+     * and is weighed by what it changes (see `DefinitionConstraints`), so it is
+     * never marked as only narrowing.
      *
      * @param  string  $action
      * @param  \Illuminate\Database\Eloquent\Model  $record
      * @param  array<string, bool|float|int|string|null>  $change
+     * @param  array<string, mixed>|null  $document
      * @return self
      */
-    public static function definition(string $action, Model $record, array $change = []): self
+    public static function definition(string $action, Model $record, array $change = [], ?array $document = null): self
     {
-        return new self($action, false, Reference::tenantOf($record), [...self::targetAttributes($record), 'change' => $change]);
+        return new self($action, false, Reference::tenantOf($record), [...self::targetAttributes($record), 'change' => $change], new DefinitionChange($record, $change, $document));
     }
 
     /**
@@ -183,24 +197,51 @@ final readonly class OperationResource implements AuthorizableResource
      */
     public function actedBy(?Reference $impersonator, ?string $id = null): self
     {
-        return new self($this->action, $this->isNarrowing, $this->tenant, $this->attributes, $this->change, $id ?? $this->id, $impersonator);
+        return new self($this->action, $this->isNarrowing, $this->tenant, $this->attributes, $this->change ?? $this->definition, $id ?? $this->id, $impersonator);
     }
 
     /**
-     * Return the descriptor of the delegation this grant proposes, as the
-     * explicit grantable right is decided on (N77): the same operation, named
-     * by the same attributes, the permission, the grantee and the reach
-     * included, under `authorization:permission.grantable`. The administration
-     * stage never weighs a descriptor, so a screen asking about it gets the
-     * decision the stage asks for.
+     * Return the descriptor of the delegation of a permission this change
+     * proposes, as the explicit grantable right is decided on (N77): the same
+     * operation, named by the same attributes, the grantee and the reach
+     * included, under `authorization:permission.grantable`, naming the
+     * permission given, such as one a granted role carries, or the change's
+     * own. The administration stage never weighs a descriptor, so a screen
+     * asking about it gets the decision the stage asks for.
      *
+     * @param  \Illuminate\Database\Eloquent\Model|null  $permission
      * @return self
      */
-    public function grantable(): self
+    public function grantable(?Model $permission = null): self
     {
-        $attributes = [...$this->attributes, 'unchanged' => null];
+        return $this->descriptor(PackagePermissions::PERMISSION_GRANTABLE, $permission === null ? [] : self::targetAttributes($permission));
+    }
 
-        return new self(PackagePermissions::PERMISSION_GRANTABLE, false, $this->tenant, $attributes, $this->change, $this->id, $this->impersonator);
+    /**
+     * Return the descriptor of the delegation of a policy this change proposes,
+     * as `authorization:policy.grantable` is decided on (N77): the same
+     * operation, naming the policy and the digest of its document (see
+     * `DocumentDigest`), so a right a policy allows for one document, by a
+     * condition on `resource.digest`, never covers the policy rewritten.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  string  $digest
+     * @return self
+     */
+    public function policyGrantable(Policy $policy, string $digest): self
+    {
+        return $this->descriptor(PackagePermissions::POLICY_GRANTABLE, [...self::targetAttributes($policy), 'digest' => $digest]);
+    }
+
+    /**
+     * Determine whether this is the descriptor of a delegation a grantable
+     * right is decided on, which the administration stage never weighs.
+     *
+     * @return bool
+     */
+    public function isDescriptor(): bool
+    {
+        return \in_array($this->action, [PackagePermissions::PERMISSION_GRANTABLE, PackagePermissions::POLICY_GRANTABLE], true);
     }
 
     /**
@@ -246,6 +287,21 @@ final readonly class OperationResource implements AuthorizableResource
     public function toResourceReference(): ResourceReference
     {
         return new ResourceReference(self::TYPE . ':' . $this->id, self::TYPE, $this->id, $this->tenant, null, $this);
+    }
+
+    /**
+     * Return the descriptor of the delegation under the grantable right, the
+     * same operation with the attributes given in place of its own.
+     *
+     * @param  string  $right
+     * @param  array<string, mixed>  $attributes
+     * @return self
+     */
+    private function descriptor(string $right, array $attributes): self
+    {
+        $named = [...$this->attributes, ...$attributes, 'unchanged' => null];
+
+        return new self($right, false, $this->tenant, $named, $this->change ?? $this->definition, $this->id, $this->impersonator);
     }
 
     /**

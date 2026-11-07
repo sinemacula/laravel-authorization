@@ -27,6 +27,9 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * - `application`: the application a grant holds in, missing for every one;
  * - `subtree`: whether a grant reaches the tenants below its tenant;
  * - `expires_at`: when a grant expires, missing for one that never does;
+ * - `digest`: the digest of the document of the policy a descriptor of
+ *   `authorization:policy.grantable` names (see `DocumentDigest`), so a right
+ *   can be bound to one document;
  * - `change.name`, `change.description`, `change.rank`, `change.parent`,
  *   `change.guard`, `change.category`, `change.digest`, `change.owner_type`,
  *   `change.owner_id`: the proposed change to a definition, a policy document
@@ -67,6 +70,7 @@ final readonly class OperationAttributes implements ResourceAttributeProvider
             'application'        => ContextKeyType::STRING,
             'subtree'            => ContextKeyType::BOOL,
             'expires_at'         => ContextKeyType::TIME,
+            'digest'             => ContextKeyType::STRING,
             'change.name'        => ContextKeyType::STRING,
             'change.description' => ContextKeyType::STRING,
             'change.rank'        => ContextKeyType::NUMBER,

@@ -36,6 +36,13 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * chain of roles that cannot be read whole, is taken to deny, so its removal is
  * never judged narrowing.
  *
+ * Setting a permission boundary narrows when the grantee has no boundary in the
+ * same scope, since it only adds a cap, or when it replaces one there with a
+ * boundary that reaches no fewer tenants and caps no less: the same policy, or
+ * one whose document can only narrow the old one's (see `DocumentComparison`).
+ * Anything else, a wider document, a narrower reach or a document that cannot
+ * be read, may widen.
+ *
  * A grant to an identity or a principal of what it holds live in the same scope
  * (tenant and application) only shortens or narrows that grant when it lasts no
  * longer and reaches no further: it takes part of the grant away, so it narrows
@@ -74,7 +81,8 @@ final class Narrowing
      * narrow a role, permission or policy the grantee, an identity or a
      * principal, holds live in the change's scope: it lasts no longer and
      * reaches no further than the grant held, and revoking that grant would
-     * only narrow. The grant held is read on the write connection.
+     * only narrow; or, for a boundary, whether it only adds or tightens the
+     * grantee's cap in the scope. What is held is read on the write connection.
      *
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
@@ -82,6 +90,10 @@ final class Narrowing
      */
     public static function isShortening(string $action, OperationChange $change): bool
     {
+        if ($action === PackagePermissions::BOUNDARY_SET) {
+            return $change->target instanceof Policy && self::isTightening($change, $change->target);
+        }
+
         $kind = self::kindGranting($action);
 
         if ($kind === null || $change->target === null || OperationGrantee::isRole($change->grantee)) {
@@ -103,6 +115,71 @@ final class Narrowing
     public static function isAllowOnly(Policy $policy): bool
     {
         return self::hasNoDeny(InlinePolicies::stored($policy->getKey()));
+    }
+
+    /**
+     * Determine whether setting the policy as the grantee's boundary in the
+     * change's scope only adds or tightens its cap there: it has none there, or
+     * the one it has reaches no further below, and is the same policy or one
+     * the new policy's document can only narrow.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @return bool
+     */
+    private static function isTightening(OperationChange $change, Policy $policy): bool
+    {
+        $held = self::boundaryOf($change);
+
+        if ($held === null) {
+            return true;
+        }
+
+        [$key, $reachesBelow] = $held;
+
+        $reaches = $change->scope->includeSubtree || !$reachesBelow;
+
+        return $reaches && ($key === GrantChanges::key($policy) || self::isNarrowerDocument($key, $policy));
+    }
+
+    /**
+     * Return the key of the policy the grantee's boundary in the change's scope
+     * is and whether it reaches the tenants below, read on the write
+     * connection, or null when it has none there.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
+     * @return array{string, bool}|null
+     */
+    private static function boundaryOf(OperationChange $change): ?array
+    {
+        /** @var string $table */
+        $table  = config('authorization.tables.authorizable_boundaries', 'authorizable_boundaries');
+        $tenant = $change->scope->tenant;
+        $query  = AuthorizationConnection::connection()->table($table)->useWritePdo()
+            ->where('authorizable_type', $change->grantee->type)
+            ->where('authorizable_id', $change->grantee->id);
+
+        $tenant === null ? $query->whereNull('tenant_type')->whereNull('tenant_id') : $query->where('tenant_type', $tenant->type)->where('tenant_id', $tenant->id);
+
+        $row = $query->first(['policy_id', 'include_subtree']);
+
+        /** @var array{policy_id: int|string, include_subtree: bool|int|string}|null $columns */
+        $columns = $row === null ? null : (array) $row;
+
+        return $columns === null ? null : [(string) $columns['policy_id'], (bool) $columns['include_subtree']];
+    }
+
+    /**
+     * Determine whether the policy's document can only narrow the document of
+     * the stored policy with the key.
+     *
+     * @param  string  $key
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @return bool
+     */
+    private static function isNarrowerDocument(string $key, Policy $policy): bool
+    {
+        return DocumentComparison::isNarrower(DocumentComparison::read(InlinePolicies::stored($key)?->document), DocumentComparison::read($policy->document));
     }
 
     /**
@@ -172,7 +249,7 @@ final class Narrowing
      */
     private static function doesRoleDeny(Role $role): bool
     {
-        $chain = self::chainOf($role->id, RoleGraph::reach([$role->id]));
+        $chain = RoleAuthority::chainOf($role->id, RoleGraph::reach([$role->id]));
 
         if ($chain === null) {
             return true;
@@ -196,31 +273,5 @@ final class Narrowing
         }
 
         return false;
-    }
-
-    /**
-     * Return the keys of the role and of each role above it, walking the links
-     * from the role up to the root, or null when the walk reaches a role the
-     * links do not hold, or one it has passed already.
-     *
-     * @param  string  $key
-     * @param  array<string, string|null>  $links
-     * @return list<string>|null
-     */
-    private static function chainOf(string $key, array $links): ?array
-    {
-        $chain   = [];
-        $current = $key;
-
-        while ($current !== null) {
-            if (!\array_key_exists($current, $links) || \in_array($current, $chain, true)) {
-                return null;
-            }
-
-            $chain[] = $current;
-            $current = $links[$current];
-        }
-
-        return $chain;
     }
 }

@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -285,11 +286,52 @@ final class NarrowingTest extends TestCase
         self::assertFalse(Narrowing::isShortening($grant, $change($read, new GrantScope($tenant, 'admin'))));
         self::assertFalse(Narrowing::isShortening($grant, $change($read, GrantScope::platform())));
         self::assertFalse(Narrowing::isShortening(PackagePermissions::ROLE_GRANT, $change($denying)));
-        self::assertFalse(Narrowing::isShortening(PackagePermissions::BOUNDARY_SET, $change(self::policy('cap', 'allow'))));
 
         Carbon::setTestNow(Carbon::now()->addDays(4));
 
         self::assertFalse(Narrowing::isShortening($grant, $change($edit, new GrantScope($tenant, null, false), Carbon::now()->addDay())));
+    }
+
+    /**
+     * Setting a boundary narrows where the grantee has none in the scope, or
+     * where it replaces one there with the same policy or one that can only
+     * narrow it, reaching no fewer tenants; a wider document, a narrower reach,
+     * or a boundary in another scope left alone, may widen.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABoundaryTightensOnlyWhereItCapsNoLess(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $grantee = Reference::of($user);
+        $tenant  = new Reference('tenant', 'a');
+        $read    = ['effect' => 'allow', 'actions' => ['posts:read']];
+        $wide    = Policy::create(['name' => 'wide', 'document' => ['statements' => [$read, ['effect' => 'allow', 'actions' => ['posts:edit']]]]]);
+        $narrow  = Policy::create(['name' => 'narrow', 'document' => ['statements' => [$read]]]);
+        $other   = Policy::create(['name' => 'other', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:*']]]]]);
+        $set     = static fn (Policy $policy, ?GrantScope $scope = null): bool => Narrowing::isShortening(
+            PackagePermissions::BOUNDARY_SET,
+            self::change($grantee, $policy, $scope ?? new GrantScope($tenant), null),
+        );
+
+        self::assertTrue($set($other));
+
+        BoundaryService::instance()?->set($user, $wide, $tenant);
+
+        self::assertTrue($set($wide));
+        self::assertTrue($set($narrow));
+        self::assertFalse($set($other));
+        self::assertFalse($set($narrow, new GrantScope($tenant, null, false)));
+        self::assertTrue($set($other, GrantScope::platform()));
+        self::assertFalse(Narrowing::isShortening(PackagePermissions::BOUNDARY_SET, new OperationChange($grantee, null, new GrantScope($tenant))));
+
+        BoundaryService::instance()?->set($user, $narrow, $tenant, false);
+
+        self::assertTrue($set($narrow, new GrantScope($tenant, null, false)));
+        self::assertTrue($set($narrow));
+        self::assertFalse($set($wide));
     }
 
     /**

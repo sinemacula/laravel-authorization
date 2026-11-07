@@ -24,8 +24,9 @@ use SineMacula\Laravel\Authorization\Support\PolicyDocument;
  * context, or trusted with none: every event the write dispatches carries the
  * operation, once the write commits. With an acting context, the change is
  * decided, as the definition's operation resource under the action, inside the
- * transaction once the row is looked up and before it is written, and a refusal
- * throws with nothing written.
+ * transaction once the row is looked up and before it is written, with the
+ * document a policy is given as it would be stored, so the change can be
+ * compared with the stored one, and a refusal throws with nothing written.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,7 +66,9 @@ final class RecordWriter
         return OperationScope::run(Operation::begin($actor, [$action]), static function (Operation $operation) use ($actor, $action, $model, $attributes): Model {
             $record = $model();
 
-            $actor?->authorizeIn($operation, OperationResource::definition($action, $record, self::changeOf($attributes)));
+            $document = self::documentOf($record, $attributes);
+
+            $actor?->authorizeIn($operation, OperationResource::definition($action, $record, self::changeOf($attributes, $document), $document));
 
             $record->forceFill($attributes)->save();
 
@@ -140,12 +143,15 @@ final class RecordWriter
     /**
      * Return the proposed change the attributes make, as the operation resource
      * offers it: each scalar or null attribute under its name, and a policy
-     * document by its digest alone, none for one that cannot be read.
+     * document by the digest of the document as it would be stored, the one the
+     * policy events report and a grantable right names, none for one that
+     * cannot be read.
      *
      * @param  array<string, mixed>  $attributes
+     * @param  array<string, mixed>|null  $document
      * @return array<string, bool|float|int|string|null>
      */
-    private static function changeOf(array $attributes): array
+    private static function changeOf(array $attributes, ?array $document = null): array
     {
         $change = [];
 
@@ -160,24 +166,47 @@ final class RecordWriter
         }
 
         if (\array_key_exists('document', $attributes)) {
-            $change['digest'] = self::digestOf($attributes['document']);
+            $change['digest'] = self::digestOf($document);
         }
 
         return $change;
     }
 
     /**
-     * Return the digest of a proposed policy document, or null for one that
-     * cannot be read, which the save then refuses as it refuses any.
+     * Return the document the attributes give a policy, as it would be stored,
+     * named as the policy is, or null when they give none, or one that cannot
+     * be read, which the save then refuses as it refuses any.
      *
-     * @param  mixed  $document
+     * @param  \Illuminate\Database\Eloquent\Model  $record
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>|null
+     */
+    private static function documentOf(Model $record, array $attributes): ?array
+    {
+        if (!\array_key_exists('document', $attributes)) {
+            return null;
+        }
+
+        try {
+            return PolicyDocument::named(PolicyDocument::decode($attributes['document'], ''), $attributes['name'] ?? $record->getAttribute('name'));
+        } catch (InvalidPolicyDocumentException) {
+            return null;
+        }
+    }
+
+    /**
+     * Return the digest of a proposed policy document, as it would be stored,
+     * or null for one that cannot be read, which the save then refuses as it
+     * refuses any.
+     *
+     * @param  array<string, mixed>|null  $document
      * @return string|null
      */
-    private static function digestOf(mixed $document): ?string
+    private static function digestOf(?array $document): ?string
     {
         try {
-            return DocumentDigest::of(PolicyDocument::decode($document, ''))->digest;
-        } catch (InvalidPolicyDocumentException|\JsonException) {
+            return $document === null ? null : DocumentDigest::of($document)->digest;
+        } catch (\JsonException) {
             return null;
         }
     }

@@ -363,9 +363,9 @@ refuses never reads the permissions, since the session stage runs before the all
       and only once the allow stage allowed. It weighs the operation's constraints and can only refuse, never allow: the
       first that fails denies with its `administration.*` reason (`administration.impersonating`, then, for a change to
       a subject, `administration.scope`, `administration.rank_uncomparable`, `administration.rank`,
-      `administration.self`, and `administration.not_grantable` or `administration.unprovable`; `administration.owner`
-      is reserved for definitions, in a later part) and adds a `refused` step naming it; when every one holds, it adds
-      one `satisfied` step and the allow stands. A further check a constraint needs, such as
+      `administration.self`, and `administration.not_grantable` or `administration.unprovable`, and, for a change to a
+      definition, `administration.owner` and the impact check's reasons) and adds a `refused` step naming it; when
+      every one holds, it adds one `satisfied` step and the allow stands. A further check a constraint needs, such as
       `authorization:administration.impersonated`, is decided as the subject through every stage up to the allow, in the
       scope in place, never through the administration stage again. A check of an administration action with no
       operation resource, or with another action's, passes the stage untouched and records nothing.

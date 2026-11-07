@@ -30,12 +30,15 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  * `check()`, on the definition's operation resource, under
  * `authorization:permission.create`, `.rename`, `.update` or `.delete`, inside
  * its transaction before anything is written, and refused with the decision's
- * `AuthorizationException` when it is not allowed. Every change to a definition
- * waits for the owner and impact rules of the later parts of BL-65, so each is
- * refused as `administration.unprovable` once the action is allowed. A read is
- * not decided yet. Every event a write dispatches carries the operation, with
- * the actor, its mode and the action, once the write commits; the actor is
- * never read from the authenticated user.
+ * `AuthorizationException` when it is not allowed. A change is made only from
+ * the tenant that owns the permission, a platform permission's from the
+ * platform (`administration.owner`, D20). Creating, describing and deleting a
+ * permission widen no one; renaming one re-grants it to every holder under the
+ * new name, so each holder must be one the actor administers and the actor must
+ * be able to hand out the new name (see `DefinitionConstraints`). A read is not
+ * decided yet. Every event a write dispatches carries the operation, with the
+ * actor, its mode and the action, once the write commits; the actor is never
+ * read from the authenticated user.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

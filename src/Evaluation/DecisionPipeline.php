@@ -17,8 +17,10 @@ use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceScope;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
@@ -146,7 +148,9 @@ final class DecisionPipeline
             return Decision::deny(DecisionReason::RESOURCE_UNRESOLVED, DecisionStage::RESOURCE);
         }
 
-        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource, $context, $attributes);
+        $here   = $resource?->source instanceof OperationResource ? TenantScope::currentTenant() : null;
+        $from   = $here === null ? null : new Reference($here[0], $here[1]);
+        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource, $context, $attributes, $from);
 
         return $resource === null ? $decide() : ResourceScope::decide($subject, $action, $resource, $decide);
     }
@@ -327,17 +331,25 @@ final class DecisionPipeline
      * stage, which can only refuse it (see `OperationConstraints`); a further
      * check they need is decided here, as this one is up to the allow, in the
      * scope in place when they ask, and never through the administration stage
-     * again.
+     * again; the stage also learns the tenant the check was made from, before
+     * the operation's own tenant was put in place.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @param  array<string, mixed>  $context
      * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $from
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes): Decision
-    {
+    private function decideGrants(
+        Subject $subject,
+        string $action,
+        ?ResourceReference $resource,
+        array $context,
+        ?ResourceAttributeBatch $attributes,
+        ?Reference $from = null,
+    ): Decision {
         $decision = $this->decideAlone($subject, $action, $resource, $context, $attributes);
 
         if (!$resource?->source instanceof OperationResource) {
@@ -348,6 +360,7 @@ final class DecisionPipeline
             $subject,
             fn (string $further, ?ResourceReference $on): Decision => $this->decideAlone($subject, $further, $on, $context, $attributes),
             fn (string $further): ?CheckSources => $this->sourcesOrNone($subject, $further, $context),
+            $from,
         );
 
         return OperationConstraints::weigh($decision, $action, $resource, $checks);

@@ -3,9 +3,10 @@
 Granting, revoking and editing roles, permissions and policies are themselves actions this package checks (AUTHZ-11.1).
 This note gives the whole design of delegated administration, built in four parts (N78), and marks what this release
 enforces: the action catalogue, the acting context, the operation resources decided through `check()` and the audit
-correlation (part 1), and the scope, rank, self, expiry and possession rules of direct grants, with atomic
-batches (part 2). Parts 3 and 4 are listed as **Not yet**: until each lands, what it would prove is refused, so
-delegated administration never grants anything it cannot justify.
+correlation (part 1), the scope, rank, self, expiry and possession rules of direct grants, with atomic batches (part 2),
+and role grants, grantable policies, the owner rule on definitions, the impact of a change on every existing holder,
+boundaries and resource-policy attachments (part 3). Part 4 is listed as **Not yet**: until it lands, what it would
+prove is refused, so delegated administration never grants anything it cannot justify.
 
 ## Invariants
 
@@ -16,9 +17,9 @@ delegated administration never grants anything it cannot justify.
    `role.rename`, `role.update`, `role.delete`, `role.parent.set`, `permission.create`, `permission.rename`,
    `permission.update`, `permission.delete`, `policy.create`, `policy.rename`, `policy.update`, `policy.delete`,
    `boundary.set`, `boundary.remove`, `guardrail.manage`, `resource-policy.attach`, `resource-policy.detach`,
-   `role.read`, `permission.read`, `policy.read`, `permission.grantable`, `policy.grantable`, `administration.self` and
-   `administration.impersonated`. The right to manage guardrails was `authorization:guardrails:manage`; it is renamed,
-   with no alias, since the package is unreleased.
+   `role.read`, `permission.read`, `policy.read`, `permission.grantable`, `policy.grantable`, `administration.self`,
+   `administration.impersonated` and `administration.unbounded`. The right to manage guardrails was
+   `authorization:guardrails:manage`; it is renamed, with no alias, since the package is unreleased.
 
 2. **Trusted or delegated, never in between (N75, in this release).** A management service call without an acting
    context is trusted system work: nothing is decided, and its operation is marked trusted with no actor. A call with
@@ -50,7 +51,8 @@ delegated administration never grants anything it cannot justify.
    `authorization:operation` are read for it, under one cache entry every operation shares. Its attributes reach
    policies under `resource` through the package's `Administration\OperationAttributes` provider, which no configured
    provider replaces: the action, whether it only narrows, whether it changes nothing, the target, its name under its
-   kind, the grantee, the application, the reach, the expiry, a definition's proposed change and the impersonator.
+   kind, the grantee, the application, the reach, the expiry, a policy grantable descriptor's digest, a definition's
+   proposed change and the impersonator.
 
 6. **Batches decompose and are atomic (in this release).** A sync, `revokeAll()`, `removeAll()` and `detachAll()` decide
    each change under its own action, all before any is written, so one refusal writes and reports nothing, and no change
@@ -74,10 +76,9 @@ delegated administration never grants anything it cannot justify.
    revoking a role no policy attached to it or its ancestors denies anything in, read across every tenant on the write
    connection, so a screen and the service judge alike and an ancestor the tenant scope hides still counts, detaching a
    policy with no deny statement, and a grant that only shortens or narrows one the grantee holds live in the same scope
-   (`Narrowing::isShortening()`). A chain that cannot be read whole is taken to deny. Every role grant, policy
-   attachment and boundary set, every boundary removal, every detach of a denying policy, every resource-policy
-   attachment, every change to a role's permissions or policies and every change to a definition is unprovable until
-   parts 3 and 4 prove it.
+   (`Narrowing::isShortening()`), and a boundary that only adds or tightens a cap. A chain that cannot be read whole is
+   taken to deny. What the rules of parts 2 and 3 cannot prove, a detach of a denying policy, a lifted deny, a holder
+   set over its limit, a document or chain that cannot be read, is unprovable.
 
 9. **Impersonation (in this release).** A delegated change made while impersonating (`ActingContext::impersonatedBy()`)
    is refused as `administration.impersonating` unless the actor is also allowed
@@ -127,17 +128,48 @@ delegated administration never grants anything it cannot justify.
       until the new expiry; a shortening only narrows;
     - **batches** are decided kind by kind, then by tenant, application and record (`ActingContext::authorizeIn()`), so
       the first refusal never depends on the order rows were read in;
-    - the owner rule (D20, `Administration\OwnerConstraint`) does not apply to grant rows (N79): it is kept for part 3,
-      which applies it to definitions, their membership and attachments.
+    - the owner rule (D20, `Administration\OwnerConstraint`) does not apply to grant rows (N79): part 3 applies it to
+      definitions, their membership and attachments.
 
-12. **Roles, grantable rights and impact (part 3, Not yet).** Granting a role covers its whole transitive authority:
-    direct and inherited permissions and policies. An explicit `policy.grantable` decision can allow an exact delegation
-    of a policy the actor does not itself hold (N77), as `permission.grantable` already does for a direct permission. A
-    policy right is bound to the policy's digest, so a rewrite needs a new one. A change to a role's content or parent,
-    a permission rename, a policy rewrite and a boundary or resource policy change are re-checked against every holder
-    they reach, as a new distribution of authority. Definitions (roles, permissions, policies, their membership and
-    attachments) are edited only from their owner's tenant (D20, `Administration\OwnerConstraint`); grant rows never
-    are (N79).
+12. **Roles, grantable rights, definitions and impact (part 3, in this release).** Every widening change distributes
+    authority, so it passes only when the actor may hand out everything it adds and it reaches only holders the actor
+    administers. Each rule runs in the same administration stage (`Administration\OperationConstraints`, and
+    `Administration\DefinitionConstraints` for anything but a change to a subject):
+    - **role grants**: a role's whole active authority, the permissions it and its ancestors carry live and the
+      policies attached to them (`Administration\RoleAuthority`, read in a fixed number of queries outside every tenant
+      scope), each passing its route across the grant's reach and lifetime; a role's denies never justify its allows,
+      and its rank counts as the grantee's;
+    - **the policy route** (`Administration\PolicyRoute`): containment, every allow naming its actions alone, no
+      resource pattern, condition or principal (a resource policy's principals are weighed by the impact check), each
+      action passing the permission route; or `authorization:policy.grantable` on the descriptor
+      `OperationResource::policyGrantable()` builds, naming the policy and its document's digest (`DocumentDigest`)
+      under `resource.digest`, so a right bound to one digest never covers a rewritten document;
+    - **the owner rule** (D20): a change to a definition, or to a role's permissions, policies or parent, is made from
+      the tenant that owns it, a platform definition's from the platform (`FurtherChecks::$from`, the tenant the check
+      is made from), or it is `administration.owner`, narrowing or not;
+    - **definitions**: creating passes, a created role junior to the actor; renaming a role or a permission (or changing
+      a permission's name or guard) is a new grant to every holder, under the new name; a rank made more senior is
+      weighed against the role's holders; deleting narrows by `Narrowing`'s rules;
+    - **membership and hierarchy**: adding a permission or a policy to a role, and setting or replacing its parent, hand
+      what is added to every holder of the role and of the roles below it (`Administration\RoleParent` for a parent);
+      clearing or replacing a parent whose chain carries a deny is unprovable;
+    - **policy documents** (`Administration\PolicyRewrite`): compared with the stored document statement by statement
+      (`Administration\DocumentComparison`), a rewrite that only removes allows or adds denies narrows; one that lifts a
+      deny is unprovable; one that adds allows needs the impact check, the policy route for what it adds and, for a
+      boundary policy, `authorization:administration.unbounded`;
+    - **the impact check** (`Administration\Impact`, `Administration\AffectedHolders`): every holder a change reaches,
+      read set by set (direct grantees, grantees of the roles below, subjects a policy is attached to or bounds,
+      principals a resource policy names), is weighed at once, at a fixed cost: the action across the definition's whole
+      reach, the actor strictly senior to every holder but itself (`RankComparison::rankAcrossAll()`), and
+      `administration.self` for a change reaching the actor; more than `authorization.administration.max_impact` holders
+      (1000 by default, validated at boot) is unprovable, never approximated;
+    - **boundaries**: a boundary that only adds or tightens a cap narrows; replacing one with a wider boundary, and
+      removing one, cannot in general be bounded, so the package takes one fail-closed rule: each is unprovable unless
+      the actor is also allowed `authorization:administration.unbounded` on the same operation, after the scope, rank
+      and self rules;
+    - **resource-policy attachments**: every principal the allows name, and every holder of a role a selector names, on
+      one record or the whole type, is weighed by the impact check across the attachment's reach, with the policy
+      route.
 
 13. **Guardrails and concurrency (part 4, Not yet).** Guardrail changes join the operation-resource path. Every
     authorization dependency of a change is locked or version-checked, so a concurrent revocation, role growth, policy
@@ -163,8 +195,7 @@ delegated administration never grants anything it cannot justify.
   a step-up) with the decision, after `AuthorizationFailed` is dispatched; the transaction rolls back, nothing is
   written and no change event is dispatched. The client sees the one `denied` line.
 - **Allowed but refused by a constraint.** The administration stage refuses with the constraint's reason, with a trace
-  step naming it; in this release every widening change but a direct grant of a permission is
-  `administration.unprovable`.
+  step naming it; a widening change no rule of this release proves is `administration.unprovable`.
 - **Rolled-back audit.** A denial is reported synchronously inside a transaction that rolls back, so an audit store that
   persists it must write on a connection with no part in that transaction: directly on a database connection of its own,
   or through a queue whose backend shares nothing with it (a non-database driver, or the `database` driver on a
@@ -174,8 +205,8 @@ delegated administration never grants anything it cannot justify.
   whether to show the administration area at all, decides the action alone; the administration stage never runs, and the
   service's own decision is still made on the operation.
 - **Console.** `authorization:grant` and `authorization:revoke` with `--actor` make the change as that actor, delegated,
-  with no session, so a role grant is refused as `administration.unprovable` in this release; without it they are
-  trusted.
+  with no session, so a role grant passes only when the actor outranks the identity and may hand out everything the
+  role carries; without it they are trusted.
   `authorization:sync`'s `--actor` is recorded on its trusted operation alone.
 - **Attribute keys.** An application attribute provider declaring one of the operation resource's keys must declare it
   with the same type, or the context key catalogue refuses it.
@@ -197,7 +228,13 @@ delegated administration never grants anything it cannot justify.
 - `Administration\Narrowing` -- which removals, and which grants, only narrow; `Services\Support\GrantTable::liveRow()`
   -- the grant held live that a shortening is judged against.
 - `Administration\RankComparison` -- the rank comparison, behind `HasRoles::canActOn()`.
-- `Administration\OwnerConstraint` -- only the owner edits, for part 3's definition edits.
+- `Administration\OwnerConstraint` -- only the owner edits, applied to definitions by
+  `Administration\DefinitionConstraints`, with `Administration\DefinitionChange`, the change to a definition as values.
+- `Administration\RoleAuthority`, `Administration\PolicyRoute`, `Administration\RoleParent`,
+  `Administration\PolicyRewrite`, `Administration\DocumentComparison` -- role grants, the policy route, parents, policy
+  rewrites and the comparison of documents.
+- `Administration\Impact`, `Administration\AffectedHolders`, `Config\AdministrationConfigValidator` -- the impact
+  check, the holders it reads and its limit.
 - `Administration\Possession`, `Administration\HeldLifetime`, `Administration\PossessionLimits` -- the possession and
   grantable routes of a direct permission grant; `Administration\GrantReach` -- the tenants a grant reaches, read once
   and put into each query.
@@ -221,6 +258,14 @@ delegated administration never grants anything it cannot justify.
   held before them, and a screen and the service agreeing over random grants.
 - `DelegatedGrantQueryBudgetTest` -- a delegated grant and a sync's additions read as much with unrelated resource
   policies and guardrails as without.
+- `DelegatedDefinitionsTest` -- part 3 end to end: role grants over the whole chain, `policy.grantable` bound to the
+  digest, the owner rule, a role created senior, renames, role membership against senior, out-of-scope and self
+  holders, parents, policy rewrites, the impact limit, boundaries and resource-policy attachments, a screen and the
+  service agreeing throughout.
+- `AdministrationImpactQueryBudgetTest` -- the impact check reads as much for thirty holders as for three.
+- `DefinitionConstraintsTest`, `DefinitionChangeTest`, `RoleAuthorityTest`, `PolicyRouteTest`, `PolicyRewriteTest`,
+  `RoleParentTest`, `DocumentComparisonTest`, `ImpactTest`, `AffectedHoldersTest`,
+  `AdministrationConfigValidatorTest` -- each rule of part 3.
 - `OperationResourceTest`, `OperationChangeTest`, `OperationGranteeTest`, `OperationAttributesTest`,
   `OperationConstraintsTest`, `FurtherChecksTest`, `NarrowingTest`, `RankComparisonTest`, `OwnerConstraintTest`,
   `PossessionTest`, `HeldLifetimeTest`, `PossessionLimitsTest`, `GrantReachTest` -- the operation resource, its change,
@@ -240,8 +285,9 @@ delegated administration never grants anything it cannot justify.
 - Part 2 (in this release) replaced the `administration.unprovable` refusal of direct permission grants with the scope,
   rank, self, expiry and possession rules, wiring `RankComparison` into every change to a subject; who changes a grant
   row is the administered scope (N79), never the owner rule.
-- Part 3 does the same for roles, definition edits and impact, applies `OwnerConstraint` to definitions, role membership
-  and policies, and decides `policy.grantable`.
+- Part 3 (in this release) did the same for roles, definition edits, boundaries, resource policies and impact, applying
+  `OwnerConstraint` to definitions, role membership and policies, and deciding `policy.grantable` and
+  `administration.unbounded`.
 - Part 4 moves guardrail changes onto the operation-resource path and adds the concurrency protocol.
 - Adding an administration action, or an attribute of the operation resource, changes `PackagePermissions` or
   `OperationAttributes` and their tests, and the README's tables.

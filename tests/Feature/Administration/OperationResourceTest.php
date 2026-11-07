@@ -296,6 +296,67 @@ final class OperationResourceTest extends TestCase
     }
 
     /**
+     * A definition holds the change it proposes as values: the record as read
+     * before the change, the values and the document given, kept when acted on
+     * and in its descriptors; a grant holds none.
+     *
+     * @return void
+     */
+    public function testADefinitionHoldsItsChangeAsValues(): void
+    {
+        $policy     = Policy::create(['name' => 'readers', 'document' => ['statements' => []]]);
+        $document   = ['name' => 'readers', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]];
+        $rewrite    = OperationResource::definition(PackagePermissions::POLICY_UPDATE, $policy, ['digest' => 'abc'], $document);
+        $definition = $rewrite->definition;
+
+        self::assertNotNull($definition);
+        self::assertSame($policy, $definition->record);
+        self::assertSame(['digest' => 'abc'], $definition->values);
+        self::assertSame($document, $definition->document);
+        self::assertNull($rewrite->change);
+        self::assertSame($definition, $rewrite->actedBy(null, 'operation-1')->definition);
+        self::assertSame($definition, $rewrite->grantable()->definition);
+        self::assertSame($definition, $rewrite->policyGrantable($policy, 'abc')->definition);
+        self::assertNull(OperationResource::definition(PackagePermissions::POLICY_RENAME, $policy)->definition?->document);
+        self::assertNull(OperationResource::grant(PackagePermissions::POLICY_ATTACH, new Reference('user', '1'), $policy, GrantScope::platform())->definition);
+    }
+
+    /**
+     * A descriptor names what is handed out: a permission grantable descriptor
+     * the permission given in place of the change's target, and a policy
+     * grantable one the policy and its digest; each is a descriptor, which no
+     * other operation is.
+     *
+     * @return void
+     */
+    public function testADescriptorNamesWhatIsHandedOut(): void
+    {
+        $role   = Role::create(['name' => 'editor']);
+        $edit   = Permission::create(['name' => 'posts:edit']);
+        $policy = Policy::create(['name' => 'readers', 'document' => ['statements' => []]]);
+        $grant  = OperationResource::grant(PackagePermissions::ROLE_GRANT, new Reference('user', '1'), $role, GrantScope::platform())->actedBy(null, 'operation-1');
+
+        $permission = $grant->grantable($edit);
+        $named      = $permission->attributes();
+
+        self::assertSame(PackagePermissions::PERMISSION_GRANTABLE, $permission->action);
+        self::assertSame(['posts:edit', 'editor', $edit->getMorphClass(), $edit->id], [$named['permission'], $named['role'], $named['target_type'], $named['target_id']]);
+        self::assertSame('operation-1', $permission->id);
+        self::assertSame($grant->change, $permission->change);
+
+        $approved   = $grant->policyGrantable($policy, 'abc');
+        $attributes = $approved->attributes();
+
+        self::assertSame(PackagePermissions::POLICY_GRANTABLE, $approved->action);
+        self::assertFalse($approved->isNarrowing);
+        self::assertSame(['readers', 'abc', $policy->id], [$attributes['policy'], $attributes['digest'], $attributes['target_id']]);
+        self::assertTrue($permission->isDescriptor());
+        self::assertTrue($approved->isDescriptor());
+        self::assertFalse($grant->isDescriptor());
+        self::assertFalse(OperationResource::definition(PackagePermissions::POLICY_UPDATE, $policy)->isDescriptor());
+    }
+
+    /**
      * Its reference is a record of the operation type, keyed by the operation's
      * id, in the intended tenant, handing the resource on as its source, as
      * `check()` resolves it.

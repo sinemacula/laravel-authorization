@@ -7,6 +7,7 @@ namespace Tests\Feature\Administration;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\RankComparison;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -371,6 +372,65 @@ final class RankComparisonTest extends TestCase
         $grants?->grantRole($target, $owned, tenant: $tenant);
 
         self::assertSame(1, RankComparison::rankAcross($target, new GrantScope($tenant, 'admin')));
+    }
+
+    /**
+     * Across a reach, the most senior rank any of several holders holds counts,
+     * read in one query whatever their types; none for no holders, or holders
+     * with no ranked role there.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheHoldersRankIsReadAcrossTheReachInOneQuery(): void
+    {
+        $tenant = new Reference('tenant', 'a');
+        $junior = self::holding('junior', 7);
+        $senior = self::holding('senior', null);
+
+        GrantService::instance()?->grantRole($senior, Role::create(['name' => 'local', 'rank' => 2]), tenant: $tenant);
+        GrantService::instance()?->grantRole(new Reference('stub-other', 'other'), Role::create(['name' => 'other', 'rank' => 1]));
+
+        $holders = [Reference::of($junior), Reference::of($senior), new Reference('stub-other', 'other')];
+
+        self::assertSame(1, RankComparison::rankAcrossAll($holders, GrantScope::platform()));
+        self::assertSame(2, RankComparison::rankAcrossAll([Reference::of($junior), Reference::of($senior)], new GrantScope($tenant)));
+        self::assertSame(7, RankComparison::rankAcrossAll([Reference::of($junior), Reference::of($senior)], new GrantScope(new Reference('tenant', 'b'))));
+        self::assertNull(RankComparison::rankAcrossAll([], GrantScope::platform()));
+        self::assertNull(RankComparison::rankAcrossAll([new Reference('stub-other', 'nobody')], GrantScope::platform()));
+
+        DB::enableQueryLog();
+
+        RankComparison::rankAcrossAll($holders, GrantScope::platform());
+
+        self::assertCount(1, DB::getQueryLog());
+    }
+
+    /**
+     * An actor is ranked in the tenant and application given, or at platform
+     * scope for none; a holder's type can be ranked when it names a model whose
+     * roles can be read.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheActorIsRankedInTheGrantsOwnScope(): void
+    {
+        $tenant = new Reference('tenant', 'a');
+        $actor  = self::holding('actor', 6);
+
+        GrantService::instance()?->grantRole($actor, Role::create(['name' => 'local', 'rank' => 3]), tenant: $tenant);
+        GrantService::instance()?->grantRole($actor, Role::create(['name' => 'billing', 'rank' => 1]), application: 'billing');
+
+        self::assertSame(6, RankComparison::rankIn(new Subject($actor, $actor), null, 'admin'));
+        self::assertSame(3, RankComparison::rankIn(new Subject($actor, $actor), $tenant, 'admin'));
+        self::assertSame(1, RankComparison::rankIn(new Subject($actor, $actor), $tenant, 'billing'));
+        self::assertTrue(RankComparison::isComparableType($actor->getMorphClass()));
+        self::assertFalse(RankComparison::isComparableType('stub-other'));
+        self::assertFalse(RankComparison::isComparableType(\stdClass::class));
+        self::assertFalse(RankComparison::isComparableType((new Role)->getMorphClass()));
     }
 
     /**

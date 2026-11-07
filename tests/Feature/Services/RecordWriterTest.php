@@ -73,7 +73,7 @@ final class RecordWriterTest extends TestCase
     /**
      * A record is created keyed by the id given, or by a new key when none is
      * given, with the attributes, and a delegated creation is decided before it
-     * writes, as a save is.
+     * writes, as a save is: an unranked actor may not create a ranked role.
      *
      * @return void
      *
@@ -91,9 +91,9 @@ final class RecordWriterTest extends TestCase
         self::assertSame(4, $fresh->rank);
         $admin = self::administrator(rank: null);
 
-        $create = static fn (): Role => RecordWriter::create($admin, PackagePermissions::ROLE_CREATE, new Role, null, ['name' => 'writer']);
+        $create = static fn (): Role => RecordWriter::create($admin, PackagePermissions::ROLE_CREATE, new Role, null, ['name' => 'writer', 'rank' => 1]);
 
-        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::reasonOf($create));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::reasonOf($create));
         self::assertSame(2, Role::query()->count());
     }
 
@@ -203,6 +203,8 @@ final class RecordWriterTest extends TestCase
         $role  = Role::query()->create(['name' => 'editor']);
         $level = null;
 
+        self::grants()?->grantRole(StubIdentity::query()->create(['id' => 'holder']), $role);
+
         self::grants()?->attachPolicy(StubIdentity::query()->findOrFail('admin-1'), Policy::query()->create(['name' => 'renamer', 'document' => ['statements' => [[
             'effect'     => 'allow',
             'actions'    => [PackagePermissions::ROLE_RENAME],
@@ -222,7 +224,7 @@ final class RecordWriterTest extends TestCase
         self::assertInstanceOf(AuthorizationException::class, $refused);
         self::assertSame(DecisionReason::CONDITION_FAILED, $refused->getReason());
         self::assertInstanceOf(AuthorizationException::class, $proved);
-        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $proved->getReason());
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $proved->getReason());
         self::assertSame(DecisionStage::ADMINISTRATION, $proved->getDecision()?->stage);
         self::assertNotNull($level);
         self::assertSame('editor', Role::query()->sole()->name);
@@ -232,7 +234,9 @@ final class RecordWriterTest extends TestCase
     }
 
     /**
-     * A delegated deletion is decided as a save is, before the row is deleted.
+     * A delegated deletion is decided as a save is, before the row is deleted:
+     * deleting a role a deny is attached to would lift the deny, so it is
+     * refused as unprovable.
      *
      * @return void
      *
@@ -242,6 +246,8 @@ final class RecordWriterTest extends TestCase
     {
         $admin = self::administrator(rank: null);
         $role  = Role::query()->create(['name' => 'editor']);
+
+        self::grants()?->attachPolicy($role, Policy::query()->create(['name' => 'denying', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:*']]]]]));
 
         $refusal = self::refusalOf(static fn () => RecordWriter::delete($admin, PackagePermissions::ROLE_DELETE, static fn (): Role => $role));
 
@@ -253,9 +259,9 @@ final class RecordWriterTest extends TestCase
     /**
      * A delegated save offers each proposed attribute to policies under its
      * name, whatever attributes come before it unset, so a policy conditioned
-     * on a later one decides on it: the right value is allowed, and refused as
-     * unprovable at the administration stage, and any other is refused as the
-     * condition refuses it.
+     * on a later one decides on it: the right value is allowed, and refused at
+     * the administration stage, an unranked actor giving no role a rank, and
+     * any other is refused as the condition refuses it.
      *
      * @return void
      *
@@ -271,14 +277,16 @@ final class RecordWriterTest extends TestCase
         $find = static fn (): Role => $role;
         $save = static fn (array $attributes): \Closure => static fn (): Role => RecordWriter::save($admin, PackagePermissions::ROLE_UPDATE, $find, $attributes);
 
-        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::reasonOf($save(['name' => 'editor', 'rank' => 3, 'guard' => 'web'])));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::reasonOf($save(['name' => 'editor', 'rank' => 3, 'guard' => 'web'])));
         self::assertSame(DecisionReason::CONDITION_FAILED, self::reasonOf($save(['name' => 'editor', 'rank' => 3, 'guard' => 'api'])));
         self::assertSame('editor', Role::query()->sole()->name);
     }
 
     /**
      * A delegated save of a policy document offers the document by its digest,
-     * so a policy can bind the right to one exact document.
+     * as it would be stored, named as the policy is, so a policy can bind the
+     * right to one exact document; the rewrite allowed lifts a deny, so it is
+     * refused as unprovable at the administration stage.
      *
      * @return void
      *
@@ -287,9 +295,9 @@ final class RecordWriterTest extends TestCase
     public function testADelegatedSaveOffersTheDocumentsDigest(): void
     {
         $admin    = self::administrator([], rank: null);
-        $policy   = Policy::query()->create(['name' => 'readers', 'document' => ['statements' => []]]);
+        $policy   = Policy::query()->create(['name' => 'readers', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:edit']]]]]);
         $document = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]];
-        $digest   = DocumentDigest::of(PolicyDocument::decode($document, ''))->digest;
+        $digest   = DocumentDigest::of(PolicyDocument::named($document, 'readers'))->digest;
 
         self::allow($admin, PackagePermissions::POLICY_UPDATE, ['resource.change.digest' => $digest]);
 
@@ -312,6 +320,26 @@ final class RecordWriterTest extends TestCase
 
         self::assertSame(['name' => 'readers', 'digest' => null], $changeOf->invoke(null, ['name' => 'readers', 'description' => ['not' => 'scalar'], 'document' => '{not json']));
         self::assertSame(['rank' => 2], $changeOf->invoke(null, ['rank' => 2]));
+    }
+
+    /**
+     * The document a save gives a policy is offered as it would be stored,
+     * named as the policy is, or by the name the save gives it; none is offered
+     * for a save that gives no document, or one that cannot be read.
+     *
+     * @return void
+     */
+    public function testTheDocumentIsOfferedAsItWouldBeStored(): void
+    {
+        $documentOf = new \ReflectionMethod(RecordWriter::class, 'documentOf');
+        $policy     = new Policy(['name' => 'readers']);
+        $document   = ['statements' => []];
+
+        self::assertSame(['statements' => [], 'name' => 'readers'], $documentOf->invoke(null, $policy, ['document' => $document]));
+        self::assertSame(['statements' => [], 'name' => 'viewers'], $documentOf->invoke(null, $policy, ['name' => 'viewers', 'document' => \json_encode($document)]));
+        self::assertSame(['name' => 'own', 'statements' => []], $documentOf->invoke(null, $policy, ['document' => ['name' => 'own', 'statements' => []]]));
+        self::assertNull($documentOf->invoke(null, $policy, ['name' => 'readers']));
+        self::assertNull($documentOf->invoke(null, $policy, ['document' => '{not json']));
     }
 
     /**

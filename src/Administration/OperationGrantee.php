@@ -70,8 +70,21 @@ final class OperationGrantee
     {
         $grantee = $operation->change?->grantee;
 
+        return $grantee !== null && self::isActor($grantee, $actor);
+    }
+
+    /**
+     * Determine whether the reference names the actor: its principal, or the
+     * identity behind it.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $holder
+     * @param  \SineMacula\Laravel\Authorization\Subject  $actor
+     * @return bool
+     */
+    public static function isActor(Reference $holder, Subject $actor): bool
+    {
         foreach ([$actor->subject, $actor->identity] as $side) {
-            if ($grantee !== null && $side instanceof Model && self::isSame(Reference::of($side), $grantee)) {
+            if ($side instanceof Model && self::isSame(Reference::of($side), $holder)) {
                 return true;
             }
         }

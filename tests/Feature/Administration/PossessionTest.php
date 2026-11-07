@@ -96,6 +96,32 @@ final class PossessionTest extends TestCase
     }
 
     /**
+     * The grantable route decides the right the descriptor names, on the
+     * descriptor, in the change's reach: a policy grantable descriptor is
+     * decided under `policy.grantable`, which must last as long as the change.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheGrantableRouteDecidesTheDescriptorsRight(): void
+    {
+        $tenant = new Reference('tenant', 'a');
+        $actor  = self::holder(['tenant' => $tenant, 'expires' => Carbon::now()->addDay()], PackagePermissions::POLICY_GRANTABLE);
+        $policy = Policy::create(['name' => 'readers', 'document' => ['statements' => []]]);
+
+        [$operation, $change, , $checks] = $this->grant($actor, new GrantScope($tenant, null, false), Carbon::now()->addHour());
+
+        self::assertTrue(Possession::isGrantable($operation, $change, $operation->policyGrantable($policy, 'abc'), $checks));
+        self::assertSame(PackagePermissions::POLICY_GRANTABLE, $this->asked[0][0]);
+        self::assertSame(['tenant', 'a'], $this->asked[0][2]);
+
+        [$operation, $change, , $checks] = $this->grant($actor, new GrantScope($tenant, null, false));
+
+        self::assertFalse(Possession::isGrantable($operation, $change, $operation->policyGrantable($policy, 'abc'), $checks));
+    }
+
+    /**
      * An actor that does not hold the permission across the grant's reach, or
      * not for as long, is refused it as not grantable, unless the grantable
      * right is allowed on the grant's descriptor, decided in the grant's own
@@ -263,7 +289,7 @@ final class PossessionTest extends TestCase
      * @return array{
      *     \SineMacula\Laravel\Authorization\Administration\OperationResource,
      *     \SineMacula\Laravel\Authorization\Administration\OperationChange,
-     *     string,
+     *     \SineMacula\Laravel\Authorization\Models\Permission,
      *     \SineMacula\Laravel\Authorization\Administration\FurtherChecks
      * }
      */
@@ -297,6 +323,9 @@ final class PossessionTest extends TestCase
         /** @var \SineMacula\Laravel\Authorization\Administration\OperationChange $change */
         $change = $operation->change;
 
-        return [$operation, $change, 'posts:edit', new FurtherChecks($actor, $decide, $gather)];
+        /** @var \SineMacula\Laravel\Authorization\Models\Permission $permission */
+        $permission = $change->target;
+
+        return [$operation, $change, $permission, new FurtherChecks($actor, $decide, $gather)];
     }
 }

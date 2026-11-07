@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -79,10 +80,11 @@ final class OperationConstraintsTest extends TestCase
 
     /**
      * An allowed operation on anything but a subject that may widen authority
-     * is refused as unprovable at the administration stage, its trace ending
-     * with the refusing constraint by its code after every step the allow took,
-     * and its freshness kept; one that can only narrow passes, with one
-     * satisfied step.
+     * and cannot be proved, such as detaching a denying policy from a role, is
+     * refused as unprovable at the administration stage, its trace ending with
+     * the refusing constraint by its code after every step the allow took, and
+     * its freshness kept; one that can only narrow passes, with one satisfied
+     * step.
      *
      * @return void
      *
@@ -96,9 +98,9 @@ final class OperationConstraintsTest extends TestCase
         $role     = Role::query()->create(['name' => 'editor']);
         $edit     = Permission::query()->create(['name' => 'posts:edit']);
         $checks   = $this->checks(self::user('admin'), self::unexpected(...));
-        $grant    = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $role, $edit, GrantScope::platform());
+        $grant    = OperationResource::revoke(PackagePermissions::POLICY_DETACH, $role, self::denying(), GrantScope::platform());
         $revoke   = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $role, $edit, GrantScope::platform());
-        $decision = OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_GRANT, $grant->toResourceReference(), $checks);
+        $decision = OperationConstraints::weigh($allowed, PackagePermissions::POLICY_DETACH, $grant->toResourceReference(), $checks);
 
         self::assertFalse($decision->isAllowed());
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $decision->reason);
@@ -204,7 +206,7 @@ final class OperationConstraintsTest extends TestCase
 
         $allowing = $this->checks(self::senior('admin'), static fn (): Decision => $allowed);
 
-        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::weigh(PackagePermissions::POLICY_ATTACH, $node->toResourceReference(), $allowing)->reason);
+        self::assertNull(self::weigh(PackagePermissions::POLICY_ATTACH, $node->toResourceReference(), $allowing)->reason);
         self::assertSame([PackagePermissions::POLICY_ATTACH, null, false, ['tenant', 'a']], $this->asked[1]);
 
         $platformChecks = $this->checks(self::senior('admin'), static fn (): Decision => $allowed);
@@ -419,7 +421,7 @@ final class OperationConstraintsTest extends TestCase
 
         $identity = $this->checks(new Subject(new \stdClass, $admin), static fn (): Decision => $allowed);
 
-        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, OperationConstraints::weigh($allowed, PackagePermissions::ROLE_GRANT, $grant, $identity)->reason);
+        self::assertTrue(OperationConstraints::weigh($allowed, PackagePermissions::ROLE_GRANT, $grant, $identity)->isAllowed());
         self::assertSame(
             [PackagePermissions::ROLE_GRANT, PackagePermissions::ADMINISTRATION_SELF, PackagePermissions::ROLE_GRANT, PackagePermissions::ADMINISTRATION_SELF],
             \array_column($this->asked, 0),
@@ -428,8 +430,9 @@ final class OperationConstraintsTest extends TestCase
 
     /**
      * A direct grant of a permission is decided by possession: one the actor
-     * neither holds nor may grant is refused as not grantable; any other grant
-     * to a subject that may widen authority is refused as unprovable.
+     * neither holds nor may grant is refused as not grantable, as a role
+     * carrying one is; a change to a subject no route proves, such as detaching
+     * a denying policy, is refused as unprovable.
      *
      * @return void
      *
@@ -446,7 +449,8 @@ final class OperationConstraintsTest extends TestCase
         $grant = self::permissionGrant($user)->toResourceReference();
 
         self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, self::weigh(PackagePermissions::PERMISSION_GRANT, $grant, $checks)->reason);
-        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::weigh(PackagePermissions::ROLE_GRANT, self::roleGrant()->toResourceReference(), $checks)->reason);
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, self::weigh(PackagePermissions::ROLE_GRANT, self::roleGrant()->toResourceReference(), $checks)->reason);
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::weigh(PackagePermissions::POLICY_DETACH, self::detach($user)->toResourceReference(), $checks)->reason);
 
         $granter = self::senior('granter');
 
@@ -458,11 +462,54 @@ final class OperationConstraintsTest extends TestCase
     }
 
     /**
+     * A change to a subject is weighed by what it hands out: a role whose chain
+     * cannot be read is unprovable, a policy by the policy route, and a
+     * boundary replaced by a wider one, or removed, only with
+     * `administration.unbounded` on the same operation; a policy grantable
+     * descriptor is never weighed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAChangeToASubjectIsWeighedByWhatItHandsOut(): void
+    {
+        $allowed = Decision::allow(DecisionStage::ALLOW);
+        $user    = self::user('user');
+        $gone    = (new Role)->forceFill(['id' => '01a1b0c0-0000-7000-8000-00000000dead', 'name' => 'gone']);
+        $cap     = Policy::create(['name' => 'cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+        $remove  = OperationResource::revoke(PackagePermissions::BOUNDARY_REMOVE, $user, $cap, GrantScope::platform())->toResourceReference();
+        $scoped  = Policy::create(['name' => 'scoped', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['posts:1']]]]]);
+        $attach  = OperationResource::grant(PackagePermissions::POLICY_ATTACH, $user, $scoped, GrantScope::platform());
+        $bounded = static fn (bool $unbounded): \Closure => static fn (string $action): Decision => $action !== PackagePermissions::ADMINISTRATION_UNBOUNDED || $unbounded
+            ? $allowed
+            : Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
+
+        $role = OperationResource::grant(PackagePermissions::ROLE_GRANT, $user, $gone, GrantScope::platform())->toResourceReference();
+
+        $admin = self::senior('admin');
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::weigh(PackagePermissions::ROLE_GRANT, $role, $this->checks($admin, $bounded(true)))->reason);
+        $attaching = $attach->toResourceReference();
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::weigh(PackagePermissions::POLICY_ATTACH, $attaching, $this->checks($admin, $bounded(true)))->reason);
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::weigh(PackagePermissions::BOUNDARY_REMOVE, $remove, $this->checks($admin, $bounded(false)))->reason);
+        self::assertSame(PackagePermissions::ADMINISTRATION_UNBOUNDED, \array_column($this->asked, 0)[\count($this->asked) - 1]);
+        self::assertTrue(self::weigh(PackagePermissions::BOUNDARY_REMOVE, $remove, $this->checks($admin, $bounded(true)))->isAllowed());
+
+        $descriptor = $attach->policyGrantable($scoped, 'abc')->toResourceReference();
+        $asked      = \count($this->asked);
+
+        self::assertSame($allowed, OperationConstraints::weigh($allowed, PackagePermissions::POLICY_GRANTABLE, $descriptor, $this->checks($admin, self::unexpected(...))));
+        self::assertCount($asked, $this->asked);
+    }
+
+    /**
      * Through `check()`, the stage follows the allow: a subject holding every
-     * action is refused a role grant as unprovable and allowed a revocation, a
-     * check of the action with no operation is allowed, and a subject not
-     * holding the action is refused as the allow stage refuses it, the stage
-     * never reached.
+     * action is refused the detach of a denying policy as unprovable and
+     * allowed a revocation, a check of the action with no operation is allowed,
+     * and a subject not holding the action is refused as the allow stage
+     * refuses it, the stage never reached.
      *
      * @return void
      *
@@ -475,7 +522,7 @@ final class OperationConstraintsTest extends TestCase
 
         $admin->givePermission(Permission::create(['name' => 'authorization:*']));
 
-        $grant = Authorization::for($admin)->check(PackagePermissions::ROLE_GRANT, self::roleGrant());
+        $grant = Authorization::for($admin)->check(PackagePermissions::POLICY_DETACH, self::detach($other));
 
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $grant->reason);
         self::assertSame(DecisionStage::ADMINISTRATION, $grant->stage);
@@ -582,7 +629,34 @@ final class OperationConstraintsTest extends TestCase
      */
     private static function roleGrant(): OperationResource
     {
-        return OperationResource::grant(PackagePermissions::ROLE_GRANT, self::user('grantee'), Role::query()->firstOrCreate(['name' => 'editor']), GrantScope::platform());
+        $role = Role::query()->firstOrCreate(['name' => 'editor']);
+
+        RoleService::instance()?->grantPermission($role, Permission::query()->firstOrCreate(['name' => 'posts:edit']));
+
+        return OperationResource::grant(PackagePermissions::ROLE_GRANT, self::user('grantee'), $role, GrantScope::platform());
+    }
+
+    /**
+     * Return a proposed detach of a denying policy from the grantee.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $grantee
+     * @return \SineMacula\Laravel\Authorization\Administration\OperationResource
+     */
+    private static function detach(StubIdentity $grantee): OperationResource
+    {
+        return OperationResource::revoke(PackagePermissions::POLICY_DETACH, $grantee, self::denying(), GrantScope::platform());
+    }
+
+    /**
+     * Return the policy that denies every post action, created on first use.
+     *
+     * @return \SineMacula\Laravel\Authorization\Models\Policy
+     */
+    private static function denying(): Policy
+    {
+        $deny = ['effect' => 'deny', 'actions' => ['posts:*']];
+
+        return Policy::query()->where('name', 'denying')->first() ?? Policy::create(['name' => 'denying', 'document' => ['statements' => [$deny]]]);
     }
 
     /**

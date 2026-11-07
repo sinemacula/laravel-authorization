@@ -15,14 +15,16 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * record from a descendant is no authority to edit it: an operator who
  * administers the owner enters the owner's context first. The record is a
  * definition, a role, permission or policy, with its membership and its
- * attachments, as a later part of BL-65 applies the rule. A grant row is never
- * such a record (N79): who may change one is the scope the actor administers
- * (see `OperationConstraints`), so this rule never weighs a grant.
+ * attachments: the administration stage applies the rule to every change to a
+ * definition, to a role's permissions, policies or parent (see
+ * `DefinitionConstraints`). A grant row is never such a record (N79): who may
+ * change one is the scope the actor administers (see `OperationConstraints`),
+ * so this rule never weighs a grant.
  *
- * The context is the tenant the check is made from, compared byte for byte, so
- * a change from the platform edits the platform's records alone, and one from a
- * tenant that tenant's alone. A change it refuses is refused as
- * `administration.owner`.
+ * The context is the tenant the check is made from (see `FurtherChecks`),
+ * compared byte for byte, so a change from the platform edits the platform's
+ * records alone, and one from a tenant that tenant's alone. A change it refuses
+ * is refused as `administration.owner`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

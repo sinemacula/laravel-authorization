@@ -7,15 +7,18 @@ namespace SineMacula\Laravel\Authorization\Administration;
 use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
  * What the administration stage of one decision may ask of the decision
- * pipeline (see `OperationConstraints`): the acting subject, and further checks
- * of the same subject, each decided as the pipeline decides any check, through
- * every stage up to the allow, in the scope in place when it is asked, but
- * never through the administration stage itself, so a constraint that decides
- * the operation's own action again in another scope cannot recurse.
+ * pipeline (see `OperationConstraints`): the acting subject, the tenant the
+ * check is made from, before the operation's own tenant is put in place (see
+ * `ResourceScope`), so the owner rule can compare it, and further checks of the
+ * same subject, each decided as the pipeline decides any check, through every
+ * stage up to the allow, in the scope in place when it is asked, but never
+ * through the administration stage itself, so a constraint that decides the
+ * operation's own action again in another scope cannot recurse.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,6 +33,7 @@ final readonly class FurtherChecks
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  \Closure(string, \SineMacula\Laravel\Authorization\Support\ResourceReference|null): \SineMacula\Laravel\Authorization\Evaluation\Decision  $decide
      * @param  \Closure(string): (\SineMacula\Laravel\Authorization\Evaluation\CheckSources|null)  $sources
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $from
      */
     public function __construct(
 
@@ -41,6 +45,9 @@ final readonly class FurtherChecks
 
         /** Gathers the sources of a further check of the subject, on no resource, in the scope in place, or null when a document cannot be read. */
         private \Closure $sources,
+
+        /** The tenant the check is made from; null for the platform. */
+        public ?Reference $from = null,
     ) {}
 
     /**

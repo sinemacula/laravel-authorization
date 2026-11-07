@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
@@ -27,7 +28,8 @@ final class FurtherChecksTest extends TestCase
     /**
      * The checks carry the subject, decide each further check through the
      * pipeline's callback, on the resource given or none, and gather each
-     * check's sources through the other.
+     * check's sources through the other; with no tenant given, the check is
+     * made from the platform.
      *
      * @return void
      */
@@ -56,5 +58,19 @@ final class FurtherChecksTest extends TestCase
         self::assertSame($decision, $checks->decide('posts:read'));
         self::assertNull($checks->sources('posts:edit'));
         self::assertSame([['posts:edit', $resource], ['posts:read', null], ['posts:edit']], $asked);
+        self::assertNull($checks->from);
+    }
+
+    /**
+     * The checks carry the tenant the check is made from, for the owner rule.
+     *
+     * @return void
+     */
+    public function testItCarriesTheTenantTheCheckIsMadeFrom(): void
+    {
+        $tenant = new Reference('tenant', 'a');
+        $checks = new FurtherChecks(new Subject(new \stdClass), static fn (): Decision => Decision::allow(DecisionStage::ALLOW), static fn (): null => null, $tenant);
+
+        self::assertSame($tenant, $checks->from);
     }
 }

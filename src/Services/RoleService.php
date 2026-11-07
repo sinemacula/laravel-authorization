@@ -69,10 +69,19 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * carry live and a revocation of each it drops; one it carries live decides
  * nothing. A revocation by name decides each permission the role carries of
  * that name; one by model decides that permission whether the role carries it
- * or not. Removing a permission only narrows, so it is allowed on its action
- * alone; every other change waits for the owner, grantable and impact rules of
- * the later parts of BL-65 and is refused as `administration.unprovable` once
- * the action is allowed. A read is not decided yet. Every event a write
+ * or not. Every change is made only from the tenant that owns the role, a
+ * platform role's from the platform, or it is refused as `administration.owner`
+ * (D20). Removing a permission only narrows, so it is then allowed on its
+ * action alone. Adding one, or setting or replacing the parent, hands something
+ * new to every holder of the role and of the roles below it: each must be one
+ * the actor administers, junior to it and not itself without
+ * `authorization:administration.self` (the impact check), and the actor must be
+ * able to hand out what is added, the parent's whole authority included, or it
+ * is refused as the first rule that fails refuses it; a parent replaced or
+ * cleared whose chain carries a deny is refused as `administration.unprovable`.
+ * A role is created only junior to the actor, a rename reaches every holder as
+ * a new grant would, and a role a deny reaches is never deleted (see
+ * `DefinitionConstraints`). A read is not decided yet. Every event a write
  * dispatches carries the operation, with the actor, its mode and the actions,
  * once the write commits; the actor is never read from the authenticated user.
  *

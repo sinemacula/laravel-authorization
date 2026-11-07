@@ -32,7 +32,9 @@ use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -118,9 +120,10 @@ final class RoleServiceTest extends TestCase
 
     /**
      * A delegated sync of a role's permissions is decided whole before anything
-     * is written: one that grants is refused as unprovable, one that only
-     * revokes or changes nothing is refused to an actor without the action, and
-     * one that keeps what the role carries live is made, changing nothing.
+     * is written: one that grants to a role held by the actor's peer is refused
+     * by rank (see `Impact`), one that only revokes or changes nothing is
+     * refused to an actor without the action, and one that keeps what the role
+     * carries live is made, changing nothing.
      *
      * @return void
      *
@@ -136,8 +139,10 @@ final class RoleServiceTest extends TestCase
         $read   = Permission::query()->create(['name' => 'posts:read']);
 
         self::service()->grantPermission($editor, $edit);
+        self::administrator([], 'peer');
+        app(GrantService::class)->grantRole(StubIdentity::query()->findOrFail('peer'), $editor);
 
-        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_UNPROVABLE, static fn (): mixed => self::service()->syncPermissions($editor, [$edit, $read], actor: $admin));
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_RANK, static fn (): mixed => self::service()->syncPermissions($editor, [$edit, $read], actor: $admin));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): mixed => self::service()->syncPermissions($editor, [], actor: $nobody));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): mixed => self::service()->syncPermissions($empty, [], actor: $nobody));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): mixed => self::service()->syncPermissions($editor, [$edit], actor: $nobody));
@@ -183,8 +188,9 @@ final class RoleServiceTest extends TestCase
     /**
      * A change to a platform role's permissions is decided at platform scope,
      * so an actor holding the action only in the tenant the request is in is
-     * refused it, and one holding it platform-wide makes it; a change to a role
-     * an ancestor of the request's tenant owns is out of scope.
+     * refused it, and one holding it platform-wide makes it from the platform,
+     * which owns the role, but not from the tenant (D20); a change to a role an
+     * ancestor of the request's tenant owns is out of scope.
      *
      * @return void
      *
@@ -212,7 +218,8 @@ final class RoleServiceTest extends TestCase
 
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->revokePermission($platform, $edit, ActingContext::for($local)));
         self::assertDelegatedRefusal(DecisionReason::TENANT_SCOPE, static fn (): int => self::service()->revokePermission($owned, $edit, ActingContext::for($local)));
-        self::assertSame(1, self::service()->revokePermission($platform, $edit, ActingContext::for($wide)));
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_OWNER, static fn (): int => self::service()->revokePermission($platform, $edit, ActingContext::for($wide)));
+        self::assertSame(1, TenantScope::within(null, null, static fn (): int => self::service()->revokePermission($platform, $edit, ActingContext::for($wide))));
     }
 
     /**
@@ -965,9 +972,9 @@ final class RoleServiceTest extends TestCase
     }
 
     /**
-     * A trusted grant carries no actor; a delegated grant is refused as
-     * unprovable, and a delegated revocation, which only narrows, carries the
-     * acting context's principal.
+     * A trusted grant carries no actor; a delegated grant to a role no one
+     * holds widens no one, and a delegated revocation only narrows, so each is
+     * made, carrying the acting context's principal.
      *
      * @return void
      *
@@ -981,26 +988,24 @@ final class RoleServiceTest extends TestCase
 
         Event::fake([PermissionGranted::class, PermissionRevoked::class]);
 
-        $refusal = self::refusalOf(static fn (): GrantOutcome => self::service()->grantPermission($role, $permission, actor: $admin));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantPermission($role, $permission, actor: $admin));
 
-        self::assertInstanceOf(AuthorizationException::class, $refusal);
-        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $refusal->getReason());
-        Event::assertNotDispatched(PermissionGranted::class);
-
-        self::service()->grantPermission($role, $permission);
         self::service()->revokePermission($role, $permission, $admin);
+        self::service()->grantPermission($role, $permission);
 
         Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => $event->operation->actor === null
             && self::refersTo($event->permission, $permission)
             && $event->permissionName === 'posts:edit'
             && $event->tenant         === null);
+        Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => self::refersTo($event->operation->actor, $admin->principal()));
         Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => self::refersTo($event->operation->actor, $admin->principal()));
     }
 
     /**
      * Deleting a role through the service reports every grantee that held it,
-     * as trusted work; a delegated deletion waits for the owner rule, so it is
-     * refused as unprovable and deletes nothing.
+     * as trusted work; a delegated deletion of a role a deny is attached to
+     * would lift the deny from every holder, so it is refused as unprovable and
+     * deletes nothing.
      *
      * @return void
      *
@@ -1012,10 +1017,13 @@ final class RoleServiceTest extends TestCase
         $role  = self::role('editor');
 
         app(GrantService::class)->grantRole(new Reference('user', '1'), $role);
+        $deny = ['effect' => 'deny', 'actions' => ['posts:*']];
+
+        app(GrantService::class)->attachPolicy(self::role('guarded'), Policy::create(['name' => 'denying', 'document' => ['statements' => [$deny]]]));
 
         Event::fake([RoleDeleted::class]);
 
-        $refusal = self::refusalOf(static fn () => self::service()->delete('editor', $admin));
+        $refusal = self::refusalOf(static fn () => self::service()->delete('guarded', $admin));
 
         self::assertInstanceOf(AuthorizationException::class, $refusal);
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $refusal->getReason());
@@ -1031,8 +1039,8 @@ final class RoleServiceTest extends TestCase
 
     /**
      * Re-parenting a role reports the change, as trusted work; a delegated
-     * re-parenting waits for the impact rules, so it is refused as unprovable
-     * and changes nothing.
+     * re-parenting away from a parent a deny is attached to would lift the deny
+     * from every holder, so it is refused as unprovable and changes nothing.
      *
      * @return void
      *
@@ -1040,10 +1048,12 @@ final class RoleServiceTest extends TestCase
      */
     public function testReParentingReportsTheActor(): void
     {
-        $admin  = self::administrator();
-        $parent = self::role('admin');
+        $admin   = self::administrator();
+        $parent  = self::role('admin');
+        $guarded = self::role('guarded');
 
-        self::role('editor');
+        self::role('editor', ['parent_id' => $guarded->id]);
+        app(GrantService::class)->attachPolicy($guarded, Policy::create(['name' => 'denying', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:*']]]]]));
 
         Event::fake([RoleUpdated::class]);
 
@@ -1051,7 +1061,7 @@ final class RoleServiceTest extends TestCase
 
         self::assertInstanceOf(AuthorizationException::class, $refusal);
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $refusal->getReason());
-        self::assertNull(Role::query()->where('name', 'editor')->sole()->parent_id);
+        self::assertSame($guarded->id, Role::query()->where('name', 'editor')->sole()->parent_id);
 
         self::service()->setParent('editor', 'admin');
 

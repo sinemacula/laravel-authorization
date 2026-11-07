@@ -78,11 +78,15 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * `check()`, on the change's operation resource (whose grantee is the resource,
  * `*` for its whole type), inside the transaction before anything is written;
  * the first refused throws the decision's `AuthorizationException`, leaving
- * nothing written. An attachment's allows can grant without any permission
- * held, so it waits for the rules of the later parts of BL-65 and is refused as
- * `administration.unprovable` once the action is allowed; detaching a policy
- * with no deny statement only narrows, and is allowed on its action alone,
- * while detaching one that denies is refused as unprovable.
+ * nothing written. An attachment's allows grant without any permission held, to
+ * every principal they name, on one record or the whole type, so each
+ * principal, the holders of a role a selector names included, must be one the
+ * actor administers across the attachment's reach, junior to it and not itself
+ * without `authorization:administration.self` (see `Impact`), and the actor
+ * must be able to hand out what the policy allows (see `PolicyRoute`);
+ * detaching a policy with no deny statement only narrows, and is allowed on its
+ * action alone, while detaching one that denies is refused as
+ * `administration.unprovable`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

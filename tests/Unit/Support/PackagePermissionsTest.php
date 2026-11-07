@@ -55,6 +55,7 @@ final class PackagePermissionsTest extends TestCase
         'authorization:policy.grantable',
         'authorization:administration.self',
         'authorization:administration.impersonated',
+        'authorization:administration.unbounded',
     ];
 
     /**
@@ -120,6 +121,7 @@ final class PackagePermissionsTest extends TestCase
             PackagePermissions::POLICY_GRANTABLE,
             PackagePermissions::ADMINISTRATION_SELF,
             PackagePermissions::ADMINISTRATION_IMPERSONATED,
+            PackagePermissions::ADMINISTRATION_UNBOUNDED,
         ]);
         self::assertSame('Set and remove guardrails from above the scope they cap.', (new PackagePermissions)->permissions()[21]->description);
     }

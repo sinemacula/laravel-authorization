@@ -10,10 +10,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
-use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
@@ -25,8 +25,8 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *
  * The stage applies to a check of an administration action on an operation
  * resource of that action (see `OperationResource`), but never to a grantable
- * descriptor (see `OperationResource::grantable()`); any other check passes it
- * untouched. The action's own decision is made in the tenant of the row the
+ * descriptor (see `OperationResource::isDescriptor()`); any other check passes
+ * it untouched. The action's own decision is made in the tenant of the row the
  * change edits (see `ResourceScope`), so an actor whose authority for the
  * action reaches that tenant, from a parent with authority over its subtree or
  * from the platform, changes the row from its own context, and one whose
@@ -42,11 +42,9 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * 2. an operation on a subject, a principal or an identity (a grant, a
  *    revocation, an attachment, a detach, a boundary set or removal), is
  *    weighed by the constraints of a change to a subject, listed below;
- * 3. any other operation (a change to a definition, to a role's permissions or
- *    policies, or to a resource's policies) that may widen authority is refused
- *    as `administration.unprovable`; one that can only narrow, such as revoking
- *    a permission from a role or detaching an allow-only policy, is allowed on
- *    its action's decision.
+ * 3. any other operation, a change to a definition, to a role's permissions,
+ *    policies or parent, or to a resource's policies, is weighed by the owner
+ *    rule and by what it changes (see `DefinitionConstraints`).
  *
  * The constraints of a change to a subject, in order:
  *
@@ -73,14 +71,23 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *   by the actor across its reach and lifetime, or explicitly grantable there
  *   (see `Possession`), or it is refused as `administration.not_grantable` or
  *   `administration.unprovable`;
- * - every other change that may widen authority, a role grant, a policy
- *   attachment, a boundary set or removal, a detach of a denying policy, is
- *   refused as `administration.unprovable`, the later parts of BL-65 not
- *   proving it yet.
+ * - **roles**: a role grant hands out the role's whole authority, every
+ *   permission and policy it and its ancestors carry (see `RoleAuthority`),
+ *   each by its own route; a chain that cannot be read is unprovable;
+ * - **policies**: a policy attachment needs the policy route, containment or
+ *   `authorization:policy.grantable` on the policy's digest (see
+ *   `PolicyRoute`);
+ * - **boundaries**: a boundary that only adds or tightens a cap narrows (see
+ *   `Narrowing`); one that replaces a boundary with a wider one, or a removal,
+ *   cannot be bounded in general, so it is refused as
+ *   `administration.unprovable` unless the actor is also allowed
+ *   `authorization:administration.unbounded` on the same operation;
+ * - every other change that may widen authority, a detach of a denying policy
+ *   included, is refused as `administration.unprovable`.
  *
- * The owner rule (D20, see `OwnerConstraint`) governs definitions, from a later
- * part of BL-65, never grant rows: who may change a grant row is the
- * administered scope alone.
+ * The owner rule (D20, see `OwnerConstraint`) governs definitions, their
+ * membership and their attachments, never grant rows: who may change a grant
+ * row is the administered scope alone.
  *
  * An allow that passes records one satisfied step at the stage.
  *
@@ -136,7 +143,7 @@ final class OperationConstraints
     private static function isWeighed(Decision $decision, string $action, ?ResourceReference $resource): bool
     {
         $operation = $resource?->source;
-        $applies   = $operation instanceof OperationResource && $operation->action === $action && $action !== PackagePermissions::PERMISSION_GRANTABLE;
+        $applies   = $operation instanceof OperationResource && $operation->action === $action && !$operation->isDescriptor();
 
         return $applies && $decision->isAllowed();
     }
@@ -157,7 +164,7 @@ final class OperationConstraints
         }
 
         if (!OperationGrantee::isSubject($operation)) {
-            return $operation->isNarrowing ? null : DecisionReason::ADMINISTRATION_UNPROVABLE;
+            return DefinitionConstraints::refusal($operation, $resource, $checks);
         }
 
         $change = $operation->change;
@@ -165,7 +172,7 @@ final class OperationConstraints
         return self::scope($operation, $change, $resource, $checks)
             ?? self::rank($operation, $change, $checks)
             ?? self::self($operation, $resource, $checks)
-            ?? self::widening($operation, $change, $checks);
+            ?? self::widening($operation, $change, $resource, $checks);
     }
 
     /**
@@ -243,11 +250,9 @@ final class OperationConstraints
             return null;
         }
 
-        $granted     = $operation->action === PackagePermissions::ROLE_GRANT && $change->target instanceof Role ? $change->target->rank : null;
-        $application = $change->scope->application;
-        $scope       = $operation->tenant === null ? AuthorizationScope::platform($application) : AuthorizationScope::tenant($operation->tenant, $application);
+        $granted = $operation->action === PackagePermissions::ROLE_GRANT && $change->target instanceof Role ? $change->target->rank : null;
 
-        return [$scope->within(static fn (): ?int => RankComparison::rankOf($actor)), \min($held ?? \PHP_INT_MAX, $granted ?? \PHP_INT_MAX)];
+        return [RankComparison::rankIn($actor, $operation->tenant, $change->scope->application), \min($held ?? \PHP_INT_MAX, $granted ?? \PHP_INT_MAX)];
     }
 
     /**
@@ -269,23 +274,69 @@ final class OperationConstraints
     }
 
     /**
-     * Return why a change that may widen authority is refused: a direct grant
-     * of a permission as possession decides it, anything else as unprovable;
+     * Return why a change that may widen authority is refused, by what it hands
+     * out: a permission by the permission route (see `Possession`), a role by
+     * the routes of its whole authority (see `RoleAuthority`), a policy by the
+     * policy route (see `PolicyRoute`), a boundary replaced by a wider one or
+     * removed by the further right `authorization:administration.unbounded`,
+     * and anything else, a detach of a denying policy included, as unprovable;
      * null for a change that can only narrow.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      */
-    private static function widening(OperationResource $operation, OperationChange $change, FurtherChecks $checks): ?DecisionReason
+    private static function widening(OperationResource $operation, OperationChange $change, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
         if ($operation->isNarrowing) {
             return null;
         }
 
-        return $operation->action === PackagePermissions::PERMISSION_GRANT && $change->target instanceof Permission
-            ? Possession::refusal($operation, $change, $change->target->name, $checks)
-            : DecisionReason::ADMINISTRATION_UNPROVABLE;
+        $target     = $change->target;
+        $action     = $operation->action;
+        $isBoundary = \in_array($action, [PackagePermissions::BOUNDARY_SET, PackagePermissions::BOUNDARY_REMOVE], true);
+
+        return match (true) {
+            $action === PackagePermissions::PERMISSION_GRANT && $target instanceof Permission => Possession::refusal($operation, $change, $target, $checks),
+            $action === PackagePermissions::ROLE_GRANT       && $target instanceof Role       => self::roleGranted($operation, $change, $target, $checks),
+            $action === PackagePermissions::POLICY_ATTACH    && $target instanceof Policy     => PolicyRoute::refusal($operation, $change, $target, $checks),
+            $isBoundary                                                                       => self::unbounded($resource, $checks),
+            default                                                                           => DecisionReason::ADMINISTRATION_UNPROVABLE,
+        };
+    }
+
+    /**
+     * Return `administration.unprovable` unless the operation, a boundary
+     * replaced by a wider one or removed, is also allowed
+     * `authorization:administration.unbounded`.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
+     */
+    private static function unbounded(ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
+    {
+        return $checks->decide(PackagePermissions::ADMINISTRATION_UNBOUNDED, $resource)->isAllowed() ? null : DecisionReason::ADMINISTRATION_UNPROVABLE;
+    }
+
+    /**
+     * Return why granting the role is refused by the routes of its whole
+     * authority, its ancestors' included, across the grant's reach and
+     * lifetime, or null when every one passes; a chain that cannot be read
+     * whole is unprovable.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
+     */
+    private static function roleGranted(OperationResource $operation, OperationChange $change, Role $role, FurtherChecks $checks): ?DecisionReason
+    {
+        $authority = RoleAuthority::of([$role->id]);
+
+        return $authority === null ? DecisionReason::ADMINISTRATION_UNPROVABLE : $authority->refusal($operation, $change, $checks);
     }
 }

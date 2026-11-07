@@ -97,18 +97,24 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * additions included, is allowed when the actor provably holds it across its
  * reach and lifetime, or may grant it explicitly (see `Possession`), and is
  * otherwise refused as `administration.not_grantable` or
- * `administration.unprovable`; every other change, a role grant or a policy
- * attachment, waits for the later parts of BL-65 and is refused as
- * `administration.unprovable`. Every event the call dispatches carries the
- * operation, with the actor, its mode and the actions, and every grant row it
- * writes records the actor in `granted_by_type` and `granted_by_id`; the actor
- * is never read from the authenticated user. A grantee that is not a saved
- * model with a key, or a reference with a type and a key, throws
- * `InvalidGranteeException` before anything is read. A role or permission name
- * that answers no row throws `UnknownRoleException` or
- * `UnknownPermissionException`; a target that is not a saved model of the kind
- * granted, such as a policy sync handed another model, throws
- * `InvalidGrantTargetException`.
+ * `administration.unprovable`; a role grant hands out the role's whole
+ * authority, every permission and policy it and its ancestors carry, each by
+ * its own route (see `RoleAuthority`), its rank counting as the grantee's; a
+ * policy attachment, to an identity, a principal or a role, needs the policy
+ * route, containment or `authorization:policy.grantable` on the policy's digest
+ * (see `PolicyRoute`); a change to a role's policies is made only from the
+ * tenant that owns the role, and weighed against every holder of the role (see
+ * `DefinitionConstraints`); any other change that may widen authority, such as
+ * detaching a denying policy, is refused as `administration.unprovable`. Every
+ * event the call dispatches carries the operation, with the actor, its mode and
+ * the actions, and every grant row it writes records the actor in
+ * `granted_by_type` and `granted_by_id`; the actor is never read from the
+ * authenticated user. A grantee that is not a saved model with a key, or a
+ * reference with a type and a key, throws `InvalidGranteeException` before
+ * anything is read. A role or permission name that answers no row throws
+ * `UnknownRoleException` or `UnknownPermissionException`; a target that is not
+ * a saved model of the kind granted, such as a policy sync handed another
+ * model, throws `InvalidGrantTargetException`.
  *
  * A grantee is an identity or a role: a policy attached to a role applies to
  * whoever holds the role, within both grants' scopes, and to whoever holds a

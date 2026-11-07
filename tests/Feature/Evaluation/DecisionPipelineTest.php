@@ -373,8 +373,11 @@ final class DecisionPipelineTest extends TestCase
     /**
      * An allow of an administration action on its operation resource passes the
      * administration stage inside the decision, the subject's own further
-     * checks decided in the same scope: a widening operation is refused there,
-     * and a narrowing one allowed, each step in the trace.
+     * checks decided in the same scope: a widening operation no route proves is
+     * refused there, and a narrowing one allowed, each step in the trace; the
+     * stage learns the tenant the check is made from, so a change to a
+     * definition a tenant owns is refused from the platform as the owner rule
+     * refuses it, and allowed from the tenant.
      *
      * @return void
      *
@@ -393,9 +396,10 @@ final class DecisionPipelineTest extends TestCase
         $user->givePermission(Permission::create(['name' => 'authorization:*']));
 
         $pipeline = $this->pipeline();
-        $grant    = OperationResource::grant(PackagePermissions::ROLE_GRANT, new Reference('user', '1'), $role, GrantScope::platform());
+        $deny     = Policy::create(['name' => 'denying', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:*']]]]]);
+        $detach   = OperationResource::revoke(PackagePermissions::POLICY_DETACH, new Reference('user', '1'), $deny, GrantScope::platform());
         $revoke   = OperationResource::revoke(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), $role, GrantScope::platform());
-        $refused  = $pipeline->decide($subject, PackagePermissions::ROLE_GRANT, $grant->toResourceReference(), []);
+        $refused  = $pipeline->decide($subject, PackagePermissions::POLICY_DETACH, $detach->toResourceReference(), []);
         $allowed  = $pipeline->decide($subject, PackagePermissions::ROLE_REVOKE, $revoke->actedBy(new Reference('support', '9'))->toResourceReference(), []);
 
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $refused->reason);
@@ -403,6 +407,14 @@ final class DecisionPipelineTest extends TestCase
         self::assertTrue($allowed->isAllowed());
         self::assertEquals(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED), $allowed->trace[\count($allowed->trace) - 1]);
         self::assertTrue($pipeline->decide($subject, PackagePermissions::ROLE_GRANT, null, [])->isAllowed());
+
+        $tenant = new Reference('tenant', 'a');
+        $owned  = Role::query()->withoutGlobalScopes()->create(['name' => 'owned', 'tenant_type' => $tenant->type, 'tenant_id' => $tenant->id]);
+        $rename = OperationResource::definition(PackagePermissions::ROLE_RENAME, $owned, ['name' => 'renamed'])->toResourceReference();
+        $decide = static fn (): Decision => $pipeline->decide($subject, PackagePermissions::ROLE_RENAME, $rename, []);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_OWNER, $decide()->reason);
+        self::assertTrue(TenantScope::within($tenant, null, $decide)->isAllowed());
     }
 
     /**

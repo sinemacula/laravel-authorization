@@ -432,8 +432,10 @@ final class ResourcePolicyServiceTest extends TestCase
 
     /**
      * A delegated change to a resource's policies is decided under its action
-     * before anything is written: an attachment, or the detachment of a policy
-     * that denies, widens authority and is refused as unprovable; an actor
+     * before anything is written: an attachment hands its allows to every
+     * principal they name, so one naming a principal whose rank cannot be read
+     * is refused as uncomparable (see `Impact`); the detachment of a policy
+     * that denies widens authority and is refused as unprovable; an actor
      * without the action is refused a detachment, whether or not anything is
      * attached; and one with it detaches nothing from a record with nothing
      * attached, the detachment still decided.
@@ -455,7 +457,7 @@ final class ResourcePolicyServiceTest extends TestCase
 
         $unprovable = DecisionReason::ADMINISTRATION_UNPROVABLE;
 
-        self::assertDelegatedRefusal($unprovable, static fn (): GrantOutcome => self::service()->attach($other, ['posts', 7], actor: $admin));
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE, static fn (): GrantOutcome => self::service()->attach($other, ['posts', 7], actor: $admin));
         self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->detach($deny, ['posts', 7], actor: $admin));
         self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->detachAll(['posts', 7], $admin));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->detach($policy, ['posts', 7], actor: $nobody));

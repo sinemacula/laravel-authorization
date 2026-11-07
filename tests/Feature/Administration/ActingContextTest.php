@@ -254,7 +254,8 @@ final class ActingContextTest extends TestCase
      * A screen checking an operation gets the decision a service's
      * authorization makes: allowed for a change that only narrows, and refused
      * with the decision, reported with `AuthorizationFailed`, for one that
-     * widens.
+     * widens in a way that cannot be proved, such as detaching a denying
+     * policy.
      *
      * @return void
      *
@@ -270,7 +271,8 @@ final class ActingContextTest extends TestCase
 
         $actor  = ActingContext::for($admin);
         $role   = Role::create(['name' => 'editor']);
-        $grant  = OperationResource::grant(PackagePermissions::ROLE_GRANT, new Reference('user', '1'), $role, GrantScope::platform());
+        $deny   = Policy::create(['name' => 'denying', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:*']]]]]);
+        $grant  = OperationResource::revoke(PackagePermissions::POLICY_DETACH, new Reference('user', '1'), $deny, GrantScope::platform());
         $revoke = OperationResource::revoke(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), $role, GrantScope::platform());
 
         self::assertTrue($actor->check($revoke)->isAllowed());
@@ -286,7 +288,7 @@ final class ActingContextTest extends TestCase
         Event::assertDispatchedTimes(AuthorizationFailed::class, 1);
         Event::assertDispatched(
             AuthorizationFailed::class,
-            static fn (AuthorizationFailed $event): bool => $event->principal === $admin && $event->action === PackagePermissions::ROLE_GRANT,
+            static fn (AuthorizationFailed $event): bool => $event->principal === $admin && $event->action === PackagePermissions::POLICY_DETACH,
         );
     }
 

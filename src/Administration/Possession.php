@@ -6,17 +6,20 @@ namespace SineMacula\Laravel\Authorization\Administration;
 
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
-use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 
 /**
- * Whether a delegated direct grant of a permission to a principal or an
- * identity hands out only what the actor may hand out (N77), by one of two
- * routes, each decided across the grant's whole reach: its tenant, standing
- * just below it for a grant that reaches the tenants below, or the platform for
- * a platform-wide one, its application, every application's grants alone
- * counting for a grant to every application, and its lifetime.
+ * Whether a delegated grant of a permission hands out only what the actor may
+ * hand out (N77): a direct grant to a principal or an identity, each permission
+ * a granted role carries, each action a policy handed out allows (see
+ * `PolicyRoute`), and a permission a change to a definition hands to its
+ * holders (see `DefinitionConstraints`), by one of two routes, each decided
+ * across the grant's whole reach: its tenant, standing just below it for a
+ * grant that reaches the tenants below, or the platform for a platform-wide
+ * one, its application, every application's grants alone counting for a grant
+ * to every application, and its lifetime.
  *
  * 1. **Provable possession.** In the grant's reach, the actor holds the
  *    permission, or a wildcard covering it, through grants lasting at least as
@@ -49,24 +52,42 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 final class Possession
 {
     /**
-     * Return why the direct grant of the permission the operation proposes is
-     * refused, or null when the actor provably holds what it grants or is
-     * explicitly allowed to grant it.
+     * Return why handing out the permission across the change's reach and
+     * lifetime is refused, or null when the actor provably holds it there or is
+     * explicitly allowed to grant it, on the operation's descriptor naming the
+     * permission.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
-     * @param  string  $permission
+     * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      */
-    public static function refusal(OperationResource $operation, OperationChange $change, string $permission, FurtherChecks $checks): ?DecisionReason
+    public static function refusal(OperationResource $operation, OperationChange $change, Permission $permission, FurtherChecks $checks): ?DecisionReason
     {
-        $below   = $operation->tenant !== null && $change->scope->includeSubtree;
-        $prove   = static fn (): ?DecisionReason => self::unproved($change, $permission, $checks);
-        $grant   = static fn (): bool => self::isGrantable($operation, $change, $checks);
-        $refusal = TenantScope::within($operation->tenant, $change->scope->application, $prove, $below);
+        $name    = $permission->name;
+        $prove   = static fn (): ?DecisionReason => self::unproved($change, $name, $checks);
+        $refusal = TenantScope::within($operation->tenant, $change->scope->application, $prove, self::isBelow($operation, $change));
 
-        return $refusal === null || TenantScope::within($operation->tenant, $change->scope->application, $grant, $below) ? null : $refusal;
+        return $refusal === null || self::isGrantable($operation, $change, $operation->grantable($permission), $checks) ? null : $refusal;
+    }
+
+    /**
+     * Determine whether the actor is allowed the grantable right the descriptor
+     * is decided under, on the descriptor, in the change's reach, through a
+     * source lasting at least as long as the change.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $descriptor
+     * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
+     * @return bool
+     */
+    public static function isGrantable(OperationResource $operation, OperationChange $change, OperationResource $descriptor, FurtherChecks $checks): bool
+    {
+        $grant = static fn (): bool => self::isAllowedFor($change, $descriptor, $checks);
+
+        return TenantScope::within($operation->tenant, $change->scope->application, $grant, self::isBelow($operation, $change));
     }
 
     /**
@@ -95,21 +116,34 @@ final class Possession
     }
 
     /**
-     * Determine whether the actor is allowed the grantable right on the grant's
-     * descriptor, in the grant's reach, which is in place, through a source
-     * lasting at least as long as the grant.
+     * Determine whether the actor is allowed the grantable right on the
+     * descriptor, in the change's reach, which is in place, through a source
+     * lasting at least as long as the change.
      *
-     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $descriptor
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return bool
      */
-    private static function isGrantable(OperationResource $operation, OperationChange $change, FurtherChecks $checks): bool
+    private static function isAllowedFor(OperationChange $change, OperationResource $descriptor, FurtherChecks $checks): bool
     {
-        $decision = $checks->decide(PackagePermissions::PERMISSION_GRANTABLE, $operation->grantable()->toResourceReference());
-        $until    = $decision->isAllowed() ? self::allowedUntil($decision, $checks->subject) : null;
+        $decision = $checks->decide($descriptor->action, $descriptor->toResourceReference());
+        $until    = $decision->isAllowed() ? self::allowedUntil($decision, $checks->subject, $descriptor->action) : null;
 
         return $until !== null && $until >= $change->lastsUntil();
+    }
+
+    /**
+     * Determine whether the change's reach stands just below its tenant: it
+     * reaches the tenants below a tenant.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
+     * @return bool
+     */
+    private static function isBelow(OperationResource $operation, OperationChange $change): bool
+    {
+        return $operation->tenant !== null && $change->scope->includeSubtree;
     }
 
     /**
@@ -121,12 +155,13 @@ final class Possession
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  string  $right
      * @return int|null
      */
-    private static function allowedUntil(Decision $decision, Subject $subject): ?int
+    private static function allowedUntil(Decision $decision, Subject $subject, string $right): ?int
     {
         if ($decision->statements === []) {
-            return HeldLifetime::of($subject, PackagePermissions::PERMISSION_GRANTABLE);
+            return HeldLifetime::of($subject, $right);
         }
 
         $until = null;

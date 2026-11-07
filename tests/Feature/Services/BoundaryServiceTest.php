@@ -205,10 +205,11 @@ final class BoundaryServiceTest extends TestCase
 
     /**
      * A delegated boundary change is decided under its action before anything
-     * is written: setting a boundary, and removing one, widen authority, so an
-     * actor allowed every action is refused as unprovable, and one without the
-     * action as no match, or as out of scope for a tenant's boundary when no
-     * tenant is active.
+     * is written: replacing a boundary with a wider one, and removing one,
+     * widen authority, so an actor allowed both actions but not
+     * `authorization:administration.unbounded` is refused as unprovable, and
+     * one without the action as no match, or as out of scope for a tenant's
+     * boundary when no tenant is active.
      *
      * @return void
      *
@@ -217,11 +218,11 @@ final class BoundaryServiceTest extends TestCase
     public function testADelegatedBoundaryChangeIsRefused(): void
     {
         $tenant = self::createTenant('tenant-a');
-        $admin  = self::administrator();
+        $admin  = self::administrator([PackagePermissions::BOUNDARY_SET, PackagePermissions::BOUNDARY_REMOVE]);
         $nobody = self::administrator([], 'nobody');
         $user   = StubIdentity::create(['id' => 'user-1']);
         $cap    = self::cap('cap');
-        $other  = self::cap('other');
+        $other  = self::policy('other', [['effect' => 'allow', 'actions' => ['posts:*']]]);
 
         $platform = StubIdentity::create(['id' => 'user-2']);
 
@@ -240,6 +241,32 @@ final class BoundaryServiceTest extends TestCase
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): bool => self::service()->remove($user, actor: $nobody));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->removeAll($platform, $nobody));
         self::assertSame([PackagePermissions::BOUNDARY_REMOVE], self::actionsDecided());
+    }
+
+    /**
+     * A delegated boundary that only adds or tightens a cap is allowed on its
+     * action and the rank rule: a first boundary in the scope, or one that
+     * replaces the boundary there with a document that can only narrow it;
+     * replacing it with a wider one, or removing it, is allowed only with
+     * `authorization:administration.unbounded`, decided on the same operation.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testANarrowingBoundaryIsAllowedAndAWideningOneNeedsTheUnboundedRight(): void
+    {
+        $setter    = self::administrator([PackagePermissions::BOUNDARY_SET, PackagePermissions::BOUNDARY_REMOVE]);
+        $unbounded = self::administrator([PackagePermissions::BOUNDARY_SET, PackagePermissions::BOUNDARY_REMOVE, PackagePermissions::ADMINISTRATION_UNBOUNDED], 'unbounded');
+        $user      = StubIdentity::create(['id' => 'user-1']);
+        $wide      = self::policy('wide', [['effect' => 'allow', 'actions' => ['posts:read']], ['effect' => 'allow', 'actions' => ['posts:edit']]]);
+        $narrow    = self::policy('narrow', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($user, $wide, actor: $setter));
+        self::assertSame(GrantOutcome::REPLACED, self::service()->set($user, $narrow, actor: $setter));
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_UNPROVABLE, static fn (): GrantOutcome => self::service()->set($user, $wide, actor: $setter));
+        self::assertSame(GrantOutcome::REPLACED, self::service()->set($user, $wide, actor: $unbounded));
+        self::assertTrue(self::service()->remove($user, actor: $unbounded));
     }
 
     /**

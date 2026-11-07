@@ -305,6 +305,30 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * The impact limit of delegated administration is validated with the rest:
+     * the package's default passes, and a limit below 1 is refused under its
+     * key.
+     *
+     * @return void
+     */
+    public function testTheImpactLimitIsValidated(): void
+    {
+        $config = $this->authorizationConfig();
+
+        self::assertSame(['max_impact' => 1000], $config['administration']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        $config['administration']['max_impact'] = 0;
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->app),
+            'authorization.administration.max_impact',
+            'expected a whole number of at least 1, got 0 (int).',
+        );
+    }
+
+    /**
      * A `models` block that is not an array is refused.
      *
      * @return void
