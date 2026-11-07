@@ -142,8 +142,9 @@ final class SqliteDialectTest extends TestCase
     }
 
     /**
-     * An integer key is exact only as the rowid of a table that has one, its
-     * primary key given no index of its own.
+     * An integer key is exact only as the rowid of a table that has one,
+     * however its `WITHOUT ROWID` is cased, its primary key given no index of
+     * its own; a column not marked auto-incrementing never is.
      *
      * @return void
      */
@@ -164,7 +165,9 @@ final class SqliteDialectTest extends TestCase
         self::assertTrue($dialect->isExactInteger($table('create table posts (id integer primary key)', [(object) ['origin' => 'u']]), 'posts', ['auto_increment' => true]));
         self::assertFalse($dialect->isExactInteger($table('create table posts (id integer primary key desc)', [(object) ['origin' => 'pk']]), 'posts', ['auto_increment' => true]));
         self::assertFalse($dialect->isExactInteger($table('create table posts (id integer primary key) without rowid'), 'posts', ['auto_increment' => true]));
+        self::assertFalse($dialect->isExactInteger($table('CREATE TABLE posts (id INTEGER PRIMARY KEY) WITHOUT ROWID'), 'posts', ['auto_increment' => true]));
         self::assertFalse($dialect->isExactInteger(\Mockery::mock(Connection::class), 'posts', ['auto_increment' => false]));
+        self::assertFalse($dialect->isExactInteger(\Mockery::mock(Connection::class), 'posts', []));
     }
 
     /**
@@ -211,6 +214,8 @@ final class SqliteDialectTest extends TestCase
         self::assertSame('0', $dialect->parameter(false));
         self::assertSame('42', $dialect->parameter(42));
         self::assertSame('(-42)', $dialect->parameter(-42));
+        self::assertSame('0', $dialect->parameter(0));
+        self::assertSame('(-1)', $dialect->parameter(-1));
         self::assertSame('+CAST(X\'613f3f27625c00ff\' AS TEXT)', $dialect->parameter("a??'b\\\0\xff"));
         self::assertNull($dialect->parameter(1.5));
     }

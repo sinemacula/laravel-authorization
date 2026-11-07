@@ -37,9 +37,9 @@ final class ScopeAnchorsTest extends TestCase
      * Every tenant a source of the subject or its identity sits at is read,
      * whatever its expiry or application: their grants, policies and
      * boundaries, the policies of the roles they hold and every role above, the
-     * owners of those roles and of the permissions granted, the guardrails and
-     * the policies attached to the type; never another's grant or another
-     * type's attachment.
+     * owners of those roles and of the permissions granted to them or through
+     * the roles, the guardrails and the policies attached to the type; never
+     * another's grant or another type's attachment.
      *
      * @return void
      *
@@ -60,6 +60,15 @@ final class ScopeAnchorsTest extends TestCase
         $parent->attachPolicy(self::storedPolicy('role-policy', []), null, new Reference('teams', 'role-policy'));
         $other->givePermission(Permission::create(['name' => 'posts:edit']), null, new Reference('teams', 'stranger'));
 
+        // Owners apart from where they are granted, and a role carrying a
+        // permission another tenant owns, which no grant made here allows but
+        // the tables can hold.
+        DB::table('roles')->update(['tenant_id' => 'role-owner']);
+        DB::table('permissions')->where('id', $owned->getKey())->update(['tenant_id' => 'owned-permission']);
+        $inherited = Permission::create(['name' => 'posts:inherited', 'tenant_type' => 'teams', 'tenant_id' => 'inherited']);
+
+        DB::table('role_permissions')->insert(['role_id' => $child->getKey(), 'permission_id' => $inherited->getKey()]);
+
         app(ResourcePolicyService::class)->attach(self::storedPolicy('typed', []), ScopedPost::class, new Reference('teams', 'attached'));
         app(ResourcePolicyService::class)->attach(self::storedPolicy('other-type', []), 'comments', new Reference('teams', 'other-type'));
         DB::table('guardrails')->insert(['policy_id' => self::storedPolicy('railed', [])->getKey(), 'tenant_type' => 'teams', 'tenant_id' => 'railed']);
@@ -68,7 +77,7 @@ final class ScopeAnchorsTest extends TestCase
 
         $ids = static fn (array $tenants): array => \array_map(static fn (Reference $tenant): string => $tenant->id, $tenants);
 
-        self::assertEqualsCanonicalizing(['expired', 'owner', 'role-policy', 'permission', 'attached', 'railed'], $ids($sources));
+        self::assertEqualsCanonicalizing(['expired', 'owner', 'role-owner', 'role-policy', 'permission', 'owned-permission', 'inherited', 'attached', 'railed'], $ids($sources));
         self::assertEqualsCanonicalizing(['attached', 'railed'], $ids($admitted));
         self::assertSame($ids($admitted), $ids(ScopeAnchors::read(new Subject($user, $identity), (new ScopedPost)->getMorphClass(), false)[0]));
     }
@@ -100,7 +109,7 @@ final class ScopeAnchorsTest extends TestCase
     /**
      * A subject that is not a model holds no grant, so none of another model's
      * grant tenants is read: only the tenants a row admitted from outside
-     * reads.
+     * reads, and those of an identity behind it that is a model.
      *
      * @return void
      *
@@ -120,5 +129,11 @@ final class ScopeAnchorsTest extends TestCase
 
         self::assertSame(['railed'], $ids($sources));
         self::assertSame(['railed'], $ids($admitted));
+
+        $identity = StubIdentity::create(['id' => 'u4']);
+
+        $identity->givePermission(Permission::create(['name' => 'posts:list']), null, new Reference('teams', 'identity'));
+
+        self::assertSame(['identity', 'railed'], $ids(ScopeAnchors::read(new Subject(new \stdClass, $identity), (new ScopedPost)->getMorphClass(), true)[0]));
     }
 }

@@ -7,12 +7,14 @@ namespace Tests\Feature\Query;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Query\KeyConditions;
 use SineMacula\Laravel\Authorization\Query\KeyTarget;
 use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Query\ResourceShape;
 use SineMacula\Laravel\Authorization\Query\SchemaInspector;
+use Tests\Concerns\ReshapesResources;
 use Tests\Fixtures\QueryScoping\FoldedDocument;
 use Tests\Fixtures\QueryScoping\KeyedPost;
 use Tests\Fixtures\QueryScoping\LooseKeyedPost;
@@ -34,6 +36,8 @@ use Tests\TestCase;
 #[CoversClass(KeyConditions::class)]
 final class KeyConditionsTest extends TestCase
 {
+    use ReshapesResources;
+
     /**
      * An integer key equals only an integer's canonical text within 64 bits,
      * inlined as its digits, the least as a sum: `-0`, `+1`, `01`, `1.0` and a
@@ -62,12 +66,15 @@ final class KeyConditionsTest extends TestCase
 
         self::assertSame([QueryAuthorizer::NO_ROW, RefusalReason::RESOURCE_PATTERN], KeyConditions::equals($shape, '9223372036854775808'));
         self::assertSame([QueryAuthorizer::NO_ROW, RefusalReason::RESOURCE_PATTERN], KeyConditions::equals($shape, '-9223372036854775809'));
+        self::assertSame(["{$shape->key} = (-9223372036854775807 - 1)", null], KeyConditions::equals($shape, (string) \PHP_INT_MIN));
+        self::assertSame(["{$shape->key} = -1", null], KeyConditions::equals($shape, '-1'));
     }
 
     /**
      * A string key equals a value byte for byte, whatever case, padding or
-     * normalisation the database might fold, and starts with one the same way,
-     * a key exactly the start left out when asked.
+     * normalisation the database might fold, the plain comparison an index can
+     * serve first, and starts with one the same way, a key exactly the start
+     * left out when asked.
      *
      * @return void
      */
@@ -81,6 +88,7 @@ final class KeyConditionsTest extends TestCase
         $codes = static fn (string $condition): array => ScopedDocument::query()->whereRaw($condition)->orderBy('row_id')->pluck('code')->all();
 
         self::assertSame(['abc'], $codes(KeyConditions::equals($shape, 'abc')[0]));
+        self::assertStringStartsWith('(' . $shape->dialect->equalsIndexed($shape->key, ColumnKind::STRING, 'abc') . ' AND ', KeyConditions::equals($shape, 'abc')[0]);
         self::assertSame(['ábc'], $codes(KeyConditions::equals($shape, 'ábc')[0]));
         self::assertSame(['abc', 'abc '], $codes(KeyConditions::of($shape, KeyTarget::prefix('abc', false))[0]));
         self::assertSame(['x:*y'], $codes(KeyConditions::of($shape, KeyTarget::prefix('x:*', true))[0]));
@@ -129,6 +137,40 @@ final class KeyConditionsTest extends TestCase
     }
 
     /**
+     * A uuid key's condition is the same on every database: it equals only a
+     * uuid's canonical lower-case text, inlined as it is; any other value names
+     * no record.
+     *
+     * @return void
+     *
+     * @throws \ReflectionException
+     */
+    public function testAUuidKeyIsComparedWithItsCanonicalTextOnEveryDatabase(): void
+    {
+        $uuid  = '0b1d2c3e-4f50-4a6b-8c7d-9e0f1a2b3c4d';
+        $shape = self::shapeOf(ColumnKind::UUID);
+
+        self::assertSame(["\"k\" = '{$uuid}'", null], KeyConditions::equals($shape, $uuid));
+        self::assertSame([QueryAuthorizer::NO_ROW, null], KeyConditions::equals($shape, \strtoupper($uuid)));
+    }
+
+    /**
+     * A key that cannot be compared at all is refused for that, before any
+     * collation it has that is not exact.
+     *
+     * @return void
+     *
+     * @throws \ReflectionException
+     */
+    public function testAKeysOwnRefusalComesBeforeItsCollation(): void
+    {
+        $shape = self::shapeOf(ColumnKind::STRING, RefusalReason::COLUMN_TYPE, false);
+
+        self::assertSame([QueryAuthorizer::NO_ROW, RefusalReason::COLUMN_TYPE], KeyConditions::of($shape, KeyTarget::equals('a')));
+        self::assertSame([QueryAuthorizer::NO_ROW, RefusalReason::COLUMN_COLLATION], KeyConditions::of(self::shapeOf(ColumnKind::STRING, null, false), KeyTarget::equals('a')));
+    }
+
+    /**
      * A key PHP may read otherwise than the database holds it is refused when
      * compared: an integer key that is not SQLite's rowid (which may hold
      * `1.5`, read as `1`), or an unsigned `BIGINT` on MySQL; and a string key
@@ -169,5 +211,23 @@ final class KeyConditionsTest extends TestCase
     private static function shape(Model $model): ResourceShape
     {
         return ResourceShape::of($model, 'posts:view', new SchemaInspector);
+    }
+
+    /**
+     * Return the documents' shape with its key `"k"` of the kind given, its own
+     * refusal and whether its collation is exact.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Query\Enums\ColumnKind  $kind
+     * @param  \SineMacula\Laravel\Authorization\Query\Enums\RefusalReason|null  $refusal
+     * @param  bool  $isExact
+     * @return \SineMacula\Laravel\Authorization\Query\ResourceShape
+     *
+     * @throws \ReflectionException
+     */
+    private static function shapeOf(ColumnKind $kind, ?RefusalReason $refusal = null, bool $isExact = true): ResourceShape
+    {
+        $parts = ['key' => '"k"', 'keyKind' => $kind, 'isIntegerCast' => false, 'keyRefusal' => $refusal, 'isKeyCollationExact' => $isExact];
+
+        return self::reshaped(self::shape(new ScopedDocument), $parts);
     }
 }

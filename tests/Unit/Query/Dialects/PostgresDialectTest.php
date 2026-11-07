@@ -170,7 +170,7 @@ final class PostgresDialectTest extends TestCase
 
     /**
      * A column compares bytes when it has no collation or a deterministic one,
-     * as the catalogue says for the quoted table.
+     * as the catalogue says for the quoted table, read only as a boolean true.
      *
      * @return void
      */
@@ -179,7 +179,9 @@ final class PostgresDialectTest extends TestCase
         $dialect = new PostgresDialect;
         $column  = static function (?object $row, string $relation = '"app"."pre_Po""sts"'): Connection {
             $connection = \Mockery::mock(Connection::class);
-            $catalogue  = \Mockery::on(static fn (string $query): bool => \str_contains($query, 'collisdeterministic') && \str_contains($query, 'to_regclass'));
+            $catalogue  = 'select a.attcollation = 0 or c.collisdeterministic as exact from pg_catalog.pg_attribute a'
+                . ' left join pg_catalog.pg_collation c on c.oid = a.attcollation'
+                . ' where a.attrelid = to_regclass(CAST(? AS text)) and a.attname = ? and a.attnum > 0 and not a.attisdropped';
 
             $connection->shouldReceive('getTablePrefix')->andReturn('pre_');
             $connection->shouldReceive('selectOne')->with($catalogue, [$relation, 'code'])->andReturn($row);
@@ -191,6 +193,8 @@ final class PostgresDialectTest extends TestCase
         self::assertTrue($dialect->isExactCollation($column((object) ['exact' => true], '"pre_posts"'), 'posts', ['name' => 'code']));
         self::assertFalse($dialect->isExactCollation($column((object) ['exact' => false]), 'app.Po"sts', ['name' => 'code']));
         self::assertFalse($dialect->isExactCollation($column((object) ['exact' => null]), 'app.Po"sts', ['name' => 'code']));
+        self::assertFalse($dialect->isExactCollation($column((object) ['exact' => 't']), 'app.Po"sts', ['name' => 'code']));
+        self::assertFalse($dialect->isExactCollation($column((object) []), 'app.Po"sts', ['name' => 'code']));
         self::assertFalse($dialect->isExactCollation($column(null), 'app.Po"sts', ['name' => 'code']));
         self::assertFalse($dialect->isExactCollation(\Mockery::mock(Connection::class), 'db.app.posts', ['name' => 'code']));
         self::assertTrue($dialect->isExactInteger(\Mockery::mock(Connection::class), 'posts', []));
@@ -214,6 +218,7 @@ final class PostgresDialectTest extends TestCase
         self::assertSame('\'-42\'', $dialect->parameter(-42));
         self::assertSame('U&\'\0061\003F\003F\0027\005C\00E9\+01F600\'', $dialect->parameter('a??\'\é😀'));
         self::assertSame('U&\'\'', $dialect->parameter(''));
+        self::assertSame('U&\'\FFFF\+010000\'', $dialect->parameter("\u{FFFF}\u{10000}"));
         self::assertNull($dialect->parameter("a\0b"));
         self::assertNull($dialect->parameter("\xff"));
         self::assertNull($dialect->parameter(1.5));

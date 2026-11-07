@@ -13,12 +13,14 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
+use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Query\ResourceShape;
 use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Query\TenantMembership;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ReshapesResources;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\ReplicatedPost;
@@ -41,17 +43,25 @@ use Tests\TestCase;
 #[CoversClass(TenantMembership::class)]
 final class TenantMembershipTest extends TestCase
 {
-    use UsesAnAuthorizationConnection;
+    use ReshapesResources, UsesAnAuthorizationConnection;
 
     /**
      * A row of no tenant has either column null; one with a tenant has neither,
-     * each at most 191 bytes; one exactly a tenant matches its bytes.
+     * each at most 191 bytes; one exactly a tenant matches its bytes, the plain
+     * comparison an index can serve first, as it does under the flat tree.
      *
      * @return void
      */
     public function testTheRowsOfNoTenantOfOneAndOfExactlyOne(): void
     {
-        $rows = ['none' => [null, null], 'partial' => ['teams', null], 'team' => ['teams', '5'], 'case' => ['Teams', '5'], 'long' => ['teams', \str_repeat('5', 192)]];
+        $rows = [
+            'none'    => [null, null],
+            'partial' => ['teams', null],
+            'untyped' => [null, '5'],
+            'team'    => ['teams', '5'],
+            'case'    => ['Teams', '5'],
+            'long'    => ['teams', \str_repeat('5', 192)],
+        ];
 
         foreach ($rows as $title => [$type, $id]) {
             TenantScopedPost::query()->create(['title' => $title, 'tenant_type' => $type, 'tenant_id' => $id]);
@@ -59,10 +69,86 @@ final class TenantMembershipTest extends TestCase
 
         $membership = self::membership(new TenantScopedPost);
 
-        self::assertSame(['none', 'partial'], self::titles($membership->ofNone()));
+        self::assertSame(['none', 'partial', 'untyped'], self::titles($membership->ofNone()));
         self::assertSame(['team', 'case'], self::titles($membership->present()));
         self::assertSame(['team'], self::titles($membership->equalTo(new Reference('teams', '5'))));
-        self::assertSame(['team'], self::titles($membership->within(new Reference('teams', '5'))));
+        self::assertSame($membership->equalTo(new Reference('teams', '5')), $membership->within(new Reference('teams', '5')));
+
+        $shape   = ResourceShape::of(new TenantScopedPost, 'posts:view', new SchemaInspector);
+        $indexed = $shape->dialect->equalsIndexed((string) $shape->typeColumn, ColumnKind::STRING, 'teams');
+
+        self::assertStringStartsWith("({$indexed} AND ", $membership->equalTo(new Reference('teams', '5')));
+    }
+
+    /**
+     * A model of one fixed tenant type has only its id column: a row of no
+     * tenant has it null, one with a tenant has it, and one exactly a tenant
+     * has the tenant's id when the tenant is of the model's type, else none.
+     *
+     * @return void
+     */
+    public function testTheRowsOfAFixedTenantType(): void
+    {
+        foreach (['none' => null, 'five' => 5] as $title => $id) {
+            ScopedTicket::query()->create(['title' => $title, 'team_id' => $id]);
+        }
+
+        $membership = self::membership(new ScopedTicket);
+        $titles     = static fn (string $condition): array => ScopedTicket::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all();
+
+        self::assertSame(['none'], $titles($membership->ofNone()));
+        self::assertSame(['five'], $titles($membership->present()));
+        self::assertSame(['five'], $titles($membership->equalTo(new Reference('teams', '5'))));
+        self::assertSame([], $titles($membership->equalTo(new Reference('orgs', '5'))));
+    }
+
+    /**
+     * A tenant's subtree is read from the tree once, however often it is asked
+     * for, and each other tenant's afresh.
+     *
+     * @return void
+     */
+    public function testASubtreeIsReadOncePerTenant(): void
+    {
+        /** @var \ArrayObject<int, string> $reads */
+        $reads = new \ArrayObject;
+
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static function (Reference $tenant) use ($reads): Builder {
+            $reads[] = $tenant->id;
+
+            return DB::query()->selectRaw('? as tenant_type, ? as tenant_id', [$tenant->type, $tenant->id]);
+        }));
+
+        $membership = self::membership(new TenantScopedPost);
+
+        $membership->within(new Reference('teams', '5'));
+        $membership->within(new Reference('teams', '5'));
+        $membership->within(new Reference('teams', '7'));
+
+        self::assertSame(['5', '7'], $reads->getArrayCopy());
+    }
+
+    /**
+     * A subtree that is no query builder, and a model whose connection is not
+     * known, cannot be nested, so both are refused.
+     *
+     * @return void
+     *
+     * @throws \ReflectionException
+     */
+    public function testASubtreeThatIsNoQueryOrOfAnUnknownConnectionIsRefused(): void
+    {
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static fn (): Builder => new class implements Builder {}));
+
+        $within = static fn (): string => self::membership(new TenantScopedPost)->within(new Reference('teams', '5'));
+
+        self::assertSame([RefusalReason::SUBTREE_CONNECTION], self::refusedReasons($within));
+
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static fn (Reference $tenant): Builder => DB::query()->selectRaw('? as tenant_id', [$tenant->id])));
+
+        $unknown = new TenantMembership(self::reshaped(ResourceShape::of(new TenantScopedPost, 'posts:view', new SchemaInspector), ['connection' => null]), 'posts:view');
+
+        self::assertSame([RefusalReason::SUBTREE_CONNECTION], self::refusedReasons(static fn (): string => $unknown->within(new Reference('teams', '5'))));
     }
 
     /**

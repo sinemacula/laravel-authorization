@@ -356,8 +356,11 @@ final class QueryAuthorizerTest extends TestCase
 
     /**
      * A subject holding the action platform-wide is admitted to the rows of
-     * every tenant, decided at platform scope, as `check()` admits them; a
-     * tenant's guardrail still caps the rows of that tenant.
+     * every tenant, decided at platform scope, as `check()` admits them: under
+     * the platform's policies and the guardrails of the row's tenant, and with
+     * the denies attached in that tenant, to the type and to its records, but
+     * no allow attached there, so not even one the scope could not compile is
+     * refused.
      *
      * @return void
      *
@@ -382,12 +385,45 @@ final class QueryAuthorizerTest extends TestCase
 
         self::assertSame(['none', 't1', 't2'], TenantScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all());
         self::assertSame(['none', 't1', 't2'], self::allowed($manager));
+
+        $ids = [];
+
+        foreach (['railed' => 'r1', 'typed' => 'r2', 'denied' => 'r3', 'kept' => 'r3', 'policed' => 'r3'] as $title => $tenant) {
+            StubTenant::query()->firstOrCreate(['id' => $tenant]);
+
+            $ids[$title] = TenantScopedPost::query()->create(['title' => $title, 'tenant_type' => $type, 'tenant_id' => $tenant])->getKey();
+        }
+
+        $deny  = self::storedPolicy('deny', [['effect' => 'deny', 'actions' => ['posts:view']]]);
+        $rail  = self::storedPolicy('edit-only', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
+        $named = (new TenantScopedPost)->getMorphClass() . ':' . (string) $ids['policed']; // @phpstan-ignore cast.string
+        $allow = self::storedPolicy('uncompilable', [
+            ['effect' => 'allow', 'actions' => ['posts:view'], 'resources' => ['posts:?'], 'principals' => [$user->getMorphClass() . ':u1']],
+        ]);
+
+        DB::table('guardrails')->insert(['policy_id' => $rail->getKey(), 'tenant_type' => $type, 'tenant_id' => 'r1']);
+        app(ResourcePolicyService::class)->attach($deny, TenantScopedPost::class, new Reference($type, 'r2'));
+        app(ResourcePolicyService::class)->attach($deny, [TenantScopedPost::class, (string) $ids['denied']], new Reference($type, 'r3')); // @phpstan-ignore cast.string
+        app(ResourcePolicyService::class)->attach($allow, [TenantScopedPost::class, (string) $ids['kept']], new Reference($type, 'r3')); // @phpstan-ignore cast.string
+        $user->attachPolicy(self::storedPolicy('platform-deny', [['effect' => 'deny', 'actions' => ['posts:view'], 'resources' => [$named]]]));
+
+        // The guardrail was written past its service, so the memo is dropped.
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        $manager   = $this->resolveRequest($user);
+        $condition = self::authorizer()->compile($manager->currentSubject(), new TenantScopedPost, 'posts:view');
+
+        self::assertSame(['none', 't1', 't2', 'kept'], self::allowed($manager));
+        self::assertSame(['none', 't1', 't2', 'kept'], TenantScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all());
     }
 
     /**
      * A policy attached to a record is weighed on that record alone: its deny
      * applies to everyone, its allow to the subjects it names, as `check()`
-     * weighs it; an override, which reads no attachment, ignores it.
+     * weighs it; an override, which reads no attachment, ignores it. The
+     * policies one scope attaches to records are at most
+     * `authorization.query_scoping.max_attachments`, or 64 when it is not set
+     * to a whole number; more are refused.
      *
      * @return void
      *
@@ -418,6 +454,26 @@ final class QueryAuthorizerTest extends TestCase
         $overridden = self::authorizer(self::pipeline()->withPolicies([]))->compile($subject, new ScopedPost, 'posts:view');
 
         self::assertSame([3, 4, 5], ScopedPost::query()->whereRaw($overridden)->orderBy('id')->pluck('id')->all());
+
+        $config  = $this->app?->make(ConfigRepository::class);
+        $compile = static fn (): string => self::authorizer()->compile($subject, new ScopedPost, 'posts:view');
+
+        foreach (\range(6, 67) as $id) {
+            self::attachToResource([ScopedPost::class, (string) $id], [['effect' => 'deny', 'actions' => ['posts:view']]]);
+        }
+
+        $config?->set('authorization.query_scoping.max_attachments', 'many');
+
+        self::assertStringContainsString('EXISTS', $compile());
+
+        $config?->set('authorization.query_scoping.max_attachments', 63);
+
+        self::assertSame([RefusalReason::TOO_MANY_ATTACHMENTS], self::refusalOf($compile)->reasons());
+
+        $config?->set('authorization.query_scoping.max_attachments', 'many');
+        self::attachToResource([ScopedPost::class, '68'], [['effect' => 'deny', 'actions' => ['posts:view']]]);
+
+        self::assertSame([RefusalReason::TOO_MANY_ATTACHMENTS], self::refusalOf($compile)->reasons());
     }
 
     /**
