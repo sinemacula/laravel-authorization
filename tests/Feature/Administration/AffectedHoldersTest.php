@@ -4,11 +4,14 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Administration;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\AffectedHolders;
 use SineMacula\Laravel\Authorization\Administration\DocumentComparison;
+use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -16,8 +19,11 @@ use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -33,7 +39,7 @@ use Tests\TestCase;
 #[CoversClass(AffectedHolders::class)]
 final class AffectedHoldersTest extends TestCase
 {
-    use CatchesRefusals;
+    use CatchesRefusals, RecordsRowLocks;
 
     /**
      * A role reaches its grantees and those of every role below it, in any
@@ -61,6 +67,61 @@ final class AffectedHoldersTest extends TestCase
 
         self::assertSame(['one'], self::ids(AffectedHolders::none()->ofRoles([$role->id])->holders()));
         self::assertSame(['one', 'two'], self::ids(AffectedHolders::none()->ofRoles([$role->id, $least->id])->holders()));
+    }
+
+    /**
+     * Inside a delegated operation, every set read is locked and pinned as the
+     * operation's holders, the roles below a role with every role whose parent
+     * is one of them, so a holder granted, or a role put below one, before the
+     * write fails validation; outside one, nothing is locked.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testInsideADelegatedOperationTheHoldersArePinned(): void
+    {
+        $role       = Role::query()->create(['name' => 'editor']);
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+        $policy     = Policy::query()->create(['name' => 'shared', 'document' => ['statements' => []]]);
+
+        self::grants()->grantRole(self::user('one'), $role);
+
+        $locks = $this->recordRowLocks();
+
+        AffectedHolders::none()->ofRoles([$role->id]);
+
+        self::assertSame([], $locks->getArrayCopy());
+
+        $operation = new Operation('op', new Reference('user', 'admin'), CarbonImmutable::now('UTC'), false);
+
+        $failures = OperationScope::run($operation, static function () use ($role, $permission, $policy, $locks): array {
+            AffectedHolders::none()->ofRoles([$role->id])->ofPermission($permission)->ofPolicy($policy, []);
+
+            $pins     = OperationScope::pins();
+            $phase    = $pins?->phase();
+            $tables   = \array_values(\array_unique(\array_column($locks->getArrayCopy(), 0)));
+            $failures = [$phase, $tables];
+
+            $pins?->validate();
+
+            Role::query()->create(['name' => 'junior', 'parent_id' => $role->id]);
+
+            try {
+                $pins?->validate();
+            } catch (DependencyChangedException $exception) {
+                $failures[] = $exception->getMessage();
+            }
+
+            return $failures;
+        });
+
+        self::assertSame(DependencyPhase::HOLDERS, $failures[0]);
+        self::assertSame(
+            ['roles', 'authorizable_roles', 'authorizable_permissions', 'role_permissions', 'authorizable_policies', 'authorizable_boundaries', 'resource_policies'],
+            $failures[1],
+        );
+        self::assertSame('The rows of [roles] a delegated decision read changed before the write.', $failures[2] ?? null);
     }
 
     /**

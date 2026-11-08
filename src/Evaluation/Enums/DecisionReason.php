@@ -76,6 +76,9 @@ enum DecisionReason: string
     /** The administration operation is made while impersonating, and nothing allows that. */
     case ADMINISTRATION_IMPERSONATING = 'administration.impersonating';
 
+    /** The administration operation was decided on records that changed before it was written, every time it was tried. */
+    case ADMINISTRATION_CONFLICT = 'administration.conflict';
+
     /**
      * Return a short description of the reason, for explanations.
      *
@@ -104,6 +107,7 @@ enum DecisionReason: string
             self::ADMINISTRATION_NOT_GRANTABLE     => 'it hands out what the actor neither holds nor may grant',
             self::ADMINISTRATION_UNPROVABLE        => 'it may widen authority in a way that cannot be proved permitted',
             self::ADMINISTRATION_IMPERSONATING     => 'it is made while impersonating',
+            self::ADMINISTRATION_CONFLICT          => 'what it was decided on changed before it was written',
         };
     }
 }

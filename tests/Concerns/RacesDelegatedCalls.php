@@ -1,0 +1,117 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Concerns;
+
+use Illuminate\Database\Events\TransactionRolledBack;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+
+/**
+ * Simulates a concurrent write landing between a delegated decision and the
+ * write it allows, whatever the database, so a test can reach the concurrency
+ * protocol's version check on SQLite, which serialises writers, as on
+ * PostgreSQL and MySQL.
+ *
+ * The change runs from a listener of the decision, inside the operation's try,
+ * as a concurrent call's write would be seen by the reads that follow; when
+ * that try is rolled back, it runs again outside it, inside the test's own
+ * transaction, as though the concurrent call had committed, so the next try
+ * decides on it. Asked to race every try, it runs inside each try instead, and
+ * never outside, so every try conflicts.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ *
+ * @phpstan-require-extends \Tests\TestCase
+ */
+trait RacesDelegatedCalls
+{
+    /**
+     * Run the change once the first decision of the action of a try has been
+     * made, as described above, and return how many decisions of the action
+     * were made, counted as they are.
+     *
+     * @param  string  $action
+     * @param  \Closure(): mixed  $change
+     * @param  bool  $isEveryTry
+     * @return \ArrayObject<int, bool>
+     */
+    protected static function raceWith(string $action, \Closure $change, bool $isEveryTry = false): \ArrayObject
+    {
+        /** @var \ArrayObject<int, bool> $decisions */
+        $decisions = new \ArrayObject;
+
+        /** @var \ArrayObject<string, bool|int> $state */
+        $state = new \ArrayObject(['armed' => true, 'level' => 0, 'committed' => false]);
+
+        Event::listen(DecisionEvaluated::class, static function (DecisionEvaluated $event) use ($action, $change, $decisions, $state): void {
+            if ($event->action !== $action) {
+                return;
+            }
+
+            $decisions->append($event->decision->isAllowed());
+
+            if ($state['armed'] !== true) {
+                return;
+            }
+
+            $state['armed'] = false;
+            $state['level'] = DB::transactionLevel();
+
+            $change();
+        });
+
+        Event::listen(TransactionRolledBack::class, static function () use ($change, $isEveryTry, $state): void {
+            // Only the rollback of the try raced counts: not one inside the
+            // change itself, nor the test's own once it ends.
+            $level = DB::transactionLevel();
+
+            if ($state['committed'] === true || $level >= $state['level'] || $level === 0) {
+                return;
+            }
+
+            if ($isEveryTry) {
+                $state['armed'] = true;
+
+                return;
+            }
+
+            $state['committed'] = true;
+
+            $change();
+        });
+
+        return $decisions;
+    }
+
+    /**
+     * Record the package's change events dispatched from now on, by class:
+     * every package event but the decisions and the refusals.
+     *
+     * @return \ArrayObject<int, string>
+     */
+    protected static function recordChanges(): \ArrayObject
+    {
+        /** @var \ArrayObject<int, string> $changes */
+        $changes = new \ArrayObject;
+
+        Event::listen('*', static function (string $name, array $payload) use ($changes): void {
+            $event = $payload[0] ?? null;
+
+            if (!$event instanceof AuthorizationEvent || $event instanceof DecisionEvaluated || $event instanceof AuthorizationFailed) {
+                return;
+            }
+
+            $changes->append($event::class);
+        });
+
+        return $changes;
+    }
+}

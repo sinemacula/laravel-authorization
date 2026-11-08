@@ -1,0 +1,38 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Unit\Exceptions;
+
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
+
+/**
+ * Unit tests for `DependencyChangedException`, the conflict of a delegated
+ * operation whose decisions read something that changed before the write.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ */
+#[CoversClass(DependencyChangedException::class)]
+final class DependencyChangedExceptionTest extends TestCase
+{
+    /**
+     * Rows that changed are named by their table, and a moved tree as such;
+     * each is a runtime exception.
+     *
+     * @return void
+     */
+    public function testTheMessagesNameWhatChanged(): void
+    {
+        $rows = DependencyChangedException::rows('roles');
+        $tree = DependencyChangedException::tree();
+
+        self::assertInstanceOf(\RuntimeException::class, $rows);
+        self::assertSame('The rows of [roles] a delegated decision read changed before the write.', $rows->getMessage());
+        self::assertSame('The tenant tree moved after a delegated decision read it, before the write.', $tree->getMessage());
+    }
+}

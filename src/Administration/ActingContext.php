@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -221,18 +222,34 @@ final readonly class ActingContext
      * first refusal of a batch never depends on the order its rows were read
      * in.
      *
+     * Inside a delegated operation's work, the concurrency protocol runs around
+     * the decisions (see `DependencyPins`): the actor's authority and what the
+     * changes change are locked and pinned before the first is decided, the
+     * holders a change reaches as they are read, and once every change is
+     * allowed, all of it is read again and the operation is tried again when
+     * anything changed.
+     *
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  ...$changes
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     * @throws \LogicException
      */
     public function authorizeIn(Operation $operation, OperationResource ...$changes): void
     {
-        foreach (self::ordered($changes) as $change) {
+        $changes = self::ordered($changes);
+        $pins    = OperationScope::pins();
+
+        $pins?->lockChanges(...$changes);
+
+        foreach ($changes as $change) {
             $this->authorize($change->actedBy($this->impersonator, $operation->id));
         }
+
+        $pins?->validate();
     }
 
     /**

@@ -305,26 +305,35 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
-     * The impact limit of delegated administration is validated with the rest:
-     * the package's default passes, and a limit below 1 is refused under its
-     * key.
+     * The limits of delegated administration are validated with the rest: the
+     * package's defaults pass, and an impact limit below 1, or retries below 0,
+     * are refused under their key.
      *
      * @return void
      */
-    public function testTheImpactLimitIsValidated(): void
+    public function testTheAdministrationLimitsAreValidated(): void
     {
         $config = $this->authorizationConfig();
 
-        self::assertSame(['max_impact' => 1000], $config['administration']);
+        self::assertSame(['max_impact' => 1000, 'retries' => 2], $config['administration']);
 
         ConfigValidator::validate($config, $this->app);
 
-        $config['administration']['max_impact'] = 0;
+        $impact = $config;
+        $tries  = $config;
+
+        $impact['administration']['max_impact'] = 0;
+        $tries['administration']['retries']     = -1;
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($config, $this->app),
+            fn () => ConfigValidator::validate($impact, $this->app),
             'authorization.administration.max_impact',
             'expected a whole number of at least 1, got 0 (int).',
+        );
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($tries, $this->app),
+            'authorization.administration.retries',
+            'expected a whole number of at least 0, got -1 (int).',
         );
     }
 

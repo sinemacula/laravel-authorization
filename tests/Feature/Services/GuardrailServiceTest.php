@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Events\Guardrail\GuardrailRemoved;
 use SineMacula\Laravel\Authorization\Events\Guardrail\GuardrailSet;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\GuardrailException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
@@ -22,11 +23,15 @@ use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
 use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
+use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
+use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\StubIdentity;
@@ -47,7 +52,7 @@ use Tests\TestCase;
 #[CoversClass(GuardrailService::class)]
 final class GuardrailServiceTest extends TestCase
 {
-    use ActsAsTenant, ComparesReferences, ReadsDispatchedEvents, RecordsRowLocks;
+    use ActsAsTenant, ComparesReferences, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks;
 
     /**
      * The service is bound once in the container.
@@ -343,15 +348,16 @@ final class GuardrailServiceTest extends TestCase
     }
 
     /**
-     * Setting a guardrail reads the policy under a lock on its row before
-     * anything else is locked, so an edit of the policy made meanwhile waits
+     * Setting a guardrail locks the actor's authority first, as every delegated
+     * operation does, then the policy's row, before the right is decided and
+     * before anything is written, so an edit of the policy made meanwhile waits
      * until the guardrail is there to refuse it.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testSettingAGuardrailLocksItsPolicyFirst(): void
+    public function testSettingAGuardrailLocksTheActorThenItsPolicy(): void
     {
         $actor  = self::manager();
         $policy = self::rail('cap');
@@ -359,7 +365,152 @@ final class GuardrailServiceTest extends TestCase
 
         self::service()->set($policy, null, ActingContext::for($actor));
 
-        self::assertEquals(['policies', [$policy->id]], $locks[0] ?? null);
+        $locked = $locks->getArrayCopy();
+        $first  = \array_search(['policies', [$policy->id]], $locked, true);
+
+        self::assertIsInt($first);
+        self::assertSame(
+            ['authorizable_roles', 'authorizable_permissions', 'authorizable_policies', 'authorizable_boundaries', 'guardrails', 'resource_policies', 'permissions'],
+            \array_column(\array_slice($locked, 0, $first), 0),
+        );
+    }
+
+    /**
+     * The actor's right revoked between the decision and the write has the
+     * change tried again, under the concurrency protocol, and refused, as the
+     * actor no longer holds it; nothing is written.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARightRevokedMeanwhileIsRefusedOnTheRetry(): void
+    {
+        $actor     = self::manager();
+        $policy    = self::rail('cap');
+        $admin     = StubIdentity::query()->whereKey('admin-1')->firstOrFail();
+        $revoke    = static fn (): int => GrantService::instance()?->revokePermission($admin, PackagePermissions::GUARDRAIL_MANAGE) ?? 0;
+        $decisions = self::raceWith(PackagePermissions::GUARDRAIL_MANAGE, $revoke);
+
+        try {
+            self::service()->set($policy, null, ActingContext::for($actor));
+
+            self::fail('The change was made.');
+        } catch (GuardrailException $exception) {
+            self::assertSame(GuardrailException::NOT_PERMITTED, $exception->getReason());
+        }
+
+        self::assertSame([true, false], $decisions->getArrayCopy());
+        self::assertSame(0, DB::table('guardrails')->count());
+    }
+
+    /**
+     * A policy rewritten between the decision and the write has the change
+     * tried again and made on the policy as rewritten, once.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyRewrittenMeanwhileIsSetAsRewritten(): void
+    {
+        $actor   = self::manager();
+        $policy  = self::rail('cap');
+        $edit    = ['statements' => [['effect' => 'allow', 'actions' => ['posts:edit']]]];
+        $rewrite = static fn (): Policy => PolicyService::instance()?->rewrite(self::stored($policy), $edit) ?? $policy;
+
+        $decisions = self::raceWith(PackagePermissions::GUARDRAIL_MANAGE, $rewrite);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($policy, null, ActingContext::for($actor)));
+        self::assertSame([true, true], $decisions->getArrayCopy());
+        self::assertSame(1, DB::table('guardrails')->count());
+        self::assertStringContainsString('posts:edit', self::documentOf($policy));
+    }
+
+    /**
+     * The exemption from the guardrail stage covers exactly
+     * `authorization:guardrail.manage`, and only the guardrails: a guardrail
+     * that does not allow the right never blocks it, but the actor's own deny
+     * of it, a boundary that does not allow it and a cap of the call still
+     * refuse, and the impersonation right, decided alongside it, stays capped
+     * by the guardrails.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheExemptionCoversOnlyTheGuardrailRight(): void
+    {
+        $actor  = self::manager();
+        $policy = self::rail('cap');
+        $other  = self::rail('other');
+
+        DB::table('guardrails')->insert(['policy_id' => self::rail('blocking')->getKey()]);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($policy, null, ActingContext::for($actor)));
+
+        $impersonated = ActingContext::for($actor)->impersonatedBy(new Reference('support', '9'));
+
+        $actor->givePermission(Permission::query()->create(['name' => PackagePermissions::ADMINISTRATION_IMPERSONATED]));
+
+        self::assertRefusedAs('administration.impersonating', static fn (): GrantOutcome => self::service()->set($other, null, $impersonated));
+        self::assertRefusedAs(GuardrailException::class, static fn (): GrantOutcome => self::service()->set($other, null, ActingContext::for($actor)->capped(['posts:*'])));
+
+        $bounded = StubIdentity::query()->create(['id' => 'bounded']);
+
+        $bounded->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
+        BoundaryService::instance()?->set($bounded, self::policy('bound', [['effect' => 'allow', 'actions' => ['posts:*']]]));
+
+        self::assertRefusedAs(GuardrailException::class, static fn (): GrantOutcome => self::service()->set($other, null, ActingContext::for($bounded)));
+
+        $denied = StubIdentity::query()->create(['id' => 'denied']);
+
+        $denied->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
+        $denied->attachPolicy(self::policy('deny', [['effect' => 'deny', 'actions' => [PackagePermissions::GUARDRAIL_MANAGE]]]));
+
+        self::assertRefusedAs(GuardrailException::class, static fn (): GrantOutcome => self::service()->set($other, null, ActingContext::for($denied)));
+        self::assertSame(2, DB::table('guardrails')->count());
+    }
+
+    /**
+     * A policy in use as a guardrail is never edited or deleted, through the
+     * policy service, trusted or delegated, or through the model, until every
+     * guardrail it is has been removed (an invariant of delegated
+     * administration).
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGuardrailsPolicyIsNeverEditedOrDeleted(): void
+    {
+        $actor   = self::manager();
+        $policy  = self::policy('cap', [['effect' => 'allow', 'actions' => ['*']]]);
+        $admin   = StubIdentity::query()->create(['id' => 'editor', 'name' => 'editor']);
+        $context = ActingContext::for($admin);
+
+        foreach ([PackagePermissions::POLICY_UPDATE, PackagePermissions::POLICY_DELETE, 'posts:*'] as $action) {
+            $admin->givePermission(Permission::query()->firstOrCreate(['name' => $action]));
+        }
+
+        self::service()->set($policy, null, ActingContext::for($actor));
+
+        $document = ['statements' => [['effect' => 'allow', 'actions' => ['posts:edit']]]];
+        $policies = PolicyService::instance();
+
+        self::assertNotNull($policies);
+        self::assertRefusedAs(GuardrailException::class, static fn (): Policy => $policies->rewrite($policy, $document));
+        self::assertRefusedAs(GuardrailException::class, static fn (): Policy => $policies->rewrite($policy, $document, $context));
+        self::assertRefusedAs(GuardrailException::class, static fn () => $policies->delete($policy));
+        self::assertRefusedAs(GuardrailException::class, static fn () => $policies->delete($policy, $context));
+        self::assertRefusedAs(GuardrailException::class, static fn (): bool => self::stored($policy)->forceFill(['description' => 'edited'])->save());
+        self::assertRefusedAs(GuardrailException::class, static fn (): ?bool => self::stored($policy)->delete());
+
+        self::assertTrue(self::service()->remove($policy, null, ActingContext::for($actor)));
+
+        $policies->rewrite(self::stored($policy), $document);
+
+        self::assertStringContainsString('posts:edit', self::documentOf($policy));
     }
 
     /**
@@ -507,6 +658,55 @@ final class GuardrailServiceTest extends TestCase
 
             DB::table('guardrails')->insertOrIgnore($row);
         }
+    }
+
+    /**
+     * Return the policy as stored, read afresh.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @return \SineMacula\Laravel\Authorization\Models\Policy
+     */
+    private static function stored(Policy $policy): Policy
+    {
+        return Policy::query()->whereKey($policy->getKey())->firstOrFail();
+    }
+
+    /**
+     * Return the policy's document as stored.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @return string
+     */
+    private static function documentOf(Policy $policy): string
+    {
+        $document = DB::table('policies')->where('id', $policy->getKey())->value('document');
+
+        return \is_string($document) ? $document : '';
+    }
+
+    /**
+     * Assert the call is refused with the exception class, or as the reason of
+     * an `AuthorizationException`.
+     *
+     * @param  string  $refusal
+     * @param  \Closure(): mixed  $call
+     * @return void
+     */
+    private static function assertRefusedAs(string $refusal, \Closure $call): void
+    {
+        try {
+            $call();
+        } catch (AuthorizationException $exception) {
+            self::assertSame($refusal, $exception->getReason()->value);
+
+            return;
+        } catch (\Throwable $exception) {
+            self::assertInstanceOf($refusal, $exception);
+
+            return;
+        }
+
+        self::fail('The call was not refused.');
     }
 
     /**

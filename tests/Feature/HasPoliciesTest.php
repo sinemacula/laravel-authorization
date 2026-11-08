@@ -10,12 +10,15 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use Psr\Log\AbstractLogger;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -468,6 +471,27 @@ final class HasPoliciesTest extends TestCase
     }
 
     /**
+     * Each write helper hands the acting context it is given to the service, so
+     * the change is delegated and decided as that actor: an actor allowed
+     * nothing is refused by each, writing nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheWriteHelpersPassTheActorThrough(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-actor']);
+        $actor  = ActingContext::for(StubIdentity::create(['id' => 'nobody']));
+        $policy = Policy::create(['name' => 'readers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+
+        self::assertRefusedAsNothingAllowed(static fn () => $user->attachPolicy($policy, actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->detachPolicy($policy, actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->syncPolicies([$policy], actor: $actor));
+        self::assertSame(0, DB::table('authorizable_policies')->where('authorizable_id', 'user-actor')->count());
+    }
+
+    /**
      * Return the grant table the expiry check reads.
      *
      * @return string
@@ -524,6 +548,23 @@ final class HasPoliciesTest extends TestCase
     {
         /** @var list<string> */
         return $identity->policies->pluck('name')->all();
+    }
+
+    /**
+     * Assert the call is refused as the actor is allowed nothing.
+     *
+     * @param  \Closure(): mixed  $call
+     * @return void
+     */
+    private static function assertRefusedAsNothingAllowed(\Closure $call): void
+    {
+        try {
+            $call();
+
+            self::fail('The helper did not decide the change as the actor.');
+        } catch (AuthorizationException $refusal) {
+            self::assertSame(DecisionReason::NO_MATCH, $refusal->getReason());
+        }
     }
 
     /**

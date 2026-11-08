@@ -1,12 +1,13 @@
 # Delegated Administration
 
 Granting, revoking and editing roles, permissions and policies are themselves actions this package checks (AUTHZ-11.1).
-This note gives the whole design of delegated administration, built in four parts (N78), and marks what this release
+This note gives the whole design of delegated administration, built in four parts (N78), all of which this release
 enforces: the action catalogue, the acting context, the operation resources decided through `check()` and the audit
 correlation (part 1), the scope, rank, self, expiry and possession rules of direct grants, with atomic batches (part 2),
-and role grants, grantable policies, the owner rule on definitions, the impact of a change on every existing holder,
-boundaries and resource-policy attachments (part 3). Part 4 is listed as **Not yet**: until it lands, what it would
-prove is refused, so delegated administration never grants anything it cannot justify.
+role grants, grantable policies, the owner rule on definitions, the impact of a change on every existing holder,
+boundaries and resource-policy attachments (part 3), and the concurrency protocol, guardrail changes under it, the
+trusted integration surfaces and the adversarial tests (part 4). What no rule proves is refused, so delegated
+administration never grants anything it cannot justify.
 
 ## Invariants
 
@@ -188,11 +189,69 @@ prove is refused, so delegated administration never grants anything it cannot ju
       one record or the whole type, is weighed by the impact check across the attachment's reach, with the policy
       route.
 
-13. **Guardrails and concurrency (part 4, Not yet).** Guardrail changes join the operation-resource path. Every
-    authorization dependency of a change is locked or version-checked, so a concurrent revocation, role growth, policy
-    rewrite or tenant move never commits on stale authority, and the trusted paths are documented as integration
-    surfaces. Until then, guardrails keep their own authority rule (`GuardrailAuthority`, decided inside the change's
-    transaction) and the exact-action exemption of `authorization:guardrail.manage` from the guardrail stage.
+13. **The concurrency protocol (part 4, in this release).** A delegated decision never commits on authority that
+    changed under it. Inside `OperationScope::run()`, each try of a delegated operation holds
+    `Administration\DependencyPins`, which take every lock in one documented order (`Enums\DependencyPhase`):
+    - **the actor**, once, at the operation's first decision: the grant rows of its principal and identity (roles,
+      permissions, policies, boundaries), the guardrails on the platform and on the chain of the request's tenant, the
+      resource policies of the type `authorization:operation`, the roles held and every role above them with the
+      permissions and policies they carry, then the permission and policy rows all of these name
+      (`Administration\AuthorityRows`);
+    - **the target**, before the first change is decided (`ActingContext::authorizeIn()`): for each change, the chain
+      of the tenant it holds in and the guardrails there, the grantee's grant rows (or a role grantee's chain, or the
+      resource policies of the resource type a policy is attached to), the role, permission or policy handed out or
+      taken away, and a definition's record, with a new parent's chain;
+    - **the holders**, as the impact check reads them (`Administration\AffectedHolders`): every set of holder rows,
+      the roles below a role with every role whose parent is one of them.
+
+    Within a part, the rows are locked in `AuthorityRows`' fixed order, each query's keys sorted, and a part never
+    locks before an earlier one (a `LogicException`). Every lock is `lockForUpdate()` on the write connection, outside
+    every tenant scope, expired grants included. The tenant tree is the application's and cannot be locked, so the
+    chain of each tenant is read afresh and pinned, and `treeChanged()` reported meanwhile marks every running
+    delegated operation moved (`OperationScope::treeChanged()`).
+
+    Once every change is allowed, and before anything is written, every pinned set is read again, once as a decision
+    reads it and once under the lock, and every chain afresh; anything that differs (a row written, inserted or
+    removed, a snapshot older than the locks, a tenant moved) throws `Exceptions\DependencyChangedException`, and the
+    try is rolled back and run again from the start (`Administration\ConflictRetries`), up to
+    `authorization.administration.retries` times (2 by default, validated at boot). A PostgreSQL serialisation failure
+    or deadlock, a MySQL deadlock or lock wait timeout, or a busy SQLite database is tried again the same way when the
+    operation opened the outermost transaction; inside the application's own transaction it is thrown as it is, since
+    the database rolled the whole transaction back or needs it restarted. Once every try has conflicted, the call is
+    refused with `AuthorizationException` as `administration.conflict`, at the `administration` stage.
+
+    What each database gives: PostgreSQL and MySQL hold the row locks until the transaction ends, so a concurrent write
+    of a locked row waits, and the second read catches an insertion the locks do not cover (PostgreSQL's read committed)
+    or a snapshot older than the locks (MySQL's repeatable read, whose next-key locks also hold back most insertions).
+    SQLite serialises writers and compiles no row lock, so the locks are a no-op there and the second read alone catches
+    a change; the tests reach that path by making the change between the decision and the write from a listener.
+
+    The protocol takes no lock until the operation's first decision, and a service's work starts inside the call's
+    transaction before it reads or locks anything, so a scope-widening grant hook (AUTHZ-11.3, BL-66) called first in
+    the work of `OperationScope::run()` runs before every lock the package takes for the call; that is the seam BL-66
+    runs its hooks from. A trusted call keeps today's behaviour and cost: it runs once, with no pins, no extra lock and
+    no retry.
+
+14. **Guardrails (part 4, in this release).** Guardrail changes always take an acting context and run under the
+    concurrency protocol: the actor's authority, the policy's row and the guardrails of the scope and of the scopes
+    above it are locked and pinned before the right is decided, and read again once it is allowed. The right keeps its
+    own rule (`GuardrailAuthority`, decided through `check()` from above the scope, inside the change's transaction).
+    The exemption from the guardrail stage covers exactly `authorization:guardrail.manage`: no guardrail ever blocks it,
+    but the actor's own denies, boundaries and the call's caps still refuse it, and every other action, the
+    impersonation right decided beside it included, stays capped by the guardrails. A policy in use as a guardrail is
+    never edited or deleted, through the policy service, trusted or delegated, or through the model, until every
+    guardrail it is has been removed (`Support\PolicyGuardrails`).
+
+15. **Trusted surfaces (part 4, in this release).** Each of these is trusted system work, an integration surface for
+    the application's own code and never an endpoint for user-controlled administration:
+    - a management service called without an acting context;
+    - a raw Eloquent write on the package's models, pivots or tables;
+    - the trait helpers called without `actor:`: each write helper of `HasRoles`, `HasPermissions` and `HasPolicies`
+      takes an optional `actor:` and hands it to the grant service, while the Spatie aliases and a role's own
+      `givePermission()`, `revokePermission()` and `syncPermissions()` take none (call `RoleService` with `actor:`);
+    - seeders, migrations and console commands run without `--actor` (`authorization:grant` and `authorization:revoke`
+      take one, through `Console\Support\ActorOption`; `authorization:sync`'s is recorded alone, and
+      `authorization:prune` and `authorization:migrate-spatie` are always trusted).
 
 ## Success Path
 
@@ -213,6 +272,9 @@ prove is refused, so delegated administration never grants anything it cannot ju
   written and no change event is dispatched. The client sees the one `denied` line.
 - **Allowed but refused by a constraint.** The administration stage refuses with the constraint's reason, with a trace
   step naming it; a widening change no rule of this release proves is `administration.unprovable`.
+- **Conflict.** A try whose decisions read something that changed before the write, or that the database refused as
+  a concurrency error, is rolled back and run again; once `authorization.administration.retries` tries have all
+  conflicted, the call is refused as `administration.conflict`, nothing written and no change event dispatched.
 - **Rolled-back audit.** A denial is reported synchronously inside a transaction that rolls back, so an audit store that
   persists it must write on a connection with no part in that transaction: directly on a database connection of its own,
   or through a queue whose backend shares nothing with it (a non-database driver, or the `database` driver on a
@@ -258,7 +320,13 @@ prove is refused, so delegated administration never grants anything it cannot ju
 - `Support\Operation` -- the operation's actor, identity, impersonator, mode and actions.
 - `Services\Support\RecordWriter`, `Services\Support\GrantChanges`, `Services\Support\StoredRecords` and every
   management service -- the changes they decide, on the rows as stored, before they write.
-- `Services\Support\GuardrailAuthority` -- the guardrail right, decided inside the transaction.
+- `Services\Support\GuardrailAuthority` -- the guardrail right, decided inside the transaction;
+  `Services\GuardrailService` -- guardrail changes under the concurrency protocol; `Support\PolicyGuardrails` -- a
+  guardrail's policy never edited or deleted.
+- `Administration\DependencyPins`, `Administration\AuthorityRows`, `Enums\DependencyPhase` -- the locks, the pins,
+  their order and the validation before the write; `Administration\ConflictRetries`,
+  `Exceptions\DependencyChangedException` -- the retries and `administration.conflict`; `Support\OperationScope` --
+  the tries of a delegated operation, `pins()` and `treeChanged()`.
 - `Evaluation\Enums\DecisionReason`, `DecisionStage::ADMINISTRATION`, `TraceOutcome::SATISFIED` -- the reasons, the
   stage and its trace.
 
@@ -291,7 +359,21 @@ prove is refused, so delegated administration never grants anything it cannot ju
   `PossessionTest`, `HeldLifetimeTest`, `PossessionLimitsTest`, `GrantReachTest` -- the operation resource, its change,
   its grantee, its attributes, the administration stage and each of its constraints.
 - `GuardrailAuthorityTest`, `GuardrailServiceTest`, `DecisionPipelineTest` -- the guardrail right inside the
-  transaction, impersonation, and the exemption of exactly `authorization:guardrail.manage`.
+  transaction, impersonation, the exemption of exactly `authorization:guardrail.manage` with the actor's own denies,
+  boundaries and caps still refusing, a right revoked or a policy rewritten meanwhile, and a guardrail's policy never
+  edited or deleted.
+- `EscalationPropertyTest` -- the seeded property (`AUTHZ_PARITY_SEED`, `AUTHZ_PARITY_RUNS`, 150 by default): over
+  random tenants, roles with hierarchy and ranks, permissions with wildcards, policies with allows and denies,
+  boundaries, guardrails, resource policies and a random actor making random delegated operations, no committed
+  operation leaves a subject with authority beyond what the actor could hand out, judged by `permissionsFor()` before
+  and after at the platform and in every tenant, and no refused one changes anything or dispatches a change event.
+- `DelegatedRacesTest` -- a concurrent revocation of the actor, a role that grows, a policy rewritten and a tenant moved
+  between the decision and the write, each tried again and refused; a harmless race tried again and made once; a
+  conflict on every try refused as `administration.conflict`; a trusted call never tried again.
+- `DependencyPinsTest`, `AuthorityRowsTest`, `ConflictRetriesTest`, `DependencyPhaseTest`,
+  `DependencyChangedExceptionTest`, `OperationScopeTest` -- the locks and their order, the validation both ways, the
+  chains and a tree reported moved, the retries, serialisation failures and the refusal.
+- `HasRolesTest`, `HasPermissionsTest`, `HasPoliciesTest` -- each write helper hands its `actor:` to the service.
 - `PackagePermissionsTest`, `OperationTest`, `RecordWriterTest`, `GrantChangesTest` -- the catalogue, the operation and
   the changes the services decide.
 - `GrantServiceTest`, `RoleServiceTest`, `BoundaryServiceTest`, `ResourcePolicyServiceTest` -- each service's delegated
@@ -308,6 +390,8 @@ prove is refused, so delegated administration never grants anything it cannot ju
 - Part 3 (in this release) did the same for roles, definition edits, boundaries, resource policies and impact, applying
   `OwnerConstraint` to definitions, role membership and policies, and deciding `policy.grantable` and
   `administration.unbounded`.
-- Part 4 moves guardrail changes onto the operation-resource path and adds the concurrency protocol.
+- Part 4 (in this release) added the concurrency protocol, ran guardrail changes under it, documented the trusted
+  surfaces and passed an actor through the trait helpers, and added the escalation property and the race tests, so
+  delegated administration is complete.
 - Adding an administration action, or an attribute of the operation resource, changes `PackagePermissions` or
   `OperationAttributes` and their tests, and the README's tables.

@@ -598,9 +598,17 @@ return [
     | `administration.unprovable`, never approximated. A whole number of at
     | least 1.
     |
+    | `retries` is how many times a delegated call is tried again when what
+    | its decisions read changed before it wrote, or the database refused it
+    | as a serialisation failure or deadlock: each try runs in a transaction
+    | of its own and decides everything again. Once every try has conflicted,
+    | the call is refused as `administration.conflict`. A whole number of at
+    | least 0; 0 refuses on the first conflict.
+    |
     */
 
     'administration' => [
         'max_impact' => (int) env('AUTHORIZATION_ADMINISTRATION_MAX_IMPACT', 1000),
+        'retries'    => (int) env('AUTHORIZATION_ADMINISTRATION_RETRIES', 2),
     ],
 ];

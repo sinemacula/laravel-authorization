@@ -137,8 +137,10 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   same operation gets the same decision. This release weighs the administered scope, rank and self of every change to
   a subject, possession or explicit grantability of every permission and policy handed out, a granted role's whole
   authority included, the owner rule and the impact on every existing holder of a change to a definition, and
-  boundaries and resource-policy attachments, and refuses, as `administration.unprovable`, every change it cannot prove
-  (see [Delegated administration](#delegated-administration)).
+  boundaries and resource-policy attachments, and refuses, as `administration.unprovable`, every change it cannot prove.
+  A delegated call locks what its decisions read and checks it again before it writes, so it never commits on
+  authority that changed under it: a conflict is tried again, then refused as `administration.conflict` (see
+  [Delegated administration](#delegated-administration)).
 - **Management services** that own every write of a role, permission, policy, grant, resource attachment, permission
   boundary or guardrail: each call runs in one transaction on the package's connection, through the configured models,
   and grants are idempotent under concurrency. The traits, the grant and revoke commands and the Spatie import write
@@ -935,7 +937,11 @@ A tenant with no parent, and the platform, are changed only through a platform-w
 application and is recorded and reported like any other decision. An actor without the right is refused with
 `GuardrailException`, whose `getReason()` is `not_permitted` and `getActor()` the actor's principal, before anything is
 read or written. An impersonated actor is refused with `AuthorizationException` as `administration.impersonating` unless
-`authorization:administration.impersonated` is allowed it from above the scope too.
+`authorization:administration.impersonated` is allowed it from above the scope too. Every change runs under the
+[concurrency protocol](#delegated-administration) of delegated administration: the actor's authority, the policy's row
+and the guardrails of the scope and the scopes above it are locked before the right is decided and read again before
+anything is written, so a right revoked or a policy rewritten meanwhile has the change tried again, and refused as
+`administration.conflict` once every try has conflicted.
 
 ```php
 // Every scope, the platform included.
@@ -1423,7 +1429,7 @@ weighs the operation's constraints, in this order, and can only refuse:
   cannot be read is `administration.rank_uncomparable`. Detaching an allow-only policy narrows; detaching a denying one
   is `administration.unprovable`.
 - **Still refused.** Anything the package cannot prove stays `administration.unprovable`. Guardrail changes keep their
-  own authority rule, and the concurrency protocol arrives in a later release (see
+  own authority rule, decided from above the scope, under the concurrency protocol below (see
   [the design note](docs/design/delegated-administration.md)).
 
 A batch (a sync, `revokeAll()`) works out its whole change first and decides every item against the authority the actor
@@ -1446,13 +1452,57 @@ neither side holds a ranked role, the comparison refuses: both count as the most
 strict seniority refuses equal rank (N76). An application that leaves rank on but ranks no role should turn rank off
 (`authorization.rank.enabled`), or no delegated change to an identity will pass it.
 
+**Concurrency.** A delegated call never commits on authority that changed under it. Each try runs in a transaction of
+its own and locks, with `lockForUpdate()` on the write connection, every row its decisions depend on, in one order,
+each query's keys sorted, so two calls never deadlock on each other over the same rows:
+
+1. **the actor**, at the call's first decision: the grant rows of its principal and identity, its roles and every role
+   above them with the permissions and policies they carry, its boundaries, the guardrails in the reach of the
+   request's tenant and the resource policies of `authorization:operation`;
+2. **the target**, before the first change is decided: the grantee's grant rows, the role, permission or policy handed
+   out or taken away, a definition's record and a new parent's chain, and the guardrails of the tenant it holds in;
+3. **the holders**, as the impact check reads them.
+
+The tenant tree is yours and cannot be locked, so the chain of every tenant involved is read afresh and pinned, and a
+`treeChanged()` reported while the call runs marks it moved. Once every change is allowed, before anything is written,
+the call reads everything again, as the decision read it and under the lock: a grant revoked from the actor, a role
+given more, a policy rewritten or a tenant moved meanwhile has the whole call rolled back and tried again, decided on
+what was committed, so it is refused or made as the new state allows. A PostgreSQL serialisation failure or deadlock,
+or a MySQL deadlock, is tried again the same way when the call opened the transaction; inside a transaction of your own
+it is thrown as it is, since only you can restart that transaction. A call is tried again at most
+`authorization.administration.retries` times (2 by default); once every try has conflicted, it is refused with
+`AuthorizationException` as `administration.conflict`, at the `administration` stage, writing nothing.
+
+PostgreSQL and MySQL hold the locks until the transaction ends, so a concurrent write of a locked row waits for the
+call. SQLite serialises writers and compiles no row lock, so there the second read alone catches a change. The package
+takes no lock until the call's first decision, and the call's work starts inside its transaction before anything is read
+or locked, so a scope-widening grant hook (AUTHZ-11.3) run first in that work runs before every lock. A trusted call is
+unchanged: it runs once, with no extra lock and no retry.
+
+**Trusted surfaces.** Each of these is trusted system work: nothing is decided, so use it only from your own code, never
+as an endpoint for user-controlled administration:
+
+| Surface                                                                     | Warning                                                                  |
+|-----------------------------------------------------------------------------|--------------------------------------------------------------------------|
+| A management service called without `actor:`                                | Trusted: decides nothing; pass the acting context of the administrator   |
+| A raw Eloquent write on the package's models, pivots or tables              | Trusted: decides nothing, and a raw relation write dispatches no events  |
+| An identity's `assignRole()`, `givePermission()`, `attachPolicy()` and more | Trusted without `actor:`; each write helper takes one and passes it on   |
+| `givePermissionTo()`, `revokePermissionTo()`, `removeRole()`                | Always trusted: the Spatie aliases take no actor                         |
+| A role's `givePermission()`, `revokePermission()`, `syncPermissions()`      | Always trusted; call `RoleService` with `actor:` from a screen           |
+| Seeders, migrations and console commands without `--actor`                  | Trusted; `authorization:grant` and `authorization:revoke` take `--actor` |
+| `authorization:sync`, `authorization:prune`, `authorization:migrate-spatie` | Always trusted; `authorization:sync` only records its `--actor`          |
+
+With the concurrency protocol, delegated administration is complete: all four parts of
+[the design](docs/design/delegated-administration.md) are in this release.
+
 **Reasons and errors.** A refusal throws `AuthorizationException`, or `InsufficientAuthenticationException` for a
 step-up, carrying the decision (`getDecision()`), its stage and its trace, for audit; the client sees the one `denied`
 line. The administration stage refuses with these reasons, each at the `administration` stage with a trace step naming
 it: `administration.impersonating`, `administration.scope`, `administration.rank_uncomparable`, `administration.rank`,
-`administration.self`, `administration.owner`, `administration.not_grantable` and `administration.unprovable`. The
-owner rule (D20) applies to definitions (roles, permissions and policies), what a role carries (its permissions,
-policies and parent), never to a resource policy's attachment or to grant rows.
+`administration.self`, `administration.owner`, `administration.not_grantable` and `administration.unprovable`; a call
+that conflicted on every try is refused as `administration.conflict`, at the same stage. The owner rule (D20) applies to
+definitions (roles, permissions and policies), what a role carries (its permissions, policies and parent), never to a
+resource policy's attachment or to grant rows.
 
 **Audit.** Every decision is reported with `DecisionEvaluated`, and a refusal with `AuthorizationFailed`, as
 `authorize()` reports one, each naming the operation resource `authorization:operation:{operation id}`. The change

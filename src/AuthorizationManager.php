@@ -33,6 +33,7 @@ use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\ActionList;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -514,8 +515,10 @@ final class AuthorizationManager
      *
      * Every resolution built in the tenant or below it is dropped, in every
      * worker, and the current tenant's ancestors are read afresh, so a moved
-     * tenant never keeps grants inherited from its old ancestors. A failure of
-     * the cache store is thrown, so the caller can retry.
+     * tenant never keeps grants inherited from its old ancestors. A delegated
+     * administration call running meanwhile is tried again rather than written
+     * on the chains its decisions read (see `OperationScope::treeChanged()`). A
+     * failure of the cache store is thrown, so the caller can retry.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|\SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @return void
@@ -529,6 +532,8 @@ final class AuthorizationManager
         ResolutionCache::instance()?->treeChanged($reference);
 
         (new TenantScope)->flushResolvedTenant();
+
+        OperationScope::treeChanged();
     }
 
     /**

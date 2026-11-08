@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -49,6 +50,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned as IdentityRol
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked as IdentityRoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
@@ -63,6 +65,8 @@ use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
@@ -162,6 +166,45 @@ final class AuthorizationManagerTest extends TestCase
         Authorization::treeChanged(Reference::of($account));
 
         self::assertTrue(Authorization::can('posts:edit'));
+    }
+
+    /**
+     * A tree change reported while a delegated administration call runs marks
+     * it moved, so it is tried again rather than written on the chains its
+     * decisions read; a trusted one is never marked.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATreeChangeMarksADelegatedCallRunningMeanwhile(): void
+    {
+        $operation = new Operation('op', new Reference('user', 'admin'), CarbonImmutable::now('UTC'), false);
+        $tenant    = new Reference('stub_tenant', 'account');
+
+        $moved = OperationScope::run($operation, static function () use ($tenant): bool {
+            $pins = OperationScope::pins();
+
+            $pins?->validate();
+
+            Authorization::treeChanged($tenant);
+
+            try {
+                $pins?->validate();
+            } catch (DependencyChangedException) {
+                return true;
+            }
+
+            return false;
+        });
+
+        self::assertTrue($moved);
+
+        OperationScope::run(Operation::begin(), static function () use ($tenant): void {
+            Authorization::treeChanged($tenant);
+
+            self::assertNull(OperationScope::pins());
+        });
     }
 
     /**

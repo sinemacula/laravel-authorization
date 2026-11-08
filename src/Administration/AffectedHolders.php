@@ -6,12 +6,14 @@ namespace SineMacula\Laravel\Authorization\Administration;
 
 use Illuminate\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\StatementValidator;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -36,6 +38,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * the set is over its limit, and the change it would weigh cannot be proved
  * (see `Impact`), so the reach of a change is never approximated. A principal
  * named by a document that cannot be read puts the set over its limit too.
+ *
+ * Inside a delegated operation, every set's rows are locked and pinned before
+ * they are read (see `DependencyPins`), the roles below a role with every role
+ * whose parent is one of them, so a holder granted, or a role re-parented
+ * below, meanwhile has the operation tried again rather than written past it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -143,7 +150,7 @@ final class AffectedHolders
         $this->addFrom(self::table('authorizable_boundaries')->where('policy_id', $key));
         $this->ofRoles($this->keysFrom(self::table('authorizable_policies')->where('policy_id', $key)->where('authorizable_type', $role), 'authorizable_id'));
 
-        if (!self::table('resource_policies')->where('policy_id', $key)->exists()) {
+        if (!self::pinned(self::table('resource_policies')->where('policy_id', $key))->exists()) {
             return $this;
         }
 
@@ -211,7 +218,7 @@ final class AffectedHolders
             return;
         }
 
-        $rows = $query->distinct()->limit($this->limit + 1)->get(['authorizable_type', 'authorizable_id']);
+        $rows = self::pinned($query)->distinct()->limit($this->limit + 1)->get(['authorizable_type', 'authorizable_id']);
 
         foreach ($rows as $row) {
             /** @var array{authorizable_type: string, authorizable_id: int|string} $columns */
@@ -237,7 +244,7 @@ final class AffectedHolders
         }
 
         /** @var list<string> $keys */
-        $keys = $query->distinct()->limit($this->limit + 1)->pluck($column)->all();
+        $keys = self::pinned($query)->distinct()->limit($this->limit + 1)->pluck($column)->all();
 
         $this->isOver = \count($keys) > $this->limit;
 
@@ -300,7 +307,29 @@ final class AffectedHolders
             $keys,
         );
 
-        return \array_column($rows, $model->getKeyName());
+        $below = \array_column($rows, $model->getKeyName());
+
+        self::pinned(self::table('roles')->whereIn($model->getKeyName(), $below)->orWhereIn('parent_id', $below));
+
+        return $below;
+    }
+
+    /**
+     * Lock and pin the rows the query selects as holders of the operation whose
+     * work is running, when it is delegated (see `DependencyPins`), so a holder
+     * granted, re-parented in or moved meanwhile is noticed before the change
+     * is written; return the query.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @return \Illuminate\Database\Query\Builder
+     *
+     * @throws \LogicException
+     */
+    private static function pinned(Builder $query): Builder
+    {
+        OperationScope::pins()?->lock(DependencyPhase::HOLDERS, clone $query);
+
+        return $query;
     }
 
     /**
