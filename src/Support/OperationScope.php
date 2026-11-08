@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantHookRecursionException;
 use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
 
 /**
  * Runs a management service call as one operation, and dispatches the events of
@@ -72,6 +73,11 @@ use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
  * a hook only vetoes. A grant made while another operation's work runs is
  * nested in it (`isNested()`), and may run after that operation took locks.
  *
+ * While a preview is evaluated (AUTHZ-11.4, see `Preview\Previewing`), `run()`
+ * refuses every operation, delegated or trusted, as
+ * `administration.previewing`, with no override, so a callback or a listener a
+ * preview runs changes nothing.
+ *
  * @managed-static
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -105,7 +111,8 @@ final class OperationScope
      * as the refusal of the actor given, the acting context the operation was
      * begun with. A trusted operation is tried again only when a grant it is
      * about to write widens an identity's scope with no grant hook run for it.
-     * While a grant hook runs, every operation is refused.
+     * While a grant hook runs, every operation is refused, and so is every
+     * operation while a preview is evaluated.
      *
      * @template TResult
      *
@@ -114,6 +121,7 @@ final class OperationScope
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return TResult
      *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GrantHookRecursionException
      * @throws \Throwable
      */
@@ -122,6 +130,8 @@ final class OperationScope
         if (self::$hooks > 0) {
             throw new GrantHookRecursionException;
         }
+
+        Previewing::refuseAuthority();
 
         if ($operation->isTrusted) {
             return self::trusted($operation, $work);

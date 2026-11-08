@@ -54,6 +54,7 @@ use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
@@ -192,6 +193,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             DeclaredAbilities::class,
             'authorization',
             AuthorizationManager::class,
+            Previewing::class,
         ];
 
         foreach ($abstracts as $abstract) {

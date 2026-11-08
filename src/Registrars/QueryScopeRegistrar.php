@@ -23,10 +23,14 @@ use SineMacula\Laravel\Authorization\Query\AuthorizedQuery;
  * `QueryScopeRefusedException` when it cannot prove that (AUTHZ-10.2). The
  * subject is the one `check()` decides about: the current manager's, or that of
  * the manager given, a scoped clone from `for()`, `forUser()`, `withPolicies()`
- * or `capped()` included. It only adds a constraint, never running a query of
- * its own on the model's table, so the application's filters, ordering, selects
- * and pagination keep working. It is called on the query that runs: inside a
- * `where` group or a relation's definition it refuses when the query runs.
+ * or `capped()` included. Given a preview from `previewFor()`, it keeps the
+ * rows the preview's target may take the action on, admitting the preview again
+ * at each execution, and refuses every write with the query (`preview_write`);
+ * rows the target may see are not thereby rows the caller may read. It only
+ * adds a constraint, never running a query of its own on the model's table, so
+ * the application's filters, ordering, selects and pagination keep working. It
+ * is called on the query that runs: inside a `where` group or a relation's
+ * definition it refuses when the query runs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

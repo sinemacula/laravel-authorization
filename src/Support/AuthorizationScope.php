@@ -141,7 +141,7 @@ final readonly class AuthorizationScope
      * with this scope's tenant and application, or null for a guest.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
-     * @return \SineMacula\Laravel\Authorization\Subject|null
+     * @return ($subject is null ? null : \SineMacula\Laravel\Authorization\Subject)
      */
     public function subjectIn(?Subject $subject): ?Subject
     {

@@ -12,12 +12,13 @@ use Illuminate\Support\Facades\Facade;
  * Static proxy to the container-bound authorization manager. The facade
  * resolves the manager scoped to the current request or job, so every call in
  * that lifecycle reaches the same manager and a new one is made for the next.
- * `for()`, `forUser()`, `withPolicies()` and `capped()` never change it: each
- * returns a new scoped clone, which shares the lifecycle's last-decision store,
- * so `lastDecision()` reads the latest decision of any of them.
- * `permissionsFor()` takes a null subject as the manager's checks take it: the
- * request's subject on the facade, the named one on a clone from `for()`, and a
- * guest on `forUser(null)`.
+ * `for()`, `forUser()`, `previewFor()`, `withPolicies()` and `capped()` never
+ * change it: each returns a new scoped clone, which shares the lifecycle's
+ * last-decision store, so `lastDecision()` reads the latest decision of any of
+ * them. A preview from `previewFor()` never rebinds the facade, the Gate or the
+ * guard: they stay the caller's. `permissionsFor()` takes a null subject as the
+ * manager's checks take it: the request's subject on the facade, the named one
+ * on a clone from `for()`, and a guest on `forUser(null)`.
  *
  * @phpcs:disable Generic.Files.LineLength.TooLong
  *
@@ -32,6 +33,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static array<array-key, mixed>|\Illuminate\Support\Collection<array-key, mixed> filterAuthorized(string $action, iterable<array-key, mixed> $resources, array<string, mixed> $context = [])
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager for(object $subject)
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager forUser(object|null $user)
+ * @method static \SineMacula\Laravel\Authorization\AuthorizationManager previewFor(object $subject, \SineMacula\Laravel\Authorization\Support\AuthorizationScope|null $scope = null)
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager withPolicies(array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy> $policies)
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager capped(list<string> $actions)
  * @method static \SineMacula\Laravel\Authorization\Evaluation\Decision|null lastDecision()

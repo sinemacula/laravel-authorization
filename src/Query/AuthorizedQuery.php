@@ -65,6 +65,15 @@ use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
  * not being run (nested in another, or compiled to text) is refused
  * (`read_replica`), since it cannot be.
  *
+ * A scope compiled for a preview (`Authorization::previewFor()`) refuses its
+ * own writes: compiled for a write, an `update()`, `updateFrom()`, `delete()`,
+ * `insertUsing()` or `insertOrIgnoreUsing()`, of its own query or of one it is
+ * nested in whole, it is refused (`preview_write`). Which is running is read
+ * from the call stack, as `InlinedQuery` reads it. A query that takes it in as
+ * SQL text (`whereIn()`, `fromSub()`, `joinSub()`, `selectSub()`) compiles it
+ * when it is taken in, before any write runs, so a write of that other query is
+ * not refused, and deletes or changes the rows the preview's subject may see.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -80,6 +89,9 @@ final readonly class AuthorizedQuery implements Scope
     /** @var string The grammar macro that compiles the scope's condition, named as the grammar calls it. */
     public const string GRAMMAR_MACRO = 'where' . self::WHERE_TYPE;
 
+    /** @var list<string> The methods of a query builder that write with the queries they compile. */
+    private const array WRITES = ['update', 'updateFrom', 'delete', 'insertUsing', 'insertOrIgnoreUsing'];
+
     /** @var string What the scope is registered on the builder as, unique to the call, so two calls combine. */
     public string $identifier;
 
@@ -90,6 +102,7 @@ final readonly class AuthorizedQuery implements Scope
      * @param  string  $table
      * @param  string  $type
      * @param  \Closure(): string  $compile
+     * @param  bool  $isReadOnly
      */
     private function __construct(
 
@@ -104,6 +117,9 @@ final readonly class AuthorizedQuery implements Scope
 
         /** Compiles the condition from the state at the instant it is called. */
         private \Closure $compile,
+
+        /** Whether a write with the query is refused, as for a preview's. */
+        private bool $isReadOnly = false,
     ) {
         // Unique among the scopes alive, and a scope lives as long as a builder
         // holds it.
@@ -112,18 +128,20 @@ final readonly class AuthorizedQuery implements Scope
 
     /**
      * Return the scope of the model's query, having compiled it once, so a
-     * refusal (`QueryScopeRefusedException`) throws now.
+     * refusal (`QueryScopeRefusedException`) throws now; a read-only scope
+     * refuses every write with the query.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @param  string  $action
      * @param  \Closure(): string  $compile
+     * @param  bool  $isReadOnly
      * @return self
      */
-    public static function compiled(Model $model, string $action, \Closure $compile): self
+    public static function compiled(Model $model, string $action, \Closure $compile, bool $isReadOnly = false): self
     {
         Reentrancy::guarded($compile);
 
-        return new self($action, $model->getTable(), $model->getMorphClass(), $compile);
+        return new self($action, $model->getTable(), $model->getMorphClass(), $compile, $isReadOnly);
     }
 
     /**
@@ -223,8 +241,9 @@ final readonly class AuthorizedQuery implements Scope
 
     /**
      * Return the condition, compiled from the state now, for the query the
-     * grammar compiles, refusing when the scope was never applied or when the
-     * query would escape the condition.
+     * grammar compiles, refusing when the scope was never applied, when the
+     * query would escape the condition, or when a read-only scope's query is
+     * compiled for a write.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  bool  $isApplied
@@ -236,6 +255,7 @@ final readonly class AuthorizedQuery implements Scope
     {
         $this->refuseWhen($isApplied ? self::escapeOf($query, false) : RefusalReason::SCOPE_REMOVED);
         $this->assertScopable($query);
+        $this->refuseWhen($this->isReadOnly && self::isWriting() ? RefusalReason::PREVIEW_WRITE : null);
 
         $condition = Reentrancy::guarded($this->compile);
 
@@ -273,6 +293,20 @@ final readonly class AuthorizedQuery implements Scope
         $query->useWritePdo();
 
         return null;
+    }
+
+    /**
+     * Determine whether the query being compiled is compiled for a write: a
+     * query builder up the call stack is updating, deleting or inserting from a
+     * query.
+     *
+     * @return bool
+     */
+    private static function isWriting(): bool
+    {
+        $isWrite = static fn (array $frame): bool => \in_array($frame['function'], self::WRITES, true) && \is_a($frame['class'] ?? '', QueryBuilder::class, true);
+
+        return \array_filter(\debug_backtrace(\DEBUG_BACKTRACE_IGNORE_ARGS), $isWrite) !== [];
     }
 
     /**
@@ -397,6 +431,7 @@ final readonly class AuthorizedQuery implements Scope
         $detail = match ($reason) {
             RefusalReason::SCOPE_REMOVED => 'call whereAuthorized() on the query that runs, after removing its global scopes',
             RefusalReason::READ_REPLICA  => 'a query that is not run itself cannot be put on the write connection',
+            RefusalReason::PREVIEW_WRITE => 'a query scoped through a preview is read-only',
             default                      => null,
         };
 

@@ -1,10 +1,11 @@
 # Impersonation
 
-`Authorization::for($user)` is the official seam for evaluating authorization decisions against a principal other than
-the ambient one. It supports admin-previews-user-permissions workflows, background job authorization, and any context
-where the caller knows the target principal at call time. This note documents the scoped clone semantics, composition
-with `withPolicies()`, the effective-permissions API, and the boundary between authorization scoping and request-user
-identity.
+`Authorization::for($user)` is the low-level seam for evaluating authorization decisions against a principal other
+than the ambient one: background job authorization, and any trusted context where the caller knows the target
+principal at call time. A screen that shows a person what another subject may do uses `Authorization::previewFor()`
+instead, which checks that the caller may preview and reports every decision with both parties (see
+[Preview](preview.md)). This note documents the scoped clone semantics, composition with `withPolicies()`, the
+effective-permissions API, and the boundary between authorization scoping and request-user identity.
 
 ## Invariants
 
@@ -42,22 +43,31 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 // Resolve the target user (the subject being previewed).
 $targetUser = User::findOrFail($id);
 
-// Evaluate a single check as that user.
-$canEdit = Authorization::for($targetUser)->can('posts:edit');
+// The caller must hold authorization:subject.preview for the user in the request's tenant and application.
+$preview = Authorization::previewFor($targetUser);
 
-// List the actions the user may take in the request's tenant and application, for a UI.
-$permissions = Authorization::permissionsFor($targetUser, AuthorizationScope::current());
+// Evaluate a single check as that user, reported with the caller as its previewer.
+$canEdit = $preview->can('posts:edit');
+
+// List the actions the user may take in the preview's scope, for a UI; each action is reported.
+$permissions = $preview->permissionsFor(null, AuthorizationScope::current());
 ```
 
-`permissionsFor()` decides every action of the permission catalogue through the full staged evaluation (the subject,
-resource and tenant, the explicit denies, the guardrails, the permission boundaries, the session caps, the allows and
-the implicit deny; see [Evaluation order and deny precedence](evaluation-order-and-deny-precedence.md)) and returns the
-names of those allowed, in the catalogue's order -- suitable for rendering permission-picker UIs or capability
-checklists. A model named this way has no session, as with `for()`, so an action that needs a step-up is not listed for
-it; pass the resolved `Subject` to keep its session. Listing records no last decision and dispatches no event (see
-[Effective permissions](effective-permissions.md)).
+`previewFor()` admits the preview as a check about the caller, and again at every use, so a revoked right is seen at
+the next one, and refuses before anything about the target is decided. `permissionsFor()` decides every action of the
+permission catalogue through the full staged evaluation (the subject, resource and tenant, the explicit denies, the
+guardrails, the permission boundaries, the session caps, the allows and the implicit deny; see
+[Evaluation order and deny precedence](evaluation-order-and-deny-precedence.md)) and returns the names of those
+allowed, in the catalogue's order -- suitable for rendering permission-picker UIs or capability checklists. The target
+has no session, so an action that needs a step-up is not listed for it, whatever the caller has proved. A preview
+listing reports each action it evaluates with both parties and stores none of them as the last decision (see
+[Preview](preview.md)). Outside a preview, `Authorization::permissionsFor($user, ...)` lists as introspection,
+recording and reporting nothing (see [Effective permissions](effective-permissions.md)).
 
 ### Hypothetical policy evaluation
+
+A preview refuses hypothetical policies: `withPolicies()` on a preview, or `previewFor()` on a manager carrying an
+override, throws `InvalidPreviewException`. Trusted code that needs a hypothetical answer uses `for()`.
 
 Chaining `for($user)->withPolicies([$hypothetical])` evaluates against only the supplied policies, bypassing the target
 user's own attached policies, any configured policy store and the policies attached to the resource. A supplied policy
@@ -93,8 +103,9 @@ it hands over.
 ## Trade-offs
 
 - **No dedicated impersonation event.** The `DecisionEvaluated` event carries a reference to the principal the decision
-  was about, so an audit listener can detect that it differs from `$request->user()`. Consumers who need an explicit
-  "admin X previewed user Y" signal should emit their own event at the call site.
+  was about, so an audit listener can detect that it differs from `$request->user()`. A decision made through
+  `previewFor()` also carries the caller as its `previewer`, so "admin X previewed user Y" needs no event of the
+  application's own; a decision made through `for()` carries none, since `for()` is a trusted seam, not a preview.
 - **The permission step uses the target principal's permissions.** When `for($user)` is active, the held-permission
   check is made at the allow stage, after the caps and only when no allow statement decides, through
   `SubjectGrants::permissionFor()` over the target subject's grantees, its principal and its identity -- the target
@@ -111,6 +122,8 @@ it hands over.
 - `AuthorizationManager::currentSubject()` -- the override-aware resolution method.
 - `AuthorizationManager::permissionsFor()` -- the actions listed for UI rendering, the subject named as `for()` names
   it.
+- `AuthorizationManager::previewFor()`, in `Concerns\BuildsScopedManagers` -- the checked preview (see
+  [Preview](preview.md)).
 
 ## Authoritative Tests
 
@@ -132,6 +145,5 @@ it hands over.
 
 - Adding a dedicated impersonation event requires a new event class and a dispatch call inside `for()` or
   `currentSubject()`.
-- Introducing a "caller context" that preserves the original principal alongside the target would require a second
-  field on the scoped clone. The decision events and the last decision's provenance already carry a `previewer`
-  reference for it, null for every decision today.
+- The caller context that preserves the original principal alongside the target is `Preview\PreviewContext`, which
+  only `previewFor()` sets; a `for()` clone carrying one would make it a preview, admitted and reported as one.

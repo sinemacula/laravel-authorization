@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
@@ -104,6 +105,17 @@ final class DecisionPipeline
         $pipeline->policyOverride = $policies;
 
         return $pipeline;
+    }
+
+    /**
+     * Determine whether the pipeline evaluates only the policies
+     * `withPolicies()` supplied, in place of the stored ones.
+     *
+     * @return bool
+     */
+    public function hasPolicyOverride(): bool
+    {
+        return $this->policyOverride !== null;
     }
 
     /**
@@ -226,7 +238,10 @@ final class DecisionPipeline
      * caps, as `decideGrants()` weighs them. `whereAuthorized()` reads them
      * before they are weighed, so a query is decided from exactly the sources
      * `check()` is. A check of a bulk check reads its resource's attributes
-     * through the batch's.
+     * through the batch's. The subject a running use of a preview decides about
+     * is first admitted in the scope in place, where its sources are gathered
+     * (see `Preview\Previewing::admit()`), so a decision about a preview's
+     * target is never made where its previewer may not preview.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -241,6 +256,10 @@ final class DecisionPipeline
      */
     public function sources(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes = null): CheckSources
     {
+        // The subject of a preview's use is admitted where its sources are
+        // gathered, before any is read (see `Preview\PreviewAdmission`).
+        Previewing::admit($subject);
+
         $policies   = $this->gatherPolicies($subject, $resource);
         $guardrails = $action === PackagePermissions::GUARDRAIL_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
         $boundaries = SubjectGrants::boundaries($subject);

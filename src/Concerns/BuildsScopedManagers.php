@@ -4,13 +4,23 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Concerns;
 
+use SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException;
+use SineMacula\Laravel\Authorization\Preview\PreviewContext;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 
 /**
  * The scoped clones of the authorization manager: `for()` and `forUser()`,
- * which name the subject its checks are about, and `withPolicies()` and
- * `capped()`, which change how they are decided. Each returns a clone, so the
- * manager it is called on is unchanged.
+ * which name the subject its checks are about, `previewFor()`, which previews
+ * another subject as the caller, and `withPolicies()` and `capped()`, which
+ * change how they are decided. Each returns a clone, so the manager it is
+ * called on is unchanged.
+ *
+ * A preview keeps its two parties and its scope (see `PreviewContext`): on a
+ * preview, `for()`, `forUser()` and `previewFor()`, which would change its
+ * target, and `withPolicies()`, which would decide through hypothetical
+ * policies, throw `InvalidPreviewException`, while `capped()` caps the target's
+ * checks alone, never the previewer's admission.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,6 +35,9 @@ trait BuildsScopedManagers
     /** @var bool Whether `for()` or `forUser()` named the subject; until one does, the bound resolver resolves it. */
     private bool $isSubjectNamed = false;
 
+    /** @var \SineMacula\Laravel\Authorization\Preview\PreviewContext|null Who previews whom, and where, for a preview from `previewFor()`; null for any other manager. */
+    private ?PreviewContext $preview = null;
+
     /**
      * Return a scoped manager deciding about the supplied subject.
      *
@@ -36,9 +49,13 @@ trait BuildsScopedManagers
      *
      * @param  object  $subject
      * @return self
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException
      */
     public function for(object $subject): self
     {
+        $this->refuseOnPreview('for');
+
         if ($subject instanceof Subject) {
             return $this->scopedTo($subject);
         }
@@ -55,9 +72,13 @@ trait BuildsScopedManagers
      *
      * @param  object|null  $user
      * @return self
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException
      */
     public function forUser(?object $user): self
     {
+        $this->refuseOnPreview('forUser');
+
         return $this->scopedTo($user === null ? null : $this->subjectResolver->forUser($user));
     }
 
@@ -71,13 +92,71 @@ trait BuildsScopedManagers
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @return self
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException
      */
     public function withPolicies(array $policies): self
     {
+        if ($this->preview !== null) {
+            throw InvalidPreviewException::hypothetical();
+        }
+
         $scoped           = clone $this;
         $scoped->pipeline = $this->pipeline->withPolicies($policies);
 
         return $scoped;
+    }
+
+    /**
+     * Return a scoped manager previewing the supplied subject as the caller
+     * (AUTHZ-11.4): its checks are about the subject, in the scope, while the
+     * caller, the subject this manager decides about, stays who is asking.
+     *
+     * The subject is previewed with no session: a resolved `Subject` keeps its
+     * principal and identity, and a model is named as `for()` names it, so no
+     * authentication requirement made of it is met, whatever the caller has
+     * proved. A null scope is the request's tenant and application, captured
+     * now. The caller must be allowed `authorization:subject.preview` on the
+     * preview resource naming the subject and the scope (see
+     * `Preview\PreviewResource`), decided as an ordinary check about the
+     * caller, with its own session, denies, boundaries, guardrails and caps:
+     * now, in the scope, and again at every use of the preview, each check,
+     * batch, listing and compile of a query scoped through it, in the scope and
+     * in every other scope one of its decisions is made in, a resource's own
+     * tenant, the tenants below it or the platform (see
+     * `Preview\PreviewAdmission`), so a revocation is seen at the next use. A
+     * refusal throws `AuthorizationException` before anything about the subject
+     * is decided there.
+     *
+     * `check()`, `can()`, `cannot()`, `any()`, `all()`, `authorize()`,
+     * `explain()`, `checkMany()`, `canEach()`, `filterAuthorized()`,
+     * `permissionsFor()` with a null subject, and `whereAuthorized()` given the
+     * preview decide about the subject through the one decision path, each
+     * decision reported with both parties and every listed action reported too
+     * (see `PreviewContext`). Nothing a preview evaluates may change the
+     * package's records, and its queries refuse their own writes.
+     *
+     * @param  object  $subject
+     * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope|null  $scope
+     * @return self
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException
+     */
+    public function previewFor(object $subject, ?AuthorizationScope $scope = null): self
+    {
+        $this->refuseOnPreview('previewFor');
+        $this->refuseOverride();
+
+        $context = PreviewContext::of($this->scopedTo($this->currentSubject()), $subject, $scope ?? AuthorizationScope::current());
+
+        // Admitted now, as a use deciding nothing about the target.
+        $context->run(static fn (): null => null);
+
+        $preview          = $this->scopedTo($context->target);
+        $preview->preview = $context;
+
+        return $preview;
     }
 
     /**
@@ -89,7 +168,8 @@ trait BuildsScopedManagers
      * A cap grants nothing, so an action it covers is still decided by every
      * other stage. Capping a capped manager intersects the caps, and the
      * credential's scopes cap the check too. For a machine without credential
-     * scopes, which is allowed nothing, a cap never stands in for them.
+     * scopes, which is allowed nothing, a cap never stands in for them. On a
+     * preview, the cap applies to the target's checks alone.
      *
      * @param  list<string>  $actions
      * @return self
@@ -116,5 +196,35 @@ trait BuildsScopedManagers
         $scoped->isSubjectNamed  = true;
 
         return $scoped;
+    }
+
+    /**
+     * Refuse a call that would change a preview's target, on a preview.
+     *
+     * @param  string  $method
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException
+     */
+    private function refuseOnPreview(string $method): void
+    {
+        if ($this->preview !== null) {
+            throw InvalidPreviewException::retargeted($method);
+        }
+    }
+
+    /**
+     * Refuse a preview of a manager that carries a policy override, whose
+     * hypothetical policies would stand in for the stored ones.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException
+     */
+    private function refuseOverride(): void
+    {
+        if ($this->pipeline->hasPolicyOverride()) {
+            throw InvalidPreviewException::hypothetical();
+        }
     }
 }

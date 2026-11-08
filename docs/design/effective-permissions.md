@@ -45,7 +45,9 @@ action through the one decision path rather than computing allows less denies, a
    switches on the shared path rather than a copy of the decision loop: it stores no last decision and dispatches no
    `DecisionEvaluated`; `AuthorizationFailed` is never dispatched since nothing is authorized. Break-glass reporting
    (BL-70, AUTHZ-15.3's "always") must define how it treats introspection when it is built: either exempt a listing,
-   as this note does today, or report the break-glass allows a listing relies on.
+   as this note does today, or report the break-glass allows a listing relies on. A preview's listing is the one
+   exception (N86): it dispatches each action's `DecisionEvaluated`, naming both parties, and still stores none of them
+   (see [Preview](preview.md)).
 
 7. **Generic and resource-specific listings differ.** A listing with no resource answers the resource-less check, so an
    allow limited by `resources` or by a resource's attributes does not list its action; a listing for one resource

@@ -42,6 +42,7 @@ use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
@@ -87,11 +88,11 @@ use SineMacula\Laravel\Authorization\Support\SessionScopes;
  *
  * Every binding that holds state for one request or job (the resolvers, the
  * policy store, the resolved tenant, the resolution cache, the last decision,
- * the action catalogue, the context sources and the check context factory, and
- * the manager that holds them) is registered with `scoped()`, so Laravel's
- * queue worker drops it before each job and Octane builds it afresh on each
- * request's sandbox. They are scoped together: a singleton holding a scoped
- * instance would keep the old instance alive.
+ * the action catalogue, the context sources and the check context factory, what
+ * its previews know, and the manager that holds them) is registered with
+ * `scoped()`, so Laravel's queue worker drops it before each job and Octane
+ * builds it afresh on each request's sandbox. They are scoped together: a
+ * singleton holding a scoped instance would keep the old instance alive.
  *
  * The management services (roles, permissions, policies and grants), the
  * application access service and the grant scope query hold no state and are
@@ -404,8 +405,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
     /**
      * Bind the authorization manager, scoped to the request or job together
-     * with the resolvers and stores it holds, and the schema inspector its
-     * query scopes read through.
+     * with the resolvers and stores it holds, what its previews know of the
+     * request or job, and the schema inspector its query scopes read through.
      *
      * @return void
      */
@@ -425,6 +426,10 @@ final class AuthorizationServiceProvider extends ServiceProvider
         ));
 
         $this->app->alias('authorization', AuthorizationManager::class);
+
+        // Whether a preview is being evaluated, and which subjects its previews
+        // are about, once a request or job.
+        $this->app->scoped(Previewing::class);
 
         // What `whereAuthorized()` reads of each table and connection, once a
         // request or job.

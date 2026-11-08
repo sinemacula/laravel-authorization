@@ -607,6 +607,52 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * A refusal whose decision a listener replaced as the last decision, by
+     * deciding another check, is reported once, naming the subject and no
+     * previewer, since the manager is no preview.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    public function testARefusalWhoseDecisionWasReplacedNamesNoPreviewer(): void
+    {
+        $user = StubIdentity::create(['id' => 'u1']);
+
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($user, $user)));
+        $this->app?->forgetInstance(AuthorizationManager::class);
+
+        /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
+        $manager = $this->app?->make(AuthorizationManager::class);
+
+        /** @var \ArrayObject<int, \SineMacula\Laravel\Authorization\Events\AuthorizationFailed> $failed */
+        $failed = new \ArrayObject;
+
+        Event::listen(DecisionEvaluated::class, static function (DecisionEvaluated $event) use ($manager): void {
+            if ($event->action !== 'posts:delete') {
+                return;
+            }
+
+            $manager->check('posts:read');
+        });
+        Event::listen(AuthorizationFailed::class, static fn (AuthorizationFailed $event) => $failed->append($event));
+
+        try {
+            $manager->authorize('posts:delete');
+            self::fail('The check was allowed.');
+        } catch (AuthorizationException $exception) {
+            self::assertSame(DecisionReason::NO_MATCH, $exception->getReason());
+        }
+
+        $reported = \array_values($failed->getArrayCopy());
+
+        self::assertCount(1, $reported);
+        self::assertSame('posts:delete', $reported[0]->action);
+        self::assertEquals(Reference::of($user), $reported[0]->subject);
+        self::assertNull($reported[0]->previewer);
+    }
+
+    /**
      * withPolicies scope overrides principal-attached policies: its allow
      * statement decides the check at the allow stage.
      *

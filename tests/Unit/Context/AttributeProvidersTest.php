@@ -21,6 +21,9 @@ use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
+use SineMacula\Laravel\Authorization\Preview\PreviewAttributes;
+use SineMacula\Laravel\Authorization\Preview\PreviewResource;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\ConflictingResourceAttributes;
 use Tests\Feature\Stubs\FailingResourceAttributes;
@@ -312,17 +315,21 @@ final class AttributeProvidersTest extends TestCase
 
     /**
      * The providers of `authorization.attributes` are those the configuration
-     * registers, with the package's own provider of the administration
-     * operation resources, which a provider configured for their type never
-     * replaces.
+     * registers, with the package's own providers of the administration
+     * operation resources and of the preview resources, which a provider
+     * configured for their type never replaces.
      *
      * @return void
      */
     public function testFromConfigReadsTheConfiguredProviders(): void
     {
         $this->container->instance('config', new Repository(['authorization' => ['attributes' => [
-            'resources' => ['post' => RecordingResourceAttributes::class, OperationResource::TYPE => RecordingResourceAttributes::class],
-            'subjects'  => ['user' => RecordingSubjectAttributes::class],
+            'resources' => [
+                'post'                  => RecordingResourceAttributes::class,
+                OperationResource::TYPE => RecordingResourceAttributes::class,
+                PreviewResource::TYPE   => RecordingResourceAttributes::class,
+            ],
+            'subjects' => ['user' => RecordingSubjectAttributes::class],
         ]]]));
 
         $providers = AttributeProviders::fromConfig($this->container);
@@ -330,11 +337,15 @@ final class AttributeProvidersTest extends TestCase
         self::assertSame(['status' => 'draft', 'owner' => ['id' => '7']], $providers->resourceValues(ResourceReference::record('post', '1')));
         self::assertSame(['department' => 'sales'], $providers->subjectValues(new \stdClass, 'user'));
 
-        self::assertSame([OperationAttributes::class], \array_keys(\array_diff_key($providers->declarations()['resource'], [RecordingResourceAttributes::class => true])));
+        $declared = \array_diff_key($providers->declarations()['resource'], [RecordingResourceAttributes::class => true]);
+        $preview  = (new PreviewResource(new Reference('user', '7'), null, null, null))->toResourceReference();
+
+        self::assertSame([OperationAttributes::class, PreviewAttributes::class], \array_keys($declared));
+        self::assertSame(['target_type' => 'user', 'target_id' => '7'], $providers->resourceValues($preview));
 
         $this->container->instance('config', new Repository);
 
-        self::assertSame(['resource' => [OperationAttributes::class => (new OperationAttributes)->attributes()]], AttributeProviders::fromConfig($this->container)->declarations());
+        self::assertSame(['resource' => self::packageDeclarations()], AttributeProviders::fromConfig($this->container)->declarations());
     }
 
     /**
@@ -349,7 +360,7 @@ final class AttributeProvidersTest extends TestCase
 
         $providers = AttributeProviders::fromConfig($this->container);
 
-        self::assertSame(['resource' => [OperationAttributes::class => (new OperationAttributes)->attributes()]], $providers->declarations());
+        self::assertSame(['resource' => self::packageDeclarations()], $providers->declarations());
         self::assertSame([], $providers->resourceValues(ResourceReference::record('post', '1')));
         self::assertSame([], $providers->subjectValues(new \stdClass, 'user'));
     }
@@ -460,5 +471,16 @@ final class AttributeProvidersTest extends TestCase
     private function providers(): AttributeProviders
     {
         return new AttributeProviders($this->container, ['post' => RecordingResourceAttributes::class], ['user' => RecordingSubjectAttributes::class]);
+    }
+
+    /**
+     * Return what the package's own providers declare, the operation resources'
+     * and the preview resources'.
+     *
+     * @return array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType>>
+     */
+    private static function packageDeclarations(): array
+    {
+        return [OperationAttributes::class => (new OperationAttributes)->attributes(), PreviewAttributes::class => (new PreviewAttributes)->attributes()];
     }
 }

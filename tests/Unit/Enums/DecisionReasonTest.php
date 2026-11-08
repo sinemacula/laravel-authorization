@@ -22,13 +22,14 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 final class DecisionReasonTest extends TestCase
 {
     /**
-     * The enum defines exactly the twenty-one denial reasons, in declaration
-     * order, the administration constraints' last: an allowed check carries no
+     * The enum defines exactly the twenty-two denial reasons, in declaration
+     * order, the administration constraints' last, the refusal of a mutation
+     * while a preview is evaluated after them: an allowed check carries no
      * reason, so there is no allow case.
      *
      * @return void
      */
-    public function testExactlyTwentyOneCases(): void
+    public function testExactlyTwentyTwoCases(): void
     {
         self::assertSame(
             [
@@ -53,6 +54,7 @@ final class DecisionReasonTest extends TestCase
                 DecisionReason::ADMINISTRATION_UNPROVABLE,
                 DecisionReason::ADMINISTRATION_IMPERSONATING,
                 DecisionReason::ADMINISTRATION_CONFLICT,
+                DecisionReason::ADMINISTRATION_PREVIEWING,
             ],
             DecisionReason::cases(),
         );
@@ -86,6 +88,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame('administration.unprovable', DecisionReason::ADMINISTRATION_UNPROVABLE->value);
         self::assertSame('administration.impersonating', DecisionReason::ADMINISTRATION_IMPERSONATING->value);
         self::assertSame('administration.conflict', DecisionReason::ADMINISTRATION_CONFLICT->value);
+        self::assertSame('administration.previewing', DecisionReason::ADMINISTRATION_PREVIEWING->value);
     }
 
     /**
@@ -129,6 +132,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame('it may widen authority in a way that cannot be proved permitted', DecisionReason::ADMINISTRATION_UNPROVABLE->label());
         self::assertSame('it is made while impersonating', DecisionReason::ADMINISTRATION_IMPERSONATING->label());
         self::assertSame('what it was decided on changed before it was written', DecisionReason::ADMINISTRATION_CONFLICT->label());
+        self::assertSame('it is made while a preview is evaluated', DecisionReason::ADMINISTRATION_PREVIEWING->label());
     }
 
     /**
@@ -171,6 +175,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, DecisionReason::tryFrom('administration.unprovable'));
         self::assertSame(DecisionReason::ADMINISTRATION_IMPERSONATING, DecisionReason::tryFrom('administration.impersonating'));
         self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, DecisionReason::tryFrom('administration.conflict'));
+        self::assertSame(DecisionReason::ADMINISTRATION_PREVIEWING, DecisionReason::tryFrom('administration.previewing'));
     }
 
     /**

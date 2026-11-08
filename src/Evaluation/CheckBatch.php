@@ -68,7 +68,13 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * actions through one, since listing them is introspection, not a check (N70);
  * the break-glass reporting of BL-70 is to define how it treats it. A batch may
  * also dispatch without storing, leaving the last decision untouched while
- * every decision is reported, or store without dispatching.
+ * every decision is reported, or store without dispatching. A preview's listing
+ * dispatches without storing (N86): each action it evaluates is reported,
+ * naming both parties, and the last decision is left untouched.
+ *
+ * The checks of a preview are made with its previewer, which every decision's
+ * provenance, and so its event and the last decision, names beside the subject
+ * (see `DecisionProvenance`); any other batch names none.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -89,6 +95,7 @@ final readonly class CheckBatch
      * @param  \Illuminate\Contracts\Events\Dispatcher|null  $events
      * @param  bool  $isDispatching
      * @param  bool  $isStoring
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $previewer
      */
     public function __construct(
 
@@ -109,6 +116,9 @@ final readonly class CheckBatch
 
         /** Whether each decision is stored as the last decision; false for introspection, which leaves it untouched. */
         private bool $isStoring,
+
+        /** Who previews the subject, for a preview's checks; null for any other. */
+        private ?Reference $previewer = null,
     ) {}
 
     /**
@@ -153,7 +163,7 @@ final readonly class CheckBatch
      */
     public function decideOne(?Subject $subject, CheckInput $check): Decision
     {
-        return $this->decideRecorded($subject, DecisionProvenance::of($subject), $check, ResourceReferences::of($check->resource));
+        return $this->decideRecorded($subject, DecisionProvenance::of($subject, $this->previewer), $check, ResourceReferences::of($check->resource));
     }
 
     /**
@@ -168,7 +178,7 @@ final readonly class CheckBatch
      */
     public function recordOne(?Subject $subject, CheckInput $check, Decision $decision): Decision
     {
-        return $this->record(DecisionProvenance::of($subject), $check, ResourceReferences::of($check->resource), $decision);
+        return $this->record(DecisionProvenance::of($subject, $this->previewer), $check, ResourceReferences::of($check->resource), $decision);
     }
 
     /**
@@ -190,7 +200,7 @@ final readonly class CheckBatch
 
         $attributes = new ResourceAttributeBatch([], self::activeTenant());
         $holders    = self::lastHolders($inputs);
-        $about      = DecisionProvenance::of($subject);
+        $about      = DecisionProvenance::of($subject, $this->previewer);
         $decisions  = [];
 
         foreach (\array_chunk($inputs, self::chunkSize(), true) as $chunk) {

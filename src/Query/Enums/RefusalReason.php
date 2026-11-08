@@ -104,4 +104,7 @@ enum RefusalReason: string
 
     /** A model-level scope was applied while a scope was being decided: it is on the subject's model, or on a model the decision reads. */
     case REENTRANT = 'reentrant';
+
+    /** A query scoped through a preview is run as a write, an update, a delete or an insert from it, which a preview never makes. */
+    case PREVIEW_WRITE = 'preview_write';
 }

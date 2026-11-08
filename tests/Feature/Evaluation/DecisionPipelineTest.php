@@ -22,9 +22,13 @@ use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Preview\PreviewAdmission;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
+use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
@@ -37,6 +41,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\PreviewsSubjects;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubSessionPolicySource;
@@ -59,6 +64,8 @@ use Tests\TestCase;
 #[CoversClass(DecisionPipeline::class)]
 final class DecisionPipelineTest extends TestCase
 {
+    use PreviewsSubjects;
+
     /**
      * Tear down Mockery instances after every test.
      *
@@ -415,6 +422,51 @@ final class DecisionPipelineTest extends TestCase
 
         self::assertSame(DecisionReason::ADMINISTRATION_OWNER, $decide()->reason);
         self::assertTrue(TenantScope::within($tenant, null, $decide)->isAllowed());
+    }
+
+    /**
+     * The subject a running use of a preview decides about has its sources
+     * gathered only once the preview is admitted in the scope in place: any
+     * other subject, the same principal named apart included, is decided as
+     * always, while a refused admission throws before the subject's check is
+     * decided.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPreviewsSubjectIsAdmittedBeforeItsSourcesAreGathered(): void
+    {
+        $caller    = self::previewer('previewer', false);
+        $target    = self::target();
+        $about     = new Subject($target, $target);
+        $apart     = new Subject($target, $target);
+        $pipeline  = $this->pipeline();
+        $admission = new PreviewAdmission($this->signIn($caller), new PreviewResource(Reference::of($target), null, null, null));
+
+        self::assertTrue(Previewing::current()->evaluating($about, $admission, static fn (): bool => $pipeline->decide($apart, 'posts:read', null, [])->isAllowed()));
+        self::assertTrue($pipeline->decide($about, 'posts:read', null, [])->isAllowed());
+
+        $this->expectException(AuthorizationException::class);
+
+        Previewing::current()->evaluating($about, $admission, static fn (): Decision => $pipeline->decide($about, 'posts:read', null, []));
+    }
+
+    /**
+     * A pipeline carries a policy override only once `withPolicies()` gives it
+     * one, and `capped()` keeps whether it does.
+     *
+     * @return void
+     */
+    public function testAPipelineKnowsWhetherItCarriesAPolicyOverride(): void
+    {
+        $pipeline   = $this->pipeline();
+        $overridden = $pipeline->withPolicies([]);
+
+        self::assertFalse($pipeline->hasPolicyOverride());
+        self::assertFalse($pipeline->capped(['posts:*'])->hasPolicyOverride());
+        self::assertTrue($overridden->hasPolicyOverride());
+        self::assertTrue($overridden->capped(['posts:*'])->hasPolicyOverride());
     }
 
     /**

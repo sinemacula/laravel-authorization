@@ -79,6 +79,9 @@ enum DecisionReason: string
     /** The administration operation was decided on records that changed before it was written, every time it was tried. */
     case ADMINISTRATION_CONFLICT = 'administration.conflict';
 
+    /** A package mutation was asked for while a preview is evaluated, which no right allows. */
+    case ADMINISTRATION_PREVIEWING = 'administration.previewing';
+
     /**
      * Return a short description of the reason, for explanations.
      *
@@ -108,6 +111,7 @@ enum DecisionReason: string
             self::ADMINISTRATION_UNPROVABLE        => 'it may widen authority in a way that cannot be proved permitted',
             self::ADMINISTRATION_IMPERSONATING     => 'it is made while impersonating',
             self::ADMINISTRATION_CONFLICT          => 'what it was decided on changed before it was written',
+            self::ADMINISTRATION_PREVIEWING        => 'it is made while a preview is evaluated',
         };
     }
 }

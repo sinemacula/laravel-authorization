@@ -94,6 +94,78 @@ final class AuthorizedQueryTest extends TestCase
     }
 
     /**
+     * A read-only scope, a preview's, refuses every write with its query, an
+     * update, a delete or an insert from it, of its own query or one it is
+     * nested in, before its condition is compiled, while a read compiles it as
+     * any scope does; a scope that is not read-only writes.
+     *
+     * @return void
+     */
+    public function testAReadOnlyScopeRefusesEveryWriteWithItsQuery(): void
+    {
+        ScopedPost::query()->create(['title' => 'kept']);
+
+        /** @var \ArrayObject<int, true> $compiled */
+        $compiled = new \ArrayObject;
+        $compile  = static function () use ($compiled): string {
+            $compiled[] = true;
+
+            return '1 = 1';
+        };
+
+        $readOnly = AuthorizedQuery::compiled(new ScopedPost, 'posts:view', $compile, true);
+        $scoped   = static function () use ($readOnly): EloquentBuilder {
+            $builder = ScopedPost::query();
+
+            $readOnly->holdPlaceOn($builder->getQuery());
+
+            return $builder->withGlobalScope($readOnly->identifier, $readOnly);
+        };
+
+        $writes = [
+            static fn (): mixed => $scoped()->update(['title' => 'changed']),
+            static fn (): mixed => $scoped()->delete(),
+            static fn (): mixed => DB::table('scoped_posts')->insertUsing(['title'], $scoped()->select('title')),
+            static fn (): mixed => DB::table('scoped_posts')->insertOrIgnoreUsing(['title'], $scoped()->select('title')),
+            static fn (): mixed => DB::table('scoped_posts')->whereExists($scoped()->toBase())->update(['title' => 'changed']),
+        ];
+
+        foreach ($writes as $write) {
+            $refused = self::refusalOf($write);
+
+            self::assertSame([RefusalReason::PREVIEW_WRITE], $refused->reasons());
+            self::assertStringContainsString('a query scoped through a preview is read-only', $refused->getMessage());
+        }
+
+        // A read made from a method that only shares a write's name, of a class
+        // that is no query builder, is a read.
+        $caller = new class {
+            /**
+             * Run the read.
+             *
+             * @param  \Closure(): mixed  $read
+             * @return mixed
+             */
+            public function update(\Closure $read): mixed
+            {
+                return $read();
+            }
+        };
+
+        self::assertCount(1, $compiled);
+        self::assertSame(['kept'], $scoped()->pluck('title')->all());
+        self::assertSame(['kept'], $caller->update(static fn (): array => $scoped()->pluck('title')->all()));
+        self::assertCount(3, $compiled);
+
+        $writable = AuthorizedQuery::compiled(new ScopedPost, 'posts:view', static fn (): string => '1 = 1');
+        $builder  = ScopedPost::query();
+
+        $writable->holdPlaceOn($builder->getQuery());
+
+        self::assertSame(1, $builder->withGlobalScope($writable->identifier, $writable)->update(['title' => 'changed']));
+    }
+
+    /**
      * Applying the scope takes its place out, puts every other constraint in
      * one nested group with the bindings, in order, and adds the condition
      * after it; another scope's place stays at the top, and a query whose one
