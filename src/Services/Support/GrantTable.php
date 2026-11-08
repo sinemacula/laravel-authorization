@@ -132,6 +132,30 @@ final readonly class GrantTable extends ExpiringGrants
     }
 
     /**
+     * Return the expiry and the reach of the row the grantee holds live in the
+     * scope for the key, at the instant given, else now, read on the write
+     * connection: when it expires, null for never, and whether it reaches the
+     * tenants below its tenant; null when the grantee holds no live row of it.
+     *
+     * @param  string  $id
+     * @param  \Illuminate\Support\Carbon|null  $now
+     * @return array{\Illuminate\Support\Carbon|null, bool}|null
+     */
+    public function liveRow(string $id, ?Carbon $now = null): ?array
+    {
+        $row = LiveGrants::only($this->inScope()->useWritePdo(), $this->table, $now)->where($this->column, $id)->first(['expires_at', 'include_subtree']);
+
+        if ($row === null) {
+            return null;
+        }
+
+        /** @var array{expires_at: mixed, include_subtree: bool|int|string} $columns */
+        $columns = (array) $row;
+
+        return [UtcDateTime::toUtc($columns['expires_at']), (bool) $columns['include_subtree']];
+    }
+
+    /**
      * Delete the grantee's rows in the scope for the given keys.
      *
      * @param  list<string>  $ids

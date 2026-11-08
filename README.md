@@ -134,8 +134,9 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   declares (`authorization:role.grant`, `authorization:policy.update` and the rest), decided through `check()` as the
   acting subject on an operation resource naming the change, inside the change's transaction and before anything is
   written, when the call names an acting context; a call that names none is trusted system work. A screen checking the
-  same operation gets the same decision. This release decides each action and refuses, as `administration.unprovable`,
-  every change that could widen authority, until the scope, owner, rank, self and impact rules arrive (see
+  same operation gets the same decision. This release weighs the owner, the administered scope, rank, self and, for a
+  direct grant of a permission, possession or explicit grantability, and refuses, as `administration.unprovable`, every
+  other change that could widen authority, until the role, definition and impact rules arrive (see
   [Delegated administration](#delegated-administration)).
 - **Management services** that own every write of a role, permission, policy, grant, resource attachment, permission
   boundary or guardrail: each call runs in one transaction on the package's connection, through the configured models,
@@ -1142,8 +1143,9 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 
 $actor = ActingContext::current(); // the request's subject, its session kept
 
-app(GrantService::class)->revokeRole($user, 'editor', actor: $actor); // decided under authorization:role.revoke
-app(GrantService::class)->grantRole($user, 'editor', actor: $actor);  // refused in this release: see below
+app(GrantService::class)->revokeRole($user, 'editor', actor: $actor);          // under authorization:role.revoke
+app(GrantService::class)->grantPermission($user, 'posts:edit', actor: $actor); // when the actor may hand it out
+app(GrantService::class)->grantRole($user, 'editor', actor: $actor);           // refused in this release
 ```
 
 **The actions.** The package declares each administration action as a permission of its own, spelt
@@ -1162,7 +1164,7 @@ writes them and a policy naming them validates:
 | `guardrail.manage`                                                                 | A guardrail set or removed, from above the scope it caps             |
 | `resource-policy.attach`, `resource-policy.detach`                                 | A policy attached to or detached from a record or a resource type    |
 | `role.read`, `permission.read`, `policy.read`                                      | Reading and listing through the services; not decided yet            |
-| `permission.grantable`, `policy.grantable`                                         | Delegating what the actor does not hold; not decided yet             |
+| `permission.grantable`, `policy.grantable`                                         | Delegating what the actor does not hold; `policy.grantable` not yet  |
 | `administration.self`, `administration.impersonated`                               | A change that benefits the actor; a change made while impersonating  |
 
 Each is prefixed with `authorization:`. A sync, `revokeAll()`, `removeAll()` and `detachAll()` decide each change they
@@ -1178,9 +1180,11 @@ name decides each held row of the name, or, when none is held, the row the looku
 A delegated call that finds nothing to change is still decided, on the change it was asked for: a revocation, detach or
 removal of what the grantee does not hold, a sync of what it already holds live, and `revokeAll()`, `removeAll()` or
 `detachAll()` of a grantee or record that holds nothing, which decide each of their actions at platform scope, since
-they reach every scope. A change that changes nothing only narrows, so an actor allowed the action makes it, writing
-nothing; an actor not allowed it is refused whether or not there was anything to change, so a refusal never tells it
-what a grantee holds.
+they reach every scope. A change that changes nothing only narrows, so it needs no scope, self or possession right: an
+actor allowed the action makes it, writing nothing, once the rank rule passes for a change to another identity or
+principal. An actor not allowed the action, or not senior to the grantee, is refused whether or not there was anything
+to change, so a refusal never tells it what a grantee holds. A policy reads whether a change changes nothing as
+`resource.unchanged`.
 
 **The acting context.** `ActingContext` holds the resolved subject making the call: its principal, the identity behind
 it, its guard, its session and, for a machine, the scopes of its credential, which cap what it may administer as they
@@ -1218,13 +1222,17 @@ anything is written, and its operation carries the actor. `GuardrailService` alw
 `authorization:operation` whose id is the operation's id and whose tenant is the scope of what the change changes, never
 the tenant the request is in: the tenant a grant is held in, or a definition's owner for a change to a role, permission
 or policy. A change in a tenant is decided in that tenant's scope, and one in a tenant outside the actor's scope, an
-ancestor of the request's tenant included, is refused as `tenant_scope`. A change with no tenant, to a platform-wide
-grant, a platform role or a platform-owned record, is decided at platform scope, where only a platform-wide grant of the
-action counts, so an actor that holds the action only in a tenant is refused it. A screen that builds the same resource
-through the same named constructor (`OperationResource::grant()`, `revoke()`, `unchanged()` or `definition()`) and
-checks it with `$actor->check($resource)` gets the decision the service makes. Nothing is ever attached to one
-operation, so a check on it reads only the resource policies attached to the type `authorization:operation`. The
-resource offers what the change names to your policies, under `resource`:
+ancestor of the request's tenant included, is refused as `tenant_scope` unless the actor holds the action through a
+platform-wide grant. A change with no tenant, to a platform-wide grant, a platform role or a platform-owned record, is
+decided at platform scope, where only a platform-wide grant of the action counts, so an actor that holds the action only
+in a tenant is refused it. So who may change a grant row is the scope the actor administers (N79): an actor whose
+authority for the action reaches the row's tenant, from a parent tenant by authority over its subtree or from the
+platform, changes the row from its own context, and one `revokeAll()` clears a grantee's rows across every tenant the
+actor administers; a parent's node-only authority reaches no child's row, and a tenant's no platform-wide row. A screen
+that builds the same resource through the same named constructor (`OperationResource::grant()`, `revoke()`,
+`unchanged()` or `definition()`) and checks it with `$actor->check($resource)` gets the decision the service makes.
+Nothing is ever attached to one operation, so a check on it reads only the resource policies attached to the type
+`authorization:operation`. The resource offers what the change names to your policies, under `resource`:
 
 | Key                                                                                          | Type   | What it holds                                                         |
 |----------------------------------------------------------------------------------------------|--------|-----------------------------------------------------------------------|
@@ -1253,33 +1261,89 @@ declares one of these keys must declare it with the same type.
 
 **What this release enforces.** Every change is decided under its action, through every deny, guardrail, boundary and
 session cap, and in its intended tenant. Then an administration stage, after the allow and inside the same decision,
-weighs the operation's constraints, and can only refuse:
+weighs the operation's constraints, in this order, and can only refuse:
 
-- a change made while impersonating is refused as `administration.impersonating` unless the actor is also allowed
-  `authorization:administration.impersonated` on the same operation;
-- a change that can only narrow what anyone may do is allowed on its action's decision alone: revoking a permission
-  (directly or from a role), revoking a role no policy attached to it or its ancestors denies anything in, and
-  detaching a policy, from a grantee or a resource, with no deny statement;
-- every other change, which could widen what someone may do, is refused as `administration.unprovable`: grants and
-  attachments, setting or removing a boundary, detaching a policy that denies, and every change to a role, permission
-  or policy definition. The rules that would prove them permitted arrive in later releases: the scope, owner, rank,
-  self, expiry and possession rules of direct grants; then grantable rights, role and definition edits and their impact
-  on existing holders; then guardrail integration and the concurrency protocol (see
+- **Impersonation.** A change made while impersonating is refused as `administration.impersonating` unless the actor is
+  also allowed `authorization:administration.impersonated` on the same operation.
+- **Administered scope.** A change that may widen authority is decided again across its whole reach, and refused as
+  `administration.scope` unless it is allowed there: in the grant's tenant, standing just below it for a grant that
+  reaches the tenants below, so only authority that itself reaches below counts (node-only authority cannot issue a
+  subtree grant), and in the grant's application, so a grant to every application needs authority unrestricted by
+  application. A platform-wide grant is decided at platform scope by its own decision, so it needs platform authority.
+- **Rank** (N76). Every change to an identity or a principal, a revocation, a sync, `revokeAll()`, a boundary change and
+  a call that changes nothing included, is refused as `administration.rank` unless the actor is strictly senior to the
+  grantee, and as `administration.rank_uncomparable` when either side's rank, or the reach, cannot be read. The actor is
+  ranked in the grant's own tenant and application, by the roles that reach it (its principal's and its identity's).
+  The grantee is ranked across the whole reach of the change: the most senior rank it holds anywhere the change reaches
+  counts, its roles held platform-wide, in the grant's tenant and its ancestors, in every tenant below for a grant that
+  reaches below, in every tenant for a platform-wide grant, and in any application for a grant to every application.
+  Expired grants never count. A role grant is also weighed against the rank the role would give the grantee, so it
+  never leaves the grantee equal to or senior to the actor. An unranked grantee is the most junior, an unranked actor
+  acts on no one, two unranked sides are equal and refused, and with `authorization.rank.enabled` off rank is no
+  constraint.
+- **Self.** A change to the actor itself, its principal or its identity, that may widen authority is refused as
+  `administration.self` unless the actor is also allowed `authorization:administration.self` on the same operation;
+  rank is not weighed against itself. A change to itself that only narrows, such as revoking its own permission, needs
+  no such right.
+- **Narrowing.** A change that can only narrow what anyone may do is then allowed: revoking a permission (directly or
+  from a role), revoking a role no policy attached to it or its ancestors denies anything in, detaching a policy, from a
+  grantee or a resource, with no deny statement, and a grant that only shortens or narrows one the grantee holds live in
+  the same scope (it lasts no longer and reaches no further, and revoking the grant would only narrow).
+- **Possession** (N77). A direct grant of a permission to an identity or a principal, a re-grant, an extension, a wider
+  reach and a sync's additions included, is allowed only when the actor provably holds what it grants, or is explicitly
+  allowed to grant it:
+  - *provable possession*: in the grant's reach (its tenant, below it for a subtree grant, or the platform, and its
+    application), the actor holds the permission, or a wildcard covering it, through grants lasting at least as long as
+    the grant (a permanent grant needs permanent authority, and an extension authority lasting until the new expiry);
+    `check()` of the permission there allows it; and no deny, boundary, guardrail or session or credential cap of the
+    actor could limit it anywhere in the reach: no deny statement names an action it covers, with conditions or
+    resource patterns or none, every boundary and guardrail allows it whole, with no condition and on every resource,
+    and every cap covers it. The actor's policies, its roles' and every resource's, its boundaries and the guardrails
+    are read as stored, whatever their application, each table in one query bounded to the reach (the platform, the
+    grant's tenant and its ancestors, and the tenants below for a grant that reaches below), so what a grant reads
+    never grows with other tenants' policies. Two patterns that both hold wildcards, one of them `?` or a `[...]` class,
+    are taken to overlap. When in doubt, a tree, row or document that cannot be read included, the route fails;
+  - *explicit grantability*: `authorization:permission.grantable` is allowed, in the grant's reach, on the grant's
+    descriptor (`OperationResource::grantable()`), the same operation resource under that action, naming the
+    permission, the grantee, the reach and the expiry, so a policy may allow exactly one delegation the actor does not
+    hold. A right held for one application, or at a tenant's node alone, allows no grant to every application, another
+    application or the subtree. The right must last as long as the grant: held as a permission, through grants lasting
+    that long; allowed by a policy, through an attachment lasting that long (a resource policy's never expires).
+
+  Otherwise the grant is refused as `administration.not_grantable` when the actor does not hold the permission across
+  the grant's reach and lifetime, and as `administration.unprovable` when it does but its check there is refused or
+  something could limit it.
+- **Still refused.** Every other change that could widen what someone may do is refused as `administration.unprovable`:
+  role grants (their transitive authority is proved in a later release), policy attachments, setting or removing a
+  boundary, detaching a policy that denies, attaching a resource policy, every change to a role's permissions or
+  policies, and every change to a role, permission or policy definition. `authorization:policy.grantable` is not decided
+  yet. The rules that would prove them arrive in later releases: grantable policies, role and definition edits and their
+  impact on existing holders; then guardrail integration and the concurrency protocol (see
   [the design note](docs/design/delegated-administration.md)).
 
-`canActOn($target)` on an identity compares rank alone (strictly senior, an unranked target the most junior, an unranked
-actor acting on no one, rank turned off passing every comparison) and grants nothing by itself; the later releases weigh
-it beside every other rule. When neither side holds a ranked role, the comparison still refuses: both count as the most
-junior, so their ranks are equal, and strict seniority refuses equal rank (N76). An application that leaves rank on but
-ranks no role should turn rank off (`authorization.rank.enabled`), or no delegated grant will pass it once the later
-releases weigh it.
+A batch (a sync, `revokeAll()`) works out its whole change first and decides every item against the authority the actor
+held before the call, so no item relies on authority an earlier one hands out, and a refusal of any item writes nothing
+and dispatches no change event. Its items are decided kind by kind, then by tenant, application and record, so the
+first refusal, and its reason, never depend on the order the rows were read in.
+
+```php
+// An editor may hand out posts:edit, for the admin application only, without holding it.
+['effect' => 'allow', 'actions' => ['authorization:permission.grantable'], 'resources' => ['authorization:operation:*'],
+    'conditions' => ['eq' => ['resource.permission' => 'posts:edit', 'resource.application' => 'admin']]]
+```
+
+`canActOn($target)` on an identity compares rank alone, as the rank rule does, and grants nothing by itself. When
+neither side holds a ranked role, the comparison refuses: both count as the most junior, so their ranks are equal, and
+strict seniority refuses equal rank (N76). An application that leaves rank on but ranks no role should turn rank off
+(`authorization.rank.enabled`), or no delegated change to an identity will pass it.
 
 **Reasons and errors.** A refusal throws `AuthorizationException`, or `InsufficientAuthenticationException` for a
 step-up, carrying the decision (`getDecision()`), its stage and its trace, for audit; the client sees the one `denied`
 line. The administration stage refuses with these reasons, each at the `administration` stage with a trace step naming
-it: `administration.scope`, `administration.owner`, `administration.rank_uncomparable`, `administration.rank`,
-`administration.self`, `administration.not_grantable`, `administration.unprovable` and `administration.impersonating`.
-This release refuses with the last two; the others are reserved for the rules to come.
+it: `administration.impersonating`, `administration.scope`, `administration.rank_uncomparable`, `administration.rank`,
+`administration.self`, `administration.not_grantable` and `administration.unprovable`. `administration.owner` is
+reserved for the owner rule (D20), which a later release applies to definitions (roles, permissions, policies, their
+membership and attachments), never to grant rows.
 
 **Audit.** Every decision is reported with `DecisionEvaluated`, and a refusal with `AuthorizationFailed`, as
 `authorize()` reports one, each naming the operation resource `authorization:operation:{operation id}`. The change
@@ -1322,7 +1386,7 @@ administration stage can still refuse an allow; no allow is weighed before every
 | `boundary`       | Every permission boundary of the principal and of its identity that applies must allow the check                  | `boundary`, `invalid_policy`                                                                                                                                                                                                  |
 | `session`        | Every session cap, the credential's scopes and each set of actions `capped()` was given, must cover the action    | `session_policy`                                                                                                                                                                                                              |
 | `allow`          | Every allow statement that applies to the subject, a resource policy's naming it included, then a permission held | `invalid_policy`                                                                                                                                                                                                              |
-| `administration` | The operation's constraints, for an administration action on its own operation resource; refuses only             | `administration.scope`, `administration.owner`, `administration.rank_uncomparable`, `administration.rank`, `administration.self`, `administration.not_grantable`, `administration.unprovable`, `administration.impersonating` |
+| `administration` | The operation's constraints, for an administration action on its own operation resource; refuses only             | `administration.scope`, `administration.rank_uncomparable`, `administration.rank`, `administration.self`, `administration.not_grantable`, `administration.unprovable`, `administration.impersonating`                         |
 | `implicit`       | Nothing allowed                                                                                                   | `insufficient_authentication`, `condition_failed`, `no_match`                                                                                                                                                                 |
 
 Within each stage, the policies are assessed in a fixed order (name, stored key, resource, then document) and each
@@ -2753,8 +2817,8 @@ identity holds on a temporary or expired grant is made permanent and reported as
 `authorization:sync` take `--actor={morph type}:{key}` to name who made the change; it must name a row that exists, and
 without it the change is trusted work that records no actor. For `authorization:grant` and `authorization:revoke` the
 actor makes the change as delegated administration, decided as that actor, with no session (see
-[Delegated administration](#delegated-administration)), so a grant is refused as `administration.unprovable` in this
-release; for `authorization:sync` it is recorded on the trusted operation's events alone.
+[Delegated administration](#delegated-administration)), so a role grant is refused as `administration.unprovable` in
+this release; for `authorization:sync` it is recorded on the trusted operation's events alone.
 
 `authorization:prune` removes the grants that no longer count: expired grants, reported as `RoleExpired`,
 `PermissionExpired` or `PolicyExpired` with no actor, a role's expired grants of permissions, reported as

@@ -160,8 +160,7 @@ final class DelegatedAdministrationTest extends TestCase
      * Every mutating method of every management service, as a setup that
      * returns the call to make with an acting context, the administration
      * actions the call decides, in order, and what it is refused with once the
-     * actor holds every action, null for a change that only narrows and is
-     * made.
+     * actor holds every action, null for a change that is made.
      *
      * @return iterable<string, array{Setup, list<string>, \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null}>
      */
@@ -198,7 +197,7 @@ final class DelegatedAdministrationTest extends TestCase
         yield 'grantPermission' => [
             self::directly(static fn (ActingContext $actor): mixed => self::grants()->grantPermission(self::user(), self::permission('posts:edit'), actor: $actor)),
             [Actions::PERMISSION_GRANT],
-            $unprovable,
+            null,
         ];
         yield 'revokePermission' => [static function (): \Closure {
             self::grants()->grantPermission(self::user(), self::permission('posts:edit'));
@@ -209,7 +208,7 @@ final class DelegatedAdministrationTest extends TestCase
             self::grants()->grantPermission(self::user(), self::permission('posts:edit'));
 
             return static fn (ActingContext $actor): mixed => self::grants()->syncPermissions(self::user(), [self::permission('posts:read')], actor: $actor);
-        }, [Actions::PERMISSION_GRANT], $unprovable];
+        }, [Actions::PERMISSION_GRANT, Actions::PERMISSION_REVOKE], null];
         yield 'attachPolicy' => [
             self::directly(static fn (ActingContext $actor): mixed => self::grants()->attachPolicy(self::user(), self::policy('reader', 'allow'), actor: $actor)),
             [Actions::POLICY_ATTACH],
@@ -375,10 +374,12 @@ final class DelegatedAdministrationTest extends TestCase
     }
 
     /**
-     * Called with an actor allowed every action, a call that may widen
-     * authority is refused as unprovable, before anything is written, and one
-     * that can only narrow is made, as delegated work, under the actions it
-     * decides, each change decided on the operation's resource.
+     * Called with an actor allowed every action, and ranked above the grantee,
+     * a call that may widen authority and that this release cannot prove is
+     * refused as unprovable, before anything is written, and one that can only
+     * narrow, or a direct grant of a permission the actor may grant (it holds
+     * `authorization:permission.grantable`), is made, as delegated work, under
+     * the actions it decides, each change decided on the operation's resource.
      *
      * @param  Setup  $setup
      * @param  list<string>  $actions
@@ -388,7 +389,7 @@ final class DelegatedAdministrationTest extends TestCase
      * @throws \Throwable
      */
     #[DataProvider('calls')]
-    public function testEveryCallFollowsThePartOneRules(\Closure $setup, array $actions, ?DecisionReason $refusal): void
+    public function testEveryCallFollowsTheRulesInForce(\Closure $setup, array $actions, ?DecisionReason $refusal): void
     {
         $actor = self::administrator();
         $call  = $setup();

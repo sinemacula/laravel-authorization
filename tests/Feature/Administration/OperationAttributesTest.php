@@ -47,11 +47,12 @@ final class OperationAttributesTest extends TestCase
         self::assertInstanceOf(ResourceAttributeProvider::class, new OperationAttributes);
         self::assertSame(ContextKeyType::STRING, $attributes['action']);
         self::assertSame(ContextKeyType::BOOL, $attributes['narrowing']);
+        self::assertSame(ContextKeyType::BOOL, $attributes['unchanged']);
         self::assertSame(ContextKeyType::BOOL, $attributes['subtree']);
         self::assertSame(ContextKeyType::TIME, $attributes['expires_at']);
         self::assertSame(ContextKeyType::NUMBER, $attributes['change.rank']);
         self::assertSame(ContextKeyType::BOOL, $attributes['impersonated']);
-        self::assertCount(24, $attributes);
+        self::assertCount(25, $attributes);
 
         $strings = ['target_type', 'target_id', 'role', 'permission', 'policy', 'grantee_type', 'grantee_id', 'application', 'change.name', 'change.description'];
 
@@ -86,6 +87,38 @@ final class OperationAttributesTest extends TestCase
     }
 
     /**
+     * A policy reads whether the change changes nothing, under
+     * `resource.unchanged`: an actor allowed only calls that change nothing
+     * makes one, and is refused a change that would revoke.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyReadsWhetherTheChangeChangesNothing(): void
+    {
+        $admin = StubIdentity::create(['id' => 'admin-1']);
+
+        config(['authorization.rank.enabled' => false]);
+
+        $admin->attachPolicy(Policy::create(['name' => 'no-op', 'document' => ['statements' => [[
+            'effect'     => PolicyEffect::ALLOW->value,
+            'actions'    => [PackagePermissions::PERMISSION_REVOKE],
+            'resources'  => [OperationResource::TYPE . ':*'],
+            'conditions' => ['eq' => ['resource.unchanged' => true]],
+        ]]]]));
+
+        $actor     = ActingContext::for($admin);
+        $grantee   = new Reference('user', '1');
+        $unchanged = OperationResource::unchanged(PackagePermissions::PERMISSION_REVOKE, $grantee, null, GrantScope::platform());
+        $revoke    = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $grantee, Permission::create(['name' => 'posts:edit']), GrantScope::platform());
+
+        self::assertTrue((new OperationAttributes)->values($unchanged->toResourceReference(), null)['unchanged']);
+        self::assertTrue($actor->check($unchanged)->isAllowed());
+        self::assertSame(DecisionReason::CONDITION_FAILED, $actor->check($revoke)->reason);
+    }
+
+    /**
      * A policy conditions an administration action on what the operation names,
      * under `resource`, through the one decision path.
      *
@@ -96,6 +129,10 @@ final class OperationAttributesTest extends TestCase
     public function testAPolicyConditionsOnTheOperation(): void
     {
         $admin = StubIdentity::create(['id' => 'admin-1']);
+
+        // The grantee is named by a reference alone, whose rank cannot be read,
+        // so rank is off: the attributes are what this test is about.
+        config(['authorization.rank.enabled' => false]);
 
         $admin->attachPolicy(Policy::create(['name' => 'revoker', 'document' => ['statements' => [[
             'effect'     => PolicyEffect::ALLOW->value,

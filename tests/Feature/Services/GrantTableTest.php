@@ -758,6 +758,35 @@ final class GrantTableTest extends TestCase
     }
 
     /**
+     * The live row of a key is read with its expiry and reach, in the scope
+     * alone: a row that has expired, at the instant given or now, is not live,
+     * and another grantee's, another scope's or another key's is never read.
+     *
+     * @return void
+     */
+    public function testALiveRowIsReadWithItsExpiryAndReach(): void
+    {
+        $forever = Role::create(['name' => 'forever']);
+        $later   = Role::create(['name' => 'later']);
+        $expired = Role::create(['name' => 'expired']);
+        $table   = self::table(tenant: self::tenant(), includeSubtree: false);
+
+        $table->grant($forever->id, null);
+        $table->grant($later->id, Carbon::parse(self::NOW)->addDay());
+        $table->grant($expired->id, Carbon::parse(self::NOW)->subDay());
+        self::table('user-2')->grant($later->id, null);
+
+        self::assertSame([null, false], $table->liveRow($forever->id));
+        self::assertEquals([Carbon::parse(self::NOW)->addDay(), false], $table->liveRow($later->id));
+        self::assertSame('UTC', ($table->liveRow($later->id) ?? [null])[0]?->getTimezone()->getName());
+        self::assertNull($table->liveRow($expired->id));
+        self::assertNull($table->liveRow($later->id, Carbon::parse(self::NOW)->addDays(2)));
+        self::assertNull(self::table()->liveRow($forever->id));
+        self::assertSame([null, true], self::table('user-2')->liveRow($later->id));
+        self::assertNull($table->liveRow(Role::create(['name' => 'never'])->id));
+    }
+
+    /**
      * Return a grant table writer for a stub identity's roles, recording the
      * given actor on the rows it writes.
      *

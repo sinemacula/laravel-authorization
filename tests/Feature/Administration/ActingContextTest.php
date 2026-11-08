@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
@@ -47,6 +48,21 @@ use Tests\TestCase;
 final class ActingContextTest extends TestCase
 {
     use CatchesRefusals;
+
+    /**
+     * Turn rank off: these tests are about the acting context, and name
+     * grantees by references alone, whose rank cannot be read (see
+     * `OperationConstraintsTest` for rank).
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config(['authorization.rank.enabled' => false]);
+    }
 
     /**
      * The current acting context is the request's subject as `check()` resolves
@@ -305,6 +321,57 @@ final class ActingContextTest extends TestCase
 
         self::assertSame(DecisionReason::ADMINISTRATION_IMPERSONATING, $refusal instanceof AuthorizationException ? $refusal->getReason() : null);
         Event::assertDispatchedTimes(DecisionEvaluated::class, 3);
+    }
+
+    /**
+     * A batch is decided in a stable order, kind by kind as the kinds first
+     * appear, and within a kind by where each change holds and what it acts on,
+     * so its first refusal never depends on the order its changes were read in.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABatchIsDecidedInAStableOrder(): void
+    {
+        $admin = StubIdentity::create(['id' => 'admin-1']);
+
+        $statement = static fn (string $effect, string $key, string $value): array => [
+            'effect'     => $effect,
+            'actions'    => [PackagePermissions::PERMISSION_REVOKE],
+            'resources'  => [OperationResource::TYPE . ':*'],
+            'conditions' => ['eq' => [$key => $value]],
+        ];
+
+        $admin->attachPolicy(Policy::create(['name' => 'revoker', 'document' => ['statements' => [
+            $statement('allow', 'resource.permission', 'posts:a'),
+            $statement('deny', 'resource.permission', 'posts:b'),
+            $statement('deny', 'resource.application', 'billing'),
+        ]]]));
+
+        $actor     = ActingContext::for($admin);
+        $operation = Operation::begin($actor);
+        $user      = new Reference('user', '1');
+        $revoke    = static fn (string $name, ?string $application = null): OperationResource => OperationResource::revoke(
+            PackagePermissions::PERMISSION_REVOKE,
+            $user,
+            Permission::query()->firstOrCreate(['name' => $name]),
+            new GrantScope(null, $application),
+        );
+        $role         = OperationResource::revoke(PackagePermissions::ROLE_REVOKE, $user, Role::create(['name' => 'editor']), GrantScope::platform());
+        $firstRefusal = static function (OperationResource ...$changes) use ($actor, $operation): ?DecisionReason {
+            $refusal = self::refusalOf(static fn () => $actor->authorizeIn($operation, ...$changes));
+
+            return $refusal instanceof AuthorizationException ? $refusal->getReason() : null;
+        };
+
+        foreach ([[$revoke('posts:b', 'admin'), $revoke('posts:c', 'admin')], [$revoke('posts:c', 'admin'), $revoke('posts:c', 'billing')]] as [$one, $other]) {
+            self::assertNotSame($firstRefusal($one), $firstRefusal($other));
+            self::assertSame($firstRefusal($one, $other), $firstRefusal($other, $one));
+        }
+
+        self::assertSame(DecisionReason::NO_MATCH, $firstRefusal($role, $revoke('posts:b', 'admin')));
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $firstRefusal($revoke('posts:b', 'admin'), $role));
     }
 
     /**

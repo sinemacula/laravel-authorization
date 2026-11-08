@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -201,6 +202,97 @@ final class OperationResourceTest extends TestCase
         $impersonation = ['impersonated' => true, 'impersonator_type' => true, 'impersonator_id' => true];
 
         self::assertSame(\array_diff_key($proposed->attributes(), $impersonation), \array_diff_key($acted->attributes(), $impersonation));
+    }
+
+    /**
+     * Each grant, removal and unchanged change holds what it changes as values:
+     * the grantee's reference, the target, the scope and the expiry in UTC; it
+     * changes nothing only when unchanged; a definition holds none, and is
+     * never unchanged; acting on the resource keeps them.
+     *
+     * @return void
+     */
+    public function testItHoldsTheChangeAsValues(): void
+    {
+        $role   = Role::create(['name' => 'editor']);
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $scope  = new GrantScope(new Reference('stub_tenant', 'tenant-a'), 'admin', false);
+        $expiry = Carbon::parse('2026-07-02 14:00:00', 'Europe/Paris');
+        $grant  = OperationResource::grant(PackagePermissions::ROLE_GRANT, $user, $role, $scope, $expiry);
+        $revoke = OperationResource::revoke(PackagePermissions::ROLE_REVOKE, $user, $role, $scope);
+        $kept   = OperationResource::unchanged(PackagePermissions::ROLE_REVOKE, $user, null, $scope);
+
+        $change = $grant->change;
+
+        self::assertNotNull($change);
+        self::assertEquals(Reference::of($user), $change->grantee);
+        self::assertSame($role, $change->target);
+        self::assertSame($scope, $change->scope);
+        self::assertSame('2026-07-02T12:00:00+00:00', $change->expiresAt?->format(\DATE_ATOM));
+        self::assertFalse($grant->isUnchanged());
+        self::assertSame([$role, null], [$revoke->change?->target, $revoke->change?->expiresAt]);
+        self::assertFalse($revoke->isUnchanged());
+        self::assertNull($kept->change?->target);
+        self::assertTrue($kept->isUnchanged());
+        self::assertSame($grant->change, $grant->actedBy(new Reference('support', '9'), 'operation-1')->change);
+        self::assertNull(OperationResource::definition(PackagePermissions::ROLE_RENAME, $role)->change);
+        self::assertFalse(OperationResource::definition(PackagePermissions::ROLE_RENAME, $role)->isUnchanged());
+    }
+
+    /**
+     * A grant of what the grantee holds live in the same scope that lasts no
+     * longer only narrows, and says so to policies; one of what it does not
+     * hold does not.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantThatOnlyShortensOnlyNarrows(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $edit = Permission::create(['name' => 'posts:edit']);
+        $read = Permission::create(['name' => 'posts:read']);
+
+        GrantService::instance()?->grantPermission($user, $edit);
+
+        $again = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $user, $edit, GrantScope::platform(), Carbon::now()->addDay());
+        $fresh = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $user, $read, GrantScope::platform(), Carbon::now()->addDay());
+
+        self::assertTrue($again->isNarrowing);
+        self::assertTrue($again->attributes()['narrowing']);
+        self::assertFalse($fresh->isNarrowing);
+    }
+
+    /**
+     * A grant's descriptor is the same operation under
+     * `authorization:permission.grantable`: its tenant, id, impersonator,
+     * change and attributes kept, the action replaced, never narrowing nor
+     * unchanged.
+     *
+     * @return void
+     */
+    public function testAGrantsDescriptorNamesTheSameDelegation(): void
+    {
+        $edit   = Permission::create(['name' => 'posts:edit']);
+        $tenant = new Reference('stub_tenant', 'tenant-a');
+        $grant  = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, new Reference('user', '1'), $edit, new GrantScope($tenant, 'admin'))
+            ->actedBy(new Reference('support', '9'), 'operation-1');
+        $kept       = OperationResource::unchanged(PackagePermissions::PERMISSION_GRANT, new Reference('user', '1'), $edit, GrantScope::platform());
+        $descriptor = $grant->grantable();
+
+        self::assertSame(PackagePermissions::PERMISSION_GRANTABLE, $descriptor->action);
+        self::assertFalse($descriptor->isNarrowing);
+        self::assertSame($tenant, $descriptor->tenant);
+        self::assertSame('operation-1', $descriptor->id);
+        self::assertEquals(new Reference('support', '9'), $descriptor->impersonator);
+        self::assertSame($grant->change, $descriptor->change);
+        self::assertSame(
+            [...$grant->attributes(), 'action' => PackagePermissions::PERMISSION_GRANTABLE],
+            $descriptor->attributes(),
+        );
+        self::assertArrayNotHasKey('unchanged', $kept->grantable()->attributes());
+        self::assertFalse($kept->grantable()->attributes()['narrowing']);
     }
 
     /**

@@ -6,11 +6,11 @@ namespace SineMacula\Laravel\Authorization\Administration;
 
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
-use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
@@ -24,9 +24,11 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * resource policy is attached to), the intended tenant, whether a grant reaches
  * the tenants below it, the application, the expiry and the proposed change,
  * and whether the change can only narrow what anyone may do (see `Narrowing`).
- * A service builds one for each change it makes, and a screen that builds the
- * same one, through the same named constructor, and checks it through the same
- * acting context, gets the same decision.
+ * The grantee, the record, the scope and the expiry are also held as values,
+ * for the administration stage to weigh (see `OperationConstraints`). A service
+ * builds one for each change it makes, and a screen that builds the same one,
+ * through the same named constructor, and checks it through the same acting
+ * context, gets the same decision.
  *
  * Its reference is a record of type `authorization:operation` whose id is the
  * id of the operation the service runs, which every event of the write shares,
@@ -63,6 +65,7 @@ final readonly class OperationResource implements AuthorizableResource
      * @param  bool  $isNarrowing
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  array<string, mixed>  $attributes
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange|null  $change
      * @param  string  $id
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $impersonator
      */
@@ -80,6 +83,9 @@ final readonly class OperationResource implements AuthorizableResource
         /** What the change names, as policies read it under `resource`. */
         private array $attributes,
 
+        /** The grant or removal the change makes, as values; null for a change to a definition. */
+        public ?OperationChange $change = null,
+
         /** The id of the operation that makes the change, or `proposed`. */
         public string $id = self::PROPOSED,
 
@@ -90,8 +96,9 @@ final readonly class OperationResource implements AuthorizableResource
     /**
      * Return the operation resource of a grant, an attachment or a boundary
      * set: the target (a role, permission or policy) handed to the grantee in
-     * the scope, until the expiry or forever. It widens what the grantee may
-     * do, so it never only narrows.
+     * the scope, until the expiry or forever. It may widen what the grantee may
+     * do, so it never only narrows, unless it only shortens or narrows a grant
+     * the grantee holds live in the scope (see `Narrowing::isShortening()`).
      *
      * @param  string  $action
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
@@ -102,9 +109,11 @@ final readonly class OperationResource implements AuthorizableResource
      */
     public static function grant(string $action, Model|Reference $grantee, Model $target, GrantScope $scope, ?\DateTimeInterface $expiresAt = null): self
     {
-        $expiry = UtcDateTime::toUtc($expiresAt)?->format(\DATE_ATOM);
+        $reference  = Reference::of($grantee);
+        $change     = new OperationChange($reference, $target, $scope, $expiresAt);
+        $attributes = [...self::grantAttributes($reference, $target, $scope), 'expires_at' => $change->expiresAt?->format(\DATE_ATOM)];
 
-        return new self($action, false, $scope->tenant, [...self::grantAttributes($grantee, $target, $scope), 'expires_at' => $expiry]);
+        return new self($action, Narrowing::isShortening($action, $change), $scope->tenant, $attributes, $change);
     }
 
     /**
@@ -120,7 +129,10 @@ final readonly class OperationResource implements AuthorizableResource
      */
     public static function revoke(string $action, Model|Reference $grantee, Model $target, GrantScope $scope): self
     {
-        return new self($action, Narrowing::isNarrowing($action, $target), $scope->tenant, self::grantAttributes($grantee, $target, $scope));
+        $reference = Reference::of($grantee);
+        $change    = new OperationChange($reference, $target, $scope);
+
+        return new self($action, Narrowing::isNarrowing($action, $target), $scope->tenant, self::grantAttributes($reference, $target, $scope), $change);
     }
 
     /**
@@ -139,7 +151,10 @@ final readonly class OperationResource implements AuthorizableResource
      */
     public static function unchanged(string $action, Model|Reference $grantee, ?Model $target, GrantScope $scope): self
     {
-        return new self($action, true, $scope->tenant, [...self::grantAttributes($grantee, $target, $scope), 'unchanged' => true]);
+        $reference = Reference::of($grantee);
+        $change    = new OperationChange($reference, $target, $scope, null, true);
+
+        return new self($action, true, $scope->tenant, [...self::grantAttributes($reference, $target, $scope), 'unchanged' => true], $change);
     }
 
     /**
@@ -168,7 +183,35 @@ final readonly class OperationResource implements AuthorizableResource
      */
     public function actedBy(?Reference $impersonator, ?string $id = null): self
     {
-        return new self($this->action, $this->isNarrowing, $this->tenant, $this->attributes, $id ?? $this->id, $impersonator);
+        return new self($this->action, $this->isNarrowing, $this->tenant, $this->attributes, $this->change, $id ?? $this->id, $impersonator);
+    }
+
+    /**
+     * Return the descriptor of the delegation this grant proposes, as the
+     * explicit grantable right is decided on (N77): the same operation, named
+     * by the same attributes, the permission, the grantee and the reach
+     * included, under `authorization:permission.grantable`. The administration
+     * stage never weighs a descriptor, so a screen asking about it gets the
+     * decision the stage asks for.
+     *
+     * @return self
+     */
+    public function grantable(): self
+    {
+        $attributes = [...$this->attributes, 'unchanged' => null];
+
+        return new self(PackagePermissions::PERMISSION_GRANTABLE, false, $this->tenant, $attributes, $this->change, $this->id, $this->impersonator);
+    }
+
+    /**
+     * Determine whether the change changes nothing, as a call that finds
+     * nothing to change, or a sync that keeps a row held live, asks for.
+     *
+     * @return bool
+     */
+    public function isUnchanged(): bool
+    {
+        return $this->change->isUnchanged ?? false;
     }
 
     /**
@@ -209,15 +252,13 @@ final readonly class OperationResource implements AuthorizableResource
      * Return what a grant or a removal names: the target, when there is one,
      * the grantee, and the scope's application and reach.
      *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $reference
      * @param  \Illuminate\Database\Eloquent\Model|null  $target
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @return array<string, mixed>
      */
-    private static function grantAttributes(Model|Reference $grantee, ?Model $target, GrantScope $scope): array
+    private static function grantAttributes(Reference $reference, ?Model $target, GrantScope $scope): array
     {
-        $reference = Reference::of($grantee);
-
         return [
             ...($target === null ? [] : self::targetAttributes($target)),
             'grantee_type' => $reference->type,

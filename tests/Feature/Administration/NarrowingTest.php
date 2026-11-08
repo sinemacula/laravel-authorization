@@ -4,14 +4,18 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Administration;
 
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\Narrowing;
+use SineMacula\Laravel\Authorization\Administration\OperationChange;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
@@ -33,6 +37,19 @@ use Tests\TestCase;
 final class NarrowingTest extends TestCase
 {
     use ActsAsTenant, UsesAnAuthorizationConnection;
+
+    /**
+     * Reset the clock.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
 
     /**
      * Revoking a permission always narrows; removing a boundary never does, nor
@@ -225,6 +242,88 @@ final class NarrowingTest extends TestCase
         GrantService::instance()?->attachPolicy($role, self::policy('denying', 'deny'));
 
         self::assertFalse(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $role));
+    }
+
+    /**
+     * A grant of what the grantee holds live in the same scope only shortens or
+     * narrows it when it lasts no longer and reaches no further, and revoking
+     * it would only narrow; an extension, a wider reach, a grant in another
+     * scope, one of what is not held or has expired, and one of a role that a
+     * deny is attached to may widen.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantShortensOnlyWhatTheGranteeHoldsLive(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-07 12:00:00', 'UTC'));
+
+        $user     = StubIdentity::create(['id' => 'user-1']);
+        $grantee  = Reference::of($user);
+        $tenant   = new Reference('tenant', 'a');
+        $edit     = Permission::create(['name' => 'posts:edit']);
+        $read     = Permission::create(['name' => 'posts:read']);
+        $denying  = Role::create(['name' => 'denying']);
+        $inTenant = new GrantScope($tenant);
+        $change   = static fn (Model $target, ?GrantScope $scope = null, ?Carbon $until = null): OperationChange => self::change($grantee, $target, $scope ?? $inTenant, $until);
+
+        GrantService::instance()?->grantPermission($user, $edit, Carbon::now()->addDays(3), tenant: $tenant, includeSubtree: false);
+        GrantService::instance()?->grantPermission($user, $read, tenant: $tenant);
+        GrantService::instance()?->attachPolicy($denying, self::policy('denying', 'deny'));
+        GrantService::instance()?->grantRole($user, $denying, tenant: $tenant);
+
+        $grant = PackagePermissions::PERMISSION_GRANT;
+
+        self::assertTrue(Narrowing::isShortening($grant, $change($edit, new GrantScope($tenant, null, false), Carbon::now()->addDay())));
+        self::assertTrue(Narrowing::isShortening($grant, $change($edit, new GrantScope($tenant, null, false), Carbon::now()->addDays(3))));
+        self::assertTrue(Narrowing::isShortening($grant, $change($read)));
+        self::assertTrue(Narrowing::isShortening($grant, $change($read, new GrantScope($tenant, null, false), Carbon::now()->addDay())));
+        self::assertFalse(Narrowing::isShortening($grant, $change($edit, new GrantScope($tenant, null, false), Carbon::now()->addDays(4))));
+        self::assertFalse(Narrowing::isShortening($grant, $change($edit, new GrantScope($tenant, null, false))));
+        self::assertFalse(Narrowing::isShortening($grant, $change($edit, new GrantScope($tenant), Carbon::now()->addDay())));
+        self::assertFalse(Narrowing::isShortening($grant, $change($read, new GrantScope($tenant, 'admin'))));
+        self::assertFalse(Narrowing::isShortening($grant, $change($read, GrantScope::platform())));
+        self::assertFalse(Narrowing::isShortening(PackagePermissions::ROLE_GRANT, $change($denying)));
+        self::assertFalse(Narrowing::isShortening(PackagePermissions::BOUNDARY_SET, $change(self::policy('cap', 'allow'))));
+
+        Carbon::setTestNow(Carbon::now()->addDays(4));
+
+        self::assertFalse(Narrowing::isShortening($grant, $change($edit, new GrantScope($tenant, null, false), Carbon::now()->addDay())));
+    }
+
+    /**
+     * A grant to a role, and a grant that names no target, never shorten one
+     * the grantee holds.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantToARoleOrOfNothingNeverShortens(): void
+    {
+        $role = Role::create(['name' => 'editor']);
+        $edit = Permission::create(['name' => 'posts:edit']);
+
+        GrantService::instance()?->grantPermission(Reference::of($role), $edit);
+
+        self::assertFalse(Narrowing::isShortening(PackagePermissions::PERMISSION_GRANT, new OperationChange(Reference::of($role), $edit, GrantScope::platform())));
+        self::assertFalse(Narrowing::isShortening(PackagePermissions::PERMISSION_GRANT, new OperationChange(new Reference('user', '1'), null, GrantScope::platform())));
+    }
+
+    /**
+     * Return the change of a grant of the target to the grantee in the scope,
+     * until the expiry or forever.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model  $target
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @param  \Illuminate\Support\Carbon|null  $expiresAt
+     * @return \SineMacula\Laravel\Authorization\Administration\OperationChange
+     */
+    private static function change(Reference $grantee, Model $target, GrantScope $scope, ?Carbon $expiresAt): OperationChange
+    {
+        return new OperationChange($grantee, $target, $scope, $expiresAt);
     }
 
     /**

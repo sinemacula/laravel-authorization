@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -28,6 +29,7 @@ use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
@@ -384,6 +386,10 @@ final class DecisionPipelineTest extends TestCase
         $subject = new Subject($user, $user);
         $role    = Role::create(['name' => 'editor']);
 
+        // The grantee is named by a reference alone, whose rank cannot be read,
+        // so rank is off: the stage is what this test is about.
+        config(['authorization.rank.enabled' => false]);
+
         $user->givePermission(Permission::create(['name' => 'authorization:*']));
 
         $pipeline = $this->pipeline();
@@ -397,6 +403,99 @@ final class DecisionPipelineTest extends TestCase
         self::assertTrue($allowed->isAllowed());
         self::assertEquals(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED), $allowed->trace[\count($allowed->trace) - 1]);
         self::assertTrue($pipeline->decide($subject, PackagePermissions::ROLE_GRANT, null, [])->isAllowed());
+    }
+
+    /**
+     * A change to a grant row is decided in the row's tenant, whatever tenant
+     * the check is made from: an actor whose platform-wide authority reaches
+     * the row revokes it from the row's tenant and from the platform alike, no
+     * owner standing in the way (N79).
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantRowIsDecidedInItsOwnTenant(): void
+    {
+        $admin   = StubIdentity::create(['id' => 'admin-1']);
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $subject = new Subject($admin, $admin);
+        $tenant  = new Reference('tenant', 'a');
+
+        $admin->givePermission(Permission::create(['name' => 'authorization:*']));
+        $admin->assignRole(Role::create(['name' => 'chief', 'rank' => 0]));
+
+        $edit   = Permission::create(['name' => 'posts:edit']);
+        $revoke = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $user, $edit, new GrantScope($tenant))->toResourceReference();
+        $decide = fn (): Decision => $this->pipeline()->decide($subject, PackagePermissions::PERMISSION_REVOKE, $revoke, []);
+
+        self::assertTrue(TenantScope::within($tenant, null, $decide)->isAllowed());
+        self::assertTrue($decide()->isAllowed());
+    }
+
+    /**
+     * A further check the stage asks is decided without the stage, so deciding
+     * the operation's own action again, across its reach, never recurses; and a
+     * check of a permission whose sources cannot be read cannot be proved held,
+     * so the grant is unprovable.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAFurtherCheckIsDecidedWithoutTheStage(): void
+    {
+        $admin   = StubIdentity::create(['id' => 'admin-1']);
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $subject = new Subject($admin, $admin);
+        $edit    = Permission::create(['name' => 'posts:edit']);
+
+        $admin->givePermission(Permission::create(['name' => PackagePermissions::PERMISSION_GRANT]));
+        $admin->givePermission($edit);
+        $admin->assignRole(Role::create(['name' => 'chief', 'rank' => 0]));
+
+        $grant = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $user, $edit, GrantScope::platform())->toResourceReference();
+
+        self::assertTrue($this->pipeline()->decide($subject, PackagePermissions::PERMISSION_GRANT, $grant, [])->isAllowed());
+
+        $calls    = 0;
+        $resolver = new class ($calls) implements PolicyResolver {
+            /**
+             * Create a resolver whose third read fails.
+             *
+             * @param  int  $calls
+             */
+            public function __construct(
+
+                /** How many times the policies have been read, kept by the test. */
+                private int &$calls,
+            ) {}
+
+            /**
+             * Return no policies, failing on the third read.
+             *
+             * @param  object  $principal
+             * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+             *
+             * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+             */
+            #[\Override]
+            public function policiesFor(object $principal): array
+            {
+                if (++$this->calls === 3) {
+                    throw new InvalidPolicyDocumentException('broken', 'unreadable');
+                }
+
+                return [];
+            }
+        };
+
+        $pipeline = new DecisionPipeline(new PolicyEvaluator, $resolver, null, new ResourcePolicyResolver, new GuardrailResolver);
+
+        // The grant, its reach, the permission's sources, which fail, and the
+        // grantable right each read the policies once.
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $pipeline->decide($subject, PackagePermissions::PERMISSION_GRANT, $grant, [])->reason);
+        self::assertSame(4, $calls);
     }
 
     /**

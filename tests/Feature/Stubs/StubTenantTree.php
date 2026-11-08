@@ -26,6 +26,9 @@ final class StubTenantTree implements TenantTree
     /** @var array<string, \SineMacula\Laravel\Authorization\Support\Reference> Each tenant's parent, keyed by the tenant's type and key. */
     private array $parents = [];
 
+    /** @var array<string, \SineMacula\Laravel\Authorization\Support\Reference> Each tenant put in the tree, keyed by its type and key. */
+    private array $tenants = [];
+
     /**
      * Put the tenant under the parent, or at the top of the tree for none.
      *
@@ -36,6 +39,8 @@ final class StubTenantTree implements TenantTree
     public function put(Reference $tenant, ?Reference $parent): self
     {
         unset($this->parents[self::key($tenant)]);
+
+        $this->tenants[self::key($tenant)] = $tenant;
 
         if ($parent !== null) {
             $this->parents[self::key($tenant)] = $parent;
@@ -84,7 +89,8 @@ final class StubTenantTree implements TenantTree
     }
 
     /**
-     * Return the tenant alone; the tests read no subtree.
+     * Return the tenant and every tenant put below it, as a query on the
+     * default connection; reading it counts no read of ancestors.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @return \Illuminate\Contracts\Database\Query\Builder
@@ -92,7 +98,38 @@ final class StubTenantTree implements TenantTree
     #[\Override]
     public function subtree(Reference $tenant): Builder
     {
-        return DB::query()->selectRaw('? as tenant_type, ? as tenant_id', [$tenant->type, $tenant->id]);
+        $query = DB::query()->selectRaw('? as tenant_type, ? as tenant_id', [$tenant->type, $tenant->id]);
+
+        foreach ($this->tenants as $key => $below) {
+            if ($key === self::key($tenant) || !$this->isBelow($key, $tenant)) {
+                continue;
+            }
+
+            $query->unionAll(DB::query()->selectRaw('? as tenant_type, ? as tenant_id', [$below->type, $below->id]));
+        }
+
+        return $query;
+    }
+
+    /**
+     * Determine whether the tenant held under the key is below the ancestor,
+     * walking its parents.
+     *
+     * @param  string  $key
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $ancestor
+     * @return bool
+     */
+    private function isBelow(string $key, Reference $ancestor): bool
+    {
+        while (($parent = $this->parents[$key] ?? null) !== null) {
+            if (self::key($parent) === self::key($ancestor)) {
+                return true;
+            }
+
+            $key = self::key($parent);
+        }
+
+        return false;
     }
 
     /**

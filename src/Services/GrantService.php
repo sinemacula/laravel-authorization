@@ -81,20 +81,34 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * of that name; one by model decides that row whether it is held or not.
  * `revokeAll()` decides the revocation of every row and the removal of every
  * permission boundary (`authorization:boundary.remove`) the grantee has. There
- * is no blanket action. A change that can only narrow (revoking a permission, a
- * role no deny is attached to, or detaching an allow-only policy, see
- * `Narrowing`) is allowed on its action alone; every other waits for the scope,
- * owner, rank, self and grantable rules of the later parts of BL-65 and is
- * refused as `administration.unprovable` once the action is allowed. Every
- * event the call dispatches carries the operation, with the actor, its mode and
- * the actions, and every grant row it writes records the actor in
- * `granted_by_type` and `granted_by_id`; the actor is never read from the
- * authenticated user. A grantee that is not a saved model with a key, or a
- * reference with a type and a key, throws `InvalidGranteeException` before
- * anything is read. A role or permission name that answers no row throws
- * `UnknownRoleException` or `UnknownPermissionException`; a target that is not
- * a saved model of the kind granted, such as a policy sync handed another
- * model, throws `InvalidGrantTargetException`.
+ * is no blanket action. Each change is decided in the tenant of the row it
+ * changes, so an actor whose authority for the action reaches that tenant, from
+ * a parent over its subtree or from the platform, changes it from its own
+ * context, and `revokeAll()` clears a grantee's rows across every tenant the
+ * actor administers. Every change to an identity or a principal is then weighed
+ * by the administration stage (see `OperationConstraints`): the actor must be
+ * strictly senior to the grantee anywhere the change reaches
+ * (`administration.rank`); one that may widen authority must be allowed across
+ * its whole reach (`administration.scope`) and, made to the actor itself, also
+ * allowed `authorization:administration.self` (`administration.self`). A change
+ * that can only narrow (revoking a permission, a role no deny is attached to,
+ * detaching an allow-only policy, or a grant that only shortens one held, see
+ * `Narrowing`) is then allowed; a direct grant of a permission, a sync's
+ * additions included, is allowed when the actor provably holds it across its
+ * reach and lifetime, or may grant it explicitly (see `Possession`), and is
+ * otherwise refused as `administration.not_grantable` or
+ * `administration.unprovable`; every other change, a role grant or a policy
+ * attachment, waits for the later parts of BL-65 and is refused as
+ * `administration.unprovable`. Every event the call dispatches carries the
+ * operation, with the actor, its mode and the actions, and every grant row it
+ * writes records the actor in `granted_by_type` and `granted_by_id`; the actor
+ * is never read from the authenticated user. A grantee that is not a saved
+ * model with a key, or a reference with a type and a key, throws
+ * `InvalidGranteeException` before anything is read. A role or permission name
+ * that answers no row throws `UnknownRoleException` or
+ * `UnknownPermissionException`; a target that is not a saved model of the kind
+ * granted, such as a policy sync handed another model, throws
+ * `InvalidGrantTargetException`.
  *
  * A grantee is an identity or a role: a policy attached to a role applies to
  * whoever holds the role, within both grants' scopes, and to whoever holds a
@@ -153,13 +167,8 @@ final class GrantService
      *
      * @throws \Throwable
      */
-    public function revokeRole(
-        Model|Reference $grantee,
-        Role|string $role,
-        ?ActingContext $actor = null,
-        Model|Reference|null $tenant = null,
-        ?string $application = null,
-    ): int {
+    public function revokeRole(Model|Reference $grantee, Role|string $role, ?ActingContext $actor = null, Model|Reference|null $tenant = null, ?string $application = null): int
+    {
         return $this->revoke(GrantTarget::ROLE, $grantee, $role, $actor, $tenant, $application);
     }
 
@@ -315,13 +324,8 @@ final class GrantService
      *
      * @throws \Throwable
      */
-    public function detachPolicy(
-        Model|Reference $grantee,
-        Policy $policy,
-        ?ActingContext $actor = null,
-        Model|Reference|null $tenant = null,
-        ?string $application = null,
-    ): int {
+    public function detachPolicy(Model|Reference $grantee, Policy $policy, ?ActingContext $actor = null, Model|Reference|null $tenant = null, ?string $application = null): int
+    {
         return $this->revoke(GrantTarget::POLICY, $grantee, $policy, $actor, $tenant, $application);
     }
 
@@ -443,14 +447,8 @@ final class GrantService
      *
      * @throws \Throwable
      */
-    private function grant(
-        GrantTarget $kind,
-        Model|Reference $grantee,
-        mixed $target,
-        ?\DateTimeInterface $expiresAt,
-        ?ActingContext $actor,
-        GrantScope $named,
-    ): GrantOutcome {
+    private function grant(GrantTarget $kind, Model|Reference $grantee, mixed $target, ?\DateTimeInterface $expiresAt, ?ActingContext $actor, GrantScope $named): GrantOutcome
+    {
         $reference = self::grantee($grantee);
         $operation = Operation::begin($actor, [$kind->grantAction()]);
 
@@ -540,14 +538,8 @@ final class GrantService
      *
      * @throws \Throwable
      */
-    private function sync(
-        GrantTarget $kind,
-        Model|Reference $grantee,
-        array $targets,
-        ?\DateTimeInterface $expiresAt,
-        ?ActingContext $actor,
-        GrantScope $named,
-    ): SyncResult {
+    private function sync(GrantTarget $kind, Model|Reference $grantee, array $targets, ?\DateTimeInterface $expiresAt, ?ActingContext $actor, GrantScope $named): SyncResult
+    {
         $reference = self::grantee($grantee);
         $operation = Operation::begin($actor, [$kind->grantAction(), $kind->revokeAction()]);
 

@@ -4,7 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
+use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\OperationConstraints;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Context\AttributeNamespaces;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
@@ -323,7 +325,9 @@ final class DecisionPipeline
      * An allow of an administration action on an operation resource of that
      * action then passes the operation's constraints, at the administration
      * stage, which can only refuse it (see `OperationConstraints`); a further
-     * check they need is decided here, as this one is, in its scope.
+     * check they need is decided here, as this one is up to the allow, in the
+     * scope in place when they ask, and never through the administration stage
+     * again.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -334,15 +338,60 @@ final class DecisionPipeline
      */
     private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes): Decision
     {
+        $decision = $this->decideAlone($subject, $action, $resource, $context, $attributes);
+
+        if (!$resource?->source instanceof OperationResource) {
+            return $decision;
+        }
+
+        $checks = new FurtherChecks(
+            $subject,
+            fn (string $further, ?ResourceReference $on): Decision => $this->decideAlone($subject, $further, $on, $context, $attributes),
+            fn (string $further): ?CheckSources => $this->sourcesOrNone($subject, $further, $context),
+        );
+
+        return OperationConstraints::weigh($decision, $action, $resource, $checks);
+    }
+
+    /**
+     * Gather the sources of a check of the action on no resource, in the scope
+     * in place, or none when a document among them cannot be read.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  string  $action
+     * @param  array<string, mixed>  $context
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckSources|null
+     */
+    private function sourcesOrNone(Subject $subject, string $action, array $context): ?CheckSources
+    {
+        try {
+            return $this->sources($subject, $action, null, $context);
+        } catch (InvalidPolicyDocumentException) {
+            return null;
+        }
+    }
+
+    /**
+     * Decide the admitted action from every source, up to the allow, in the
+     * scope in place, without the administration stage: a document that cannot
+     * be read denies it as an invalid policy.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
+     * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     */
+    private function decideAlone(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes): Decision
+    {
         try {
             $sources = $this->sources($subject, $action, $resource, $context, $attributes);
         } catch (InvalidPolicyDocumentException) {
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }
 
-        $decide = fn (string $further): Decision => $this->decideGrants($subject, $further, $resource, $context, $attributes);
-
-        return OperationConstraints::weigh($this->weigh($sources, $action, $resource), $action, $resource, $decide);
+        return $this->weigh($sources, $action, $resource);
     }
 
     /**

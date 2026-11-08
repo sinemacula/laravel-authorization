@@ -1366,8 +1366,9 @@ final class GrantServiceTest extends TestCase
      * A call that names no acting context is trusted: every event it dispatches
      * carries a trusted operation with no actor, under the action it is decided
      * under, and every grant row it writes records no actor. One that names an
-     * acting context is delegated, and a grant, which may widen what the
-     * grantee may do, is refused as unprovable before anything is written.
+     * acting context is delegated, and a grant of a permission the actor does
+     * not hold, and may not grant explicitly, is refused as not grantable
+     * before anything is written.
      *
      * @return void
      *
@@ -1375,7 +1376,7 @@ final class GrantServiceTest extends TestCase
      */
     public function testATrustedCallRecordsNoActorAndADelegatedGrantIsRefused(): void
     {
-        $admin = self::administrator();
+        $admin = self::administrator([PackagePermissions::PERMISSION_GRANT]);
         $user  = self::user();
 
         Event::fake();
@@ -1395,7 +1396,7 @@ final class GrantServiceTest extends TestCase
         $refusal = self::refusalOf(static fn (): GrantOutcome => self::service()->grantPermission($user, Permission::query()->create(['name' => 'posts:edit']), actor: $admin));
 
         self::assertInstanceOf(AuthorizationException::class, $refusal);
-        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $refusal->getReason());
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $refusal->getReason());
         self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', 'user-1')->count());
         Event::assertNotDispatched(PermissionGranted::class);
     }
@@ -1494,9 +1495,11 @@ final class GrantServiceTest extends TestCase
 
     /**
      * A delegated sync is decided whole before anything is written: one that
-     * grants is refused as unprovable, one that only revokes is refused to an
-     * actor without the revoke action, and one that changes nothing is still
-     * decided on its action, so it is refused to an actor without it too.
+     * grants a role or a policy is refused as unprovable, one that grants a
+     * permission the actor does not hold as not grantable, one that only
+     * revokes is refused to an actor without the revoke action, and one that
+     * changes nothing is still decided on its action, so it is refused to an
+     * actor without it too.
      *
      * @return void
      *
@@ -1504,9 +1507,10 @@ final class GrantServiceTest extends TestCase
      */
     public function testADelegatedSyncIsDecidedBeforeAnythingIsWritten(): void
     {
-        $admin  = self::administrator();
-        $nobody = self::administrator([], 'nobody');
-        $user   = self::user();
+        $admin   = self::administrator();
+        $nobody  = self::administrator([], 'nobody');
+        $granter = self::administrator([PackagePermissions::PERMISSION_GRANT, PackagePermissions::PERMISSION_REVOKE], 'granter');
+        $user    = self::user();
 
         self::service()->grantRole($user, self::role('editor'));
         self::service()->grantPermission($user, Permission::query()->create(['name' => 'posts:edit']));
@@ -1517,7 +1521,7 @@ final class GrantServiceTest extends TestCase
         $unprovable = DecisionReason::ADMINISTRATION_UNPROVABLE;
 
         self::assertDelegatedRefusal($unprovable, static fn (): SyncResult => self::service()->syncRoles($user, ['editor', 'author'], actor: $admin));
-        self::assertDelegatedRefusal($unprovable, static fn (): SyncResult => self::service()->syncPermissions($user, [$read], actor: $admin));
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, static fn (): SyncResult => self::service()->syncPermissions($user, [$read], actor: $granter));
         self::assertDelegatedRefusal($unprovable, static fn (): SyncResult => self::service()->syncPolicies($user, [$audit], actor: $admin));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): SyncResult => self::service()->syncRoles($user, [], actor: $nobody));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): SyncResult => self::service()->syncRoles($user, ['editor'], actor: $nobody));
@@ -1615,7 +1619,8 @@ final class GrantServiceTest extends TestCase
      * A change to a platform-wide grant is decided at platform scope, so an
      * actor that holds the action only in the tenant the request is in is
      * refused it, a revocation of a role that denies nothing included, as a
-     * screen asking the same is, and one that holds it platform-wide makes it.
+     * screen asking the same is, and one that holds it platform-wide makes it
+     * from the tenant: its authority reaches the platform's grant.
      *
      * @return void
      *
@@ -1637,6 +1642,7 @@ final class GrantServiceTest extends TestCase
         self::service()->grantPermission($local, $revoke, tenant: $tenant, includeSubtree: false);
         self::service()->grantPermission($local, Permission::query()->create(['name' => PackagePermissions::ROLE_REVOKE]), tenant: $tenant, includeSubtree: false);
         self::service()->grantPermission($wide, $revoke);
+        self::service()->grantRole($wide, Role::query()->create(['name' => 'chief', 'rank' => 0]));
 
         $this->actAsTenant($tenant);
 
@@ -1702,6 +1708,7 @@ final class GrantServiceTest extends TestCase
         self::service()->grantRole($user, $editor, tenant: $child);
         self::service()->grantPermission($admin, $revoke, tenant: $parent);
         self::service()->grantPermission($admin, $revoke);
+        self::service()->grantRole($admin, Role::query()->create(['name' => 'chief', 'rank' => 0]));
 
         $unprovable = DecisionReason::ADMINISTRATION_UNPROVABLE;
 
@@ -2016,14 +2023,14 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
-     * Return the grantor columns of the one row in a grant table.
+     * Return the grantor columns of the one row of `user-1` in a grant table.
      *
      * @param  string  $table
      * @return array{mixed, mixed}
      */
     private static function grantor(string $table): array
     {
-        $row = DB::table($table)->sole(['granted_by_type', 'granted_by_id']);
+        $row = DB::table($table)->where('authorizable_id', 'user-1')->sole(['granted_by_type', 'granted_by_id']);
 
         return [$row->granted_by_type, $row->granted_by_id];
     }
