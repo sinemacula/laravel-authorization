@@ -640,4 +640,31 @@ return [
         'max_impact' => (int) env('AUTHORIZATION_ADMINISTRATION_MAX_IMPACT', 1000),
         'retries'    => (int) env('AUTHORIZATION_ADMINISTRATION_RETRIES', 2),
     ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Grant hooks
+    |---------------------------------------------------------------------------
+    |
+    | Classes implementing `GrantHook`, in the order they run, each built from
+    | the container. Before a grant that widens an identity's scope is
+    | written (one to the identity itself, a platform-wide one, or one in a
+    | tenant, or reaching below one, where the identity and its principals
+    | held no grant before), the grant service calls them with the proposed
+    | widening, inside the call's transaction and before the package takes
+    | any lock for it, trusted calls and delegated ones alike. A hook may only
+    | refuse, by throwing (`GrantRefusedException` for a refusal it means);
+    | the first that throws stops the rest and rolls the call back. A hook may
+    | run more than once for one call, as a call that conflicts is tried
+    | again, so nothing that leaves the transaction belongs in it. Under the
+    | suite `sinemacula/laravel-iam` binds `laravel-sso`'s scope widening.
+    |
+    | The list is validated at boot: each entry must name a class implementing
+    | the contract, once. An empty list does nothing, and then nothing is
+    | classified. An application may bind its own hook on the contract
+    | instead.
+    |
+    */
+
+    'grant_hooks' => [],
 ];

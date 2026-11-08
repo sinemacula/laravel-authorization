@@ -12,6 +12,8 @@ use SineMacula\Laravel\Authorization\Administration\DependencyPins;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
+use SineMacula\Laravel\Authorization\Exceptions\GrantHookRecursionException;
 
 /**
  * Runs a management service call as one operation, and dispatches the events of
@@ -49,10 +51,17 @@ use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
  * `administration.conflict`, recorded and reported as the actor's refusal (see
  * `ConflictRetries`). The work starts inside the transaction before the service
  * reads or locks anything, and the protocol takes no lock until the service
- * first reads what the operation changes, so a grant hook (AUTHZ-11.3) called
- * first in the work runs before every lock the package takes for the call: that
- * is the seam scope-widening hooks are run from. A trusted operation runs once,
- * as it always has, with no pins and no extra lock.
+ * first reads what the operation changes, so the grant hooks (AUTHZ-11.3), run
+ * first in a grant's work (see `Hooks\WideningPhase`), run before every lock
+ * the package takes for the call. A trusted operation runs with no pins and no
+ * extra lock, once, unless its grant hooks were not run for a grant it is about
+ * to write that now widens an identity's scope: that try conflicts, and is
+ * rolled back and tried again the same way.
+ *
+ * While a grant hook runs (`whileHookRuns()`), `run()` refuses every operation
+ * with `GrantHookRecursionException`, so a hook can call no management service:
+ * a hook only vetoes. A grant made while another operation's work runs is
+ * nested in it (`isNested()`), and may run after that operation took locks.
  *
  * @managed-static
  *
@@ -72,6 +81,9 @@ final class OperationScope
     /** @var \WeakMap<\Illuminate\Database\Eloquent\Model, \SineMacula\Laravel\Authorization\Support\Operation>|null The operation of each model write made outside a call. */
     private static ?\WeakMap $writes = null;
 
+    /** @var int How many grant hooks are running, one inside another's call never, so at most one. */
+    private static int $hooks = 0;
+
     /**
      * Run the call's work as the given operation, in one transaction on the
      * package's connection: once for a trusted operation, and, for a delegated
@@ -79,7 +91,9 @@ final class OperationScope
      * each try that conflicts, up to `authorization.administration.retries`
      * times, then refused as `administration.conflict`, recorded and reported
      * as the refusal of the actor given, the acting context the operation was
-     * begun with.
+     * begun with. A trusted operation is tried again only when a grant it is
+     * about to write widens an identity's scope with no grant hook run for it.
+     * While a grant hook runs, every operation is refused.
      *
      * @template TResult
      *
@@ -88,15 +102,48 @@ final class OperationScope
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return TResult
      *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\GrantHookRecursionException
      * @throws \Throwable
      */
     public static function run(Operation $operation, \Closure $work, ?ActingContext $actor = null): mixed
     {
+        if (self::$hooks > 0) {
+            throw new GrantHookRecursionException;
+        }
+
         if ($operation->isTrusted) {
-            return self::attempt($operation, $work, null);
+            return self::trusted($operation, $work);
         }
 
         return ConflictRetries::run(static fn (): mixed => self::attempt($operation, $work, new DependencyPins($operation)), $actor, $operation);
+    }
+
+    /**
+     * Run a grant hook, refusing every operation until it returns or throws.
+     *
+     * @param  \Closure(): void  $hook
+     * @return void
+     */
+    public static function whileHookRuns(\Closure $hook): void
+    {
+        self::$hooks++;
+
+        try {
+            $hook();
+        } finally {
+            self::$hooks--;
+        }
+    }
+
+    /**
+     * Determine whether the operation whose work is running runs inside another
+     * operation's work, which may already hold the package's locks.
+     *
+     * @return bool
+     */
+    public static function isNested(): bool
+    {
+        return \count(self::$operations) > 1;
     }
 
     /**
@@ -203,6 +250,40 @@ final class OperationScope
         }
 
         $connection->afterCommit($send);
+    }
+
+    /**
+     * Run the trusted operation's work once, and again, in a fresh transaction,
+     * for each try a grant's hook phase finds a widening it did not cover, up
+     * to `authorization.administration.retries` times, then refuse it as
+     * `administration.conflict`. Nothing else a trusted operation throws, any
+     * other dependency conflict included, is tried again.
+     *
+     * @template TResult
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Support\Operation): TResult  $work
+     * @return TResult
+     *
+     * @throws \Throwable
+     */
+    private static function trusted(Operation $operation, \Closure $work): mixed
+    {
+        for ($left = ConflictRetries::retries();; $left--) {
+            try {
+                return self::attempt($operation, $work, null);
+            } catch (DependencyChangedException $exception) {
+                $refusal = match (true) {
+                    !$exception->isWidening() => $exception,
+                    $left > 0                 => null,
+                    default                   => ConflictRetries::refusal(),
+                };
+
+                if ($refusal !== null) {
+                    throw $refusal;
+                }
+            }
+        }
     }
 
     /**

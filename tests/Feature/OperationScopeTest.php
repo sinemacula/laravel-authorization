@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
+use SineMacula\Laravel\Authorization\Exceptions\GrantHookRecursionException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -432,8 +433,10 @@ final class OperationScopeTest extends TestCase
     }
 
     /**
-     * A trusted operation runs once, as it always has: a conflict it throws is
-     * thrown, never tried again.
+     * A trusted operation runs once, as it always has: anything it throws but a
+     * widening its grant hooks did not cover, a concurrency error of the
+     * database's and any other dependency conflict included, is thrown on,
+     * never tried again or turned into a refusal.
      *
      * @return void
      *
@@ -441,19 +444,143 @@ final class OperationScopeTest extends TestCase
      */
     public function testATrustedOperationRunsOnce(): void
     {
-        $tries = 0;
+        $thrown = [new \RuntimeException('Deadlock found when trying to get lock', 40001), DependencyChangedException::tree(), DependencyChangedException::rows('roles')];
 
-        try {
-            OperationScope::run(Operation::begin(), static function () use (&$tries): never {
-                $tries++;
+        foreach ($thrown as $throws) {
+            $tries  = 0;
+            $caught = null;
 
-                throw DependencyChangedException::tree();
-            });
-        } catch (DependencyChangedException) {
+            try {
+                OperationScope::run(Operation::begin(), static function () use (&$tries, $throws): never {
+                    $tries++;
+
+                    throw $throws;
+                });
+            } catch (\RuntimeException $exception) {
+                $caught = $exception;
+            }
+
+            self::assertInstanceOf($throws::class, $caught);
             self::assertSame(1, $tries);
         }
+    }
 
-        self::assertSame(1, $tries);
+    /**
+     * A trusted operation whose grant hook phase finds a widening it did not
+     * cover conflicts, and is tried again `retries` times in a fresh
+     * transaction, then refused as `administration.conflict`; one that stops
+     * conflicting returns what its try returns.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATrustedOperationThatConflictsIsTriedAgain(): void
+    {
+        config(['authorization.administration.retries' => 1]);
+
+        /** @var \ArrayObject<int, bool> $tries */
+        $tries = new \ArrayObject;
+
+        /** @var \ArrayObject<int, int> $levels */
+        $levels = new \ArrayObject;
+
+        $result = OperationScope::run(Operation::begin(), static function () use ($tries, $levels): string {
+            $tries->append(true);
+            $levels->append(DB::transactionLevel());
+
+            return $tries->count() === 1 ? throw DependencyChangedException::widening() : 'written';
+        });
+
+        self::assertSame('written', $result);
+        self::assertSame([2, 2], $levels->getArrayCopy());
+
+        $refusal = null;
+
+        try {
+            OperationScope::run(Operation::begin(), self::widening(...));
+        } catch (AuthorizationException $exception) {
+            $refusal = $exception;
+        }
+
+        self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $refusal->getReason());
+
+        config(['authorization.administration.retries' => 0]);
+
+        $once = 0;
+
+        try {
+            OperationScope::run(Operation::begin(), static function () use (&$once): never {
+                $once++;
+
+                throw DependencyChangedException::widening();
+            });
+        } catch (AuthorizationException) {
+            self::assertSame(1, $once);
+        }
+
+        self::assertSame(1, $once);
+    }
+
+    /**
+     * While a grant hook runs every operation is refused, and the guard is
+     * lifted once the hook returns or throws.
+     *
+     * @return void
+     *
+     * @throws \RuntimeException
+     */
+    public function testEveryOperationIsRefusedWhileAGrantHookRuns(): void
+    {
+        $ran = 0;
+
+        OperationScope::whileHookRuns(static function () use (&$ran): void {
+            try {
+                OperationScope::run(Operation::begin(), static fn (): bool => true);
+            } catch (GrantHookRecursionException) {
+                $ran++;
+            }
+
+            try {
+                OperationScope::run(self::delegated(), static fn (): bool => true);
+            } catch (GrantHookRecursionException) {
+                $ran++;
+            }
+        });
+
+        self::assertSame(2, $ran);
+        self::assertTrue(OperationScope::run(Operation::begin(), static fn (): bool => true));
+
+        $refused = static fn () => OperationScope::whileHookRuns(static fn (): never => throw new \RuntimeException('Refused.'));
+
+        try {
+            $refused();
+        } catch (\RuntimeException) {
+            // The guard must be lifted after a hook that throws.
+        }
+
+        self::assertTrue(OperationScope::run(Operation::begin(), static fn (): bool => true));
+    }
+
+    /**
+     * An operation is nested only while it runs inside another's work.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnOperationIsNestedOnlyInsideAnothersWork(): void
+    {
+        self::assertFalse(OperationScope::isNested());
+
+        $nested = OperationScope::run(Operation::begin(), static fn (): array => [
+            OperationScope::isNested(),
+            OperationScope::run(Operation::begin(), static fn (): bool => OperationScope::isNested()),
+            OperationScope::isNested(),
+        ]);
+
+        self::assertSame([false, true, false], $nested);
+        self::assertFalse(OperationScope::isNested());
     }
 
     /**
@@ -561,6 +688,18 @@ final class OperationScopeTest extends TestCase
         }
 
         return null;
+    }
+
+    /**
+     * Throw the conflict of a grant that widens with no grant hook run for it.
+     *
+     * @return never
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException
+     */
+    private static function widening(): never
+    {
+        throw DependencyChangedException::widening();
     }
 
     /**

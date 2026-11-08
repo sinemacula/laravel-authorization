@@ -252,10 +252,17 @@ administration never grants anything it cannot justify.
     a change; the tests reach that path by making the change between a read and the write from a listener.
 
     The protocol takes no lock until the service first reads what the operation changes, and a service's work starts
-    inside the call's transaction before it reads or locks anything, so a scope-widening grant hook (AUTHZ-11.3, BL-66)
-    called first in the work of `OperationScope::run()` runs before every lock the package takes for the call; that is
-    the seam BL-66 runs its hooks from. A trusted call keeps today's behaviour and cost: it runs once, with no pins, no
-    extra lock and no retry.
+    inside the call's transaction before it reads or locks anything. The grant hooks (AUTHZ-11.3, N80) run there:
+    `Hooks\WideningPhase::before()`, first in the work of a grant or sync, classifies a non-locking preliminary proposal
+    and calls the bound hook with every widening grant before the first lock and any write, for trusted and delegated
+    calls alike. The call then locks, rebuilds and decides its grants, and `assertCovers()` classifies them again
+    before the write: a grant that now widens with no hook run for it is a `DependencyChangedException`, and the whole
+    call is tried again from the proposal, so the hook may run on each try and is never called under the package's
+    locks. A hook only vetoes and never replaces a decision here: a call it lets go on is still decided, and refused
+    when it should be. While a hook runs every service refuses (`GrantHookRecursionException`), and a widening grant
+    made inside another operation's work is refused (`NestedGrantException`). See [Grant scope](grant-scope.md). A
+    trusted call keeps today's cost: with no hook configured it runs once, with no pins, no extra lock and no retry;
+    with one, it is tried again only for that coverage conflict.
 
 14. **Guardrails (part 4, in this release).** Guardrail changes always take an acting context and run under the
     concurrency protocol: the actor's authority, the policy's row and the guardrails of the scope and of the scopes
@@ -270,7 +277,8 @@ administration never grants anything it cannot justify.
 15. **Trusted surfaces (part 4, in this release).** Each of these is trusted system work, an integration surface for
     the application's own code and never an endpoint for user-controlled administration:
     - a management service called without an acting context;
-    - a raw Eloquent write on the package's models, pivots or tables, which never takes an actor;
+    - a raw Eloquent write on the package's models, pivots or tables, which never takes an actor and runs no grant
+      hook;
     - the trait helpers called without `actor:`: every write helper of `HasRoles`, `HasPermissions`, `HasPolicies`
       (`createInlinePolicy()` included) and a role's `ManagesPermissions`, the Spatie aliases included, takes an
       optional `actor:` and hands it to its service;

@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
+use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
@@ -337,6 +338,36 @@ final class ConfigValidatorTest extends TestCase
             fn () => ConfigValidator::validate($tries, $this->app),
             'authorization.administration.retries',
             'expected a whole number of at least 0, got -1 (int).',
+        );
+    }
+
+    /**
+     * The grant hooks are validated with the rest: the package's default, an
+     * empty list, passes, as does a missing key, and a class that is not a hook
+     * is refused under its entry's key.
+     *
+     * @return void
+     */
+    public function testTheGrantHooksAreValidated(): void
+    {
+        $config = $this->authorizationConfig();
+
+        self::assertSame([], $config['grant_hooks']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        $missing = $config;
+
+        unset($missing['grant_hooks']);
+
+        ConfigValidator::validate($missing, $this->app);
+
+        $config['grant_hooks'] = [\stdClass::class];
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->app),
+            'authorization.grant_hooks.0',
+            'class \'stdClass\' does not implement ' . GrantHook::class . '.',
         );
     }
 

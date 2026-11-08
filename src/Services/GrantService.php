@@ -13,6 +13,8 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
+use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
+use SineMacula\Laravel\Authorization\Hooks\WideningPhase;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -126,6 +128,16 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * `UnknownRoleException` or `UnknownPermissionException`; a target that is not
  * a saved model of the kind granted, such as a policy sync handed another
  * model, throws `InvalidGrantTargetException`.
+ *
+ * Before a grant, a sync's additions and re-arms, an extension or a wider reach
+ * that widens an identity's scope is written, trusted or delegated, the bound
+ * grant hook is called with every widening grant of the call, before the
+ * package takes any lock for it (AUTHZ-11.3, see `Hooks\WideningPhase`): it may
+ * refuse by throwing, which rolls the call back, and the call is tried again
+ * when a grant it writes widens with no hook run for it. A widening grant made
+ * inside another management call's work is refused with `NestedGrantException`,
+ * and one whose identity cannot be resolved with
+ * `UnresolvableRecipientException`.
  *
  * A grantee is an identity or a role: a policy attached to a role applies to
  * whoever holds the role, within both grants' scopes, and to whoever holds a
@@ -446,19 +458,34 @@ final class GrantService
 
         /** @var \SineMacula\Laravel\Authorization\Enums\GrantOutcome $outcome */
         $outcome = OperationScope::run($operation, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $named, $target, $expiresAt): GrantOutcome {
+            $resolve = static function () use ($kind, $grantee, $named, $target, $actor): array {
+                $model = $kind->resolve($target, GrantChanges::guard($grantee), $named->tenant);
+                $model = \is_string($target) ? $model : self::stored($kind, $model, $actor);
+
+                return [$model, self::scope(GrantScopes::of($kind, $model, $named->tenant), $named->includeSubtree, $named->application)];
+            };
+
+            // A grant that widens the identity's scope runs its hooks first,
+            // before the package takes any lock for the call (AUTHZ-11.3).
+            $hooks = WideningPhase::before($operation, $grantee, static function () use ($kind, $resolve, $expiresAt): array {
+                [$model, $scope] = $resolve();
+
+                return [ProposedGrant::of($kind, $model, $scope, $expiresAt)];
+            });
+
             // The grantee's rows are locked before they are read, so a grant
             // weighed as only shortening one held is weighed on the row as it
             // stays until the write.
             OperationScope::pins()?->lockGrantees($reference);
 
-            $model = $kind->resolve($target, GrantChanges::guard($grantee), $named->tenant);
-            $model = \is_string($target) ? $model : self::stored($kind, $model, $actor);
-            $scope = self::scope(GrantScopes::of($kind, $model, $named->tenant), $named->includeSubtree, $named->application);
+            [$model, $scope] = $resolve();
 
             RoleParity::assertGrantable($kind->value, $model, GrantChanges::guard($grantee));
             InlinePolicies::assertAttachable($model, $reference);
 
             $actor?->authorizeIn($operation, OperationResource::grant($kind->grantAction(), $reference, $model, $scope, $expiresAt));
+
+            $hooks->assertCovers(static fn (): array => [ProposedGrant::of($kind, $model, $scope, $expiresAt)]);
 
             $change = GrantChanges::table($kind, $reference, $operation->actor, $scope)->grant(GrantChanges::key($model), $expiresAt);
 
@@ -545,16 +572,23 @@ final class GrantService
 
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult $result */
         $result = OperationScope::run($operation, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $named, $targets, $expiresAt): SyncResult {
+            $plan = static fn (): array => self::plan($kind, $grantee, $operation->actor, $named, $targets, $actor);
+
+            // Every addition that widens the identity's scope runs its hooks
+            // first, all of them before any lock and any write (AUTHZ-11.3).
+            $hooks = WideningPhase::before($operation, $grantee, static function () use ($kind, $plan, $expiresAt): array {
+                [, $written, $table, $keep] = $plan();
+
+                return WideningPhase::additions($kind, $expiresAt, $written, $table, $keep);
+            });
+
             // The grantee's rows are locked before they are read, so a row the
             // sync keeps as held is held until the write, never one revoked
             // meanwhile and written back undecided.
             OperationScope::pins()?->lockGrantees($reference);
 
-            $scope   = $named->tenant ?? GrantScopes::commonOwner($kind, GrantChanges::guard($grantee), $targets);
-            $written = self::scope($scope, $named->includeSubtree, $named->application);
-            $table   = GrantChanges::table($kind, $reference, $operation->actor, $written);
-            $held    = $table->held();
-            $keep    = self::toKeep($kind, $grantee, $targets, $held, $scope, $actor);
+            [$scope, $written, $table, $keep, $held] = $plan();
+
             $revoked = \array_values(\array_diff($held, \array_map(GrantChanges::key(...), $keep)));
             $changed = [];
             $events  = [];
@@ -564,6 +598,8 @@ final class GrantService
             $live    = $actor === null ? [] : $table->live(\array_map(\strval(...), \array_keys($keep)), $now);
 
             $actor?->authorizeIn($operation, ...GrantChanges::ofSync($kind, $reference, $live, $keep, $reaches, $written, $expiresAt));
+
+            $hooks->assertCovers(static fn (): array => WideningPhase::additions($kind, $expiresAt, $written, $table, $keep));
 
             $table->revoke($revoked);
 
@@ -593,6 +629,42 @@ final class GrantService
         self::forgetRelation($kind, $grantee);
 
         return $result;
+    }
+
+    /**
+     * Return what a sync of the grantee's rows of the kind works from, read
+     * afresh on each call: the scope it replaces the rows in (the tenant named,
+     * else the tenant that owns every target, else the platform), the scope it
+     * writes them in, the grantee's table there, the targets it keeps, keyed by
+     * key, and the keys the grantee holds there.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $grantedBy
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $named
+     * @param  array<int, mixed>  $targets
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
+     * @return array{
+     *     0: \SineMacula\Laravel\Authorization\Support\Reference|null,
+     *     1: \SineMacula\Laravel\Authorization\Support\GrantScope,
+     *     2: \SineMacula\Laravel\Authorization\Services\Support\GrantTable,
+     *     3: array<string, \Illuminate\Database\Eloquent\Model>,
+     *     4: list<string>,
+     * }
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException
+     */
+    private static function plan(GrantTarget $kind, Model|Reference $grantee, ?Reference $grantedBy, GrantScope $named, array $targets, ?ActingContext $actor): array
+    {
+        $scope   = $named->tenant ?? GrantScopes::commonOwner($kind, GrantChanges::guard($grantee), $targets);
+        $written = self::scope($scope, $named->includeSubtree, $named->application);
+        $table   = GrantChanges::table($kind, Reference::of($grantee), $grantedBy, $written);
+        $held    = $table->held();
+
+        return [$scope, $written, $table, self::toKeep($kind, $grantee, $targets, $held, $scope, $actor), $held];
     }
 
     /**

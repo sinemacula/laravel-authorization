@@ -15,9 +15,13 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Enums\WideningReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
@@ -30,18 +34,22 @@ use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\GranteeGuardMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\GrantRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
+use SineMacula\Laravel\Authorization\Hooks\GrantWidening;
+use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Services\SyncResult;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -54,13 +62,17 @@ use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\UsesAnAuthorizationConnection;
+use Tests\Concerns\WidensGrants;
 use Tests\Feature\Stubs\ApiGuardedUser;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
+use Tests\Fixtures\GrantHooks\RefusingGrantHook;
 use Tests\TestCase;
 
 /**
@@ -79,7 +91,7 @@ use Tests\TestCase;
 final class GrantServiceTest extends TestCase
 {
     use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals, ComparesReferences,
-        RacesDelegatedCalls, ReadsDispatchedEvents, UsesAnAuthorizationConnection;
+        RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, UsesAnAuthorizationConnection, WidensGrants;
 
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
@@ -2233,6 +2245,276 @@ final class GrantServiceTest extends TestCase
         self::assertTrue(self::holdsPermission($user, 'comments:read'));
         self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', 'user-1')->count());
         self::assertSame([PermissionGranted::class, RoleRevoked::class, PermissionRevoked::class], $changes->getArrayCopy());
+    }
+
+    /**
+     * Provide each grant entry point of the service, with the action its grant
+     * falls under.
+     *
+     * @return iterable<string, array{string, string}>
+     */
+    public static function grantEntryPointProvider(): iterable
+    {
+        yield 'grantRole' => ['grantRole', PackagePermissions::ROLE_GRANT];
+        yield 'grantPermission' => ['grantPermission', PackagePermissions::PERMISSION_GRANT];
+        yield 'attachPolicy' => ['attachPolicy', PackagePermissions::POLICY_ATTACH];
+        yield 'syncRoles' => ['syncRoles', PackagePermissions::ROLE_GRANT];
+        yield 'syncPermissions' => ['syncPermissions', PackagePermissions::PERMISSION_GRANT];
+        yield 'syncPolicies' => ['syncPolicies', PackagePermissions::POLICY_ATTACH];
+    }
+
+    /**
+     * Every grant entry point calls the hook, trusted and delegated, for a
+     * grant in a tenant the identity held nothing in, with the call's action
+     * and the grant's scope, and not for one in a tenant another principal of
+     * the identity holds a grant in.
+     *
+     * @param  string  $entry
+     * @param  string  $action
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    #[DataProvider('grantEntryPointProvider')]
+    public function testEveryEntryPointCallsTheHookOnlyWhenTheGrantWidens(string $entry, string $action): void
+    {
+        $actor = self::administrator(['authorization:*', 'posts:*']);
+
+        [, [$first, $second]] = $this->principals();
+
+        $hook = $this->hook();
+
+        foreach (['trusted' => null, 'delegated' => $actor] as $mode => $acting) {
+            self::grantThrough($entry, $first, $acting, 'widening-' . $mode);
+
+            self::assertCount(1, $hook->widenings, $mode);
+            self::assertSame($acting === null, $hook->widenings[0]->isTrusted);
+            self::assertSame([$action], \array_map(static fn (ProposedGrant $change): string => $change->action, $hook->widenings[0]->changes));
+            self::assertSame('acct1', $hook->widenings[0]->changes[0]->tenant?->id);
+            self::assertSame([WideningReason::NEW_TENANT], $hook->widenings[0]->reasons);
+
+            self::grantThrough($entry, $second, $acting, 'held-' . $mode);
+
+            self::assertCount(1, $hook->widenings, $mode . ' held');
+
+            foreach (['authorizable_roles', 'authorizable_permissions', 'authorizable_policies'] as $table) {
+                DB::table($table)->whereIn('authorizable_id', ['p1', 'p2'])->delete();
+            }
+
+            $hook->widenings = [];
+        }
+    }
+
+    /**
+     * Extending a held grant's expiry, re-arming an expired one and widening
+     * its reach call the hook for a platform-wide grant; shortening it, or
+     * granting it unchanged, does not, and a sync leaves a live grant as it is.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnExtensionCallsTheHookAndAShorteningDoesNot(): void
+    {
+        [, [$principal]] = $this->principals();
+
+        $role  = self::role('held');
+        $later = Carbon::now('UTC')->addDays(2);
+
+        self::service()->grantRole($principal, $role, Carbon::now('UTC')->addDay());
+
+        $hook = $this->hook();
+
+        self::service()->grantRole($principal, $role, Carbon::now('UTC')->addDay());
+        self::service()->grantRole($principal, $role, Carbon::now('UTC')->addHour());
+        self::service()->syncRoles($principal, [$role], $later);
+
+        self::assertSame([], $hook->reasons());
+
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, self::service()->grantRole($principal, $role, $later));
+
+        Carbon::setTestNow(Carbon::now()->addDays(3));
+
+        self::assertSame(GrantOutcome::REARMED, self::service()->grantRole($principal, $role));
+
+        self::assertSame([[WideningReason::PLATFORM->value], [WideningReason::PLATFORM->value]], $hook->reasons());
+        $expiries = \array_map(static fn (GrantWidening $widening): ?int => $widening->changes[0]->expiresAt?->getTimestamp(), $hook->widenings);
+
+        self::assertSame([$later->getTimestamp(), null], $expiries);
+    }
+
+    /**
+     * A sync runs its hook once for every addition that widens, a re-arm of an
+     * expired grant included, before any lock and any write; a grant it holds
+     * live proposes nothing, and a grant to a role runs no hook.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncRunsEveryHookBeforeAnyLockOrWrite(): void
+    {
+        $actor = self::administrator(['authorization:*', 'posts:*']);
+
+        [, [$principal]] = $this->principals();
+
+        $held    = self::role('held');
+        $expired = self::role('expired');
+        $rows    = static fn (): int => DB::table('authorizable_roles')->where('authorizable_id', 'p1')->count();
+
+        self::service()->grantRole($principal, $expired, Carbon::now('UTC')->addHour(), tenant: self::tenant('acct2'));
+
+        Carbon::setTestNow(Carbon::now()->addHours(2));
+
+        $locks = $this->recordRowLocks();
+
+        /** @var \ArrayObject<int, list<int>> $seen */
+        $seen = new \ArrayObject;
+        $hook = $this->hook(static function () use ($locks, $seen, $rows): void {
+            $seen->append([\count($locks), $rows()]);
+        });
+
+        self::service()->syncRoles($principal, [$expired, self::role('first'), self::role('second')], actor: $actor, tenant: self::tenant('acct2'));
+
+        self::assertSame([[0, 1]], $seen->getArrayCopy());
+        self::assertSame(3, $rows());
+        self::assertSame([['expired', 'first', 'second']], \array_map(self::namesOf(...), $hook->widenings));
+
+        GrantChanges::table(GrantTarget::ROLE, Reference::of($principal), null, GrantScope::platform())->grant(GrantChanges::key($held), null);
+
+        self::service()->syncRoles($principal, [$held, self::role('platform')]);
+        self::service()->grantPermission(self::role('holder'), self::permission('posts:edit'));
+
+        self::assertSame([['expired', 'first', 'second'], ['platform']], \array_map(self::namesOf(...), $hook->widenings));
+    }
+
+    /**
+     * A refusal of the package's after the hook let the grant go on still
+     * refuses it, nothing written; a hook's refusal is not tried again and is
+     * never reported as a denial.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheHookNeverReplacesTheDecision(): void
+    {
+        $actor = self::administrator([PackagePermissions::ROLE_GRANT]);
+
+        [, [$principal]] = $this->principals();
+
+        $hook = $this->hook();
+
+        $tenant  = self::tenant('acct1');
+        $refusal = self::refusalOf(static fn (): mixed => self::service()->grantPermission($principal, self::permission('posts:edit'), actor: $actor, tenant: $tenant));
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertCount(1, $hook->widenings);
+        self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', 'p1')->count());
+
+        $refusing = new RefusingGrantHook;
+        $denials  = new \ArrayObject;
+
+        $this->app?->instance(GrantHook::class, $refusing);
+
+        Event::listen(AuthorizationFailed::class, static fn (AuthorizationFailed $event) => $denials->append($event));
+
+        $vetoed = self::refusalOf(static fn (): mixed => self::service()->grantRole($principal, self::role('new'), actor: $actor, tenant: $tenant));
+
+        self::assertInstanceOf(GrantRefusedException::class, $vetoed);
+        self::assertSame(1, $refusing->refused);
+        self::assertCount(0, $denials);
+    }
+
+    /**
+     * A delegated try that conflicts after its hook ran is rolled back and
+     * tried again, its hook running again on the retry.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheHookRunsAgainOnARetriedTry(): void
+    {
+        $actor = self::administrator(['authorization:*', 'posts:*']);
+
+        [, [$principal]] = $this->principals();
+
+        $hook = $this->hook();
+        $more = self::permission('comments:read');
+
+        self::raceWith(PackagePermissions::ROLE_GRANT, static function () use ($actor, $more): void {
+            GrantChanges::table(GrantTarget::PERMISSION, $actor->principal(), null, GrantScope::platform())->grant(GrantChanges::key($more), null);
+        });
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantRole($principal, self::role('new'), actor: $actor, tenant: self::tenant('acct1')));
+        self::assertCount(2, $hook->widenings);
+        self::assertNotSame($hook->widenings[0]->observedAt, $hook->widenings[1]->observedAt);
+    }
+
+    /**
+     * Grant the grantee a new grant named for the name in the first account,
+     * through the service's entry point given, as the actor given or trusted.
+     *
+     * @param  string  $entry
+     * @param  \Tests\Feature\Stubs\StubSecondIdentity  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
+     * @param  string  $name
+     * @return mixed
+     *
+     * @throws \Throwable
+     */
+    private static function grantThrough(string $entry, StubSecondIdentity $grantee, ?ActingContext $actor, string $name): mixed
+    {
+        $tenant = self::tenant('acct1');
+
+        return match ($entry) {
+            'grantRole'       => self::service()->grantRole($grantee, self::role($name), actor: $actor, tenant: $tenant),
+            'grantPermission' => self::service()->grantPermission($grantee, self::permission('posts:' . $name), actor: $actor, tenant: $tenant),
+            'attachPolicy'    => self::service()->attachPolicy($grantee, self::denying($name), actor: $actor, tenant: $tenant),
+            'syncRoles'       => self::service()->syncRoles($grantee, [self::role($name)], actor: $actor, tenant: $tenant),
+            'syncPermissions' => self::service()->syncPermissions($grantee, [self::permission('posts:' . $name)], actor: $actor, tenant: $tenant),
+            default           => self::service()->syncPolicies($grantee, [self::denying($name)], actor: $actor, tenant: $tenant),
+        };
+    }
+
+    /**
+     * Return the names of the roles the widening's grants grant, sorted.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Hooks\GrantWidening  $widening
+     * @return list<string>
+     */
+    private static function namesOf(GrantWidening $widening): array
+    {
+        $names = \array_map(static fn (ProposedGrant $change): string => self::nameOf($change->target), $widening->changes);
+
+        \sort($names);
+
+        return $names;
+    }
+
+    /**
+     * Return the name of the role the reference names.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $role
+     * @return string
+     */
+    private static function nameOf(Reference $role): string
+    {
+        $name = Role::query()->withoutGlobalScopes()->findOrFail($role->id)->getAttribute('name');
+
+        return \is_string($name) ? $name : '';
+    }
+
+    /**
+     * Create a policy that only denies.
+     *
+     * @param  string  $name
+     * @return \SineMacula\Laravel\Authorization\Models\Policy
+     */
+    private static function denying(string $name): Policy
+    {
+        return Policy::query()->create(['name' => 'deny-' . $name, 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:delete']]]]]);
     }
 
     /**

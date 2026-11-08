@@ -21,8 +21,9 @@ use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 final class DependencyChangedExceptionTest extends TestCase
 {
     /**
-     * Rows that changed are named by their table, and a moved tree as such;
-     * each is a runtime exception.
+     * Rows that changed are named by their table, a moved tree and a widening
+     * no grant hook was run for as such; each is a runtime exception, and only
+     * the widening is one.
      *
      * @return void
      */
@@ -34,5 +35,9 @@ final class DependencyChangedExceptionTest extends TestCase
         self::assertInstanceOf(\RuntimeException::class, $rows);
         self::assertSame('The rows of [roles] a delegated decision read changed before the write.', $rows->getMessage());
         self::assertSame('The tenant tree moved after a delegated decision read it, before the write.', $tree->getMessage());
+        self::assertSame('A grant now widens an identity\'s scope although its grant hooks were not run for it.', DependencyChangedException::widening()->getMessage());
+        self::assertTrue(DependencyChangedException::widening()->isWidening());
+        self::assertFalse($rows->isWidening());
+        self::assertFalse($tree->isWidening());
     }
 }

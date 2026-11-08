@@ -28,6 +28,7 @@ use SineMacula\Laravel\Authorization\Context\ContextBindings;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
@@ -37,6 +38,7 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
@@ -99,12 +101,12 @@ use SineMacula\Laravel\Authorization\Support\SessionScopes;
  * provider registers on it are kept for every request and job.
  *
  * The contracts an application may bind itself (the subject resolver, the
- * tenant tree, the identity directory, the policy store, the policy resolver,
- * the action catalogue, the authentication requirement checker, the session
- * policy source and the trusted context sources) resolve through a
- * package-owned key that holds the scoped default. An application's own binding
- * of the contract therefore replaces the default without being scoped itself,
- * and an instance it binds survives the reset between jobs.
+ * tenant tree, the identity directory, the grant hook, the policy store, the
+ * policy resolver, the action catalogue, the authentication requirement
+ * checker, the session policy source and the trusted context sources) resolve
+ * through a package-owned key that holds the scoped default. An application's
+ * own binding of the contract therefore replaces the default without being
+ * scoped itself, and an instance it binds survives the reset between jobs.
  *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
@@ -216,9 +218,10 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
     /**
      * Bind the configured subject resolver, tenant tree and identity directory
-     * as the defaults, each scoped to the request or job so any state it keeps
-     * does not reach the next one. Rebinding the subject resolver or the tenant
-     * tree forgets the resolutions read through it.
+     * as the defaults, and the composite of the configured grant hooks as the
+     * grant hook, each scoped to the request or job so any state it keeps does
+     * not reach the next one. Rebinding the subject resolver or the tenant tree
+     * forgets the resolutions read through it.
      *
      * @return void
      */
@@ -239,6 +242,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
             $this->bindScopedDefault($contract, $class);
         }
+
+        $this->bindScopedDefault(GrantHook::class, GrantHooks::fromConfig(...));
     }
 
     /**
