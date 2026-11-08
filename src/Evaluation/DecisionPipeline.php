@@ -15,6 +15,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
+use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
+use SineMacula\Laravel\Authorization\Resolvers\GrantProvenanceResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
@@ -37,8 +39,17 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  * `checkMany()` the same over many checks, and `CheckBatch` owns the recording
  * for both, so every decision the pipeline makes reaches the caller through it.
  *
- * A pipeline is immutable: `withPolicies()` and `capped()` return a new one, as
- * the manager's scoped clones do.
+ * A pipeline is immutable: `withPolicies()`, `capped()` and `explaining()`
+ * return a new one, as the manager's scoped clones do.
+ *
+ * A pipeline `explaining()` returns decides its one check in explain mode
+ * (N89): exactly as any other, through the same stages and the same sources,
+ * recording besides the evidence an explanation needs, where each grant that
+ * allowed it came from, read by the grant resolution itself (see
+ * `GrantProvenanceResolver`), and each condition test with what it found (see
+ * `CheckContext::explain()`), and returning the decision with it (see
+ * `DecisionEvidence`). Every other pipeline records none, and costs what it did
+ * before explanations.
  *
  * A bulk check decides each of its checks through `decide()` too, exactly as a
  * single check is decided; `prepare()` only reads ahead, in bulk, what those
@@ -58,6 +69,9 @@ final class DecisionPipeline
 
     /** @var list<list<string>> The explicit session caps supplied via `capped()`, outermost first, every one of which must cover the action. */
     private array $caps = [];
+
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder|null Records the evidence of the one check an `explaining()` pipeline decides; null for every other pipeline. */
+    private ?EvidenceRecorder $evidence = null;
 
     /**
      * Create a new decision pipeline instance.
@@ -135,6 +149,21 @@ final class DecisionPipeline
     }
 
     /**
+     * Return a pipeline that decides one check in explain mode, recording the
+     * evidence an explanation needs beside its decision; a pipeline for each
+     * explained check, since it records that check's evidence alone.
+     *
+     * @return self
+     */
+    public function explaining(): self
+    {
+        $pipeline           = clone $this;
+        $pipeline->evidence = new EvidenceRecorder;
+
+        return $pipeline;
+    }
+
+    /**
      * Decide the action for the supplied subject, stage by stage (AUTHZ-7.1),
      * admitting the check first: a subject that is missing, or inactive (it or
      * its identity), is denied before anything else is read; a resource that
@@ -148,6 +177,9 @@ final class DecisionPipeline
      * resource's tenant, platform scope, or the scope in place. It is not
      * called for a check denied before then, by the subject, resource or tenant
      * stage, which is decided in the scope in place.
+     *
+     * A pipeline `explaining()` returned returns the decision with the evidence
+     * its check recorded, an early refusal's included.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  string  $action
@@ -165,25 +197,9 @@ final class DecisionPipeline
         ?ResourceAttributeBatch $attributes = null,
         ?\Closure $witness = null,
     ): Decision {
-        if ($subject === null || SubjectGrants::isInactive($subject)) {
-            return Decision::deny($subject === null ? DecisionReason::SUBJECT_UNRESOLVED : DecisionReason::SUBJECT_INACTIVE, DecisionStage::SUBJECT);
-        }
+        $decision = $this->runStages($subject, $action, $resource, $context, $attributes, $witness);
 
-        if ($resource === false) {
-            return Decision::deny(DecisionReason::RESOURCE_UNRESOLVED, DecisionStage::RESOURCE);
-        }
-
-        $here   = $resource?->source instanceof OperationResource ? TenantScope::currentTenant() : null;
-        $from   = $here === null ? null : new Reference($here[0], $here[1]);
-        $decide = function () use ($subject, $action, $resource, $context, $attributes, $from, $witness): Decision {
-            if ($witness !== null) {
-                $witness();
-            }
-
-            return $this->decideGrants($subject, $action, $resource, $context, $attributes, $from);
-        };
-
-        return $resource === null ? $decide() : ResourceScope::decide($subject, $action, $resource, $decide);
+        return $this->evidence === null ? $decision : $decision->withEvidence($this->evidence->evidenceFor($decision));
     }
 
     /**
@@ -243,24 +259,35 @@ final class DecisionPipeline
      * (see `Preview\Previewing::admit()`), so a decision about a preview's
      * target is never made where its previewer may not preview.
      *
+     * Given a recorder, the check is explained: the policies and the permission
+     * held are resolved with where each came from, noted with the recorder, and
+     * the context records each condition test (N89).
+     *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @param  array<string, mixed>  $context
      * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder|null  $evidence
      * @return \SineMacula\Laravel\Authorization\Evaluation\CheckSources
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      *
      * @internal
      */
-    public function sources(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes = null): CheckSources
-    {
+    public function sources(
+        Subject $subject,
+        string $action,
+        ?ResourceReference $resource,
+        array $context,
+        ?ResourceAttributeBatch $attributes = null,
+        ?EvidenceRecorder $evidence = null,
+    ): CheckSources {
         // The subject of a preview's use is admitted where its sources are
         // gathered, before any is read (see `Preview\PreviewAdmission`).
         Previewing::admit($subject);
 
-        $policies   = $this->gatherPolicies($subject, $resource);
+        $policies   = $this->gatherPolicies($subject, $resource, $evidence);
         $guardrails = $action === PackagePermissions::GUARDRAIL_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
         $boundaries = SubjectGrants::boundaries($subject);
 
@@ -272,8 +299,14 @@ final class DecisionPipeline
         $checkContext = $this->contexts?->make($context, $subject, $resource, $attributes)
             ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
 
-        $permission = static fn (): ?string => SubjectGrants::permissionFor($subject, $action);
-        $session    = ($this->sessionCaps ?? new SessionCapResolver)->capsFor($subject, $this->caps);
+        $permission = $evidence === null
+            ? static fn (): ?string => SubjectGrants::permissionFor($subject, $action)
+            : static fn (): ?string => $evidence->notePermission(GrantProvenanceResolver::permissionFor($subject, $action));
+        $session = ($this->sessionCaps ?? new SessionCapResolver)->capsFor($subject, $this->caps);
+
+        if ($evidence !== null) {
+            $checkContext->explain();
+        }
 
         return new CheckSources($policies, $guardrails, $boundaries, $checkContext, $permission, $session);
     }
@@ -311,6 +344,47 @@ final class DecisionPipeline
     public function queryAuthorizer(): QueryAuthorizer
     {
         return new QueryAuthorizer($this, $this->contexts, $this->policyOverride === null ? $this->resourcePolicies : null, $this->guardrails);
+    }
+
+    /**
+     * Admit the check, and decide it from the grants once it is admitted (see
+     * `decide()`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
+     * @param  string  $action
+     * @param  false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
+     * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
+     * @param  (\Closure(): void)|null  $witness
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     */
+    private function runStages(
+        ?Subject $subject,
+        string $action,
+        false|ResourceReference|null $resource,
+        array $context,
+        ?ResourceAttributeBatch $attributes,
+        ?\Closure $witness,
+    ): Decision {
+        if ($subject === null || SubjectGrants::isInactive($subject)) {
+            return Decision::deny($subject === null ? DecisionReason::SUBJECT_UNRESOLVED : DecisionReason::SUBJECT_INACTIVE, DecisionStage::SUBJECT);
+        }
+
+        if ($resource === false) {
+            return Decision::deny(DecisionReason::RESOURCE_UNRESOLVED, DecisionStage::RESOURCE);
+        }
+
+        $here   = $resource?->source instanceof OperationResource ? TenantScope::currentTenant() : null;
+        $from   = $here === null ? null : new Reference($here[0], $here[1]);
+        $decide = function () use ($subject, $action, $resource, $context, $attributes, $from, $witness): Decision {
+            if ($witness !== null) {
+                $witness();
+            }
+
+            return $this->decideGrants($subject, $action, $resource, $context, $attributes, $from);
+        };
+
+        return $resource === null ? $decide() : ResourceScope::decide($subject, $action, $resource, $decide);
     }
 
     /**
@@ -388,7 +462,7 @@ final class DecisionPipeline
         ?ResourceAttributeBatch $attributes,
         ?Reference $from = null,
     ): Decision {
-        $decision = $this->decideAlone($subject, $action, $resource, $context, $attributes);
+        $decision = $this->decideAlone($subject, $action, $resource, $context, $attributes, $this->evidence);
 
         return $resource?->source instanceof OperationResource
             ? OperationConstraints::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from))
@@ -437,19 +511,28 @@ final class DecisionPipeline
     /**
      * Decide the admitted action from every source, up to the allow, in the
      * scope in place, without the administration stage: a document that cannot
-     * be read denies it as an invalid policy.
+     * be read denies it as an invalid policy. Given a recorder, the check is
+     * explained (see `sources()`); a further check the administration stage
+     * makes never is.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @param  array<string, mixed>  $context
      * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder|null  $evidence
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function decideAlone(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes): Decision
-    {
+    private function decideAlone(
+        Subject $subject,
+        string $action,
+        ?ResourceReference $resource,
+        array $context,
+        ?ResourceAttributeBatch $attributes,
+        ?EvidenceRecorder $evidence = null,
+    ): Decision {
         try {
-            $sources = $this->sources($subject, $action, $resource, $context, $attributes);
+            $sources = $this->sources($subject, $action, $resource, $context, $attributes, $evidence);
         } catch (InvalidPolicyDocumentException) {
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }
@@ -468,20 +551,52 @@ final class DecisionPipeline
      * to the subject (another model of the same kind, see
      * `SubjectGrants::grantingIdentity()`) and as their deny statements alone
      * otherwise, and those attached to the resource and its type (see
-     * `ResourcePolicyResolver`).
+     * `ResourcePolicyResolver`). Given a recorder, the subject's and its
+     * identity's policies are resolved with where each came from (see
+     * `explainedPolicies()`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder|null  $evidence
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
-    private function gatherPolicies(Subject $subject, ?ResourceReference $resource): array
+    private function gatherPolicies(Subject $subject, ?ResourceReference $resource, ?EvidenceRecorder $evidence): array
     {
         if ($this->policyOverride !== null) {
             return $this->policyOverride;
         }
 
-        return [...$this->policyResolver->policiesFor($subject->subject), ...SubjectGrants::identityPolicies($subject), ...$this->resourcePolicies?->policiesFor($resource) ?? []];
+        $own = $evidence === null
+            ? [...$this->policyResolver->policiesFor($subject->subject), ...SubjectGrants::identityPolicies($subject)]
+            : $this->explainedPolicies($subject, $evidence);
+
+        return [...$own, ...$this->resourcePolicies?->policiesFor($resource) ?? []];
+    }
+
+    /**
+     * Gather the subject's and its identity's policies for an explained check,
+     * noting where each came from with the recorder: through the default
+     * resolver, by the grant rows that gave them, and through a resolver bound
+     * in its place, which cannot say, as `unavailable`.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder  $evidence
+     * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     */
+    private function explainedPolicies(Subject $subject, EvidenceRecorder $evidence): array
+    {
+        if ($this->policyResolver instanceof DefaultPolicyResolver) {
+            $principal = $this->policyResolver->explainedPoliciesFor($subject->subject, $evidence);
+        } else {
+            $principal = $this->policyResolver->policiesFor($subject->subject);
+
+            $evidence->notePolicies($principal, null, $subject->subject);
+        }
+
+        return [...$principal, ...GrantProvenanceResolver::identityPolicies($subject, $evidence)];
     }
 }

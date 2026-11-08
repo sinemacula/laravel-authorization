@@ -26,6 +26,9 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
  * substituted value is a string: numbers are cast and booleans become `true` or
  * `false`.
  *
+ * A reference that cannot be resolved is noted with the check's context, which
+ * an explained check records by key (see `CheckContext::noteUnresolved()`).
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -217,7 +220,8 @@ final class ContextInterpolator
 
     /**
      * Resolve a single dotted token to its string value, or null when its key
-     * is missing or its value is not a scalar.
+     * is missing or its value is not a scalar, noting it with the context as
+     * unresolved, which an explained check records.
      *
      * @param  string  $token
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
@@ -228,6 +232,7 @@ final class ContextInterpolator
         $value = $context->lookup($token)[1];
 
         if (!\is_scalar($value)) {
+            $context->noteUnresolved($token);
             self::logUnresolved($token);
 
             return null;

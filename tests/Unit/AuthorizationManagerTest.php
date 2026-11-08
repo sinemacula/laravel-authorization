@@ -1010,8 +1010,12 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = $this->manager();
 
-        self::assertSame('DENY (subject_unresolved: there is no subject) at the subject stage.', $manager->explain('posts:create'));
-        self::assertSame($manager->check('posts:create')->explain(), $manager->explain('posts:create'));
+        $explanation = $manager->explain('posts:create');
+
+        self::assertTrue($explanation->isDetailed());
+        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $explanation->reason);
+        self::assertStringStartsWith("DENY (subject_unresolved: there is no subject) at the subject stage.\n  not evaluated: resource, tenant, deny,", $explanation->toText());
+        self::assertSame($manager->check('posts:create')->explain()->toArray()['decided_by'], $explanation->toArray()['decided_by']);
     }
 
     /**

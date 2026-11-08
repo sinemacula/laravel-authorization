@@ -563,6 +563,39 @@ final class RolePoliciesTest extends TestCase
     }
 
     /**
+     * The attachments to the roles that hold in scope are each the policy's key
+     * and the role's, a lapsed one and one of another application left out; no
+     * role reads nothing.
+     *
+     * @return void
+     */
+    public function testTheAttachmentsToTheRoles(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $editor = Role::create(['name' => 'editor']);
+        $reader = Role::create(['name' => 'reader']);
+        $edits  = self::policy('edits');
+        $reads  = self::policy('reads');
+        $lapsed = self::policy('lapsed');
+        $mobile = self::policy('mobile');
+        $type   = $editor->getMorphClass();
+
+        $editor->attachPolicy($edits);
+        $editor->attachPolicy($reads);
+        $reader->attachPolicy($reads);
+        $reader->attachPolicy($lapsed, Carbon::parse('2026-07-01 11:00:00'));
+        $reader->attachPolicy($mobile, application: 'mobile');
+
+        self::assertEqualsCanonicalizing([
+            ['policy_id' => $edits->id, 'role_id' => $editor->id],
+            ['policy_id' => $reads->id, 'role_id' => $editor->id],
+            ['policy_id' => $reads->id, 'role_id' => $reader->id],
+        ], RolePolicies::attachedTo($type, [$editor->id, $reader->id]));
+        self::assertSame([], RolePolicies::attachedTo($type, []));
+    }
+
+    /**
      * Create a policy that allows nothing.
      *
      * @param  string  $name

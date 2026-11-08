@@ -43,6 +43,7 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
@@ -963,6 +964,50 @@ final class CheckBatchTest extends TestCase
         self::assertSame(DecisionReason::NO_MATCH, $decisions[1]->reason);
         self::assertSame([], $resolver->bulkCalls);
         self::assertSame([], $resolver->calls);
+    }
+
+    /**
+     * A batch that explains decides each check in explain mode, with the
+     * verdict any batch gives, and adds to its evidence what it asked: the
+     * action, the resource, who it was about and the scope it was asked and
+     * decided in; every other batch records none.
+     *
+     * @return void
+     */
+    public function testAnExplainingBatchRecordsTheRequest(): void
+    {
+        $user = $this->subject();
+
+        $user->givePermission(Permission::create(['name' => self::ACTION]));
+
+        $posts = $this->posts(1);
+        $check = new CheckInput(self::ACTION, $posts[0]);
+
+        /** @var \Illuminate\Foundation\Application $app */
+        $app      = $this->app;
+        $contexts = $app->make(CheckContextFactory::class);
+        $pipeline = new DecisionPipeline($app->make(PolicyEvaluator::class), $app->make(PolicyResolver::class), $contexts, new ResourcePolicyResolver, new GuardrailResolver);
+        $store    = $app->make(LastDecisionStore::class);
+        $resolver = $app->make(SubjectResolver::class);
+        $batch    = static fn (bool $isExplaining): CheckBatch => new CheckBatch($pipeline, $store, $resolver, $app->make(Dispatcher::class), true, true, null, $isExplaining);
+        $subject  = Authorization::currentSubject();
+
+        $plain     = $batch(false)->decideOne($subject, $check);
+        $explained = $batch(true)->decideOne($subject, $check);
+        $request   = $explained->evidence?->request;
+
+        self::assertNotNull($request);
+
+        self::assertNull($plain->evidence);
+        self::assertSame($plain->isAllowed(), $explained->isAllowed());
+        self::assertSame($explained, $store->get());
+        self::assertSame(self::ACTION, $request->action);
+        self::assertSame(ResourceReferences::identifierOf(ResourceReferences::of($posts[0])), $request->resource);
+        self::assertEquals(Reference::of($user), $request->decided->subject);
+        self::assertEquals($store->provenance(), $request->decided);
+        self::assertEquals(DecisionProvenance::of($subject), $request->requested);
+        self::assertCount(1, $explained->evidence->grants ?? []);
+        self::assertNull($batch(false)->decide($subject, ['a' => $check, 'b' => $check])['a']->evidence);
     }
 
     /**

@@ -295,12 +295,12 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         $explanation = Authorization::for($user)->explain('posts:destroy');
 
-        self::assertSame(
-            "DENY (explicit_deny: an applicable statement denies it) at the deny stage by deny-destruct[{$policy->id}]#0.\n"
-            . "  [deny] deny-destruct[{$policy->id}]#0: matched",
-            $explanation,
-        );
-        self::assertSame(Authorization::for($user)->check('posts:destroy')->explain(), $explanation);
+        $lines = "DENY (explicit_deny: an applicable statement denies it) at the deny stage by deny-destruct[{$policy->id}]#0.\n"
+            . "  [deny] deny-destruct[{$policy->id}]#0: matched\n"
+            . "  not evaluated: guardrail, boundary, session, allow, administration, implicit\n";
+
+        self::assertStringStartsWith($lines . '  request "posts:destroy" about ', $explanation->toText());
+        self::assertSame($lines . '  evidence: not recorded (explain mode off)', Authorization::for($user)->check('posts:destroy')->explain()->toText());
     }
 
     /**

@@ -674,4 +674,22 @@ final class ContextInterpolatorTest extends TestCase
 
         self::assertNull($this->interpolator->interpolate('${input.missing}', []));
     }
+
+    /**
+     * A reference that cannot be resolved is noted with an explained context,
+     * by its key, and one that resolves is not.
+     *
+     * @return void
+     */
+    public function testAnUnresolvedReferenceIsNotedWithTheContext(): void
+    {
+        $context = new CheckContext(['input' => ['a' => 'x', 'list' => ['y']]]);
+
+        $context->explain();
+
+        self::assertNull((new ContextInterpolator)->interpolate('${input.a}/${input.list}', $context));
+        self::assertNull((new ContextInterpolator)->interpolatePattern('${input.missing}', $context));
+        self::assertSame('x', (new ContextInterpolator)->interpolate('${input.a}', $context));
+        self::assertSame(['input.list', 'input.missing'], $context->takeUnresolved());
+    }
 }

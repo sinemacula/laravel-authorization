@@ -13,7 +13,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  * nothing to cap by), the guardrail, permission boundary, session cap or
  * administration constraint it is about when it is about no one statement, the
  * held permission that allowed the check when the step is the permission's and
- * found one, and the condition keys it tested with whether each held.
+ * found one, and the condition keys it tested with whether each held, and the
+ * `${…}` references the statement it assessed names, by key.
+ *
+ * A step of an explained check also carries each condition test on its own,
+ * with what it found (see `ConditionResult`), and the `${…}` references of the
+ * statement's resource patterns that could not be resolved, by key (N89). An
+ * everyday check's steps carry neither.
  *
  * Never a value: only key names and results reach the trace (AUTHZ-8.8).
  *
@@ -31,6 +37,9 @@ final readonly class TraceEntry
      * @param  array<string, bool>  $conditions
      * @param  string|null  $cap
      * @param  string|null  $permission
+     * @param  list<string>  $dependencies
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\ConditionResult>|null  $tests
+     * @param  list<string>  $unresolved
      */
     public function __construct(
 
@@ -51,6 +60,15 @@ final readonly class TraceEntry
 
         /** The held permission, as it was granted (a pattern such as `posts:*` included), that allowed the check at the permission step; null for any other step. */
         public ?string $permission = null,
+
+        /** The path of each `${…}` reference the statement assessed names in its condition operands and resource patterns. */
+        public array $dependencies = [],
+
+        /** Each condition test the statement made, with what it found, for a step of an explained check; null for any other. */
+        public ?array $tests = null,
+
+        /** The key of each `${…}` reference of the statement's resource patterns that could not be resolved, for a step of an explained check. */
+        public array $unresolved = [],
     ) {}
 
     /**

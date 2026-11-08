@@ -1205,7 +1205,7 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertTrue($manager->can('posts:create', null, $caller));
         self::assertTrue($manager->check('posts:create', null, $caller)->isAllowed());
-        self::assertStringContainsString('allow', $manager->explain('posts:create', null, $caller));
+        self::assertStringContainsString('allow', $manager->explain('posts:create', null, $caller)->toText());
         self::assertSame(['posts:create'], $manager->permissionsFor($user, AuthorizationScope::current(), $caller));
         self::assertFalse($manager->can('posts:delete', null, $caller));
         self::assertFalse($manager->can('posts:delete', null, ['request.ip' => '10.0.0.1']));
@@ -1411,8 +1411,8 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertTrue($decision->isAllowed());
         self::assertSame(['resource.status' => true, 'resource.owner.id' => true, 'subject.department' => true], $decision->trace[3]->conditions);
-        self::assertStringNotContainsString('draft', $decision->explain());
-        self::assertStringNotContainsString('sales', $decision->explain());
+        self::assertStringNotContainsString('draft', $decision->explain()->toText());
+        self::assertStringNotContainsString('sales', $decision->explain()->toText());
         self::assertTrue($scope->can('posts:edit', [$type, 'post-3']));
         self::assertTrue($scope->can('posts:read', $post));
         self::assertFalse($scope->can('posts:leak', $post));
@@ -1825,8 +1825,8 @@ final class AuthorizationManagerTest extends TestCase
         self::assertTrue($allowed->isAllowed());
         self::assertSame(DecisionStage::ALLOW, $allowed->stage);
         self::assertSame('posts:7', $allowed->statements[0]->resource);
-        self::assertStringContainsString('sharing[', $allowed->explain());
-        self::assertStringContainsString('#0 sid="share" on "posts:7"', $allowed->explain());
+        self::assertStringContainsString('sharing[', $allowed->explain()->toText());
+        self::assertStringContainsString('#0 sid="share" on "posts:7"', $allowed->explain()->toText());
         self::assertSame(DecisionReason::NO_MATCH, $denied->reason);
         self::assertSame(TraceOutcome::PRINCIPAL_MISMATCH, $denied->trace[3]->outcome);
         self::assertSame('posts:7', $denied->trace[3]->statement?->resource);
@@ -2406,7 +2406,7 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertTrue($decision->isAllowed());
         self::assertEquals(new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::UNCAPPED), $decision->trace[1]);
-        self::assertStringContainsString('[boundary] boundaries: uncapped', $decision->explain());
+        self::assertStringContainsString('[boundary] boundaries: uncapped', $decision->explain()->toText());
     }
 
     /**
@@ -2708,7 +2708,7 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertTrue($decision->isAllowed());
         self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::UNCAPPED), $decision->trace[0]);
-        self::assertStringContainsString('[guardrail] guardrails: uncapped', $decision->explain());
+        self::assertStringContainsString('[guardrail] guardrails: uncapped', $decision->explain()->toText());
     }
 
     /**
@@ -2771,7 +2771,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertTrue($exempt->isAllowed());
         self::assertSame([], $read);
         self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::EXEMPT), $exempt->trace[0]);
-        self::assertStringContainsString('[guardrail] guardrails: exempt', $exempt->explain());
+        self::assertStringContainsString('[guardrail] guardrails: exempt', $exempt->explain()->toText());
         self::assertSame(DecisionReason::INVALID_POLICY, Authorization::for($user)->check('authorization:roles:manage')->reason);
 
         DB::table('policies')->where('name', 'broken')->update(['document' => '{"statements": []}']);
@@ -2908,7 +2908,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionStage::SESSION, $edit->stage);
         self::assertSame([], $edit->statements);
         self::assertEquals(new TraceEntry(DecisionStage::SESSION, TraceOutcome::REFUSED, null, [], 'credential'), $edit->trace[\count($edit->trace) - 1]);
-        self::assertStringContainsString('[session] credential: refused', $edit->explain());
+        self::assertStringContainsString('[session] credential: refused', $edit->explain()->toText());
     }
 
     /**
@@ -3258,7 +3258,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertTrue($allowed->isAllowed());
         self::assertSame(DecisionStage::ALLOW, $allowed->stage);
         self::assertEquals([...self::uncapped(), new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, 'posts:*')], $allowed->trace);
-        self::assertStringContainsString('[allow] permission "posts:*": held', $allowed->explain());
+        self::assertStringContainsString('[allow] permission "posts:*": held', $allowed->explain()->toText());
     }
 
     /**

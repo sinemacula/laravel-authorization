@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Resolvers;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
+use SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder;
 
 /**
  * Default policy resolver.
@@ -26,6 +27,11 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
  *
  * The order of the list never matters: the evaluator assesses the policies by
  * name, then stored key, then document, wherever they came from.
+ *
+ * For an explained check (N89), `explainedPoliciesFor()` resolves the same
+ * policies, noting where each came from: the store's as `unavailable`, since a
+ * store cannot say, and the principal's own through the grant rows that gave
+ * them (see `GrantProvenanceResolver`).
  *
  * The resolver is intentionally stateless so consumers can decorate it with
  * cache or tenant-scoping layers without inheriting any internal state.
@@ -66,6 +72,34 @@ final readonly class DefaultPolicyResolver implements PolicyResolver
 
         if ($principal instanceof AuthorizableIdentity) {
             $policies = \array_merge($policies, $principal->getPolicies());
+        }
+
+        return \array_values($policies);
+    }
+
+    /**
+     * Return every policy applicable to the principal, as `policiesFor()` does,
+     * for an explained check, noting with the recorder where each came from:
+     * the store's policies as `unavailable`, and the principal's own by the
+     * grant rows that gave them.
+     *
+     * @param  object  $principal
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder  $recorder
+     * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     *
+     * @internal
+     */
+    public function explainedPoliciesFor(object $principal, EvidenceRecorder $recorder): array
+    {
+        $policies = $this->store?->policiesFor($principal) ?? [];
+
+        $recorder->notePolicies($policies, null);
+
+        if ($principal instanceof AuthorizableIdentity) {
+            $policies = \array_merge($policies, GrantProvenanceResolver::policiesOf($principal, $recorder));
         }
 
         return \array_values($policies);

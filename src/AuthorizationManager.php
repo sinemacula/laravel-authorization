@@ -22,6 +22,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Explanation;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
@@ -508,22 +509,31 @@ final class AuthorizationManager
     }
 
     /**
-     * Decide the supplied action and return the decision's explanation: the
-     * verdict, the stage and statements that decided it, each requirement an
-     * insufficient authentication names with its unmet parts, and every step of
-     * its trace. A shortcut over `check(...)->explain()`. On a preview, the
-     * right to preview discloses the target's explanation (N85), which names
-     * statements, conditions, caps and requirements, never a value or a
-     * session; a refused preview explains nothing.
+     * Decide the supplied action in explain mode and return the decision's
+     * explanation (AUTHZ-11.5, N89): the verdict, the statements, or the cap or
+     * permission, that decided it, every condition test of every stage it
+     * reached with what it found, the keys found missing, the stages it never
+     * reached, where each grant that allowed it came from, and what the check
+     * asked (see `Explanation`). The check is the one `check()` makes, through
+     * the same path and the same stages, so its verdict is the same, and it is
+     * recorded as the last decision and reported as any check is; explain mode
+     * only records the evidence besides. On a preview, the preview is admitted
+     * as for `check()`, and the right to preview discloses the target's
+     * explanation (N85), which names statements, conditions, caps and
+     * requirements, never a value or a session; a refused preview explains
+     * nothing.
      *
      * @param  string  $action
      * @param  mixed  $resource
      * @param  array<string, mixed>  $context
-     * @return string
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Explanation
      */
-    public function explain(string $action, mixed $resource = null, array $context = []): string
+    public function explain(string $action, mixed $resource = null, array $context = []): Explanation
     {
-        return $this->check($action, $resource, $context)->explain();
+        $check   = new CheckInput($action, $resource, $context);
+        $explain = fn (?Subject $target): Decision => $this->batch(isExplaining: true)->decideOne($target, $check);
+
+        return ($this->preview === null ? $explain($this->currentSubject()) : $this->preview->run($explain))->explain();
     }
 
     /**
@@ -673,14 +683,25 @@ final class AuthorizationManager
      * pipeline, so `check()`, `checkMany()` and `permissionsFor()` take the one
      * path, dispatching each decision's event and storing it as the last
      * decision, or, for introspection, neither, or, for a preview's listing,
-     * dispatching alone; a preview's decisions name its previewer.
+     * dispatching alone; a preview's decisions name its previewer. The batch
+     * `explain()` decides through explains its check.
      *
      * @param  bool  $isDispatching
      * @param  bool  $isStoring
+     * @param  bool  $isExplaining
      * @return \SineMacula\Laravel\Authorization\Evaluation\CheckBatch
      */
-    private function batch(bool $isDispatching = true, bool $isStoring = true): CheckBatch
+    private function batch(bool $isDispatching = true, bool $isStoring = true, bool $isExplaining = false): CheckBatch
     {
-        return new CheckBatch($this->pipeline, $this->lastDecisionStore, $this->subjectResolver, $this->events, $isDispatching, $isStoring, $this->preview?->previewer);
+        return new CheckBatch(
+            $this->pipeline,
+            $this->lastDecisionStore,
+            $this->subjectResolver,
+            $this->events,
+            $isDispatching,
+            $isStoring,
+            $this->preview?->previewer,
+            $isExplaining,
+        );
     }
 }

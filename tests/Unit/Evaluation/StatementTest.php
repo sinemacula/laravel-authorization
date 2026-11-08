@@ -12,7 +12,9 @@ use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\ConditionOperands;
+use SineMacula\Laravel\Authorization\Evaluation\ConditionResult;
 use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\ConditionOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\IpRanges;
@@ -1533,6 +1535,72 @@ final class StatementTest extends TestCase
         }
 
         self::assertSame(['user:1'], (new Statement(PolicyEffect::ALLOW, ['posts:read'], principals: ['user:1']))->principals);
+    }
+
+    /**
+     * A statement names every `${…}` reference of its condition operands and
+     * resource patterns, each once, worked out on construction.
+     *
+     * @return void
+     */
+    public function testDependenciesAreTheReferencesTheStatementNames(): void
+    {
+        $statement = new Statement(PolicyEffect::ALLOW, ['posts:read'], null, ['eq' => ['input.a' => '${subject.id}']], null, null, ['posts:${input.tenant}/*']);
+
+        self::assertSame(['subject.id', 'input.tenant'], $statement->dependencies);
+        self::assertSame([], (new Statement(PolicyEffect::ALLOW, ['posts:read']))->dependencies);
+        self::assertSame(['resource.owner'], (new Statement(PolicyEffect::ALLOW, ['posts:read'], ['posts:${resource.owner}']))->dependencies);
+    }
+
+    /**
+     * Through an explained context, the assessment notes each condition test
+     * and the resource patterns' references that could not be resolved with the
+     * context, and gives the outcome and the condition keys an everyday
+     * assessment gives; a statement whose target does not match notes none, and
+     * an everyday context is never noted with.
+     *
+     * @return void
+     */
+    public function testAnExplainedAssessmentCarriesItsEvidence(): void
+    {
+        $statement = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:${input.missing}', 'posts:*'], ['eq' => ['input.a' => 'x']]);
+        $everyday  = new CheckContext(['input' => ['a' => 'x']]);
+        $context   = new CheckContext(['input' => ['a' => 'x']]);
+        $plain     = $statement->assess('posts:read', 'posts:1', $everyday, new ContextInterpolator);
+
+        $context->explain();
+
+        $explained = $statement->assess('posts:read', 'posts:1', $context, new ContextInterpolator);
+
+        self::assertSame($plain->outcome, $explained->outcome);
+        self::assertSame($plain->conditions, $explained->conditions);
+        self::assertSame([null, []], $everyday->takeAssessment());
+        self::assertEquals([[new ConditionResult('input.a', 'eq', ConditionOutcome::HELD)], ['input.missing']], $context->takeAssessment());
+        self::assertSame([], $context->takeUnresolved());
+
+        $statement->assess('comments:read', 'posts:1', $context);
+        (new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:*']))->assess('posts:read', 'comments:1', $context, new ContextInterpolator);
+
+        self::assertSame([null, []], $context->takeAssessment());
+
+        $statement->assess('posts:read', 'comments:1', $context, new ContextInterpolator);
+
+        self::assertSame(['input.missing'], $context->takeAssessment()[1]);
+    }
+
+    /**
+     * A substituted operand of the wrong type is undecidable, its detail saying
+     * so.
+     *
+     * @return void
+     */
+    public function testASubstitutedOperandOfTheWrongTypeSaysSo(): void
+    {
+        $statement = new Statement(PolicyEffect::ALLOW, ['posts:read'], null, ['gt' => ['input.n' => '${input.limit}']]);
+        $result    = $statement->assess('posts:read', null, ['input' => ['n' => 5, 'limit' => 'abc']], new ContextInterpolator);
+
+        self::assertSame(MatchOutcome::UNDECIDABLE, $result->outcome);
+        self::assertStringStartsWith('condition \'input.n\': ' . Statement::SUBSTITUTED_OPERAND . ' ', $result->detail);
     }
 
     /**

@@ -383,6 +383,64 @@ final class RoleGraphTest extends TestCase
     }
 
     /**
+     * The path of each role is the role, then each ancestor from its parent up
+     * to the root; with the hierarchy disabled, the role alone.
+     *
+     * @return void
+     */
+    public function testThePathsRunFromTheRoleUp(): void
+    {
+        $root   = Role::create(['name' => 'root']);
+        $parent = Role::create(['name' => 'parent', 'parent_id' => $root->id]);
+        $child  = Role::create(['name' => 'child', 'parent_id' => $parent->id]);
+        $alone  = Role::create(['name' => 'alone']);
+        $names  = static fn (array $paths): array => \array_map(static fn (array $path): array => \array_map(static fn (Role $role): string => $role->name, $path), $paths);
+
+        self::assertSame([$child->id => ['child', 'parent', 'root'], $alone->id => ['alone']], $names(RoleGraph::pathsOf([$child, $alone])));
+        self::assertSame([], RoleGraph::pathsOf([]));
+
+        config(['authorization.hierarchy.enabled' => false]);
+
+        self::assertSame([$child->id => ['child']], $names(RoleGraph::pathsOf([$child])));
+    }
+
+    /**
+     * The permissions each role carries are read in one query, keyed by the
+     * role, a grant that has expired left out; no role reads nothing.
+     *
+     * @return void
+     */
+    public function testThePermissionsEachRoleCarries(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $editor = Role::create(['name' => 'editor']);
+        $reader = Role::create(['name' => 'reader']);
+        $empty  = Role::create(['name' => 'empty']);
+        $read   = Permission::create(['name' => 'posts:read']);
+
+        $editor->givePermission(Permission::create(['name' => 'posts:edit']));
+        $editor->givePermission($read);
+        $editor->givePermission(Permission::create(['name' => 'posts:delete']), Carbon::parse('2026-07-01 11:00:00'));
+        $reader->givePermission($read);
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $carried = RoleGraph::permissionsByRole([$editor->id, $reader->id, $empty->id]);
+
+        self::assertCount(1, DB::getQueryLog());
+
+        DB::flushQueryLog();
+
+        self::assertSame([], RoleGraph::permissionsByRole([]));
+        self::assertSame([], DB::getQueryLog());
+        self::assertEqualsCanonicalizing([$editor->id, $reader->id], \array_keys($carried));
+        self::assertEqualsCanonicalizing(['posts:edit', 'posts:read'], $carried[$editor->id]);
+        self::assertSame(['posts:read'], $carried[$reader->id]);
+    }
+
+    /**
      * Create a chain of roles, root first, each the parent of the next.
      *
      * @param  int  $length

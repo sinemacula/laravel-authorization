@@ -80,6 +80,10 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   neither answer is membership or authorisation, why it is a trusted service returning only the status, and the grant
   hooks: which grants widen an identity's scope, the veto-only contract and its ordered composite, the run before the
   package's first lock with the coverage check and retry, the recursion guard and nested calls.
+- `explanations.md`: explain mode, the switch on the one decision path that leaves every everyday check as it was, the
+  evidence it records (each condition test with its typed outcome, the unresolved references, where each grant that
+  allowed a check came from, and what the check asked), the `Explanation` projection, its causes and the stages it
+  never reached, its escaped text and versioned schema, what it never holds, and what a stored decision explains.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

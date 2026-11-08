@@ -585,6 +585,27 @@ final class StatementValidatorTest extends TestCase
     }
 
     /**
+     * dependenciesOf() names every reference of the well-formed tests' string
+     * operands and of the patterns, each once, in order, and none of a
+     * malformed test, a literal operand or an escaped reference.
+     *
+     * @return void
+     */
+    public function testDependenciesOf(): void
+    {
+        $tests = StatementValidator::conditionTests([
+            'eq'    => ['input.a' => '${subject.id}-${input.b}', 'input.c' => 'plain', 'input.d' => '\${input.escaped}'],
+            'in'    => ['input.e' => ['${input.listed}']],
+            'gt'    => ['input.f' => '${subject.id}'],
+            'ip_in' => ['request.ip' => ['${input.ranged}']],
+        ]);
+
+        self::assertSame(['subject.id', 'input.b', 'resource.owner'], StatementValidator::dependenciesOf($tests, ['posts:*', 'posts:${resource.owner}/${subject.id}']));
+        self::assertSame([], StatementValidator::dependenciesOf([], []));
+        self::assertSame([], StatementValidator::dependenciesOf(StatementValidator::conditionTests(['eq' => ['input.a' => []]]), []));
+    }
+
+    /**
      * Assert that the callback throws an invalid-argument exception with the
      * message.
      *
