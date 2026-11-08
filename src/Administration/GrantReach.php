@@ -20,10 +20,11 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * below its tenant, every tenant below it, as the bound tree's subtree query
  * selects them, read once; a platform-wide grant reaches every tenant.
  *
- * The rank and possession rules read what the grantee or the actor holds, and
- * what could cap or deny the actor, across this reach (see `RankComparison` and
- * `PossessionLimits`). A tree that cannot be read, or a subtree query that is
- * no query, throws, so the reach is never guessed.
+ * The rank, possession and administered-scope rules read what the grantee or
+ * the actor holds, and what could cap or deny the actor, across this reach (see
+ * `RankComparison`, `PossessionLimits` and `AdministeredScope`). A tree that
+ * cannot be read, or a subtree query that is no query, throws, so the reach is
+ * never guessed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

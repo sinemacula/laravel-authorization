@@ -66,7 +66,10 @@ use Tests\TestCase;
  * The scenarios are drawn from `AUTHZ_PARITY_SEED`, a random seed when it is
  * not set, and there are `AUTHZ_PARITY_RUNS` of them, 150 by default; a failure
  * names the seed and the scenario, so it can be replayed. Each scenario runs in
- * a transaction of its own, rolled back after it.
+ * a transaction of its own, rolled back after it. A sweep of more than one
+ * scenario must commit some operation, so it is never vacuous; one scenario
+ * replayed alone may refuse every operation it makes, as a scenario whose
+ * escalation is now refused does.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -114,7 +117,7 @@ final class EscalationPropertyTest extends TestCase
             });
         }
 
-        self::assertGreaterThan(0, $committed, "No operation committed; seed {$seed}.");
+        self::assertTrue($runs === 1 || $committed > 0, "No operation committed; seed {$seed}.");
     }
 
     /**
