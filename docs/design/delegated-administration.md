@@ -48,7 +48,9 @@ administration never grants anything it cannot justify.
    in a tenant is refused it. Who may change a grant row is therefore the scope the actor administers (N79): an actor
    whose authority for the action reaches the row's tenant, from a parent by authority over its subtree or from the
    platform, changes it from its own context, and one `revokeAll()` clears a grantee's rows across every tenant the
-   actor administers. Nothing is attached to one operation, so only the resource policies attached to the type
+   actor administers, and a change that may widen authority reaches no further than the actor administers: one whose
+   reach holds a tenant where the actor's authority for the action is denied or limited is `administration.scope`
+   (invariant 11). Nothing is attached to one operation, so only the resource policies attached to the type
    `authorization:operation` are read for it, under one cache entry every operation shares. Its attributes reach
    policies under `resource` through the package's `Administration\OperationAttributes` provider, which no configured
    provider replaces: the action, whether it only narrows, whether it changes nothing, the target, its name under its
@@ -99,10 +101,19 @@ administration never grants anything it cannot justify.
     weighs every change to an identity or a principal (`Administration\OperationGrantee`), in order, each further check
     decided as the actor through every stage up to the allow but never through the stage again
     (`Administration\FurtherChecks`):
-    - **scope**: a change that may widen authority decides its own action again in the grant's tenant, standing just
-      below it for a subtree grant (`TenantScope::within(..., isBelow: true)`), so only authority that itself reaches
-      below counts, and in the grant's application, so a grant to every application needs authority in every
-      application, or it is `administration.scope`; a platform-wide change already needs platform authority;
+    - **scope** (N79, `Administration\AdministeredScope`): the actor must administer the whole reach of a change that
+      may widen authority, or it is `administration.scope`. The change decides its own action again in the grant's
+      tenant, standing just below it for a subtree grant (`TenantScope::within(..., isBelow: true)`), so only authority
+      that itself reaches below counts, or at platform scope for a platform-wide grant, and in the grant's application,
+      so a grant to every application needs authority in every application. A decision at one node reads only what
+      applies there, so a reach wider than its node, platform-wide or reaching below, is also refused when anything
+      that denies or caps the actor anywhere in it could limit the action itself, read exactly as the possession route
+      reads a granted permission (`Administration\PossessionLimits`, bounded by `max_impact`): a deny statement whose
+      actions overlap it, a conditional one counting as a deny, a boundary or guardrail not allowing it whole, a session
+      cap not covering it, or a tree, row or document that cannot be read. An actor allowed `authorization:*` at the
+      platform but denied `authorization:role.grant` by a role it holds in one tenant administers no platform-wide
+      reach, and a parent's administrator denied an action in one child administers no subtree holding the child; a
+      node-only change is decided at its node alone;
     - **rank**: unless the grantee is the actor, the actor, ranked in the grant's own tenant and application, must be
       strictly senior to the most senior rank the grantee holds anywhere the change reaches (platform-wide, the
       grant's tenant and its ancestors, the tenants below for a grant reaching below, every tenant for a
@@ -176,11 +187,11 @@ administration never grants anything it cannot justify.
     - **the impact check** (`Administration\Impact`, `Administration\AffectedHolders`): every holder a change reaches,
       read set by set (direct grantees, grantees of the roles below, subjects a policy is attached to or bounds,
       principals a resource policy names), is weighed at once, at a fixed cost: the action across the definition's whole
-      reach, the actor strictly senior to every holder but itself (`RankComparison::rankAcrossAll()`), and
-      `administration.self` for a change reaching the actor; more than `authorization.administration.max_impact`
-      distinct holders (1000 by default, validated at boot) is unprovable, never approximated: each set asks for its
-      distinct holders, at most one more than the limit, whatever the sets before it hold, so a holder named twice never
-      hides one not read yet;
+      reach, by the same administered-scope rule as a grant (`Administration\AdministeredScope`), the actor strictly
+      senior to every holder but itself (`RankComparison::rankAcrossAll()`), and `administration.self` for a change
+      reaching the actor; more than `authorization.administration.max_impact` distinct holders (1000 by default,
+      validated at boot) is unprovable, never approximated: each set asks for its distinct holders, at most one more
+      than the limit, whatever the sets before it hold, so a holder named twice never hides one not read yet;
     - **boundaries**: a boundary that only adds or tightens a cap narrows; replacing one with a wider boundary, and
       removing one, cannot in general be bounded, so the package takes one fail-closed rule: each is unprovable unless
       the actor is also allowed `authorization:administration.unbounded` on the same operation, after the scope, rank

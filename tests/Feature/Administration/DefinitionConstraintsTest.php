@@ -8,9 +8,12 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\DefinitionConstraints;
 use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
+use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -412,7 +415,7 @@ final class DefinitionConstraintsTest extends TestCase
         }
 
         $decide ??= static fn (): Decision => Decision::allow(DecisionStage::ALLOW);
-        $checks = new FurtherChecks(new Subject($actor, $actor), $decide, static fn (): null => null, $from);
+        $checks = new FurtherChecks(new Subject($actor, $actor), $decide, static fn (): CheckSources => self::noSources(), $from);
 
         return DefinitionConstraints::refusal($operation, $operation->toResourceReference(), $checks);
     }
@@ -472,5 +475,16 @@ final class DefinitionConstraintsTest extends TestCase
     private static function grants(): GrantService
     {
         return app(GrantService::class);
+    }
+
+    /**
+     * Return the sources of a check that reads no policy, boundary, guardrail
+     * or session cap.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckSources
+     */
+    private static function noSources(): CheckSources
+    {
+        return new CheckSources([], null, [], new CheckContext, static fn (): ?string => null, new SessionCaps);
     }
 }

@@ -72,7 +72,10 @@ final class DelegatedGrantQueryBudgetTest extends TestCase
 
     /**
      * Store resource policies attached to records of other tenants, and
-     * guardrails set on other tenants, none of which reaches the grants.
+     * guardrails set on other tenants, none of which limits the grants: each
+     * denies an action they never name, and each guardrail allows the rest, so
+     * a platform-wide grant, whose reach holds those tenants, is still
+     * administered there.
      *
      * @param  string  $batch
      * @return void
@@ -80,13 +83,18 @@ final class DelegatedGrantQueryBudgetTest extends TestCase
     private static function storeUnrelated(string $batch): void
     {
         for ($index = 0; $index < self::UNRELATED; $index++) {
-            $policy = Policy::create(['name' => "unrelated-{$batch}-{$index}", 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['billing:refund']]]]]);
+            $deny   = ['effect' => 'deny', 'actions' => ['billing:refund']];
+            $policy = Policy::create(['name' => "unrelated-{$batch}-{$index}", 'document' => ['statements' => [$deny]]]);
+            $allow  = ['effect' => 'allow', 'actions' => ['*']];
+            $cap    = Policy::create(['name' => "unrelated-cap-{$batch}-{$index}", 'document' => ['statements' => [$allow, $deny]]]);
             $tenant = ['tenant_type' => 'tenant', 'tenant_id' => "other-{$batch}-{$index}"];
 
-            $row = ['policy_id' => $policy->id, ...$tenant, 'created_at' => now(), 'updated_at' => now()];
+            $row = [...$tenant, 'created_at' => now(), 'updated_at' => now()];
 
-            DB::table('resource_policies')->insert([...$row, 'resource_type' => 'invoices', 'resource_id' => (string) $index, 'include_subtree' => true]);
-            DB::table('guardrails')->insert($row);
+            $record = ['resource_type' => 'invoices', 'resource_id' => (string) $index, 'include_subtree' => true];
+
+            DB::table('resource_policies')->insert([...$row, 'policy_id' => $policy->id, ...$record]);
+            DB::table('guardrails')->insert([...$row, 'policy_id' => $cap->id]);
         }
     }
 

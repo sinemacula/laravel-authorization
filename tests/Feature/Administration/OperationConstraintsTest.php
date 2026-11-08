@@ -12,11 +12,14 @@ use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\OperationConstraints;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
+use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
+use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -215,6 +218,43 @@ final class OperationConstraintsTest extends TestCase
 
         self::assertSame([PackagePermissions::POLICY_ATTACH, null, false, null], $this->asked[2]);
         self::assertCount(3, $this->asked);
+    }
+
+    /**
+     * The administered scope is the whole reach (N79): an actor allowed
+     * `authorization:*` at the platform, but holding a role in one tenant whose
+     * policy denies `authorization:role.grant`, is refused a platform-wide role
+     * grant, and a subtree grant from a parent of that tenant, as out of scope,
+     * though each is allowed at the node it is decided at; a node-only grant in
+     * the parent reaches no further than its decision, so it is allowed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAWiderReachIsRefusedWhereTheActionIsDeniedInATenantItReaches(): void
+    {
+        $admin  = self::senior('admin');
+        $parent = StubTenant::query()->create(['id' => 'parent', 'name' => 'parent']);
+        $denied = StubTenant::query()->create(['id' => 't0', 'name' => 't0']);
+        $named  = Role::query()->create(['name' => 'named', 'rank' => 8]);
+        $role   = Role::query()->create(['name' => 'restricted', 'rank' => 8]);
+        $policy = Policy::create(['name' => 'restricting', 'document' => ['statements' => [['effect' => 'deny', 'actions' => [PackagePermissions::ROLE_GRANT]]]]]);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($denied), Reference::of($parent)));
+
+        $admin->givePermission(Permission::create(['name' => 'authorization:*']));
+
+        GrantService::instance()?->attachPolicy($role, $policy);
+        GrantService::instance()?->grantRole($admin, $role, tenant: $denied);
+
+        $grantee = self::user('u1');
+        $check   = static fn (GrantScope $scope): Decision => ActingContext::for($admin)->check(OperationResource::grant(PackagePermissions::ROLE_GRANT, $grantee, $named, $scope));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, $check(GrantScope::platform())->reason);
+        self::assertSame(DecisionStage::ADMINISTRATION, $check(GrantScope::platform())->stage);
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, $check(new GrantScope(Reference::of($parent)))->reason);
+        self::assertTrue($check(new GrantScope(Reference::of($parent), null, false))->isAllowed());
     }
 
     /**
@@ -606,7 +646,7 @@ final class OperationConstraintsTest extends TestCase
             return $decide($action, $on);
         };
 
-        return new FurtherChecks($actor instanceof Subject ? $actor : new Subject($actor, $actor), $record, static fn (): null => null);
+        return new FurtherChecks($actor instanceof Subject ? $actor : new Subject($actor, $actor), $record, static fn (): CheckSources => self::noSources());
     }
 
     /**
@@ -714,5 +754,16 @@ final class OperationConstraintsTest extends TestCase
         $permission = Permission::query()->firstOrCreate(['name' => 'posts:edit']);
 
         return OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $grantee, $permission, GrantScope::platform());
+    }
+
+    /**
+     * Return the sources of a check that reads no policy, boundary, guardrail
+     * or session cap.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckSources
+     */
+    private static function noSources(): CheckSources
+    {
+        return new CheckSources([], null, [], new CheckContext, static fn (): ?string => null, new SessionCaps);
     }
 }

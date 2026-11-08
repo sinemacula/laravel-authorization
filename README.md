@@ -1249,10 +1249,11 @@ decided at platform scope, where only a platform-wide grant of the action counts
 in a tenant is refused it. So who may change a grant row is the scope the actor administers (N79): an actor whose
 authority for the action reaches the row's tenant, from a parent tenant by authority over its subtree or from the
 platform, changes the row from its own context, and one `revokeAll()` clears a grantee's rows across every tenant the
-actor administers; a parent's node-only authority reaches no child's row, and a tenant's no platform-wide row. A screen
-that builds the same resource through the same named constructor (`OperationResource::grant()`, `revoke()`,
-`unchanged()`, `definition()` or `rewrite()`) and checks it with `$actor->check($resource)` gets the decision the
-service makes.
+actor administers; a parent's node-only authority reaches no child's row, and a tenant's no platform-wide row. A change
+that may widen authority reaches no further than the actor administers, so one whose reach holds a tenant where the
+actor's authority for the action is denied or limited is refused (see *Administered scope* below). A screen that builds
+the same resource through the same named constructor (`OperationResource::grant()`, `revoke()`, `unchanged()`,
+`definition()` or `rewrite()`) and checks it with `$actor->check($resource)` gets the decision the service makes.
 Nothing is ever attached to one operation, so a check on it reads only the resource policies attached to the type
 `authorization:operation`. The resource offers what the change names to your policies, under `resource`:
 
@@ -1288,11 +1289,20 @@ weighs the operation's constraints, in this order, and can only refuse:
 
 - **Impersonation.** A change made while impersonating is refused as `administration.impersonating` unless the actor is
   also allowed `authorization:administration.impersonated` on the same operation.
-- **Administered scope.** A change that may widen authority is decided again across its whole reach, and refused as
-  `administration.scope` unless it is allowed there: in the grant's tenant, standing just below it for a grant that
-  reaches the tenants below, so only authority that itself reaches below counts (node-only authority cannot issue a
-  subtree grant), and in the grant's application, so a grant to every application needs authority unrestricted by
-  application. A platform-wide grant is decided at platform scope by its own decision, so it needs platform authority.
+- **Administered scope** (N79). The actor must administer the whole reach of a change that may widen authority, or the
+  change is refused as `administration.scope`. Its action is decided again in the grant's tenant, standing just below
+  it for a grant that reaches the tenants below, so only authority that itself reaches below counts (node-only authority
+  cannot issue a subtree grant), or at platform scope for a platform-wide grant, and in the grant's application, so a
+  grant to every application needs authority unrestricted by application. A decision at one node reads only what
+  applies there, so a reach wider than its node, a platform-wide grant or one reaching the tenants below, is also
+  refused when anything of the actor's anywhere in it could deny or limit the action, read as the possession route reads
+  it: a deny statement whose actions overlap it, conditional or not, a boundary or guardrail that does not allow it
+  whole, a session or credential cap that does not cover it, or a tree, row or document that cannot be read. So an actor
+  allowed `authorization:*` at the platform, but denied `authorization:role.grant` by a role it holds in one tenant,
+  cannot grant a role platform-wide, and a parent's administrator denied an action in one child cannot take it across
+  the parent's subtree, though a node-only change in the parent is still decided there alone. The same rule weighs the
+  reach of a definition change and of a resource-policy attachment in the impact check, and every widening change a
+  platform-scope `revokeAll()` or `removeAll()` decides.
 - **Rank** (N76). Every change to an identity or a principal, a revocation, a sync, `revokeAll()`, a boundary change and
   a call that changes nothing included, is refused as `administration.rank` unless the actor is strictly senior to the
   grantee, and as `administration.rank_uncomparable` when either side's rank, or the reach, cannot be read. The actor is

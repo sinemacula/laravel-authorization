@@ -8,9 +8,12 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Administration\RoleParent;
+use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
+use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -99,7 +102,8 @@ final class RoleParentTest extends TestCase
 
     /**
      * Return why giving the role the parent is refused, the actor ranked most
-     * senior and every further check allowed, no source read.
+     * senior and every further check allowed, the sources of the operation's
+     * own action read, but none of what it hands out.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  mixed  $parent
@@ -111,7 +115,7 @@ final class RoleParentTest extends TestCase
     {
         $actor     = self::actor();
         $operation = OperationResource::definition(PackagePermissions::ROLE_PARENT_SET, $role, ['parent' => \is_string($parent) ? $parent : null]);
-        $checks    = new FurtherChecks(new Subject($actor, $actor), static fn (): Decision => Decision::allow(DecisionStage::ALLOW), static fn (): null => null);
+        $checks    = new FurtherChecks(new Subject($actor, $actor), static fn (): Decision => Decision::allow(DecisionStage::ALLOW), self::actionSources(...));
 
         return RoleParent::refusal($operation, $role, $parent, $operation->toResourceReference(), $checks);
     }
@@ -142,5 +146,18 @@ final class RoleParentTest extends TestCase
     private static function grants(): GrantService
     {
         return app(GrantService::class);
+    }
+
+    /**
+     * Return the sources of a check of the action: for an administration
+     * action, sources that read no policy, boundary, guardrail or session cap;
+     * for any other, none, as if a document among them could not be read.
+     *
+     * @param  string  $action
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckSources|null
+     */
+    private static function actionSources(string $action): ?CheckSources
+    {
+        return \str_starts_with($action, 'authorization:') ? new CheckSources([], null, [], new CheckContext, static fn (): ?string => null, new SessionCaps) : null;
     }
 }
