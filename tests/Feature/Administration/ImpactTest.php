@@ -9,10 +9,14 @@ use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\Impact;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
+use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -59,7 +63,8 @@ final class ImpactTest extends TestCase
     /**
      * The operation's action is decided again across the whole reach, standing
      * below the owner's tenant, in every application, and refused as out of
-     * scope when it is not allowed there.
+     * scope when it is not allowed there, or when the actor is denied it in a
+     * tenant the reach holds.
      *
      * @return void
      *
@@ -79,13 +84,22 @@ final class ImpactTest extends TestCase
         self::assertNull(Impact::refusal(self::operation(), self::resource(), Impact::reachOf(null), $holders, $allowing));
         self::assertSame([[PackagePermissions::PERMISSION_GRANT, null, false]], \array_slice($this->asked(), 1));
         self::assertEquals(new GrantScope($tenant, null, true), Impact::reachOf($tenant));
+
+        $restricted = Role::query()->create(['name' => 'restricted']);
+        $deny       = ['effect' => 'deny', 'actions' => [PackagePermissions::PERMISSION_GRANT]];
+
+        self::grants()->attachPolicy($restricted, Policy::create(['name' => 'restricting', 'document' => ['statements' => [$deny]]]));
+        self::grants()->grantRole(self::user('admin'), $restricted, tenant: $tenant);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, Impact::refusal(self::operation(), self::resource(), Impact::reachOf(null), $holders, $allowing));
     }
 
     /**
      * The actor must be strictly senior to every holder but itself anywhere the
      * reach goes, and to a rank the change gives them; a holder or an actor
-     * whose rank cannot be read, or a reach whose tenants cannot be read,
-     * cannot be compared; with rank turned off, rank stands in nobody's way.
+     * whose rank cannot be read cannot be compared, and a reach whose tenants
+     * cannot be read is refused by the scope rule before rank is weighed; with
+     * rank turned off, rank stands in nobody's way.
      *
      * @return void
      *
@@ -119,7 +133,7 @@ final class ImpactTest extends TestCase
 
         $unreadable = Impact::reachOf(new Reference('tenant', 'a'));
 
-        self::assertSame(DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE, Impact::refusal(self::operation(), self::resource(), $unreadable, [$junior], $checks));
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, Impact::refusal(self::operation(), self::resource(), $unreadable, [$junior], $checks));
 
         config(['authorization.rank.enabled' => false]);
 
@@ -234,7 +248,7 @@ final class ImpactTest extends TestCase
             return $decide($action, $on);
         };
 
-        return new FurtherChecks($actor instanceof Subject ? $actor : new Subject($actor, $actor), $record, static fn (): null => null);
+        return new FurtherChecks($actor instanceof Subject ? $actor : new Subject($actor, $actor), $record, static fn (): CheckSources => self::noSources());
     }
 
     /**
@@ -299,5 +313,16 @@ final class ImpactTest extends TestCase
     private static function grants(): GrantService
     {
         return app(GrantService::class);
+    }
+
+    /**
+     * Return the sources of a check that reads no policy, boundary, guardrail
+     * or session cap.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckSources
+     */
+    private static function noSources(): CheckSources
+    {
+        return new CheckSources([], null, [], new CheckContext, static fn (): ?string => null, new SessionCaps);
     }
 }

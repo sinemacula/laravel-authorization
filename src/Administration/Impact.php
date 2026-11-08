@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Administration;
 
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
-use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -23,11 +22,13 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * - **bounded**: more holders than `authorization.administration.max_impact`
  *   allow, or some that cannot be read, refuse it as
  *   `administration.unprovable`, never approximated;
- * - **scope**: the operation's own action is decided again across the whole
- *   reach the holders' grants can have, the definition's owner and every tenant
- *   below it in every application, or the platform for a platform definition,
+ * - **scope** (N79): the actor must administer the whole reach the holders'
+ *   grants can have, the definition's owner and every tenant below it in every
+ *   application, or the platform for a platform definition (see
+ *   `AdministeredScope`): the operation's own action decided again there,
  *   standing just below the owner, so only authority that itself reaches below
- *   counts, or it is refused as `administration.scope`;
+ *   counts, and nothing that denies or caps the actor anywhere in the reach
+ *   could limit it, or it is refused as `administration.scope`;
  * - **rank** (N76): the actor, ranked in the operation's tenant, must be
  *   strictly senior to the most senior rank any holder but itself holds
  *   anywhere in that reach (see `RankComparison::rankAcrossAll()`), and to a
@@ -120,8 +121,8 @@ final class Impact
     }
 
     /**
-     * Return `administration.scope` when the operation's action is not allowed
-     * across the whole reach.
+     * Return `administration.scope` when the actor does not administer the
+     * whole reach (see `AdministeredScope`).
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
@@ -131,10 +132,7 @@ final class Impact
      */
     private static function scope(OperationResource $operation, ResourceReference $resource, GrantScope $reach, FurtherChecks $checks): ?DecisionReason
     {
-        $decide = static fn (): bool => $checks->decide($operation->action, $resource)->isAllowed();
-        $below  = $reach->tenant !== null && $reach->includeSubtree;
-
-        return TenantScope::within($reach->tenant, $reach->application, $decide, $below) ? null : DecisionReason::ADMINISTRATION_SCOPE;
+        return AdministeredScope::refusal($operation, $resource, $reach, $checks);
     }
 
     /**

@@ -282,6 +282,75 @@ final class ConflictRetriesTest extends TestCase
     }
 
     /**
+     * Each try is handed the conflict the try before it failed with, the first
+     * none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEachTryIsHandedTheConflictBeforeIt(): void
+    {
+        /** @var \ArrayObject<int, \Throwable|null> $handed */
+        $handed   = new \ArrayObject;
+        $conflict = DependencyChangedException::rows('roles');
+
+        ConflictRetries::run(static function (?\Throwable $previous) use ($handed, $conflict): string {
+            $handed->append($previous);
+
+            return $handed->count() < 3 ? throw $conflict : 'done';
+        });
+
+        self::assertSame([null, $conflict, $conflict], $handed->getArrayCopy());
+    }
+
+    /**
+     * A grant that widens with no hook run for it is tried again when the
+     * operation opened the outermost transaction; inside one the application
+     * opened, where the try's locks stay held, it is never tried again but
+     * thrown as `TransactionConflictException`, keeping the conflict; any other
+     * conflict the pins find is still tried again there.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAWideningInsideAnOpenTransactionIsThrownForTheApplication(): void
+    {
+        $widening = DependencyChangedException::widening();
+        $tries    = new \ArrayObject;
+        $caught   = null;
+
+        try {
+            ConflictRetries::run(static function () use ($tries, $widening): never {
+                $tries->append(true);
+
+                throw $widening;
+            });
+        } catch (TransactionConflictException $caught) {
+            // Asserted below.
+        }
+
+        self::assertCount(1, $tries);
+        self::assertSame($widening, $caught->getPrevious());
+
+        $other = new \ArrayObject;
+
+        self::assertSame(2, ConflictRetries::run(static fn (): int => self::conflictUntil($other, 2)));
+
+        $this->useAnAuthorizationConnection();
+
+        $tries = new \ArrayObject;
+
+        self::assertSame('done', ConflictRetries::run(static function () use ($tries, $widening): string {
+            $tries->append(true);
+
+            return $tries->count() < 2 ? throw $widening : 'done';
+        }));
+        self::assertCount(2, $tries);
+    }
+
+    /**
      * A concurrency error is told by Laravel's detector, or by the one the
      * application binds: a serialisation failure and a deadlock are, anything
      * else is not.

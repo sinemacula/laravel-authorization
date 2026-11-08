@@ -123,6 +123,10 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   (`outside`), or that cannot be told (`unknown`), and whether a principal holds a grant that applies in a tenant. It
   returns only the answer, in one query whatever the number of grants or the depth of the tree, and is neither
   membership nor authorisation.
+- **Grant hooks**: before a grant that widens an identity's scope is written (to the identity itself, platform-wide,
+  or in a tenant its principals held nothing in), the grant service calls the bound hook, before the package takes any
+  lock, for trusted and delegated calls alike. A hook may only refuse, by throwing, and every management service refuses
+  while it runs.
 - **A permission catalogue in code**: enums and providers declare each permission with a description, a category and
   its guards, and `authorization:sync` writes them to the database on deploy, reporting stale rows rather than
   deleting them. Booting never touches the database.
@@ -1246,10 +1250,11 @@ decided at platform scope, where only a platform-wide grant of the action counts
 in a tenant is refused it. So who may change a grant row is the scope the actor administers (N79): an actor whose
 authority for the action reaches the row's tenant, from a parent tenant by authority over its subtree or from the
 platform, changes the row from its own context, and one `revokeAll()` clears a grantee's rows across every tenant the
-actor administers; a parent's node-only authority reaches no child's row, and a tenant's no platform-wide row. A screen
-that builds the same resource through the same named constructor (`OperationResource::grant()`, `revoke()`,
-`unchanged()`, `definition()` or `rewrite()`) and checks it with `$actor->check($resource)` gets the decision the
-service makes.
+actor administers; a parent's node-only authority reaches no child's row, and a tenant's no platform-wide row. A change
+that may widen authority reaches no further than the actor administers, so one whose reach holds a tenant where the
+actor's authority for the action is denied or limited is refused (see *Administered scope* below). A screen that builds
+the same resource through the same named constructor (`OperationResource::grant()`, `revoke()`, `unchanged()`,
+`definition()` or `rewrite()`) and checks it with `$actor->check($resource)` gets the decision the service makes.
 Nothing is ever attached to one operation, so a check on it reads only the resource policies attached to the type
 `authorization:operation`. The resource offers what the change names to your policies, under `resource`:
 
@@ -1285,11 +1290,20 @@ weighs the operation's constraints, in this order, and can only refuse:
 
 - **Impersonation.** A change made while impersonating is refused as `administration.impersonating` unless the actor is
   also allowed `authorization:administration.impersonated` on the same operation.
-- **Administered scope.** A change that may widen authority is decided again across its whole reach, and refused as
-  `administration.scope` unless it is allowed there: in the grant's tenant, standing just below it for a grant that
-  reaches the tenants below, so only authority that itself reaches below counts (node-only authority cannot issue a
-  subtree grant), and in the grant's application, so a grant to every application needs authority unrestricted by
-  application. A platform-wide grant is decided at platform scope by its own decision, so it needs platform authority.
+- **Administered scope** (N79). The actor must administer the whole reach of a change that may widen authority, or the
+  change is refused as `administration.scope`. Its action is decided again in the grant's tenant, standing just below
+  it for a grant that reaches the tenants below, so only authority that itself reaches below counts (node-only authority
+  cannot issue a subtree grant), or at platform scope for a platform-wide grant, and in the grant's application, so a
+  grant to every application needs authority unrestricted by application. A decision at one node reads only what
+  applies there, so a reach wider than its node, a platform-wide grant or one reaching the tenants below, is also
+  refused when anything of the actor's anywhere in it could deny or limit the action, read as the possession route reads
+  it: a deny statement whose actions overlap it, conditional or not, a boundary or guardrail that does not allow it
+  whole, a session or credential cap that does not cover it, or a tree, row or document that cannot be read. So an actor
+  allowed `authorization:*` at the platform, but denied `authorization:role.grant` by a role it holds in one tenant,
+  cannot grant a role platform-wide, and a parent's administrator denied an action in one child cannot take it across
+  the parent's subtree, though a node-only change in the parent is still decided there alone. The same rule weighs the
+  reach of a definition change and of a resource-policy attachment in the impact check, and every widening change a
+  platform-scope `revokeAll()` or `removeAll()` decides.
 - **Rank** (N76). Every change to an identity or a principal, a revocation, a sync, `revokeAll()`, a boundary change and
   a call that changes nothing included, is refused as `administration.rank` unless the actor is strictly senior to the
   grantee, and as `administration.rank_uncomparable` when either side's rank, or the reach, cannot be read. The actor is
@@ -1491,15 +1505,17 @@ A conflict found this way is tried again; so is a deadlock, serialisation failur
 the database refuses the call with (as Laravel's concurrency error detector tells them), when the call opened the
 transaction. A call is tried again at most `authorization.administration.retries` times (2 by default), so it runs at
 most that many times and once more; once every try has conflicted, it is refused with `AuthorizationException` as
-`administration.conflict`, at the `administration` stage, writing nothing, and the refusal is recorded and reported
-like any other (see **Audit**). Inside a transaction of your own, a database concurrency error is never tried again,
-since the database has rolled back, or needs to restart, your whole transaction: it is thrown as
+`administration.conflict`, at the `administration` stage, writing nothing, and the refusal is recorded and reported like
+any other (see **Audit**). Inside a transaction of your own, a database concurrency error is never tried again, since
+the database has rolled back, or needs to restart, your whole transaction: it is thrown as
 `TransactionConflictException`, whose code is `40001` and whose previous exception is the database's, so restart your
 transaction, for example with `DB::transaction($callback, attempts: 3)`, which tells it as a concurrency error. A
 changed dependency found by the second read is tried again there only back to the call's savepoint, and on MySQL
 (repeatable read) a snapshot your transaction already took is kept across that rollback, so the call can conflict on
 every try and be refused as `administration.conflict`: run delegated calls outside your own transaction, or before its
-first read.
+first read. A rollback to a savepoint also keeps the row locks the failed try took on MySQL, so a grant whose retry
+there would call its grant hook again is thrown as `TransactionConflictException` instead (see
+[Grant hooks](#grant-hooks)).
 
 The order holds within a call, but it cannot stop two calls that cross from deadlocking: one call's actor may be the
 other's target (A administers B while B administers A), or one's held role the other's granted one, so each holds a
@@ -1511,7 +1527,11 @@ PostgreSQL and MySQL hold the locks until the transaction ends, so a concurrent 
 call. SQLite serialises writers and compiles no row lock, so there the second read alone catches a change. The package
 takes no lock until the service first reads what the call changes, and the call's work starts inside its transaction
 before anything is read or locked, so a scope-widening grant hook (AUTHZ-11.3) run first in that work runs before every
-lock. A trusted call is unchanged: it runs once, with no extra lock and no retry.
+lock. A trusted call keeps its cost: it takes no extra lock and decides nothing, and with no grant hook configured it
+runs once, with no retry. With one, a trusted grant is tried again in the same way only when a grant it is about to
+write now widens an identity's scope with no hook run for it, up to `administration.retries` times, then refused as
+`administration.conflict`; inside your own transaction that conflict is thrown as `TransactionConflictException` (see
+[Grant hooks](#grant-hooks)).
 
 **Trusted surfaces.** Each of these is trusted system work when it is used without an actor: nothing is decided, so use
 it that way only from your own code, never as an endpoint for user-controlled administration:
@@ -2660,6 +2680,166 @@ grant, however many grants and principals there are and however deep the tree, p
 directory's; only a subtree query that fails as it runs costs a second read, of the platform-wide grants. Nothing is
 cached. See [Grant scope](docs/design/grant-scope.md) for the design.
 
+### Grant hooks
+
+Before a grant that widens an identity's scope is written, the grant service calls a grant hook the application binds
+(AUTHZ-11.3), inside the call's transaction and before the package takes any lock of its own for the call. The hook
+may refuse by throwing. Under the suite, `laravel-iam` binds it to `laravel-sso`'s scope widening, so a grant can never
+quietly take an SSO-linked identity outside the tenant its connection allows.
+
+**What widens.** The grants of a call are classified against what the identity already holds: its own grants and those
+of every principal the [identity directory](#grant-scope-query) lists, live, in every application. A grant widens the
+identity's scope when:
+
+- its grantee is the identity itself, since it holds across every principal of it (`WideningReason::IDENTITY`);
+- it is platform-wide (`PLATFORM`);
+- it is in a tenant where no grant of the identity or its principals applied before, which covers a new tenant, a
+  sibling of one held and an ancestor of one held (`NEW_TENANT`);
+- it reaches below its tenant, where no grant of theirs reached below before (`NEW_SUBTREE`).
+
+These do not widen: a permission added to a role the identity holds in one tenant (a change to the role, not to anyone's
+scope), a grant in a tenant another principal of the identity already holds a grant in, a grant the grantee already
+holds unchanged, and one that only shortens a grant held. A re-arm of an expired grant, an extension of a live one and
+a wider reach are classified like a new grant. A grant to a role widens no identity's scope.
+
+**When in doubt, the hook is called.** An incomplete directory (`INCOMPLETE_DIRECTORY`) or a tenant tree that cannot be
+read (`UNREADABLE_TREE`) makes a grant widen. A grant whose identity cannot be resolved, because the grantee's model
+cannot be found or the subject resolver's `forUser()` throws or names no identity for it, is refused with
+`UnresolvableRecipientException`, never written with its hook skipped. The package resolves the identity through the
+subject resolver: `forUser($grantee)` names the identity, and the grantee is either that identity or the subject it
+was given.
+
+**The contract.** A hook implements `SineMacula\Laravel\Authorization\Contracts\GrantHook`, whose one method is handed
+a `GrantWidening`, an immutable value with no model and no mutable date in it: the operation's id and whether the call
+is trusted, the actor, the actor's identity and any impersonator, the identity whose scope widens and the grantee the
+rows are written for (`isToIdentity()` tells them apart), each widening grant as a `ProposedGrant` (the action, the
+target by reference, the tenant, the application, the reach and the expiry as an immutable UTC instant, with its
+reasons), every reason of the call once, and when the proposal was observed:
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\GrantHook;
+use SineMacula\Laravel\Authorization\Exceptions\GrantRefusedException;
+use SineMacula\Laravel\Authorization\Hooks\GrantWidening;
+
+final class ScopeWideningHook implements GrantHook
+{
+    public function __construct(private readonly ConnectionLinks $links) {}
+
+    public function beforeWidening(GrantWidening $widening): void
+    {
+        if (! $this->links->allowsWidening($widening->identity, $widening->changes)) {
+            throw new GrantRefusedException('This identity is linked to a tenant it may not leave.');
+        }
+    }
+}
+```
+
+**One binding, an ordered composite.** Exactly one hook is bound. The default is `Hooks\GrantHooks`, the composite of
+the classes `grant_hooks` lists in `config/authorization.php`, each built from the container and run in the order
+listed; the first that throws stops the rest. The list is validated at boot: each entry must name a class implementing
+the contract, once. With none listed the composite does nothing, and then nothing is classified at all. An application
+may bind its own hook on the contract instead. There is no way to add a hook at run time.
+
+```php
+'grant_hooks' => [
+    App\Authorization\ScopeWideningHook::class,
+],
+```
+
+**Veto only.** A hook may refuse by throwing `GrantRefusedException`, or any other exception: the whole call rolls back,
+nothing is written, no change event is dispatched and the call is not tried again. A hook's refusal is never reported as
+a denial of the package's: it is thrown on as the hook threw it. The one exception is a database concurrency error
+raised by the hook's own preparation, a deadlock or a serialisation failure, say: it is handled as any concurrency error
+is (see [Delegated administration](#delegated-administration)), so a call that opened the transaction tries it again,
+hook included, and once no tries are left refuses it as `administration.conflict`, and inside your own transaction it is
+thrown as `TransactionConflictException`. Returning lets the call go on and decides nothing: a delegated call is still
+decided after the hook, and refused when it should be. A hook never changes the grant. While a hook runs, every
+management service of the package refuses with `GrantHookRecursionException`, so a hook cannot grant, revoke or edit
+anything through the package's services, trusted or delegated; read-only queries, `GrantScopeQuery` among them, stay
+allowed. A raw Eloquent write on the package's models, pivots or tables is not refused: it stays the unguarded trusted
+surface it always is (see **Raw writes** below), and belongs in no hook. A hook may do the application's own
+transactional preparation on the package's connection, which rolls back with the grant.
+
+**Before any lock, and again on a retry.** The hook runs for trusted and delegated calls alike, before the package takes
+any lock for the call. A batch, a sync, calls it once with every widening grant, before any lock and any write. Only
+then does the call lock, read its records again, rebuild what it writes and decide it. Last, after every other lock, it
+classifies what it writes again, reading under a lock the grantee's own rows and the grants of the identity and its
+principals that the hook phase relied on: a locking read sees the latest committed rows, whatever snapshot the
+transaction reads otherwise, and holds them until the call commits, so a revocation committed meanwhile is seen, and one
+made later waits for the call. If what it writes now widens with no hook run for it, because a grant the classification
+relied on was revoked meanwhile, say, the try is a conflict and the whole call is tried again from the start, up to
+`administration.retries` times, then refused as `administration.conflict`. A hook is never called under the package's
+locks. So a hook can run more than once for one call: nothing that leaves the transaction belongs in it, no email, no
+remote call and no queued work. Use the events dispatched after commit (see [Listening to events](#listening-to-events))
+for those. Only the application's own answers are read as they stand, the identity directory's list of principals and
+the tenant tree: a change to those, made concurrently, is the application's to serialise.
+
+**Nested calls and outer transactions.** A grant made inside another management call's work, from a model observer or a
+listener that call's own writes fire, may come after that call took the package's locks, so its hook cannot run before
+them; one that widens is refused with `NestedGrantException`, never written with its hook skipped. Inside a transaction
+of your own, a try that conflicts is rolled back only to its savepoint, and on MySQL the row locks it took stay held
+until your transaction ends, so a grant is never tried again there with its hook: a grant that now widens with no hook
+run for it, and a retry whose grant would call its hook again after another conflict, are thrown as
+`TransactionConflictException`, whose previous exception is the conflict. Restart your transaction, for example with
+`DB::transaction($callback, attempts: 3)`. Grant calls made one after another inside a transaction of your own each run
+their hooks before their own locks, but the rows an earlier call locked stay locked until your transaction ends. To keep
+every hook ahead of every lock the package takes in the transaction, make the grant calls first, before anything else
+that takes the package's locks. `authorization:migrate-spatie` does so: it commits the roles, permissions and roles'
+permissions first, then makes each grant as a call of its own, so run it outside any transaction of yours; a grant a
+hook refuses stops the import, with what was written before it kept.
+
+**What the hook does not cover.**
+
+- **Memberships.** Creating or accepting a membership widens an identity's scope too, but memberships are not this
+  package's (AUTHZ-13.9): the application, or `laravel-iam`, calls the same hook on its own membership path, inside the
+  membership's transaction:
+
+  ```php
+  use Illuminate\Support\Facades\DB;
+  use Illuminate\Support\Str;
+  use SineMacula\Laravel\Authorization\Contracts\GrantHook;
+  use SineMacula\Laravel\Authorization\Enums\WideningReason;
+  use SineMacula\Laravel\Authorization\Hooks\GrantWidening;
+  use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
+  use SineMacula\Laravel\Authorization\Support\Reference;
+
+  DB::transaction(function () use ($person, $principal, $tenant, $membership) {
+      // Saved first, so the hook is handed its key; a refusal rolls it back.
+      $membership->save();
+
+      app(GrantHook::class)->beforeWidening(new GrantWidening(
+          operationId: (string) Str::uuid(),
+          isTrusted: true,
+          actor: null,
+          actorIdentity: null,
+          impersonator: null,
+          identity: Reference::of($person),
+          grantee: Reference::of($principal),
+          changes: [new ProposedGrant(
+              action: 'membership.create',
+              target: Reference::of($membership),
+              tenant: Reference::of($tenant),
+              application: null,
+              includeSubtree: false,
+              expiresAt: null,
+              reasons: [WideningReason::MEMBERSHIP],
+          )],
+          observedAt: now('UTC')->toImmutable(),
+      ));
+  });
+  ```
+
+  The membership is saved before the hook is called, inside the same transaction, so the hook sees its real key and a
+  refusal rolls the save back with everything else.
+
+- **Raw writes.** A raw Eloquent write on the package's models, pivots or tables is a trusted integration surface, as
+  it is for delegated administration, and runs no hook. Only the grant service's calls, and everything built on them
+  (the trait helpers and the console commands), are guaranteed to.
+- **Break-glass.** The emergency grant (AUTHZ-11.7) will grant through the same path, so its hook is never skipped
+  either: `Hooks\WideningPhase` is the one call point every grant goes through.
+
+See [Grant scope](docs/design/grant-scope.md) for the design.
+
 ### Query scoping
 
 `whereAuthorized()` restricts an Eloquent query to the rows the subject may take an action on, alongside the
@@ -3232,7 +3412,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Query scoping](docs/design/query-scoping.md)                                               | `whereAuthorized()`, what it compiles and what it refuses     |
 | [Bulk checks](docs/design/bulk-checks.md)                                                   | `checkMany()`, what it reads once and in bulk, and its events |
 | [Effective permissions](docs/design/effective-permissions.md)                               | `permissionsFor()`, its scope, exactness and introspection    |
-| [Grant scope](docs/design/grant-scope.md)                                                   | The identity directory, `forIdentity()` and `hasGrantIn()`    |
+| [Grant scope](docs/design/grant-scope.md)                                                   | The identity directory, the scope query and the grant hooks   |
 
 ## Requirements
 

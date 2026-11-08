@@ -4,18 +4,24 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Support;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Enums\GrantScopeStatus;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Support\GrantRoots;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
@@ -37,7 +43,7 @@ use Tests\TestCase;
 #[CoversClass(GrantRoots::class)]
 final class GrantRootsTest extends TestCase
 {
-    use UsesAnAuthorizationConnection;
+    use RecordsRowLocks, UsesAnAuthorizationConnection;
 
     /**
      * Roots are classified against a tenant: within at the tenant, outside at
@@ -292,6 +298,103 @@ final class GrantRootsTest extends TestCase
         self::assertSame(0, $connection->transactionLevel());
         self::assertSame(GrantScopeStatus::OUTSIDE, (new GrantRoots([Reference::of($user)]))->against(null));
         self::assertTrue((new GrantRoots([Reference::of($user)]))->appliesIn(new TenantChain));
+    }
+
+    /**
+     * Under a lock, a grant applies where `appliesIn()` says it does, each
+     * grant table read on its own and locked, the role grants, then the
+     * permission grants, then the policy attachments, stopping at the first
+     * that holds one; with no grantees nothing is read.
+     *
+     * @return void
+     *
+     * @throws \LogicException
+     */
+    public function testAGrantAppliesUnderALockTableByTable(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user']);
+        $tenant = new Reference('tenant', 'a');
+        $roots  = new GrantRoots([Reference::of($user)]);
+        $inside = new TenantChain([$tenant, new Reference('tenant', 'parent')]);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']), null, new Reference('tenant', 'parent'));
+        StubIdentity::create(['id' => 'someone-else'])->givePermission(Permission::create(['name' => 'posts:edit']), null, $tenant);
+
+        $locks = $this->recordRowLocks();
+
+        self::assertFalse($roots->appliesUnderLock(new TenantChain([$tenant])));
+        self::assertSame(['authorizable_roles', 'authorizable_permissions', 'authorizable_policies'], \array_column($locks->getArrayCopy(), 0));
+
+        $locks->exchangeArray([]);
+
+        self::assertTrue($roots->appliesUnderLock($inside));
+        self::assertSame(['authorizable_roles', 'authorizable_permissions'], \array_column($locks->getArrayCopy(), 0));
+
+        foreach ($locks as [, $bindings]) {
+            self::assertContains('user', $bindings);
+            self::assertNotContains('someone-else', $bindings);
+        }
+
+        $locks->exchangeArray([]);
+
+        $queries = $this->queriesOf(static fn () => self::assertFalse((new GrantRoots([]))->appliesUnderLock($inside)));
+
+        self::assertSame([], $queries);
+        self::assertCount(0, $locks);
+    }
+
+    /**
+     * Under a lock, a grant counts as `appliesIn()` counts it: one made at an
+     * ancestor counts only when it reaches below it, an expired one never, and
+     * neither does another grantee's inline policy.
+     *
+     * @return void
+     *
+     * @throws \LogicException
+     */
+    public function testUnderALockAGrantCountsAsACheckReadsIt(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user']);
+        $tenant = new Reference('tenant', 'a');
+        $parent = new Reference('tenant', 'parent');
+        $roots  = new GrantRoots([Reference::of($user)]);
+        $inline = Policy::create(['name' => 'theirs', 'owner_type' => 'stub', 'owner_id' => 'someone', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['*']]]]]);
+
+        // A row the write paths refuse, written past them.
+        DB::table('authorizable_policies')->insert(['policy_id' => $inline->getKey(), 'authorizable_type' => $user->getMorphClass(), 'authorizable_id' => $user->getKey()]);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']), null, $parent, includeSubtree: false);
+        $user->givePermission(Permission::create(['name' => 'posts:edit']), now()->addHour(), $tenant);
+
+        $this->travel(2)->hours();
+
+        self::assertFalse($roots->appliesUnderLock(new TenantChain([$tenant, $parent])));
+        self::assertTrue($roots->appliesUnderLock(new TenantChain([$parent])));
+    }
+
+    /**
+     * Inside a delegated operation, the grants are locked through its pins, as
+     * the coverage part, after every other part.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testInsideADelegatedOperationTheGrantsArePinnedLast(): void
+    {
+        $user      = StubIdentity::create(['id' => 'user']);
+        $roots     = new GrantRoots([Reference::of($user)]);
+        $operation = new Operation((string) Str::uuid(), new Reference('user', 'actor'), CarbonImmutable::now('UTC'), false);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+
+        $phase = OperationScope::run($operation, static function () use ($roots): ?DependencyPhase {
+            self::assertTrue($roots->appliesUnderLock(new TenantChain));
+
+            return OperationScope::pins()?->phase();
+        });
+
+        self::assertSame(DependencyPhase::COVERAGE, $phase);
     }
 
     /**

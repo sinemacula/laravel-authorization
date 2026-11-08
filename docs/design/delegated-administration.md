@@ -48,7 +48,9 @@ administration never grants anything it cannot justify.
    in a tenant is refused it. Who may change a grant row is therefore the scope the actor administers (N79): an actor
    whose authority for the action reaches the row's tenant, from a parent by authority over its subtree or from the
    platform, changes it from its own context, and one `revokeAll()` clears a grantee's rows across every tenant the
-   actor administers. Nothing is attached to one operation, so only the resource policies attached to the type
+   actor administers, and a change that may widen authority reaches no further than the actor administers: one whose
+   reach holds a tenant where the actor's authority for the action is denied or limited is `administration.scope`
+   (invariant 11). Nothing is attached to one operation, so only the resource policies attached to the type
    `authorization:operation` are read for it, under one cache entry every operation shares. Its attributes reach
    policies under `resource` through the package's `Administration\OperationAttributes` provider, which no configured
    provider replaces: the action, whether it only narrows, whether it changes nothing, the target, its name under its
@@ -99,10 +101,19 @@ administration never grants anything it cannot justify.
     weighs every change to an identity or a principal (`Administration\OperationGrantee`), in order, each further check
     decided as the actor through every stage up to the allow but never through the stage again
     (`Administration\FurtherChecks`):
-    - **scope**: a change that may widen authority decides its own action again in the grant's tenant, standing just
-      below it for a subtree grant (`TenantScope::within(..., isBelow: true)`), so only authority that itself reaches
-      below counts, and in the grant's application, so a grant to every application needs authority in every
-      application, or it is `administration.scope`; a platform-wide change already needs platform authority;
+    - **scope** (N79, `Administration\AdministeredScope`): the actor must administer the whole reach of a change that
+      may widen authority, or it is `administration.scope`. The change decides its own action again in the grant's
+      tenant, standing just below it for a subtree grant (`TenantScope::within(..., isBelow: true)`), so only authority
+      that itself reaches below counts, or at platform scope for a platform-wide grant, and in the grant's application,
+      so a grant to every application needs authority in every application. A decision at one node reads only what
+      applies there, so a reach wider than its node, platform-wide or reaching below, is also refused when anything
+      that denies or caps the actor anywhere in it could limit the action itself, read exactly as the possession route
+      reads a granted permission (`Administration\PossessionLimits`, bounded by `max_impact`): a deny statement whose
+      actions overlap it, a conditional one counting as a deny, a boundary or guardrail not allowing it whole, a session
+      cap not covering it, or a tree, row or document that cannot be read. An actor allowed `authorization:*` at the
+      platform but denied `authorization:role.grant` by a role it holds in one tenant administers no platform-wide
+      reach, and a parent's administrator denied an action in one child administers no subtree holding the child; a
+      node-only change is decided at its node alone;
     - **rank**: unless the grantee is the actor, the actor, ranked in the grant's own tenant and application, must be
       strictly senior to the most senior rank the grantee holds anywhere the change reaches (platform-wide, the
       grant's tenant and its ancestors, the tenants below for a grant reaching below, every tenant for a
@@ -176,11 +187,11 @@ administration never grants anything it cannot justify.
     - **the impact check** (`Administration\Impact`, `Administration\AffectedHolders`): every holder a change reaches,
       read set by set (direct grantees, grantees of the roles below, subjects a policy is attached to or bounds,
       principals a resource policy names), is weighed at once, at a fixed cost: the action across the definition's whole
-      reach, the actor strictly senior to every holder but itself (`RankComparison::rankAcrossAll()`), and
-      `administration.self` for a change reaching the actor; more than `authorization.administration.max_impact`
-      distinct holders (1000 by default, validated at boot) is unprovable, never approximated: each set asks for its
-      distinct holders, at most one more than the limit, whatever the sets before it hold, so a holder named twice never
-      hides one not read yet;
+      reach, by the same administered-scope rule as a grant (`Administration\AdministeredScope`), the actor strictly
+      senior to every holder but itself (`RankComparison::rankAcrossAll()`), and `administration.self` for a change
+      reaching the actor; more than `authorization.administration.max_impact` distinct holders (1000 by default,
+      validated at boot) is unprovable, never approximated: each set asks for its distinct holders, at most one more
+      than the limit, whatever the sets before it hold, so a holder named twice never hides one not read yet;
     - **boundaries**: a boundary that only adds or tightens a cap narrows; replacing one with a wider boundary, and
       removing one, cannot in general be bounded, so the package takes one fail-closed rule: each is unprovable unless
       the actor is also allowed `authorization:administration.unbounded` on the same operation, after the scope, rank
@@ -212,7 +223,12 @@ administration never grants anything it cannot justify.
       reach, with the policies among them, that a role grant's authority (`RoleAuthority`) and a possession check
       (`PossessionLimits`) read. Each such set is locked only when it holds no more than
       `authorization.administration.max_impact` holders or rows (`DependencyPins::lockWithin()`); a larger one is
-      refused as `administration.unprovable` without being locked, so one change never locks more than that.
+      refused as `administration.unprovable` without being locked, so one change never locks more than that;
+    - **the coverage check**, last, once every change is decided and before the write, in a grant whose hooks run
+      (AUTHZ-11.3): the grantee's own rows and the grants of the identity, the grantee and every principal the
+      directory lists that apply in a tenant the grant is written in, read table by table, at most one row of each
+      (`DependencyPins::lockCoverage()`, `Support\GrantRoots::appliesUnderLock()`). A trusted grant, which has no pins,
+      reads them under the lock directly.
 
     Within a part, the rows are locked in `AuthorityRows`' fixed order, each query's keys sorted, and a part never
     locks before an earlier one (a `LogicException`). Every lock is `lockForUpdate()` on the write connection, outside
@@ -252,10 +268,22 @@ administration never grants anything it cannot justify.
     a change; the tests reach that path by making the change between a read and the write from a listener.
 
     The protocol takes no lock until the service first reads what the operation changes, and a service's work starts
-    inside the call's transaction before it reads or locks anything, so a scope-widening grant hook (AUTHZ-11.3, BL-66)
-    called first in the work of `OperationScope::run()` runs before every lock the package takes for the call; that is
-    the seam BL-66 runs its hooks from. A trusted call keeps today's behaviour and cost: it runs once, with no pins, no
-    extra lock and no retry.
+    inside the call's transaction before it reads or locks anything. The grant hooks (AUTHZ-11.3, N80) run there:
+    `Hooks\WideningPhase::before()`, first in the work of a grant or sync, classifies a non-locking preliminary proposal
+    and calls the bound hook with every widening grant before the first lock and any write, for trusted and delegated
+    calls alike. The call then locks, rebuilds and decides its grants, and `assertCovers()` classifies them again
+    before the write, after every other lock, reading the grantee's rows and the grants the classification relied on
+    under a lock, the last part of the order (`DependencyPhase::COVERAGE`): a grant that now widens with no hook run
+    for it is a `DependencyChangedException`, and the whole call is tried again from the proposal, so the hook may run
+    on each try and is never called under the package's locks. Inside the application's transaction a try is rolled
+    back only to its savepoint, whose row locks MySQL keeps, so a grant is never tried again there with its hook: that
+    conflict, and a retry after any other conflict whose grant would call its hook, is thrown as
+    `TransactionConflictException`. A hook only vetoes and never replaces a decision here: a call it lets go on is
+    still decided, and refused when it should be. While a hook runs every service refuses
+    (`GrantHookRecursionException`), and a widening grant made inside another operation's work is refused
+    (`NestedGrantException`). See [Grant scope](grant-scope.md). A trusted call keeps today's cost: with no hook
+    configured it runs once, with no pins, no extra lock and no retry; with one, it is tried again only for that
+    coverage conflict, and only when it opened the transaction.
 
 14. **Guardrails (part 4, in this release).** Guardrail changes always take an acting context and run under the
     concurrency protocol: the actor's authority, the policy's row and the guardrails of the scope and of the scopes
@@ -270,7 +298,8 @@ administration never grants anything it cannot justify.
 15. **Trusted surfaces (part 4, in this release).** Each of these is trusted system work, an integration surface for
     the application's own code and never an endpoint for user-controlled administration:
     - a management service called without an acting context;
-    - a raw Eloquent write on the package's models, pivots or tables, which never takes an actor;
+    - a raw Eloquent write on the package's models, pivots or tables, which never takes an actor and runs no grant
+      hook;
     - the trait helpers called without `actor:`: every write helper of `HasRoles`, `HasPermissions`, `HasPolicies`
       (`createInlinePolicy()` included) and a role's `ManagesPermissions`, the Spatie aliases included, takes an
       optional `actor:` and hands it to its service;

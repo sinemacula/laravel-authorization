@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Support;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder;
+use SineMacula\Laravel\Authorization\Administration\DependencyPins;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
@@ -172,6 +173,43 @@ final readonly class GrantRoots
 
             GrantApplications::only($query, $table, $application);
         })->exists();
+    }
+
+    /**
+     * Determine whether any grant applies in the chain's tenant, as
+     * `appliesIn()` does in every application, reading each grant table on its
+     * own, the role grants, then the permission grants, then the policy
+     * attachments, at most one row of each, under a lock (see
+     * `Administration\DependencyPins::lockCoverage()`), and stopping at the
+     * first that holds one. A locking read sees the latest committed rows,
+     * whatever snapshot the transaction reads otherwise, and the row it finds
+     * cannot be revoked until the transaction ends; it is never a union, which
+     * PostgreSQL cannot lock.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\TenantChain  $chain
+     * @return bool
+     *
+     * @throws \LogicException
+     */
+    public function appliesUnderLock(TenantChain $chain): bool
+    {
+        if ($this->grantees === []) {
+            return false;
+        }
+
+        $connection = AuthorizationConnection::connection();
+
+        foreach (GrantTarget::cases() as $target) {
+            $rows = $this->rowsOf($connection, $target, static function (Builder $query, string $table) use ($chain): void {
+                $chain->grants($query, $table);
+            });
+
+            if (DependencyPins::lockCoverage($rows->limit(1)) !== []) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

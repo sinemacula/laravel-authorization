@@ -26,12 +26,14 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * write connection before the decision reads it, and the digest of what was
  * read is kept: the actor's authority first, once, then the records the
  * operation changes, the grantee's grant rows among them, then the holders and
- * the resource policies a decision reaches, as it reads them. A service locks
- * what it changes before it reads it, so what it decides on is what the locks
- * hold; a record it read before the lock, such as a role looked up by name, is
- * read again under the lock and compared, so one that changed in between has
- * the operation tried again rather than decided on what the row no longer
- * holds. A set a decision reaches is locked only when it is no larger than
+ * the resource policies a decision reaches, as it reads them, and last, once
+ * every decision is made, the grants a grant hook's coverage check reads again
+ * (see `lockCoverage()`). A service locks what it changes before it reads it,
+ * so what it decides on is what the locks hold; a record it read before the
+ * lock, such as a role looked up by name, is read again under the lock and
+ * compared, so one that changed in between has the operation tried again rather
+ * than decided on what the row no longer holds. A set a decision reaches is
+ * locked only when it is no larger than
  * `authorization.administration.max_impact`; a larger one is refused as
  * unprovable without being locked.
  *
@@ -286,6 +288,28 @@ final class DependencyPins
         $keys = \array_column($rows, $column);
 
         return \array_values(\array_unique($keys));
+    }
+
+    /**
+     * Lock the rows the query selects, for the coverage part, and return them:
+     * the grants a grant hook's coverage check reads again once every decision
+     * is made (see `Hooks\WideningPhase`). Inside a delegated operation they
+     * are locked and pinned through its pins, after every other part; inside a
+     * trusted one, which has no pins, they are read under the lock directly.
+     * Either way the read sees the latest committed rows, whatever snapshot the
+     * transaction reads otherwise, and the rows found stay locked until it
+     * ends.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @return list<array<string, mixed>>
+     *
+     * @throws \LogicException
+     */
+    public static function lockCoverage(Builder $query): array
+    {
+        $pins = OperationScope::pins();
+
+        return $pins === null ? self::read($query, true)[1] : $pins->lock(DependencyPhase::COVERAGE, $query);
     }
 
     /**

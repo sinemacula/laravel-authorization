@@ -31,8 +31,19 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * is reported and skipped together with its grants, as is a permission name
  * containing `*`, because `*` is a wildcard here. Spatie's tables are read on
  * the application's default connection and this package's are written on its
- * own (`authorization.connection`), inside one transaction there; the
- * `--dry-run` flag reports counts without writing.
+ * own (`authorization.connection`); the `--dry-run` flag reports counts without
+ * writing.
+ *
+ * The import runs in two steps. The roles, the permissions and the roles'
+ * permissions are written first, in one transaction, which commits before any
+ * grant is made: a failure there writes nothing. Then each Spatie grant is made
+ * as a call of its own, in its own transaction, so the grant hooks of each
+ * (AUTHZ-11.3) run before any lock the package takes for it, never under the
+ * locks of the rows already imported. The grants are therefore not one atomic
+ * write: a grant that fails, or that a hook refuses, stops the import, and the
+ * roles, permissions and grants written before it stay. Run the command outside
+ * any transaction of your own, so each grant's own transaction is the outermost
+ * one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -110,19 +121,21 @@ final class MigrateSpatieCommand extends Command
             'authorizable_permissions' => 0,
         ];
 
-        $callback = function () use ($dryRun, &$counts): void {
+        $catalogue = function () use ($dryRun, &$counts): array {
             $roleIdMap       = $this->migrateRoles($dryRun, $counts);
             $permissionIdMap = $this->migratePermissions($dryRun, $counts);
             $this->migrateRolePermissions($roleIdMap, $permissionIdMap, $dryRun, $counts);
-            $counts['authorizable_roles']       = $this->migrateGrants('model_has_roles', 'role_id', $roleIdMap, $dryRun, $this->grants->grantRole(...));
-            $counts['authorizable_permissions'] = $this->migrateGrants('model_has_permissions', 'permission_id', $permissionIdMap, $dryRun, $this->grants->grantPermission(...));
+
+            return [$roleIdMap, $permissionIdMap];
         };
 
-        if ($dryRun) {
-            $callback();
-        } else {
-            $this->target()->transaction($callback);
-        }
+        [$roleIdMap, $permissionIdMap] = $dryRun ? $catalogue() : $this->target()->transaction($catalogue);
+
+        // Each grant is a call of its own, made once the catalogue has
+        // committed, so its grant hooks run before any lock the package takes
+        // for it (AUTHZ-11.3).
+        $counts['authorizable_roles']       = $this->migrateGrants('model_has_roles', 'role_id', $roleIdMap, $dryRun, $this->grants->grantRole(...));
+        $counts['authorizable_permissions'] = $this->migrateGrants('model_has_permissions', 'permission_id', $permissionIdMap, $dryRun, $this->grants->grantPermission(...));
 
         $this->renderMigrationSummary($counts, $dryRun);
 

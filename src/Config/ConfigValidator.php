@@ -86,6 +86,7 @@ final class ConfigValidator
         QueryScopingConfigValidator::validate($config['query_scoping'] ?? []);
         BulkConfigValidator::validate($config['bulk'] ?? []);
         AdministrationConfigValidator::validate($config['administration'] ?? []);
+        GrantHookConfigValidator::validate(\array_key_exists('grant_hooks', $config) ? $config['grant_hooks'] : []);
     }
 
     /**
