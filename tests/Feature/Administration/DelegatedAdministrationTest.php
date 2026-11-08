@@ -39,7 +39,7 @@ use Tests\TestCase;
  * management service: each change a call names an acting context for is decided
  * through `check()` under its administration action, before anything is
  * written, and refused, leaving nothing written and dispatching no change
- * event, when it is not allowed or, widening authority, cannot yet be proved
+ * event, when it is not allowed or, widening authority, cannot be proved
  * permitted.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -171,7 +171,7 @@ final class DelegatedAdministrationTest extends TestCase
         yield 'grantRole' => [
             self::directly(static fn (ActingContext $actor): mixed => self::grants()->grantRole(self::user(), self::role('editor'), actor: $actor)),
             [Actions::ROLE_GRANT],
-            $unprovable,
+            null,
         ];
         yield 'revokeRole' => [static function (): \Closure {
             self::grants()->grantRole(self::user(), self::role('editor'));
@@ -187,7 +187,7 @@ final class DelegatedAdministrationTest extends TestCase
         yield 'syncRoles granting' => [
             self::directly(static fn (ActingContext $actor): mixed => self::grants()->syncRoles(self::user(), [self::role('editor')], actor: $actor)),
             [Actions::ROLE_GRANT],
-            $unprovable,
+            null,
         ];
         yield 'syncRoles revoking' => [static function (): \Closure {
             self::grants()->grantRole(self::user(), self::role('editor'));
@@ -212,7 +212,7 @@ final class DelegatedAdministrationTest extends TestCase
         yield 'attachPolicy' => [
             self::directly(static fn (ActingContext $actor): mixed => self::grants()->attachPolicy(self::user(), self::policy('reader', 'allow'), actor: $actor)),
             [Actions::POLICY_ATTACH],
-            $unprovable,
+            null,
         ];
         yield 'detachPolicy of an allow-only policy' => [static function (): \Closure {
             self::grants()->attachPolicy(self::user(), self::policy('reader', 'allow'));
@@ -240,36 +240,36 @@ final class DelegatedAdministrationTest extends TestCase
             self::boundaries()->set(self::user(), self::policy('cap', 'allow'));
 
             return static fn (ActingContext $actor): mixed => self::grants()->revokeAll(self::user(), $actor);
-        }, [Actions::PERMISSION_REVOKE, Actions::BOUNDARY_REMOVE], $unprovable];
+        }, [Actions::PERMISSION_REVOKE, Actions::BOUNDARY_REMOVE], null];
         yield 'RoleService::create' => [
             self::directly(static fn (ActingContext $actor): mixed => self::roles()->create('newcomer', actor: $actor)),
             [Actions::ROLE_CREATE],
-            $unprovable,
+            null,
         ];
         yield 'RoleService::rename' => [
-            self::directly(static fn (ActingContext $actor): mixed => self::roles()->rename(self::role('editor'), 'author', $actor)),
+            self::directly(static fn (ActingContext $actor): mixed => self::roles()->rename(self::role('editor'), 'writer', $actor)),
             [Actions::ROLE_RENAME],
-            $unprovable,
+            null,
         ];
         yield 'RoleService::describe' => [
             self::directly(static fn (ActingContext $actor): mixed => self::roles()->describe(self::role('editor'), 'Edits', $actor)),
             [Actions::ROLE_UPDATE],
-            $unprovable,
+            null,
         ];
         yield 'RoleService::delete' => [self::directly(static function (ActingContext $actor): mixed {
             self::roles()->delete(self::role('editor'), $actor);
 
             return null;
-        }), [Actions::ROLE_DELETE], $unprovable];
+        }), [Actions::ROLE_DELETE], null];
         yield 'RoleService::setParent' => [
             self::directly(static fn (ActingContext $actor): mixed => self::roles()->setParent(self::role('editor'), self::role('staff'), $actor)),
             [Actions::ROLE_PARENT_SET],
-            $unprovable,
+            null,
         ];
         yield 'RoleService::grantPermission' => [
             self::directly(static fn (ActingContext $actor): mixed => self::roles()->grantPermission(self::role('editor'), self::permission('posts:edit'), actor: $actor)),
             [Actions::PERMISSION_GRANT],
-            $unprovable,
+            null,
         ];
         yield 'RoleService::revokePermission' => [static function (): \Closure {
             self::roles()->grantPermission(self::role('editor'), self::permission('posts:edit'));
@@ -279,7 +279,7 @@ final class DelegatedAdministrationTest extends TestCase
         yield 'RoleService::syncPermissions granting' => [
             self::directly(static fn (ActingContext $actor): mixed => self::roles()->syncPermissions(self::role('editor'), [self::permission('posts:edit')], actor: $actor)),
             [Actions::PERMISSION_GRANT],
-            $unprovable,
+            null,
         ];
         yield 'RoleService::syncPermissions revoking' => [static function (): \Closure {
             self::roles()->grantPermission(self::role('editor'), self::permission('posts:edit'));
@@ -289,72 +289,72 @@ final class DelegatedAdministrationTest extends TestCase
         yield 'PermissionService::create' => [
             self::directly(static fn (ActingContext $actor): mixed => self::permissions()->create('posts:new', actor: $actor)),
             [Actions::PERMISSION_CREATE],
-            $unprovable,
+            null,
         ];
         yield 'PermissionService::rename' => [
             self::directly(static fn (ActingContext $actor): mixed => self::permissions()->rename(self::permission('posts:edit'), 'posts:write', $actor)),
             [Actions::PERMISSION_RENAME],
-            $unprovable,
+            null,
         ];
         yield 'PermissionService::describe' => [
             self::directly(static fn (ActingContext $actor): mixed => self::permissions()->describe(self::permission('posts:edit'), 'Edit', $actor)),
             [Actions::PERMISSION_UPDATE],
-            $unprovable,
+            null,
         ];
         yield 'PermissionService::delete' => [self::directly(static function (ActingContext $actor): mixed {
             self::permissions()->delete(self::permission('posts:edit'), $actor);
 
             return null;
-        }), [Actions::PERMISSION_DELETE], $unprovable];
+        }), [Actions::PERMISSION_DELETE], null];
         yield 'PolicyService::create' => [
             self::directly(static fn (ActingContext $actor): mixed => self::policies()->create('fresh', ['statements' => []], actor: $actor)),
             [Actions::POLICY_CREATE],
-            $unprovable,
+            null,
         ];
         yield 'PolicyService::createInline' => [
             self::directly(static fn (ActingContext $actor): mixed => self::policies()->createInline(self::user(), 'mine', ['statements' => []], actor: $actor)),
             [Actions::POLICY_CREATE],
-            $unprovable,
+            null,
         ];
         yield 'PolicyService::rename' => [
             self::directly(static fn (ActingContext $actor): mixed => self::policies()->rename(self::policy('reader', 'allow'), 'viewer', $actor)),
             [Actions::POLICY_RENAME],
-            $unprovable,
+            null,
         ];
         yield 'PolicyService::describe' => [
             self::directly(static fn (ActingContext $actor): mixed => self::policies()->describe(self::policy('reader', 'allow'), 'Reads', $actor)),
             [Actions::POLICY_UPDATE],
-            $unprovable,
+            null,
         ];
         yield 'PolicyService::rewrite' => [
             self::directly(static fn (ActingContext $actor): mixed => self::policies()->rewrite(self::policy('reader', 'allow'), ['statements' => []], $actor)),
             [Actions::POLICY_UPDATE],
-            $unprovable,
+            null,
         ];
         yield 'PolicyService::delete' => [self::directly(static function (ActingContext $actor): mixed {
             self::policies()->delete(self::policy('reader', 'allow'), $actor);
 
             return null;
-        }), [Actions::POLICY_DELETE], $unprovable];
+        }), [Actions::POLICY_DELETE], null];
         yield 'BoundaryService::set' => [
             self::directly(static fn (ActingContext $actor): mixed => self::boundaries()->set(self::user(), self::policy('cap', 'allow'), actor: $actor)),
             [Actions::BOUNDARY_SET],
-            $unprovable,
+            null,
         ];
         yield 'BoundaryService::remove' => [static function (): \Closure {
             self::boundaries()->set(self::user(), self::policy('cap', 'allow'));
 
             return static fn (ActingContext $actor): mixed => self::boundaries()->remove(self::user(), actor: $actor);
-        }, [Actions::BOUNDARY_REMOVE], $unprovable];
+        }, [Actions::BOUNDARY_REMOVE], null];
         yield 'BoundaryService::removeAll' => [static function (): \Closure {
             self::boundaries()->set(self::user(), self::policy('cap', 'allow'));
 
             return static fn (ActingContext $actor): mixed => self::boundaries()->removeAll(self::user(), $actor);
-        }, [Actions::BOUNDARY_REMOVE], $unprovable];
+        }, [Actions::BOUNDARY_REMOVE], null];
         yield 'ResourcePolicyService::attach' => [
             self::directly(static fn (ActingContext $actor): mixed => self::resourcePolicies()->attach(self::sharing('allow'), ['posts', 7], actor: $actor)),
             [Actions::RESOURCE_POLICY_ATTACH],
-            $unprovable,
+            DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE,
         ];
         yield 'ResourcePolicyService::detach' => [static function (): \Closure {
             self::resourcePolicies()->attach(self::sharing('allow'), ['posts', 7]);
@@ -374,12 +374,13 @@ final class DelegatedAdministrationTest extends TestCase
     }
 
     /**
-     * Called with an actor allowed every action, and ranked above the grantee,
-     * a call that may widen authority and that this release cannot prove is
-     * refused as unprovable, before anything is written, and one that can only
-     * narrow, or a direct grant of a permission the actor may grant (it holds
-     * `authorization:permission.grantable`), is made, as delegated work, under
-     * the actions it decides, each change decided on the operation's resource.
+     * Called with an actor allowed every action, the grantable rights and
+     * `authorization:administration.unbounded` included, and ranked above the
+     * grantee, a call that may widen authority and that this release cannot
+     * prove is refused before anything is written, and one that can only
+     * narrow, or hands out only what the actor may grant, is made, as delegated
+     * work, under the actions it decides, each change decided on the
+     * operation's resource.
      *
      * @param  Setup  $setup
      * @param  list<string>  $actions
@@ -402,16 +403,18 @@ final class DelegatedAdministrationTest extends TestCase
 
         $before    = self::snapshot();
         $decisions = \count(self::dispatched(DecisionEvaluated::class));
-        $changes   = \count(self::changes());
+        $earlier   = self::changes();
 
         $call($actor);
 
         self::assertNotSame($before, self::snapshot());
 
-        self::assertSame($actions, \array_values(\array_unique(self::actionsSince($decisions))));
-        self::assertNotSame([], \array_slice(self::changes(), $changes));
+        $made = \array_values(\array_filter(self::changes(), static fn (object $event): bool => !\in_array($event, $earlier, true)));
 
-        foreach (\array_slice(self::changes(), $changes) as $event) {
+        self::assertSame($actions, \array_values(\array_unique(self::actionsSince($decisions))));
+        self::assertNotSame([], $made);
+
+        foreach ($made as $event) {
             self::assertTrue(\property_exists($event, 'operation'));
             self::assertFalse($event->operation->isTrusted);
             self::assertEquals($actor->principal(), $event->operation->actor);
@@ -532,8 +535,11 @@ final class DelegatedAdministrationTest extends TestCase
      */
     public function testAScreenAndTheServiceAgree(): void
     {
-        $actor       = self::administrator([Actions::ROLE_GRANT, Actions::ROLE_REVOKE]);
-        $role        = self::role('editor');
+        $actor = self::administrator([Actions::ROLE_GRANT, Actions::ROLE_REVOKE]);
+        $role  = self::role('editor');
+
+        self::roles()->grantPermission($role, self::permission('posts:edit'));
+
         $grant       = OperationResource::grant(Actions::ROLE_GRANT, self::user(), $role, GrantScope::platform());
         $revoke      = OperationResource::revoke(Actions::ROLE_REVOKE, self::user(), $role, GrantScope::platform());
         $grantScreen = $actor->check($grant);
@@ -561,16 +567,16 @@ final class DelegatedAdministrationTest extends TestCase
      */
     public function testABatchIsDecidedWholeBeforeAnythingIsWritten(): void
     {
-        $actor = self::administrator();
+        $actor = self::administrator([Actions::ROLE_GRANT, Actions::ROLE_REVOKE]);
 
         self::grants()->grantRole(self::user(), self::role('editor'));
-        self::role('author');
+        self::roles()->grantPermission(self::role('author'), self::permission('posts:edit'));
 
         $decisions = \count(self::dispatched(DecisionEvaluated::class));
 
         $sync = static fn (ActingContext $actor): mixed => self::grants()->syncRoles(self::user(), [self::role('author')], actor: $actor);
 
-        self::assertRefusedWithNothingWritten($sync, $actor, DecisionReason::ADMINISTRATION_UNPROVABLE, Actions::ROLE_GRANT);
+        self::assertRefusedWithNothingWritten($sync, $actor, DecisionReason::ADMINISTRATION_NOT_GRANTABLE, Actions::ROLE_GRANT);
         self::assertSame([Actions::ROLE_GRANT], self::actionsSince($decisions));
     }
 
@@ -585,7 +591,7 @@ final class DelegatedAdministrationTest extends TestCase
      */
     public function testRevokingEverythingDecidesEveryItemFirst(): void
     {
-        $actor = self::administrator();
+        $actor = self::administrator([Actions::ROLE_REVOKE, Actions::PERMISSION_REVOKE, Actions::BOUNDARY_REMOVE]);
 
         self::grants()->grantRole(self::user(), self::role('editor'));
         self::grants()->grantPermission(self::user(), self::permission('posts:edit'));

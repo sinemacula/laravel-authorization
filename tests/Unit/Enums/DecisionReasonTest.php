@@ -124,7 +124,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame('the target is not junior to the actor', DecisionReason::ADMINISTRATION_RANK->label());
         self::assertSame('it benefits the actor itself', DecisionReason::ADMINISTRATION_SELF->label());
         self::assertSame('it hands out what the actor neither holds nor may grant', DecisionReason::ADMINISTRATION_NOT_GRANTABLE->label());
-        self::assertSame('it may widen authority in a way that cannot yet be proved permitted', DecisionReason::ADMINISTRATION_UNPROVABLE->label());
+        self::assertSame('it may widen authority in a way that cannot be proved permitted', DecisionReason::ADMINISTRATION_UNPROVABLE->label());
         self::assertSame('it is made while impersonating', DecisionReason::ADMINISTRATION_IMPERSONATING->label());
     }
 

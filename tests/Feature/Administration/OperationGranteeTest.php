@@ -93,6 +93,11 @@ final class OperationGranteeTest extends TestCase
 
         self::assertFalse(OperationGrantee::isSelf($named, new Subject($user, $user)));
         self::assertFalse(OperationGrantee::isSelf(OperationResource::definition(PackagePermissions::ROLE_RENAME, Role::create(['name' => 'editor'])), new Subject($user, $user)));
+        self::assertTrue(OperationGrantee::isActor(Reference::of($user), new Subject($other, $user)));
+        self::assertTrue(OperationGrantee::isActor(Reference::of($user), new Subject($user, new \stdClass)));
+        self::assertFalse(OperationGrantee::isActor(Reference::of($other), new Subject($user, $user)));
+        self::assertFalse(OperationGrantee::isActor(new Reference($user->getMorphClass(), 'USER-1'), new Subject($user, $user)));
+        self::assertFalse(OperationGrantee::isActor(Reference::of($user), new Subject(new \stdClass)));
     }
 
     /**

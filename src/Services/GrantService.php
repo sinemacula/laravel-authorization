@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
+use SineMacula\Laravel\Authorization\Services\Support\StoredRecords;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -97,18 +98,28 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * additions included, is allowed when the actor provably holds it across its
  * reach and lifetime, or may grant it explicitly (see `Possession`), and is
  * otherwise refused as `administration.not_grantable` or
- * `administration.unprovable`; every other change, a role grant or a policy
- * attachment, waits for the later parts of BL-65 and is refused as
- * `administration.unprovable`. Every event the call dispatches carries the
- * operation, with the actor, its mode and the actions, and every grant row it
- * writes records the actor in `granted_by_type` and `granted_by_id`; the actor
- * is never read from the authenticated user. A grantee that is not a saved
- * model with a key, or a reference with a type and a key, throws
- * `InvalidGranteeException` before anything is read. A role or permission name
- * that answers no row throws `UnknownRoleException` or
- * `UnknownPermissionException`; a target that is not a saved model of the kind
- * granted, such as a policy sync handed another model, throws
- * `InvalidGrantTargetException`.
+ * `administration.unprovable`; a role grant hands out the role's whole
+ * authority, every permission and policy it and its ancestors carry, and every
+ * allow of a resource policy that names it or an ancestor, each by its own
+ * route (see `RoleAuthority`), its rank counting as the grantee's; a policy
+ * attachment, to an identity, a principal or a role, needs the policy route,
+ * containment or `authorization:policy.grantable` on the policy's digest (see
+ * `PolicyRoute`); a change to a role's policies is made only from the tenant
+ * that owns the role, and weighed against every holder of the role (see
+ * `DefinitionConstraints`); any other change that may widen authority, such as
+ * detaching a denying policy, is refused as `administration.unprovable`. A
+ * delegated call weighs each role, permission or policy it is handed as a model
+ * on its row as stored (see `StoredRecords`), so a model with unsaved changes,
+ * or one read before another write, is never judged on what its row does not
+ * hold. Every event the call dispatches carries the operation, with the actor,
+ * its mode and the actions, and every grant row it writes records the actor in
+ * `granted_by_type` and `granted_by_id`; the actor is never read from the
+ * authenticated user. A grantee that is not a saved model with a key, or a
+ * reference with a type and a key, throws `InvalidGranteeException` before
+ * anything is read. A role or permission name that answers no row throws
+ * `UnknownRoleException` or `UnknownPermissionException`; a target that is not
+ * a saved model of the kind granted, such as a policy sync handed another
+ * model, throws `InvalidGrantTargetException`.
  *
  * A grantee is an identity or a role: a policy attached to a role applies to
  * whoever holds the role, within both grants' scopes, and to whoever holds a
@@ -455,6 +466,7 @@ final class GrantService
         /** @var \SineMacula\Laravel\Authorization\Enums\GrantOutcome $outcome */
         $outcome = OperationScope::run($operation, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $named, $target, $expiresAt): GrantOutcome {
             $model = $kind->resolve($target, GrantChanges::guard($grantee), $named->tenant);
+            $model = \is_string($target) ? $model : self::stored($kind, $model, $actor);
             $scope = self::scope(GrantScopes::of($kind, $model, $named->tenant), $named->includeSubtree, $named->application);
 
             RoleParity::assertGrantable($kind->value, $model, GrantChanges::guard($grantee));
@@ -549,7 +561,7 @@ final class GrantService
             $written = self::scope($scope, $named->includeSubtree, $named->application);
             $table   = GrantChanges::table($kind, $reference, $operation->actor, $written);
             $held    = $table->held();
-            $keep    = self::toKeep($kind, $grantee, $targets, $held, $scope);
+            $keep    = self::toKeep($kind, $grantee, $targets, $held, $scope, $actor);
             $revoked = \array_values(\array_diff($held, \array_map(GrantChanges::key(...), $keep)));
             $changed = [];
             $events  = [];
@@ -586,14 +598,16 @@ final class GrantService
 
     /**
      * Resolve the sync's targets, keyed by key: a named target keeps every held
-     * row of the name, else the row the lookup ranks first. Each must be
-     * grantable in the sync's scope, and to the grantee.
+     * row of the name, else the row the lookup ranks first; a model given to a
+     * delegated sync, its row as stored. Each must be grantable in the sync's
+     * scope, and to the grantee.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  array<int, mixed>  $targets
      * @param  list<string>  $held
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $scope
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return array<string, \Illuminate\Database\Eloquent\Model>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException
@@ -601,12 +615,12 @@ final class GrantService
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException
      */
-    private static function toKeep(GrantTarget $kind, Model|Reference $grantee, array $targets, array $held, ?Reference $scope): array
+    private static function toKeep(GrantTarget $kind, Model|Reference $grantee, array $targets, array $held, ?Reference $scope, ?ActingContext $actor): array
     {
         $keep = [];
 
         foreach ($targets as $target) {
-            $models = \is_string($target) ? $kind->heldOrFirst($target, GrantChanges::guard($grantee), $held, $scope) : [$kind->assertTarget($target)];
+            $models = \is_string($target) ? $kind->heldOrFirst($target, GrantChanges::guard($grantee), $held, $scope) : [self::stored($kind, $kind->assertTarget($target), $actor)];
 
             foreach ($models as $model) {
                 GrantScopes::assertGrantableIn($kind, $model, $scope);
@@ -618,6 +632,24 @@ final class GrantService
         }
 
         return $keep;
+    }
+
+    /**
+     * Return the target a call hands out as it is weighed and written: for a
+     * delegated call, its row as stored (see `StoredRecords`), so the change is
+     * never judged on a rank, name or document the model in hand holds but the
+     * row does not; for trusted work, the model given.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  \Illuminate\Database\Eloquent\Model  $model
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
+     * @return \Illuminate\Database\Eloquent\Model
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
+     */
+    private static function stored(GrantTarget $kind, Model $model, ?ActingContext $actor): Model
+    {
+        return $actor === null ? $model : StoredRecords::of($kind->value, $model);
     }
 
     /**

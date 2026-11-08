@@ -4,7 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Administration;
 
+use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
@@ -160,16 +162,40 @@ final class RankComparison
      */
     public static function rankAcross(Model $target, GrantScope $scope): ?int
     {
+        return self::rankAcrossAll([Reference::of($target)], $scope);
+    }
+
+    /**
+     * Return the most senior rank among the roles any of the holders holds live
+     * anywhere the grant scope reaches, as `rankAcross()` reads it for one, or
+     * null when none holds a ranked role there, in one query on the write
+     * connection, however many holders there are, so the impact of a change on
+     * every holder of a definition is read at a fixed cost (see `Impact`).
+     *
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\Reference>  $holders
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @return int|null
+     *
+     * @throws \UnexpectedValueException
+     */
+    public static function rankAcrossAll(array $holders, GrantScope $scope): ?int
+    {
+        if ($holders === []) {
+            return null;
+        }
+
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
         $class = config('authorization.models.role', Role::class);
 
         /** @var string $pivot */
-        $pivot   = config('authorization.tables.authorizable_roles', 'authorizable_roles');
-        $role    = new $class;
-        $grantee = Reference::of($target);
-        $query   = $class::query()->withoutGlobalScopes()->useWritePdo()->join($pivot, $pivot . '.role_id', '=', $role->getQualifiedKeyName())
-            ->where($pivot . '.authorizable_type', $grantee->type)
-            ->where($pivot . '.authorizable_id', $grantee->id);
+        $pivot = config('authorization.tables.authorizable_roles', 'authorizable_roles');
+        $role  = new $class;
+        $query = $class::query()->withoutGlobalScopes()->useWritePdo()->join($pivot, $pivot . '.role_id', '=', $role->getQualifiedKeyName())
+            ->where(static function (Builder $query) use ($pivot, $holders): void {
+                foreach (self::byType($holders) as $type => $ids) {
+                    $query->orWhere(static fn (Builder $held): Builder => $held->where($pivot . '.authorizable_type', $type)->whereIn($pivot . '.authorizable_id', $ids));
+                }
+            });
 
         if ($scope->application !== null) {
             GrantApplications::only($query, $pivot, $scope->application);
@@ -183,6 +209,54 @@ final class RankComparison
         }
 
         return $ranks === [] ? null : \min($ranks);
+    }
+
+    /**
+     * Return the actor's rank in the tenant, or at platform scope for none, and
+     * the application, as the grant's own scope ranks it, or null when it holds
+     * no ranked role there.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $actor
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  string|null  $application
+     * @return int|null
+     */
+    public static function rankIn(Subject $actor, ?Reference $tenant, ?string $application): ?int
+    {
+        $scope = $tenant === null ? AuthorizationScope::platform($application) : AuthorizationScope::tenant($tenant, $application);
+
+        return $scope->within(static fn (): ?int => self::rankOf($actor));
+    }
+
+    /**
+     * Determine whether a holder of the morph type can be ranked: the type
+     * names a model whose roles can be read (see `isComparable()`).
+     *
+     * @param  string  $type
+     * @return bool
+     */
+    public static function isComparableType(string $type): bool
+    {
+        $class = Relation::getMorphedModel($type) ?? $type;
+
+        return \is_subclass_of($class, Model::class) && self::isComparable(new $class);
+    }
+
+    /**
+     * Return the keys of the holders, grouped by morph type.
+     *
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\Reference>  $holders
+     * @return array<string, list<string>>
+     */
+    private static function byType(array $holders): array
+    {
+        $grouped = [];
+
+        foreach ($holders as $holder) {
+            $grouped[$holder->type][] = $holder->id;
+        }
+
+        return $grouped;
     }
 
     /**

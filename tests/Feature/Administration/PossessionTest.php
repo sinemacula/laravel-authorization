@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Administration;
 
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
@@ -93,6 +94,32 @@ final class PossessionTest extends TestCase
 
         self::assertNull(Possession::refusal(...$this->grant($actor, new GrantScope($tenant, null, false))));
         self::assertSame([['posts:edit', null, ['tenant', 'a'], null, false]], $this->asked);
+    }
+
+    /**
+     * The grantable route decides the right the descriptor names, on the
+     * descriptor, in the change's reach: a policy grantable descriptor is
+     * decided under `policy.grantable`, which must last as long as the change.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheGrantableRouteDecidesTheDescriptorsRight(): void
+    {
+        $tenant = new Reference('tenant', 'a');
+        $actor  = self::holder(['tenant' => $tenant, 'expires' => Carbon::now()->addDay()], PackagePermissions::POLICY_GRANTABLE);
+        $policy = Policy::create(['name' => 'readers', 'document' => ['statements' => []]]);
+
+        [$operation, $change, , $checks] = $this->grant($actor, new GrantScope($tenant, null, false), Carbon::now()->addHour());
+
+        self::assertTrue(Possession::isGrantable($operation, $change, $operation->policyGrantable($policy, 'abc'), $checks));
+        self::assertSame(PackagePermissions::POLICY_GRANTABLE, $this->asked[0][0]);
+        self::assertSame(['tenant', 'a'], $this->asked[0][2]);
+
+        [$operation, $change, , $checks] = $this->grant($actor, new GrantScope($tenant, null, false));
+
+        self::assertFalse(Possession::isGrantable($operation, $change, $operation->policyGrantable($policy, 'abc'), $checks));
     }
 
     /**
@@ -205,6 +232,74 @@ final class PossessionTest extends TestCase
     }
 
     /**
+     * Many permissions are handed out in one pass: each name is proved once,
+     * whatever the others before it, the grantable right is asked only of those
+     * the actor cannot be proved to hold, and the refusal is that of the first,
+     * in order, that neither route passes; none to hand out passes without
+     * asking anything.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testManyPermissionsAreDecidedInOnePass(): void
+    {
+        $actor  = self::holder();
+        $edit   = Permission::query()->firstOrCreate(['name' => 'posts:edit']);
+        $read   = Permission::query()->firstOrCreate(['name' => 'posts:read']);
+        $delete = Permission::query()->firstOrCreate(['name' => 'posts:delete']);
+        $deny   = EvaluationPolicy::fromArray(['name' => 'deny', 'statements' => [['effect' => 'deny', 'actions' => ['posts:edit'], 'resources' => ['posts:9']]]]);
+        $denies = new CheckSources([$deny], null, [], new CheckContext, static fn (): ?string => null, new SessionCaps);
+
+        self::holder([], 'posts:read');
+
+        [$operation, $change, , $checks] = $this->grant($actor, GrantScope::platform());
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        self::assertNull(Possession::refusalOfEach($operation, $change, [], $checks));
+        self::assertSame([], DB::getQueryLog());
+        self::assertSame([], $this->actionsAsked());
+
+        DB::disableQueryLog();
+
+        self::assertNull(Possession::refusalOfEach($operation, $change, [$edit, $read, $edit], $checks));
+        self::assertSame(['posts:edit', 'posts:read'], $this->actionsAsked());
+
+        $this->forgetAsked();
+
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, Possession::refusalOfEach($operation, $change, [$edit, $delete], $checks));
+        self::assertSame(['posts:edit', PackagePermissions::PERMISSION_GRANTABLE], $this->actionsAsked());
+
+        $this->forgetAsked();
+
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, Possession::refusalOfEach($operation, $change, [$delete, $edit], $checks));
+        self::assertSame(['posts:edit', PackagePermissions::PERMISSION_GRANTABLE], $this->actionsAsked());
+
+        [$operation, $change, , $refused] = $this->grant($actor, GrantScope::platform(), allowed: false);
+
+        $this->forgetAsked();
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, Possession::refusalOfEach($operation, $change, [$edit, $read], $refused));
+        self::assertSame(['posts:edit', 'posts:read', PackagePermissions::PERMISSION_GRANTABLE], $this->actionsAsked());
+
+        [$operation, $change, , $limited] = $this->grant($actor, GrantScope::platform(), sources: $denies);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, Possession::refusalOfEach($operation, $change, [$delete, $edit], $limited));
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, Possession::refusalOfEach($operation, $change, [$edit, $delete], $limited));
+
+        self::holder([], PackagePermissions::PERMISSION_GRANTABLE);
+
+        [$operation, $change, , $grantable] = $this->grant($actor, GrantScope::platform(), sources: $denies, grantable: true);
+
+        $this->forgetAsked();
+
+        self::assertNull(Possession::refusalOfEach($operation, $change, [$edit, $delete, $read], $grantable));
+        self::assertCount(2, \array_keys($this->actionsAsked(), PackagePermissions::PERMISSION_GRANTABLE, true));
+    }
+
+    /**
      * Return an allow decided by the statements.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\StatementReference  ...$statements
@@ -213,6 +308,16 @@ final class PossessionTest extends TestCase
     private static function allowedBy(StatementReference ...$statements): Decision
     {
         return Decision::allow(DecisionStage::ALLOW, \array_values($statements));
+    }
+
+    /**
+     * Return the action of each further check asked so far, in order.
+     *
+     * @return list<mixed>
+     */
+    private function actionsAsked(): array
+    {
+        return \array_column($this->asked, 0);
     }
 
     /**
@@ -263,7 +368,7 @@ final class PossessionTest extends TestCase
      * @return array{
      *     \SineMacula\Laravel\Authorization\Administration\OperationResource,
      *     \SineMacula\Laravel\Authorization\Administration\OperationChange,
-     *     string,
+     *     \SineMacula\Laravel\Authorization\Models\Permission,
      *     \SineMacula\Laravel\Authorization\Administration\FurtherChecks
      * }
      */
@@ -297,6 +402,9 @@ final class PossessionTest extends TestCase
         /** @var \SineMacula\Laravel\Authorization\Administration\OperationChange $change */
         $change = $operation->change;
 
-        return [$operation, $change, 'posts:edit', new FurtherChecks($actor, $decide, $gather)];
+        /** @var \SineMacula\Laravel\Authorization\Models\Permission $permission */
+        $permission = $change->target;
+
+        return [$operation, $change, $permission, new FurtherChecks($actor, $decide, $gather)];
     }
 }

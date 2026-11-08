@@ -329,6 +329,82 @@ final class PossessionLimitsTest extends TestCase
     }
 
     /**
+     * Many permissions are weighed in one pass, each keyed by its name, each by
+     * its own sources and by what is stored in the reach, read once for them
+     * all; none to weigh reads nothing, and a tree that cannot be read limits
+     * every one.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testManyPermissionsAreWeighedInOnePass(): void
+    {
+        $user    = StubIdentity::query()->create(['id' => 'user-1']);
+        $subject = new Subject($user, $user);
+        $sources = static fn (array $policies): CheckSources => new CheckSources($policies, null, [], new CheckContext, static fn (): ?string => null, new SessionCaps);
+        $denying = self::policy([['effect' => 'deny', 'actions' => ['posts:read']]]);
+
+        self::grants()->attachPolicy($user, self::denying('no-edit', 'posts:edit'));
+
+        $each = ['posts:edit' => $sources([]), 'posts:read' => $sources([$denying]), 'posts:view' => $sources([]), '7' => $sources([])];
+
+        self::assertSame(['posts:edit' => true, 'posts:read' => true, 'posts:view' => false, '7' => false], PossessionLimits::limitedEach($subject, GrantScope::platform(), $each));
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        self::assertSame([], PossessionLimits::limitedEach($subject, GrantScope::platform(), []));
+        self::assertSame([], DB::getQueryLog());
+
+        PossessionLimits::limitedEach($subject, GrantScope::platform(), ['posts:view' => $sources([])]);
+
+        $one = \count(DB::getQueryLog());
+
+        DB::flushQueryLog();
+
+        PossessionLimits::limitedEach($subject, GrantScope::platform(), $each);
+
+        $many = \count(DB::getQueryLog());
+
+        DB::disableQueryLog();
+
+        self::assertSame($one, $many);
+
+        $this->app?->instance(TenantTree::class, new FailingTenantTree(failing: ['a']));
+
+        $unreadable = new GrantScope(new Reference('tenant', 'a'));
+
+        self::assertSame(['posts:view' => true, '7' => true], PossessionLimits::limitedEach($subject, $unreadable, ['posts:view' => $sources([]), '7' => $sources([])]));
+    }
+
+    /**
+     * What the subject's identity holds limits it even when its principal is no
+     * model, and what is stored is read from the tables `authorization.tables`
+     * names, so one named there that cannot be read limits every permission.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheIdentitysPoliciesAndTheConfiguredTablesAreRead(): void
+    {
+        $user    = StubIdentity::query()->create(['id' => 'user-1']);
+        $sources = new CheckSources([], null, [], new CheckContext, static fn (): ?string => null, new SessionCaps);
+
+        self::grants()->attachPolicy($user, self::denying('no-edit', 'posts:edit'));
+
+        $identity = new Subject(new \stdClass, $user);
+        $each     = ['posts:edit' => $sources, 'posts:view' => $sources];
+
+        self::assertSame(['posts:edit' => true, 'posts:view' => false], PossessionLimits::limitedEach($identity, GrantScope::platform(), $each));
+
+        config(['authorization.tables.authorizable_roles' => 'missing_authorizable_roles']);
+
+        self::assertSame(['posts:view' => true], PossessionLimits::limitedEach(new Subject($user, $user), GrantScope::platform(), ['posts:view' => $sources]));
+    }
+
+    /**
      * Determine whether anything limits the permission for the subject, given
      * the check's sources, for a grant in the scope, platform-wide unless one
      * is given.

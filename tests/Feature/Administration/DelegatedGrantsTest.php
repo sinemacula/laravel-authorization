@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Administration\Possession;
 use SineMacula\Laravel\Authorization\Administration\PossessionLimits;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
@@ -144,8 +145,8 @@ final class DelegatedGrantsTest extends TestCase
     /**
      * The rank a role grant would give the grantee counts as its rank: a grant
      * that would leave it equal to or senior to the actor is refused as rank,
-     * and one that leaves it junior passes rank and is refused as unprovable,
-     * role grants still waiting for a later release.
+     * and one that leaves it junior passes rank and, the role handing out
+     * nothing, is made.
      *
      * @return void
      *
@@ -163,7 +164,7 @@ final class DelegatedGrantsTest extends TestCase
             self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_RANK, static fn (): mixed => self::grants()->grantRole($user, $role, actor: $actor));
         }
 
-        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_UNPROVABLE, static fn (): mixed => self::grants()->grantRole($user, $junior, actor: $actor));
+        self::assertSame(GrantOutcome::GRANTED, self::grants()->grantRole($user, $junior, actor: $actor));
         self::assertSame(DecisionReason::ADMINISTRATION_RANK, $actor->check(OperationResource::grant(Actions::ROLE_GRANT, $user, $senior, GrantScope::platform()))->reason);
     }
 

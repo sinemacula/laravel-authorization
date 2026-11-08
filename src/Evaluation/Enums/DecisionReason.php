@@ -70,7 +70,7 @@ enum DecisionReason: string
     /** The administration operation hands out what the actor neither holds nor may grant. */
     case ADMINISTRATION_NOT_GRANTABLE = 'administration.not_grantable';
 
-    /** The administration operation may widen authority in a way the package cannot yet prove is permitted. */
+    /** The administration operation may widen authority in a way the package cannot prove is permitted. */
     case ADMINISTRATION_UNPROVABLE = 'administration.unprovable';
 
     /** The administration operation is made while impersonating, and nothing allows that. */
@@ -102,7 +102,7 @@ enum DecisionReason: string
             self::ADMINISTRATION_RANK              => 'the target is not junior to the actor',
             self::ADMINISTRATION_SELF              => 'it benefits the actor itself',
             self::ADMINISTRATION_NOT_GRANTABLE     => 'it hands out what the actor neither holds nor may grant',
-            self::ADMINISTRATION_UNPROVABLE        => 'it may widen authority in a way that cannot yet be proved permitted',
+            self::ADMINISTRATION_UNPROVABLE        => 'it may widen authority in a way that cannot be proved permitted',
             self::ADMINISTRATION_IMPERSONATING     => 'it is made while impersonating',
         };
     }

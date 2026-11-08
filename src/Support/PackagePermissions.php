@@ -12,18 +12,21 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
  * always holds, whatever the application configures, so `authorization:sync`
  * writes them, they can be granted, and a policy naming them validates.
  *
- * Each is spelt `authorization:<noun>.<verb>`, is guard-agnostic and is filed
- * under the `authorization` category. They are the package's, not the
- * application's: the action catalogue holds what the application declares, and
- * the policy validator accepts a pattern that covers one of these whatever the
- * catalogue holds.
+ * Each is spelt `authorization:NOUN.VERB`, is guard-agnostic and is filed under
+ * the `authorization` category. They are the package's, not the application's:
+ * the action catalogue holds what the application declares, and the policy
+ * validator accepts a pattern that covers one of these whatever the catalogue
+ * holds.
  *
  * A service called with an acting context decides the action of each change it
  * makes through `check()`, on the change's operation resource (see
  * `Administration\OperationResource`). Holding an action permits the operation;
  * it never implicitly permits distributing whatever the operation hands out.
- * The read actions and the grantable rights are declared for the parts of
- * delegated administration still to come, and nothing checks them yet.
+ * The grantable rights let an actor hand out a permission or an approved
+ * version of a policy it does not hold, and `administration.unbounded` lets a
+ * delegated change lift or widen a permission boundary; the read actions are
+ * declared for a later part of delegated administration, and nothing checks
+ * them yet.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -123,6 +126,9 @@ final readonly class PackagePermissions implements PermissionProvider
     /** @var string The right to make a delegated change while impersonating. */
     public const string ADMINISTRATION_IMPERSONATED = 'authorization:administration.impersonated';
 
+    /** @var string The further right a delegated boundary change needs when it may lift or widen what a boundary caps. */
+    public const string ADMINISTRATION_UNBOUNDED = 'authorization:administration.unbounded';
+
     /** @var string The category every package permission is filed under. */
     private const string CATEGORY = 'authorization';
 
@@ -159,6 +165,7 @@ final readonly class PackagePermissions implements PermissionProvider
         self::POLICY_GRANTABLE            => 'Delegate an approved version of a policy without holding what it allows.',
         self::ADMINISTRATION_SELF         => 'Make an otherwise permitted change that benefits the actor itself.',
         self::ADMINISTRATION_IMPERSONATED => 'Make a delegated change while impersonating.',
+        self::ADMINISTRATION_UNBOUNDED    => 'Replace a permission boundary with a wider one, or remove one.',
     ];
 
     /**

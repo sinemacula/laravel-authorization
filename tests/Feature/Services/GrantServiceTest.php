@@ -41,6 +41,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Services\SyncResult;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -1495,11 +1496,12 @@ final class GrantServiceTest extends TestCase
 
     /**
      * A delegated sync is decided whole before anything is written: one that
-     * grants a role or a policy is refused as unprovable, one that grants a
-     * permission the actor does not hold as not grantable, one that only
-     * revokes is refused to an actor without the revoke action, and one that
-     * changes nothing is still decided on its action, so it is refused to an
-     * actor without it too.
+     * grants a role carrying a permission the actor neither holds nor may grant
+     * is refused as not grantable, as one that grants such a permission is, one
+     * that attaches a policy no route can prove is refused as unprovable, one
+     * that only revokes is refused to an actor without the revoke action, and
+     * one that changes nothing is still decided on its action, so it is refused
+     * to an actor without it too.
      *
      * @return void
      *
@@ -1507,22 +1509,24 @@ final class GrantServiceTest extends TestCase
      */
     public function testADelegatedSyncIsDecidedBeforeAnythingIsWritten(): void
     {
-        $admin   = self::administrator();
+        $actions = [PackagePermissions::ROLE_GRANT, PackagePermissions::ROLE_REVOKE, PackagePermissions::POLICY_ATTACH, PackagePermissions::POLICY_DETACH];
+        $admin   = self::administrator($actions);
         $nobody  = self::administrator([], 'nobody');
         $granter = self::administrator([PackagePermissions::PERMISSION_GRANT, PackagePermissions::PERMISSION_REVOKE], 'granter');
         $user    = self::user();
 
         self::service()->grantRole($user, self::role('editor'));
         self::service()->grantPermission($user, Permission::query()->create(['name' => 'posts:edit']));
-        self::role('author');
 
-        $read       = Permission::query()->create(['name' => 'posts:read']);
-        $audit      = self::policy('audit');
-        $unprovable = DecisionReason::ADMINISTRATION_UNPROVABLE;
+        $read    = Permission::query()->create(['name' => 'posts:read']);
+        $audit   = Policy::query()->create(['name' => 'audit', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['posts:1']]]]]);
+        $refused = DecisionReason::ADMINISTRATION_NOT_GRANTABLE;
 
-        self::assertDelegatedRefusal($unprovable, static fn (): SyncResult => self::service()->syncRoles($user, ['editor', 'author'], actor: $admin));
-        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, static fn (): SyncResult => self::service()->syncPermissions($user, [$read], actor: $granter));
-        self::assertDelegatedRefusal($unprovable, static fn (): SyncResult => self::service()->syncPolicies($user, [$audit], actor: $admin));
+        RoleService::instance()?->grantPermission(self::role('author'), $read);
+
+        self::assertDelegatedRefusal($refused, static fn (): SyncResult => self::service()->syncRoles($user, ['editor', 'author'], actor: $admin));
+        self::assertDelegatedRefusal($refused, static fn (): SyncResult => self::service()->syncPermissions($user, [$read], actor: $granter));
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_UNPROVABLE, static fn (): SyncResult => self::service()->syncPolicies($user, [$audit], actor: $admin));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): SyncResult => self::service()->syncRoles($user, [], actor: $nobody));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): SyncResult => self::service()->syncRoles($user, ['editor'], actor: $nobody));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): SyncResult => self::service()->syncPolicies($user, [], actor: $nobody));
@@ -1584,9 +1588,10 @@ final class GrantServiceTest extends TestCase
 
     /**
      * Revoking everything is decided item by item before anything is written: a
-     * boundary among the grants, whose removal widens, is refused as
-     * unprovable; an actor without an action is refused; and a grantee that
-     * holds nothing still has every action the call covers decided.
+     * boundary among the grants, whose removal widens, is refused as unprovable
+     * to an actor without `authorization:administration.unbounded`; an actor
+     * without an action is refused; and a grantee that holds nothing still has
+     * every action the call covers decided.
      *
      * @return void
      *
@@ -1602,7 +1607,9 @@ final class GrantServiceTest extends TestCase
         self::service()->grantPermission($user, Permission::query()->create(['name' => 'posts:edit']));
         BoundaryService::instance()?->set($user, Policy::create(['name' => 'cap', 'document' => ['version' => 1, 'statements' => []]]));
 
-        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_UNPROVABLE, static fn (): int => self::service()->revokeAll($user, $admin));
+        $bounded = self::administrator([PackagePermissions::PERMISSION_REVOKE, PackagePermissions::BOUNDARY_REMOVE], 'bounded');
+
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_UNPROVABLE, static fn (): int => self::service()->revokeAll($user, $bounded));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->revokeAll($user, $nobody));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->revokeAll($empty, $nobody));
 
@@ -1965,6 +1972,64 @@ final class GrantServiceTest extends TestCase
         }
 
         self::assertSame(0, DB::table('authorizable_policies')->count());
+    }
+
+    /**
+     * A delegated grant is weighed on the row it is written against, never on
+     * the model in hand: a policy whose document is changed and not saved is
+     * judged on the stored document, one read before a rewrite on the rewritten
+     * one, a role given a rank and not saved on its stored rank, and a
+     * permission renamed and not saved on its stored name, a sync's targets
+     * included; a policy whose row is gone is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedGrantIsWeighedOnTheStoredRow(): void
+    {
+        $actions  = [PackagePermissions::POLICY_ATTACH, PackagePermissions::ROLE_GRANT, PackagePermissions::PERMISSION_GRANT, 'posts:read'];
+        $admin    = self::administrator($actions, 'admin-1', 5);
+        $user     = self::user();
+        $refused  = DecisionReason::ADMINISTRATION_NOT_GRANTABLE;
+        $allowing = static fn (string $action): array => ['statements' => [['effect' => 'allow', 'actions' => [$action]]]];
+
+        $deleting        = Policy::query()->create(['name' => 'deleting', 'document' => $allowing('posts:delete')]);
+        $dirty           = Policy::query()->whereKey($deleting->getKey())->firstOrFail();
+        $dirty->document = $allowing('posts:read');
+
+        self::assertDelegatedRefusal($refused, static fn (): mixed => self::service()->attachPolicy($user, $dirty, actor: $admin));
+        self::assertDelegatedRefusal($refused, static fn (): mixed => self::service()->syncPolicies($user, [$dirty], actor: $admin));
+
+        $reading = Policy::query()->create(['name' => 'reading', 'document' => $allowing('posts:read')]);
+        $stale   = Policy::query()->whereKey($reading->getKey())->firstOrFail();
+
+        $reading->forceFill(['document' => $allowing('posts:delete')])->save();
+
+        self::assertDelegatedRefusal($refused, static fn (): mixed => self::service()->attachPolicy($user, $stale, actor: $admin));
+
+        $senior     = Role::query()->create(['name' => 'senior', 'rank' => 1]);
+        $fake       = Role::query()->whereKey($senior->getKey())->firstOrFail();
+        $fake->rank = 99;
+
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_RANK, static fn (): mixed => self::service()->grantRole($user, $fake, actor: $admin));
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_RANK, static fn (): mixed => self::service()->syncRoles($user, [$fake], actor: $admin));
+
+        $delete        = Permission::query()->create(['name' => 'posts:delete']);
+        $renamed       = Permission::query()->whereKey($delete->getKey())->firstOrFail();
+        $renamed->name = 'posts:read';
+
+        self::assertDelegatedRefusal($refused, static fn (): mixed => self::service()->grantPermission($user, $renamed, actor: $admin));
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+        self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', $user->getKey())->count());
+
+        $gone = Policy::query()->create(['name' => 'gone', 'document' => $allowing('posts:read')]);
+
+        DB::table('policies')->where('id', $gone->getKey())->delete();
+
+        $this->expectException(InvalidGrantTargetException::class);
+
+        self::service()->attachPolicy($user, $gone, actor: $admin);
     }
 
     /**

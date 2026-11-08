@@ -83,10 +83,14 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * change's operation resource, inside the transaction once the boundary is read
  * and before anything is written; the first refused throws the decision's
  * `AuthorizationException`, leaving nothing written. A removal that finds no
- * boundary decides nothing. Setting a boundary can replace a stricter one and
- * removing one lifts its cap, so either may widen what the grantee may do: once
- * the rank rule passes (see `OperationConstraints`), both wait for the rules of
- * the later parts of BL-65 and are refused as `administration.unprovable`.
+ * boundary decides nothing. Once the rank rule passes (see
+ * `OperationConstraints`), setting a boundary where the grantee has none, or
+ * replacing one with the same policy or one that can only narrow it, reaching
+ * no fewer tenants, only narrows, and is allowed (see `Narrowing`). Replacing
+ * one with a wider boundary, and removing one, lift a cap whose release cannot
+ * be bounded, so each is refused as `administration.unprovable` unless the
+ * actor is also allowed `authorization:administration.unbounded` on the same
+ * operation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

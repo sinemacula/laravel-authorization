@@ -52,9 +52,9 @@ final class OperationAttributesTest extends TestCase
         self::assertSame(ContextKeyType::TIME, $attributes['expires_at']);
         self::assertSame(ContextKeyType::NUMBER, $attributes['change.rank']);
         self::assertSame(ContextKeyType::BOOL, $attributes['impersonated']);
-        self::assertCount(25, $attributes);
+        self::assertCount(26, $attributes);
 
-        $strings = ['target_type', 'target_id', 'role', 'permission', 'policy', 'grantee_type', 'grantee_id', 'application', 'change.name', 'change.description'];
+        $strings = ['target_type', 'target_id', 'role', 'permission', 'policy', 'grantee_type', 'grantee_id', 'application', 'digest', 'change.name', 'change.description'];
 
         foreach ([...$strings, 'change.parent'] as $key) {
             self::assertSame(ContextKeyType::STRING, $attributes[$key], $key);

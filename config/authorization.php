@@ -582,4 +582,25 @@ return [
     'rank' => [
         'enabled' => (bool) env('AUTHORIZATION_RANK_ENABLED', true),
     ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Delegated administration
+    |---------------------------------------------------------------------------
+    |
+    | A delegated change to a shared definition (a permission added to a role,
+    | a role re-parented, a permission renamed, a policy rewritten or attached
+    | to a resource) is weighed against every holder it reaches, read as a set:
+    | the actor must administer each one's scope, outrank it, and not be it.
+    | `max_impact` is the most distinct holders such a change is weighed
+    | against, and the most resource policies a delegated role grant weighs
+    | in its reach; one reaching more is refused as
+    | `administration.unprovable`, never approximated. A whole number of at
+    | least 1.
+    |
+    */
+
+    'administration' => [
+        'max_impact' => (int) env('AUTHORIZATION_ADMINISTRATION_MAX_IMPACT', 1000),
+    ],
 ];
