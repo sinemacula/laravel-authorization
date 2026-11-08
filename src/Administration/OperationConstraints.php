@@ -12,7 +12,6 @@ use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -49,13 +48,15 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *
  * The constraints of a change to a subject, in order:
  *
- * - **scope**: a change that may widen authority is refused as
- *   `administration.scope` unless the actor is allowed its action across the
- *   whole reach: decided again in the grant's tenant, standing just below it
- *   for a grant that reaches the tenants below, so only authority that itself
- *   reaches below counts, and in the grant's application, so a grant to every
- *   application needs authority in every application; a platform-wide change is
- *   decided at platform scope by its own decision already;
+ * - **scope** (N79): a change that may widen authority is refused as
+ *   `administration.scope` unless the actor administers its whole reach (see
+ *   `AdministeredScope`): its action decided again in the grant's tenant,
+ *   standing just below it for a grant that reaches the tenants below, so only
+ *   authority that itself reaches below counts, or at platform scope for a
+ *   platform-wide grant, and in the grant's application, so a grant to every
+ *   application needs authority in every application; and, for a reach wider
+ *   than its node, nothing that denies or caps the actor anywhere in it could
+ *   limit the action;
  * - **rank** (N76): unless the grantee is the actor, the actor, ranked in the
  *   grant's own tenant and application, must be strictly senior to the most
  *   senior rank the grantee holds anywhere the change reaches, and to the rank
@@ -181,10 +182,9 @@ final class OperationConstraints
     }
 
     /**
-     * Return `administration.scope` when a change that may widen authority is
-     * not allowed across its whole reach: its action decided again in the
-     * grant's tenant, just below it for a grant that reaches below, in the
-     * grant's application.
+     * Return `administration.scope` when the actor does not administer the
+     * whole reach of a change that may widen authority (see
+     * `AdministeredScope`).
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
@@ -194,14 +194,7 @@ final class OperationConstraints
      */
     private static function scope(OperationResource $operation, OperationChange $change, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
-        if ($operation->isNarrowing) {
-            return null;
-        }
-
-        $decide = static fn (): bool => $checks->decide($operation->action, $resource)->isAllowed();
-        $below  = $operation->tenant !== null && $change->scope->includeSubtree;
-
-        return TenantScope::within($operation->tenant, $change->scope->application, $decide, $below) ? null : DecisionReason::ADMINISTRATION_SCOPE;
+        return $operation->isNarrowing ? null : AdministeredScope::refusal($operation, $resource, $change->scope, $checks);
     }
 
     /**

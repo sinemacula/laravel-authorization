@@ -473,7 +473,7 @@ final class DecisionPipelineTest extends TestCase
         $calls    = 0;
         $resolver = new class ($calls) implements PolicyResolver {
             /**
-             * Create a resolver whose third read fails.
+             * Create a resolver whose fourth read fails.
              *
              * @param  int  $calls
              */
@@ -484,7 +484,7 @@ final class DecisionPipelineTest extends TestCase
             ) {}
 
             /**
-             * Return no policies, failing on the third read.
+             * Return no policies, failing on the fourth read.
              *
              * @param  object  $principal
              * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
@@ -494,7 +494,7 @@ final class DecisionPipelineTest extends TestCase
             #[\Override]
             public function policiesFor(object $principal): array
             {
-                if (++$this->calls === 3) {
+                if (++$this->calls === 4) {
                     throw new InvalidPolicyDocumentException('broken', 'unreadable');
                 }
 
@@ -504,10 +504,11 @@ final class DecisionPipelineTest extends TestCase
 
         $pipeline = new DecisionPipeline(new PolicyEvaluator, $resolver, null, new ResourcePolicyResolver, new GuardrailResolver);
 
-        // The grant, its reach, the permission's sources, which fail, and the
-        // grantable right each read the policies once.
+        // The grant, its reach, the action's own sources across the reach, the
+        // permission's sources, which fail, and the grantable right each read
+        // the policies once.
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $pipeline->decide($subject, PackagePermissions::PERMISSION_GRANT, $grant, [])->reason);
-        self::assertSame(4, $calls);
+        self::assertSame(5, $calls);
     }
 
     /**
