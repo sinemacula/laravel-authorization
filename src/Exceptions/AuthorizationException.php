@@ -22,9 +22,10 @@ use SineMacula\Laravel\Authorization\Support\Messages;
  * application that words a message per reason reads the reason code. A denied
  * decision, from `authorize()` or the `permission` and `authorize` middleware,
  * is recorded as the manager's last decision and fires the
- * `AuthorizationFailed` event first, so a consumer that needs the full decision
- * reads it there. A missing role is not a decision: it carries `no_match`,
- * records nothing and fires no event.
+ * `AuthorizationFailed` event first, which carries references, ids and key
+ * names alone, so a consumer that needs the full decision reads it from
+ * `Authorization::lastDecision()`. A missing role is not a decision: it carries
+ * `no_match`, records nothing and fires no event.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

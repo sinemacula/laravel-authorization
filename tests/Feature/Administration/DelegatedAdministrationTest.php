@@ -674,7 +674,7 @@ final class DelegatedAdministrationTest extends TestCase
 
         foreach ($decisions as $decision) {
             self::assertSame(OperationResource::TYPE . ':' . $events[0]->operation->id, $decision->resource);
-            self::assertSame($actor->subject->subject, $decision->principal);
+            self::assertEquals($actor->principal(), $decision->subject);
         }
     }
 
@@ -699,7 +699,7 @@ final class DelegatedAdministrationTest extends TestCase
         self::assertSame($reason, $refusal->getReason());
         self::assertSame($before, self::snapshot());
         self::assertCount($changes, self::changes());
-        self::assertSame($refusal->getDecision(), \array_reverse(self::dispatched(AuthorizationFailed::class))[0]->decision);
+        self::assertSame($refusal->getDecision()?->reason, \array_reverse(self::dispatched(AuthorizationFailed::class))[0]->reason);
 
         if ($action === null) {
             return;

@@ -161,7 +161,7 @@ final class ConflictRetriesTest extends TestCase
         foreach ($events as $event) {
             self::assertSame(PackagePermissions::ROLE_GRANT, $event->action);
             self::assertSame(OperationResource::TYPE . ':' . $operation->id, $event->resource);
-            self::assertSame($refusal->getDecision(), $event->decision);
+            self::assertSame($refusal->getDecision()?->reason, $event->reason);
         }
 
         self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $refusal->getReason());

@@ -224,11 +224,11 @@ final class ActingContextTest extends TestCase
         self::assertSame($decision, $actor->reportRefusal($named, $decision)->getDecision());
         self::assertSame($decision, $actor->reportRefusal($bare, $decision)->getDecision());
 
-        $principal = $actor->subject->subject;
+        $principal = $actor->principal();
         $failed    = static function (Operation $operation, string $action) use ($principal): \Closure {
-            $resource = OperationResource::TYPE . ':' . $operation->id;
+            $named = [$principal->type, $principal->id, $action, OperationResource::TYPE . ':' . $operation->id];
 
-            return static fn (AuthorizationFailed $event): bool => $event->principal === $principal && $event->action === $action && $event->resource === $resource;
+            return static fn (AuthorizationFailed $event): bool => [$event->subject?->type, $event->subject?->id, $event->action, $event->resource] === $named;
         };
 
         Event::assertDispatched(AuthorizationFailed::class, $failed($named, PackagePermissions::ROLE_GRANT));
@@ -326,7 +326,7 @@ final class ActingContextTest extends TestCase
         Event::assertDispatchedTimes(AuthorizationFailed::class, 1);
         Event::assertDispatched(
             AuthorizationFailed::class,
-            static fn (AuthorizationFailed $event): bool => $event->principal === $admin && $event->action === PackagePermissions::POLICY_DETACH,
+            static fn (AuthorizationFailed $event): bool => $event->subject?->id === $admin->getKey() && $event->action === PackagePermissions::POLICY_DETACH,
         );
     }
 

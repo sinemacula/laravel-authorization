@@ -123,6 +123,27 @@ final readonly class Decision
     }
 
     /**
+     * Return the name of each context key the decision depended on: every
+     * condition key a step of its trace tested, each once, in the order first
+     * tested, whether or not its test held. Names alone, never a value
+     * (AUTHZ-15.4).
+     *
+     * @return list<string>
+     */
+    public function keys(): array
+    {
+        $keys = [];
+
+        foreach ($this->trace as $entry) {
+            foreach (\array_keys($entry->conditions) as $key) {
+                $keys[$key] = true;
+            }
+        }
+
+        return \array_map(\strval(...), \array_keys($keys));
+    }
+
+    /**
      * Return the decision with one more step at the end of its trace.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\TraceEntry  $entry

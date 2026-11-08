@@ -73,7 +73,8 @@ final class DecidesThroughAuthorizationTest extends TestCase
         Event::assertDispatchedTimes(DecisionEvaluated::class, 1);
         Event::assertDispatched(
             DecisionEvaluated::class,
-            static fn (DecisionEvaluated $event): bool => [$event->principal, $event->action, $event->resource] === [$user, 'tenants:publish', StubTenant::class . ':tenant-a'],
+            static fn (DecisionEvaluated $event): bool => [$event->subject?->id, $event->action, $event->resource]
+                === [$user->getKey(), 'tenants:publish', StubTenant::class . ':tenant-a'],
         );
         self::assertTrue(Authorization::lastDecision()?->isAllowed());
     }
@@ -177,7 +178,7 @@ final class DecidesThroughAuthorizationTest extends TestCase
             self::assertSame('This action is unauthorized.', $denial->message());
         }
 
-        Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->principal === null);
+        Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->subject === null);
     }
 
     /**

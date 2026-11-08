@@ -9,8 +9,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
-use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
-use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -18,13 +17,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Walks every event class the package ships and pins that each implements the
- * `AuthorizationEvent` marker, and that every change event is a final readonly
- * snapshot of plain values: scalars, arrays of them or of references, the
- * package's value objects and dates, never a model or any other object.
- *
- * The decision events keep the principal, the context and the result as they
- * were evaluated until their payload is redesigned, so only the marker is
- * checked for them.
+ * `AuthorizationEvent` marker, and that every event, the decision events
+ * included, is a final readonly snapshot of plain values: scalars, backed
+ * enums, arrays of them or of the package's value objects, those value objects
+ * and dates, never a model or any other object (AUTHZ-15.3, AUTHZ-15.4).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,11 +30,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 #[CoversNothing]
 final class EventSnapshotsTest extends TestCase
 {
-    /** @var list<class-string> The value objects a change event may carry. */
-    private const array VALUE_OBJECTS = [Operation::class, Reference::class, GrantScope::class, DocumentDigest::class];
-
-    /** @var list<class-string> The decision events, which carry what they evaluated. */
-    private const array DECISION_EVENTS = [DecisionEvaluated::class, AuthorizationFailed::class];
+    /** @var list<class-string> The value objects an event may carry. */
+    private const array VALUE_OBJECTS = [Operation::class, Reference::class, GrantScope::class, DocumentDigest::class, StatementReference::class];
 
     /**
      * The walk finds every event, decision and change events alike.
@@ -100,8 +93,8 @@ final class EventSnapshotsTest extends TestCase
     }
 
     /**
-     * Every change event is a final readonly snapshot whose constructor takes
-     * only plain values.
+     * Every event, a decision event included, is a final readonly snapshot
+     * whose constructor takes only plain values.
      *
      * @param  class-string  $class
      * @return void
@@ -109,12 +102,6 @@ final class EventSnapshotsTest extends TestCase
     #[DataProvider('events')]
     public function testCarriesOnlyPlainValues(string $class): void
     {
-        if (\in_array($class, self::DECISION_EVENTS, true)) {
-            self::assertTrue((new \ReflectionClass($class))->isFinal());
-
-            return;
-        }
-
         self::assertSnapshot($class);
     }
 
@@ -164,8 +151,8 @@ final class EventSnapshotsTest extends TestCase
 
     /**
      * Assert the class is final and readonly, and that each constructor
-     * parameter is a scalar, an array of plain values, one of the package's
-     * value objects or a date.
+     * parameter is a scalar, a backed enum, an array of plain values, one of
+     * the package's value objects or a date.
      *
      * @param  class-string  $class
      * @return void
@@ -189,20 +176,20 @@ final class EventSnapshotsTest extends TestCase
                 continue;
             }
 
-            self::assertArrayHoldsOnlyReferences($class, $constructor, $parameter->getName());
+            self::assertArrayHoldsOnlyValueObjects($class, $constructor, $parameter->getName());
         }
     }
 
     /**
      * Assert the docblock type of an array parameter names no class other than
-     * `Reference`.
+     * the package's value objects.
      *
      * @param  class-string  $class
      * @param  \ReflectionMethod  $constructor
      * @param  string  $name
      * @return void
      */
-    private static function assertArrayHoldsOnlyReferences(string $class, \ReflectionMethod $constructor, string $name): void
+    private static function assertArrayHoldsOnlyValueObjects(string $class, \ReflectionMethod $constructor, string $name): void
     {
         $matched = \preg_match('/@param\s+(.+?)\s+\$' . $name . '\b/', (string) $constructor->getDocComment(), $match);
 
@@ -211,7 +198,7 @@ final class EventSnapshotsTest extends TestCase
         \preg_match_all('/\\\?[A-Z][A-Za-z]*(?:\\\[A-Za-z]+)+/', $match[1], $classes);
 
         foreach ($classes[0] as $named) {
-            self::assertSame(Reference::class, \ltrim($named, '\\'), "{$class}::\${$name} holds {$named}.");
+            self::assertContains(\ltrim($named, '\\'), self::VALUE_OBJECTS, "{$class}::\${$name} holds {$named}.");
         }
     }
 
@@ -225,6 +212,7 @@ final class EventSnapshotsTest extends TestCase
     {
         return \in_array($type, ['string', 'int', 'float', 'bool', 'array'], true)
             || \in_array($type, self::VALUE_OBJECTS, true)
+            || \is_subclass_of($type, \BackedEnum::class)
             || \is_a($type, \DateTimeInterface::class, true);
     }
 }

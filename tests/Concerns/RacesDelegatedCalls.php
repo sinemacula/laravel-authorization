@@ -59,7 +59,7 @@ trait RacesDelegatedCalls
                 return;
             }
 
-            $decisions->append($event->decision->isAllowed());
+            $decisions->append($event->isAllowed());
 
             if ($state['armed'] !== true) {
                 return;

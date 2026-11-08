@@ -271,12 +271,11 @@ final class DelegatedRacesTest extends TestCase
         $last    = \array_slice($evaluated->getArrayCopy(), -1)[0];
 
         self::assertCount(1, $failed);
-        self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $fail->decision->reason);
+        self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $fail->reason);
         self::assertSame(Actions::PERMISSION_GRANT, $fail->action);
-        self::assertSame($admin, $fail->principal);
-        self::assertSame($refusal->getDecision(), $fail->decision);
-        self::assertSame($refusal->getDecision(), $last->decision);
-        self::assertSame($admin, $last->principal);
+        self::assertEquals(Reference::of($admin), $fail->subject);
+        self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $last->reason);
+        self::assertEquals(Reference::of($admin), $last->subject);
         self::assertSame($fail->resource, $last->resource);
         self::assertSame($first->resource, $last->resource);
         self::assertStringStartsWith('authorization:operation:', (string) $last->resource);

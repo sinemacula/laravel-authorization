@@ -41,11 +41,11 @@ action through the one decision path rather than computing allows less denies, a
    named one on `Authorization::for($user)`, and a guest, allowed nothing, on `Authorization::forUser(null)` or when the
    request has none. The subject is resolved before the scope is entered.
 
-6. **Introspection records nothing (N70).** The batch is made with `isRecording` false, a recording policy on the shared
-   path rather than a copy of the decision loop: it records no last decision and dispatches no `DecisionEvaluated`;
-   `AuthorizationFailed` is never dispatched since nothing is authorized. Break-glass reporting (BL-70, AUTHZ-15.3's
-   "always") must define how it treats introspection when it is built: either exempt a listing, as this note does
-   today, or report the break-glass allows a listing relies on.
+6. **Introspection records nothing (N70).** The batch is made with both `isDispatching` and `isStoring` false, two
+   switches on the shared path rather than a copy of the decision loop: it stores no last decision and dispatches no
+   `DecisionEvaluated`; `AuthorizationFailed` is never dispatched since nothing is authorized. Break-glass reporting
+   (BL-70, AUTHZ-15.3's "always") must define how it treats introspection when it is built: either exempt a listing,
+   as this note does today, or report the break-glass allows a listing relies on.
 
 7. **Generic and resource-specific listings differ.** A listing with no resource answers the resource-less check, so an
    allow limited by `resources` or by a resource's attributes does not list its action; a listing for one resource
@@ -88,8 +88,8 @@ request recorded before.
 - `AuthorizationManager::permissionsFor()` -- the subject, the catalogue's actions, the scope entered and the batch.
 - `Support\AuthorizationScope` -- the named constructors, `withResource()`, `within()` (which skips a scope already in
   place and sets the memo aside for another) and `subjectIn()`.
-- `Evaluation\CheckBatch` -- `isRecording`, the recording policy introspection turns off, and the shared reference's
-  attributes kept until its last check.
+- `Evaluation\CheckBatch` -- `isDispatching` and `isStoring`, the switches introspection turns off, and the shared
+  reference's attributes kept until its last check.
 - `Context\ResourceAttributeBatch` -- one item per shared reference, its bulk or single answer kept for every check.
 - `Cache\ResolutionMemo::aside()` -- the request's memo set aside and put back around another scope.
 - `Support\PermissionCatalogue::definitions()` -- the actions, and the bad enum entries skipped.

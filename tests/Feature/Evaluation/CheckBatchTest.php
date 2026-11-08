@@ -11,6 +11,7 @@ use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
@@ -21,6 +22,7 @@ use SineMacula\Laravel\Authorization\Evaluation\CheckBatch;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
@@ -114,8 +116,9 @@ final class CheckBatchTest extends TestCase
 
     /**
      * Each check dispatches its own decision event, in the order of the checks,
-     * a check repeated included, with the check's action, resource and context,
-     * as `check()` dispatches it.
+     * a check repeated included, with the check's action, resource and effect
+     * and a reference to the subject, but never the check's context, as
+     * `check()` dispatches it.
      *
      * @return void
      */
@@ -142,9 +145,11 @@ final class CheckBatchTest extends TestCase
         $named = \array_map(static fn (ScopedPost $post): string => $post->getMorphClass() . ':' . self::key($post), [$posts[1], $posts[0], $posts[1], $posts[2]]);
 
         self::assertSame($named, \array_map(static fn (DecisionEvaluated $event): ?string => $event->resource, $events));
-        self::assertSame(['flag' => 'on'], $events[0]->context);
-        self::assertFalse($events[1]->decision->isAllowed());
-        self::assertSame($user, $events[0]->principal);
+        self::assertSame([], $events[0]->keys);
+        self::assertStringNotContainsString('flag', \serialize($events[0]));
+        self::assertFalse($events[1]->isAllowed());
+        self::assertSame(DecisionReason::NO_MATCH, $events[1]->reason);
+        self::assertEquals(Reference::of($user), $events[0]->subject);
     }
 
     /**
@@ -173,9 +178,9 @@ final class CheckBatchTest extends TestCase
     }
 
     /**
-     * A batch made not to record decides each check as a recording one does,
-     * one check on its own or many, but leaves the last decision as it was and
-     * dispatches no decision event.
+     * A batch made neither to dispatch nor to store decides each check as a
+     * recording one does, one check on its own or many, but leaves the last
+     * decision as it was and dispatches no decision event.
      *
      * @return void
      */
@@ -193,7 +198,7 @@ final class CheckBatchTest extends TestCase
         $app      = $this->app;
         $contexts = $app->make(CheckContextFactory::class);
         $pipeline = new DecisionPipeline($app->make(PolicyEvaluator::class), $app->make(PolicyResolver::class), $contexts, new ResourcePolicyResolver, new GuardrailResolver);
-        $batch    = new CheckBatch($pipeline, $app->make(LastDecisionStore::class), $app->make(SubjectResolver::class), $app->make(Dispatcher::class), false);
+        $batch    = new CheckBatch($pipeline, $app->make(LastDecisionStore::class), $app->make(SubjectResolver::class), $app->make(Dispatcher::class), false, false);
 
         Event::fake([DecisionEvaluated::class]);
 
@@ -210,10 +215,78 @@ final class CheckBatchTest extends TestCase
     }
 
     /**
+     * The four ways a batch may be made: dispatching and storing, each on or
+     * off.
+     *
+     * @return iterable<string, array{bool, bool}>
+     */
+    public static function switches(): iterable
+    {
+        yield 'dispatching and storing' => [true, true];
+        yield 'dispatching alone' => [true, false];
+        yield 'storing alone' => [false, true];
+        yield 'neither' => [false, false];
+    }
+
+    /**
+     * Dispatching and storing are separate switches: a batch dispatches each
+     * decision's event only when it dispatches, and stores each decision as the
+     * last decision, with its provenance, only when it stores, for many checks,
+     * one on its own and a decision made elsewhere alike, deciding every check
+     * the same way whichever it does.
+     *
+     * @param  bool  $isDispatching
+     * @param  bool  $isStoring
+     * @return void
+     */
+    #[DataProvider('switches')]
+    public function testDispatchingAndStoringAreSeparateSwitches(bool $isDispatching, bool $isStoring): void
+    {
+        $user = $this->subject();
+
+        $user->givePermission(Permission::create(['name' => self::ACTION]));
+
+        $posts    = $this->posts(2);
+        $checks   = ['a' => new CheckInput(self::ACTION, $posts[0]), 'b' => new CheckInput('posts:edit', $posts[1])];
+        $refusal  = Decision::deny(DecisionReason::ADMINISTRATION_CONFLICT, DecisionStage::ADMINISTRATION);
+        $expected = Authorization::checkMany($checks);
+
+        Authorization::forgetLastDecision();
+        Event::fake([DecisionEvaluated::class]);
+
+        /** @var \Illuminate\Foundation\Application $app */
+        $app      = $this->app;
+        $contexts = $app->make(CheckContextFactory::class);
+        $pipeline = new DecisionPipeline($app->make(PolicyEvaluator::class), $app->make(PolicyResolver::class), $contexts, new ResourcePolicyResolver, new GuardrailResolver);
+        $store    = $app->make(LastDecisionStore::class);
+        $batch    = new CheckBatch($pipeline, $store, $app->make(SubjectResolver::class), $app->make(Dispatcher::class), $isDispatching, $isStoring);
+        $subject  = Authorization::currentSubject();
+        $many     = $batch->decide($subject, $checks);
+
+        self::assertEquals($expected, $many);
+        self::assertSame($isStoring ? $many['b'] : null, Authorization::lastDecision());
+
+        $one = $batch->decideOne($subject, $checks['a']);
+
+        self::assertSame($isStoring ? $one : null, Authorization::lastDecision());
+        self::assertSame($refusal, $batch->recordOne($subject, $checks['b'], $refusal));
+        self::assertSame($isStoring ? $refusal : null, Authorization::lastDecision());
+        self::assertEquals($isStoring ? DecisionProvenance::of($subject) : null, Authorization::lastDecisionProvenance());
+
+        $events = self::dispatchedEvents(DecisionEvaluated::class);
+
+        self::assertCount($isDispatching ? 4 : 0, $events);
+        $actions = \array_map(static fn (DecisionEvaluated $event): string => $event->action, $events);
+
+        self::assertSame($isDispatching ? [self::ACTION, 'posts:edit', self::ACTION, 'posts:edit'] : [], $actions);
+        self::assertSame($isDispatching ? [true, false, true, false] : [], \array_map(static fn (DecisionEvaluated $event): bool => $event->isAllowed(), $events));
+    }
+
+    /**
      * A decision the pipeline did not make is recorded and reported for its
      * check as one the pipeline made is, as the last decision with its own
-     * decision event naming the check's resource; a batch made not to record
-     * records nothing of it either.
+     * decision event naming the check's resource; a batch made neither to
+     * dispatch nor to store records nothing of it either.
      *
      * @return void
      */
@@ -228,7 +301,8 @@ final class CheckBatchTest extends TestCase
         $contexts = $app->make(CheckContextFactory::class);
         $pipeline = new DecisionPipeline($app->make(PolicyEvaluator::class), $app->make(PolicyResolver::class), $contexts, new ResourcePolicyResolver, new GuardrailResolver);
         $store    = $app->make(LastDecisionStore::class);
-        $batch    = static fn (bool $isRecording): CheckBatch => new CheckBatch($pipeline, $store, $app->make(SubjectResolver::class), $app->make(Dispatcher::class), $isRecording);
+        $resolver = $app->make(SubjectResolver::class);
+        $batch    = static fn (bool $isRecording): CheckBatch => new CheckBatch($pipeline, $store, $resolver, $app->make(Dispatcher::class), $isRecording, $isRecording);
 
         Event::fake([DecisionEvaluated::class]);
 
@@ -240,7 +314,8 @@ final class CheckBatchTest extends TestCase
 
         self::assertSame($decision, $batch(true)->recordOne($subject, $check, $decision));
         self::assertSame($decision, Authorization::lastDecision());
-        $evaluated = static fn (DecisionEvaluated $event): bool => [$event->decision, $event->resource, $event->principal] === [$decision, 'posts:7', $user];
+        $named     = [DecisionReason::ADMINISTRATION_CONFLICT, 'posts:7', $user->getKey()];
+        $evaluated = static fn (DecisionEvaluated $event): bool => [$event->reason, $event->resource, $event->subject?->id] === $named;
 
         Event::assertDispatched(DecisionEvaluated::class, $evaluated);
     }
@@ -278,9 +353,11 @@ final class CheckBatchTest extends TestCase
         $events = self::dispatchedEvents(DecisionEvaluated::class);
 
         self::assertCount(1, $events);
-        self::assertSame($events[0]->decision, $manager->lastDecision());
+        self::assertSame($posts[0]->getMorphClass() . ':' . self::key($posts[0]), $events[0]->resource);
+        self::assertSame(['resource.status'], $events[0]->keys);
+        self::assertTrue($manager->lastDecision()?->isAllowed());
         self::assertSame([self::key($posts[0]), self::key($posts[1])], $provider->calls);
-        self::assertTrue($events[0]->decision->isAllowed());
+        self::assertTrue($events[0]->isAllowed());
         self::assertSame($tenant->getMorphClass() . ':t1:every', TenantScope::scopeKey());
         self::assertFalse($this->app?->bound('authorization.tenant_scope.within'));
     }
@@ -694,8 +771,9 @@ final class CheckBatchTest extends TestCase
         $events = self::dispatchedEvents(DecisionEvaluated::class);
 
         self::assertCount(1, $events);
-        self::assertTrue($events[0]->decision->isAllowed());
-        self::assertSame($events[0]->decision, Authorization::lastDecision());
+        self::assertTrue($events[0]->isAllowed());
+        self::assertSame('posts:1', $events[0]->resource);
+        self::assertTrue(Authorization::lastDecision()?->isAllowed());
     }
 
     /**

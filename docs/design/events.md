@@ -1,13 +1,15 @@
 # Events
 
 Every event the package dispatches implements one marker, `Contracts\AuthorizationEvent`, so one listener or one
-audit mapper registration covers them all. The change events are snapshots of plain values, carry the actor the caller
-named and the operation they belong to, and are dispatched only once the write commits.
+audit mapper registration covers them all. Every event is a snapshot of plain values. The change events carry the actor
+the caller named and the operation they belong to, and are dispatched only once the write commits; the decision events
+carry references, names and ids, never a value the decision read, and are dispatched when the decision is made.
 
 ## Purpose
 
-- **Decision events.** `DecisionEvaluated` for every decision `check()` makes (query scoping dispatches none),
-  `AuthorizationFailed` when `authorize()` refuses.
+- **Decision events.** `DecisionEvaluated` for every decision `check()` makes (query scoping and `permissionsFor()`
+  dispatch none), `AuthorizationFailed` when `authorize()` refuses. Both extend `DecisionEvent`, the abstract, readonly
+  shape they share, which is never dispatched itself.
 - **Record events.** `Role\Created`, `Role\Updated`, `Role\Deleted`, and the same three under `Permission\` and
   `Policy\`.
 - **Role permission events.** `Role\PermissionGranted` (with the grant's expiry), `Role\PermissionRevoked` and
@@ -48,11 +50,11 @@ named and the operation they belong to, and are dispatched only once the write c
 1. **One marker.** Every event class implements `AuthorizationEvent`; `IdentityEvent` extends it for the grant and
    boundary events.
 
-2. **Snapshots of plain values.** Every change event is a `final readonly` class whose constructor takes only scalars,
-   arrays of scalars or of references, the package's value objects (`Support\Operation`, `Support\Reference`,
-   `Support\GrantScope`, `Support\DocumentDigest`) and dates. No event carries a model, a lazy relation, a secret or a
-   condition or attribute value, so a listener sees what was written whatever happens to the rows afterwards, and a
-   queued listener serialises the event as it is.
+2. **Snapshots of plain values.** Every event is a `final readonly` class whose constructor takes only scalars, backed
+   enums, arrays of scalars or of the package's value objects, those value objects (`Support\Operation`,
+   `Support\Reference`, `Support\GrantScope`, `Support\DocumentDigest`, `Evaluation\StatementReference`) and dates.
+   No event carries a model, a lazy relation, a secret or a condition or attribute value, so a listener sees what was
+   written or decided whatever happens to the rows afterwards, and a queued listener serialises the event as it is.
 
 3. **References.** A record (a grantee, a role, permission or policy, an actor, a tenant) is a `Reference`: its morph
    class under the application's morph map, never a hard-coded class name, and its key as a string, each at most 191
@@ -94,15 +96,27 @@ named and the operation they belong to, and are dispatched only once the write c
    refused with `GuardrailException`, so no `Policy\Deleted` or `Policy\Updated` is dispatched for it until each
    guardrail is removed, each reported as `GuardrailRemoved`.
 
-9. **Digests, not documents.** A policy event carries its document's version and the SHA-256 of its canonical JSON
-   (keys sorted at every depth, lists in order, slashes and Unicode unescaped) as a `DocumentDigest`.
-   `Policy\Updated` carries the digest after the update and, when the update rewrote the document, the one before it.
-   `changes` never holds the document.
+9. **Decisions as references (AUTHZ-15.3, AUTHZ-15.4).** A decision event carries `subject` and `identity`,
+   references to the principal the decision was about and its identity, null for a guest and never filled from the
+   authenticated user; `previewer`, whoever previewed it, null for a decision that is not a preview; the `action`; the
+   `resource` as `type:id`, `type:*` or the name given; the `tenant` and `application` the decision was made in, those
+   of its subject; its `effect` and `reason`; the `statements` that decided it, each a `StatementReference` naming its
+   policy, the stored policy's key, its index and its sid; `usedBreakGlass`, false until break-glass grants arrive; and
+   `keys`, the name of each condition key the decision tested, held or failed, never its value. Neither the caller's
+   context nor the decision, with its trace, is carried: the last decision holds the decision, stored before the event
+   is dispatched, with its provenance (`Evaluation\DecisionProvenance`), so a listener that needs it reads
+   `Authorization::lastDecision()` and `lastDecisionProvenance()`. Dispatching the event and storing the last decision
+   are separate switches of `Evaluation\CheckBatch`: `check()` and `checkMany()` do both, `permissionsFor()` neither.
 
-10. **Before and after.** The updated events carry `changes`: the fields the update changed, before and after, as plain
+10. **Digests, not documents.** A policy event carries its document's version and the SHA-256 of its canonical JSON
+    (keys sorted at every depth, lists in order, slashes and Unicode unescaped) as a `DocumentDigest`.
+    `Policy\Updated` carries the digest after the update and, when the update rewrote the document, the one before
+    it. `changes` never holds the document.
+
+11. **Before and after.** The updated events carry `changes`: the fields the update changed, before and after, as plain
     values (dates as ISO 8601 strings in UTC, backed enums as their values).
 
-11. **Every override is reported.** A change `forceSystem()` unlocked dispatches `SystemOverrideUsed` with the record,
+12. **Every override is reported.** A change `forceSystem()` unlocked dispatches `SystemOverrideUsed` with the record,
     its name before the change, its tenant, the change allowed (`delete`, `unprotect`, `rename`, `document-rewrite` or
     `modify`) and the operation, alongside the record's own event and with the same operation.
 
@@ -132,10 +146,10 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 
 ## Failure / Edge Cases
 
-- **Decision events are not snapshots yet.** `DecisionEvaluated` and `AuthorizationFailed` implement the marker but
-  still carry the principal object, the context and the result as they were evaluated, and are dispatched when the
-  decision is made, not after a commit: a denial is a fact even if the surrounding transaction rolls back. Their
-  payload is redesigned with the decision trace.
+- **Decision events are dispatched when the decision is made.** `DecisionEvaluated` and `AuthorizationFailed` are
+  dispatched straight away, not after a commit: a denial is a fact even if the surrounding transaction rolls back. A
+  subject that is no saved record, such as an unsaved model or an object that is not a model, is named by no reference.
+  Every decision is dispatched; which decisions fire is to be configurable (BL-72).
 - **The resolution cache is invalidated around the commit.** `OperationScope::dispatch()` bumps the versions the
   events affect inside the transaction, so a store that fails rolls the write back, and again once it commits, before
   any listener runs, so an entry a concurrent check stored from the rows before the commit never holds (see
@@ -162,6 +176,9 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 ## Implementation Anchors
 
 - `Contracts\AuthorizationEvent`, `Contracts\IdentityEvent` and the classes under `Events\`.
+- `Events\DecisionEvent`: the decision payload; `Evaluation\DecisionProvenance`: who a decision was about and where;
+  `Evaluation\LastDecisionStore`: the last decision and its provenance; `Evaluation\CheckBatch`: the dispatch and
+  store switches.
 - `Support\Reference`, `Support\Operation`, `Support\GrantScope`, `Support\DocumentDigest`.
 - `Support\OperationScope`: the call's operation and the after-commit dispatch.
 - `Observers\RoleObserver`, `Observers\PermissionObserver`, `Observers\PolicyObserver` and
@@ -176,7 +193,11 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 
 ## Authoritative Tests
 
-- `EventSnapshotsTest`: every event implements the marker; every change event takes only plain values.
+- `EventSnapshotsTest`: every event implements the marker; every event, the decision events included, takes only plain
+  values.
+- `DecisionEventTest`, `DecisionEvaluatedTest`, `AuthorizationFailedTest`: the decision payload, and no value a decision
+  read anywhere in the serialised event; `DecisionProvenanceTest`, `LastDecisionStoreTest` and the manager's
+  `AuthorizationManagerTest`: the provenance of the last decision; `CheckBatchTest`: the dispatch and store switches.
 - `OperationScopeTest`: after-commit dispatch, nesting, rollback and the current operation.
 - `ResourcePolicyServiceTest`, `PolicyAttachedTest`, `PolicyDetachedTest`, `ResourcePolicyEventTest`: the resource
   policy events and the shape they share, after commit and only for a change.
@@ -198,7 +219,8 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 
 ## Change Triggers
 
-- The decision payload: the subject as a reference, the deciding policy and statement, and the keys a decision
-  depended on.
+- Previews: `previewFor()` fills the previewer of the decision events and the provenance, and its listing dispatches
+  without storing the last decision (N86).
+- Configurable firing of the decision events (BL-72), and break-glass grants filling `usedBreakGlass` (BL-70).
 - Applications: the grant events report the application written.
 - Grant expiry and break-glass: their events join the set.

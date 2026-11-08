@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
@@ -344,7 +345,7 @@ final class AuthorizationAssertionsTest extends TestCase
         $this->assertGuest();
         $this->assertTheGateAgreesWithTheFacade('posts:create', true);
         $this->assertTheGateAgreesWithTheFacade('posts:delete', false);
-        self::assertSame($user, $this->lastPrincipal());
+        self::assertEquals(Reference::of($user), $this->lastPrincipal());
     }
 
     /**
@@ -373,7 +374,7 @@ final class AuthorizationAssertionsTest extends TestCase
         $this->assertTheGateAgreesWithTheFacade('posts:create', true);
         $this->assertTheGateAgreesWithTheFacade('posts:delete', false);
         self::assertFalse($identity->hasPermission('posts:create'));
-        self::assertSame($principal, $this->lastPrincipal());
+        self::assertEquals(Reference::of($principal), $this->lastPrincipal());
     }
 
     /**
@@ -395,7 +396,7 @@ final class AuthorizationAssertionsTest extends TestCase
 
         self::assertTrue(Gate::allows('reports:inspect'));
         $this->assertTheGateAgreesWithTheFacade('posts:create', true);
-        self::assertSame($principal, $this->lastPrincipal());
+        self::assertEquals(Reference::of($principal), $this->lastPrincipal());
     }
 
     /**
@@ -570,16 +571,16 @@ final class AuthorizationAssertionsTest extends TestCase
     }
 
     /**
-     * Return the principal of the last decision evaluated.
+     * Return the reference to the principal of the last decision evaluated.
      *
-     * @return object|null
+     * @return \SineMacula\Laravel\Authorization\Support\Reference|null
      */
-    private function lastPrincipal(): ?object
+    private function lastPrincipal(): ?Reference
     {
         /** @var \SineMacula\Laravel\Authorization\Events\DecisionEvaluated|null $decision */
         $decision = Event::dispatched(DecisionEvaluated::class)->last()[0] ?? null;
 
-        return $decision?->principal;
+        return $decision?->subject;
     }
 
     /**

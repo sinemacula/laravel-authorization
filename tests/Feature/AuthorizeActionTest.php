@@ -198,7 +198,7 @@ final class AuthorizeActionTest extends TestCase
         $this->getJson('/reports/report-7%00')->assertForbidden();
 
         Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->resource === null
-            && $event->decision->reason                                                                                  === DecisionReason::RESOURCE_UNRESOLVED);
+            && $event->reason                                                                                            === DecisionReason::RESOURCE_UNRESOLVED);
     }
 
     /**
@@ -220,7 +220,7 @@ final class AuthorizeActionTest extends TestCase
         $this->getJson('/reports/' . \rawurlencode(StubTenant::class))->assertForbidden();
 
         Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->resource === StubTenant::class
-            && $event->decision->reason                                                                                  === DecisionReason::NO_MATCH);
+            && $event->reason                                                                                            === DecisionReason::NO_MATCH);
     }
 
     /**
@@ -504,15 +504,16 @@ final class AuthorizeActionTest extends TestCase
         foreach (['posts:update', self::ACTION] as $action) {
             Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->action === $action
                 && $event->resource                                                                                        === null
-                && $event->decision->reason                                                                                === DecisionReason::RESOURCE_UNRESOLVED
-                && $event->decision->stage                                                                                 === DecisionStage::RESOURCE);
+                && $event->reason                                                                                          === DecisionReason::RESOURCE_UNRESOLVED);
         }
+
+        self::assertSame(DecisionStage::RESOURCE, Authorization::lastDecision()?->stage);
 
         Event::assertDispatchedTimes(AuthorizationFailed::class, 1);
         Event::assertDispatched(AuthorizationFailed::class, static fn (AuthorizationFailed $event): bool => $event->action === self::ACTION
             && $event->resource                                                                                            === null
-            && $event->context                                                                                             === []
-            && $event->principal instanceof StubIdentity
-            && $event->decision->reason === DecisionReason::RESOURCE_UNRESOLVED);
+            && $event->keys                                                                                                === []
+            && $event->subject !== null
+            && $event->reason === DecisionReason::RESOURCE_UNRESOLVED);
     }
 }

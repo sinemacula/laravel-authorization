@@ -44,13 +44,14 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * each resource on its own, and a resource whose data cannot be read fails its
  * own check alone, when that check is reached.
  *
- * Each check is recorded as the last decision, and its `DecisionEvaluated`
- * dispatched, as soon as it is decided, before the next is decided, so the last
- * decision is the last check completed, a check failing part way leaves the one
- * before it, and an empty batch leaves it untouched. A write made meanwhile, by
- * a listener reacting to a decision say, empties what the cache holds, so every
- * later check reads the subject's grants, policies, the policies attached to
- * its resource and the tenant tree afresh, as it would one check at a time. The
+ * Each check is recorded as the last decision, with its provenance (see
+ * `DecisionProvenance`), and its `DecisionEvaluated` dispatched, as soon as it
+ * is decided, before the next is decided, so the last decision is the last
+ * check completed, a check failing part way leaves the one before it, and an
+ * empty batch leaves it untouched. A write made meanwhile, by a listener
+ * reacting to a decision say, empties what the cache holds, so every later
+ * check reads the subject's grants, policies, the policies attached to its
+ * resource and the tenant tree afresh, as it would one check at a time. The
  * resources' tenants are read for a chunk as it starts, and their attributes
  * when the first check on a type reads `resource`; a change to either made
  * after it was read is seen from the next chunk, except by the later checks of
@@ -60,11 +61,14 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * default), and what a chunk read is released once it is decided, the
  * attributes of a shared reference once the last check on it is.
  *
- * A batch made not to record decides its checks the same way, through the same
+ * Dispatching the events and storing the last decision are two switches. A
+ * batch that does neither decides its checks the same way, through the same
  * stages, but records nothing: the last decision is left untouched and no
  * `DecisionEvaluated` is dispatched. `permissionsFor()` lists a subject's
  * actions through one, since listing them is introspection, not a check (N70);
- * the break-glass reporting of BL-70 is to define how it treats it.
+ * the break-glass reporting of BL-70 is to define how it treats it. A batch may
+ * also dispatch without storing, leaving the last decision untouched while
+ * every decision is reported, or store without dispatching.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -83,7 +87,8 @@ final readonly class CheckBatch
      * @param  \SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore  $lastDecisionStore
      * @param  \SineMacula\Laravel\Authorization\Contracts\SubjectResolver  $subjectResolver
      * @param  \Illuminate\Contracts\Events\Dispatcher|null  $events
-     * @param  bool  $isRecording
+     * @param  bool  $isDispatching
+     * @param  bool  $isStoring
      */
     public function __construct(
 
@@ -99,8 +104,11 @@ final readonly class CheckBatch
         /** Dispatches each check's decision event; null dispatches none. */
         private ?Dispatcher $events,
 
-        /** Whether each decision is recorded as the last decision and reported; false for introspection, which records nothing. */
-        private bool $isRecording,
+        /** Whether each decision's event is dispatched; false for introspection, which reports nothing. */
+        private bool $isDispatching,
+
+        /** Whether each decision is stored as the last decision; false for introspection, which leaves it untouched. */
+        private bool $isStoring,
     ) {}
 
     /**
@@ -147,7 +155,7 @@ final readonly class CheckBatch
     {
         $reference = ResourceReferences::of($check->resource);
 
-        return $this->record($subject, $check, $reference, $this->pipeline->decide($subject, $check->action, $reference, $check->context));
+        return $this->record(DecisionProvenance::of($subject), $check, $reference, $this->pipeline->decide($subject, $check->action, $reference, $check->context));
     }
 
     /**
@@ -162,7 +170,7 @@ final readonly class CheckBatch
      */
     public function recordOne(?Subject $subject, CheckInput $check, Decision $decision): Decision
     {
-        return $this->record($subject, $check, ResourceReferences::of($check->resource), $decision);
+        return $this->record(DecisionProvenance::of($subject), $check, ResourceReferences::of($check->resource), $decision);
     }
 
     /**
@@ -184,10 +192,11 @@ final readonly class CheckBatch
 
         $attributes = new ResourceAttributeBatch([], self::activeTenant());
         $holders    = self::lastHolders($inputs);
+        $provenance = DecisionProvenance::of($subject);
         $decisions  = [];
 
         foreach (\array_chunk($inputs, self::chunkSize(), true) as $chunk) {
-            $decisions += $this->decideChunk($subject, $chunk, $attributes, $holders);
+            $decisions += $this->decideChunk($subject, $provenance, $chunk, $attributes, $holders);
         }
 
         return $decisions;
@@ -204,6 +213,7 @@ final readonly class CheckBatch
      * @template TKey of array-key
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance  $provenance
      * @param  array<TKey, \SineMacula\Laravel\Authorization\Evaluation\CheckInput>  $chunk
      * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch  $attributes
      * @param  \WeakMap<\SineMacula\Laravel\Authorization\Support\ResourceReference, array-key>  $holders
@@ -211,7 +221,7 @@ final readonly class CheckBatch
      *
      * @throws \Throwable
      */
-    private function decideChunk(?Subject $subject, array $chunk, ResourceAttributeBatch $attributes, \WeakMap $holders): array
+    private function decideChunk(?Subject $subject, DecisionProvenance $provenance, array $chunk, ResourceAttributeBatch $attributes, \WeakMap $holders): array
     {
         $references = self::references($chunk);
 
@@ -231,7 +241,7 @@ final readonly class CheckBatch
                 throw $reference;
             }
 
-            $decisions[$key] = $this->record($subject, $check, $reference, $this->pipeline->decide($subject, $check->action, $reference, $check->context, $attributes));
+            $decisions[$key] = $this->record($provenance, $check, $reference, $this->pipeline->decide($subject, $check->action, $reference, $check->context, $attributes));
 
             if (!$reference instanceof ResourceReference || ($holders[$reference] ?? $key) === $key) {
                 $attributes->forget($reference);
@@ -329,24 +339,26 @@ final readonly class CheckBatch
     }
 
     /**
-     * Record the decision as the last decision, with the session of the request
-     * when it read an authentication requirement, and dispatch its decision
-     * event when a dispatcher is available, unless the batch records nothing.
+     * Store the decision as the last decision, with its provenance and the
+     * session of the request when it read an authentication requirement, when
+     * the batch stores, and dispatch its decision event when the batch
+     * dispatches and a dispatcher is available.
      *
-     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance  $provenance
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckInput  $check
      * @param  false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null  $reference
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function record(?Subject $subject, CheckInput $check, false|ResourceReference|null $reference, Decision $decision): Decision
+    private function record(DecisionProvenance $provenance, CheckInput $check, false|ResourceReference|null $reference, Decision $decision): Decision
     {
-        if (!$this->isRecording) {
-            return $decision;
+        if ($this->isStoring) {
+            $this->lastDecisionStore->put($decision, $provenance, $decision->freshness === null ? null : $this->subjectResolver->resolve()?->session);
         }
 
-        $this->lastDecisionStore->put($decision, $decision->freshness === null ? null : $this->subjectResolver->resolve()?->session);
-        $this->events?->dispatch(new DecisionEvaluated($subject?->subject, $check->action, ResourceReferences::identifierOf($reference), $check->context, $decision));
+        if ($this->isDispatching) {
+            $this->events?->dispatch(DecisionEvaluated::of($provenance, $check->action, ResourceReferences::identifierOf($reference), $decision));
+        }
 
         return $decision;
     }

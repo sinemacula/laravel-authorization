@@ -1,0 +1,131 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Unit\Events;
+
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
+use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Events\DecisionEvent;
+use SineMacula\Laravel\Authorization\Support\Reference;
+
+/**
+ * Unit tests for the shape both decision events share: references, names and
+ * ids, made from a decision and its provenance, never the decision itself.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ *
+ * @SuppressWarnings("php:S1192")
+ */
+#[CoversClass(DecisionEvent::class)]
+final class DecisionEventTest extends TestCase
+{
+    /**
+     * An event exposes every constructor argument through readonly properties.
+     *
+     * @return void
+     */
+    public function testExposesEveryConstructorArgument(): void
+    {
+        $subject    = new Reference('user', '1');
+        $identity   = new Reference('identity', '2');
+        $previewer  = new Reference('user', '3');
+        $tenant     = new Reference('tenant', '4');
+        $statements = [new StatementReference('editors', 0, '9', 'edit')];
+
+        $event = new DecisionEvaluated(
+            $subject,
+            $identity,
+            $previewer,
+            'posts:edit',
+            'post:42',
+            $tenant,
+            'admin',
+            DecisionEffect::DENY,
+            DecisionReason::EXPLICIT_DENY,
+            $statements,
+            true,
+            ['resource.status'],
+        );
+
+        self::assertSame($subject, $event->subject);
+        self::assertSame($identity, $event->identity);
+        self::assertSame($previewer, $event->previewer);
+        self::assertSame('posts:edit', $event->action);
+        self::assertSame('post:42', $event->resource);
+        self::assertSame($tenant, $event->tenant);
+        self::assertSame('admin', $event->application);
+        self::assertSame(DecisionEffect::DENY, $event->effect);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $event->reason);
+        self::assertSame($statements, $event->statements);
+        self::assertTrue($event->usedBreakGlass);
+        self::assertSame(['resource.status'], $event->keys);
+    }
+
+    /**
+     * An event made from a decision and its provenance carries the provenance's
+     * references, the action and the resource, the decision's effect, reason
+     * and deciding statements, the keys its trace tested, and no break-glass
+     * grant, as the class it is made through.
+     *
+     * @return void
+     */
+    public function testIsMadeFromTheDecisionAndItsProvenance(): void
+    {
+        $statement = new StatementReference('editors', 1, '9', 'deny-drafts', 'post:*');
+        $decision  = Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, [$statement], [
+            new TraceEntry(DecisionStage::DENY, TraceOutcome::MATCHED, $statement, ['resource.status' => true, 'input.reason' => true]),
+        ]);
+        $provenance = new DecisionProvenance(new Reference('user', '1'), new Reference('identity', '2'), new Reference('user', '3'), new Reference('tenant', '4'), 'admin');
+
+        $event = AuthorizationFailed::of($provenance, 'posts:publish', 'post:42', $decision);
+
+        self::assertInstanceOf(AuthorizationFailed::class, $event);
+        self::assertSame($provenance->subject, $event->subject);
+        self::assertSame($provenance->identity, $event->identity);
+        self::assertSame($provenance->previewer, $event->previewer);
+        self::assertSame('posts:publish', $event->action);
+        self::assertSame('post:42', $event->resource);
+        self::assertSame($provenance->tenant, $event->tenant);
+        self::assertSame('admin', $event->application);
+        self::assertSame(DecisionEffect::DENY, $event->effect);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $event->reason);
+        self::assertSame([$statement], $event->statements);
+        self::assertFalse($event->usedBreakGlass);
+        self::assertSame(['resource.status', 'input.reason'], $event->keys);
+        self::assertFalse($event->isAllowed());
+    }
+
+    /**
+     * An allow made into an event names no reason and reads as allowed; a
+     * decision about no subject names none.
+     *
+     * @return void
+     */
+    public function testAnAllowIsAllowed(): void
+    {
+        $event = DecisionEvaluated::of(new DecisionProvenance, 'posts:read', null, Decision::allow(DecisionStage::ALLOW));
+
+        self::assertInstanceOf(DecisionEvaluated::class, $event);
+        self::assertTrue($event->isAllowed());
+        self::assertSame(DecisionEffect::ALLOW, $event->effect);
+        self::assertNull($event->reason);
+        self::assertNull($event->subject);
+        self::assertNull($event->resource);
+        self::assertSame([], $event->statements);
+        self::assertSame([], $event->keys);
+    }
+}
