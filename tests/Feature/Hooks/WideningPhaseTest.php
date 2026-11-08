@@ -19,10 +19,12 @@ use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantHookRecursionException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\NestedGrantException;
+use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
 use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
 use SineMacula\Laravel\Authorization\Hooks\GrantWidening;
 use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
 use SineMacula\Laravel\Authorization\Hooks\WideningPhase;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -30,9 +32,12 @@ use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsAdministrator;
+use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\RecordsRowLocks;
+use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Concerns\WidensGrants;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
@@ -40,9 +45,11 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the grant hook phase (AUTHZ-11.3, N80): the hook called for
- * the widening grants of a call before the package takes any lock, the batch's
- * hooks before any write, a veto rolling everything back, the check of the
- * final grants after the locks, the recursion guard and nested calls.
+ * the widening grants of a call before the package takes any lock, a veto
+ * rolling everything back, the check of the final grants under the lock after
+ * every other, a race it catches, the retry with the hook or, inside the
+ * application's transaction, the conflict thrown for it, the recursion guard,
+ * nested calls and a binding that is no hook.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,7 +61,7 @@ use Tests\TestCase;
 #[CoversClass(WideningPhase::class)]
 final class WideningPhaseTest extends TestCase
 {
-    use ActsAsAdministrator, RecordsRowLocks, WidensGrants;
+    use ActsAsAdministrator, RacesDelegatedCalls, RecordsRowLocks, UsesAnAuthorizationConnection, WidensGrants;
 
     /**
      * With nothing bound, or the composite holding no hook, nothing is proposed
@@ -349,9 +356,10 @@ final class WideningPhaseTest extends TestCase
 
     /**
      * A grant that widened nothing as the hook phase read it, but widens once a
-     * grant the classification relied on is gone, conflicts and is tried again
-     * from the start, the hook running on the retry; trusted and delegated
-     * alike.
+     * grant the classification relied on is revoked between the hook phase and
+     * the check after the locks, conflicts and, when the call opened the
+     * outermost transaction, is tried again from the start, the hook running on
+     * the retry; trusted and delegated alike.
      *
      * @return void
      *
@@ -359,25 +367,154 @@ final class WideningPhaseTest extends TestCase
      */
     public function testARaceThatTurnsAGrantWideningIsTriedAgainWithTheHook(): void
     {
+        $this->useAnAuthorizationConnection();
+
         $actor = self::administrator();
 
         [, [$first, $second]] = $this->principals();
-
-        $hook = $this->hook();
 
         foreach (['trusted' => null, 'delegated' => $actor] as $mode => $acting) {
             $evidence = Role::query()->create(['name' => 'evidence-' . $mode]);
 
             self::grants()->grantRole($second, $evidence, tenant: self::tenant($mode));
 
-            self::revokeOnFirstClassification($second, $evidence, self::tenant($mode));
+            $hook  = $this->hook();
+            $raced = self::revokeAfterTheHookPhase($second, $evidence, self::tenant($mode));
 
             $outcome = self::grants()->grantRole($first, Role::query()->create(['name' => 'new-' . $mode]), actor: $acting, tenant: self::tenant($mode), includeSubtree: false);
 
             self::assertSame(GrantOutcome::GRANTED, $outcome, $mode);
+            self::assertCount(1, $raced, $mode);
+            self::assertSame([[WideningReason::NEW_TENANT->value]], $hook->reasons(), $mode);
+            self::assertSame([], self::rolesOf($second, self::authorizationConnection()->getName()), $mode);
+        }
+    }
+
+    /**
+     * Inside a transaction the application opened, the same race is caught by
+     * the check after the locks, which reads the evidence again under the lock,
+     * the latest committed rows; the try is not tried again there, its row
+     * locks still held, but thrown as `TransactionConflictException` for the
+     * application to restart, nothing written and the hook never called;
+     * trusted and delegated alike.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARaceInsideTheApplicationsTransactionIsThrownForIt(): void
+    {
+        $actor = self::administrator();
+
+        [, [$first, $second]] = $this->principals();
+
+        foreach (['trusted' => null, 'delegated' => $actor] as $mode => $acting) {
+            $evidence = Role::query()->create(['name' => 'evidence-' . $mode]);
+            $new      = Role::query()->create(['name' => 'new-' . $mode]);
+
+            self::grants()->grantRole($second, $evidence, tenant: self::tenant($mode));
+
+            $hook  = $this->hook();
+            $raced = self::revokeAfterTheHookPhase($second, $evidence, self::tenant($mode));
+            $locks = $this->recordRowLocks();
+
+            try {
+                self::grants()->grantRole($first, $new, actor: $acting, tenant: self::tenant($mode), includeSubtree: false);
+
+                self::fail('The grant was made: ' . $mode);
+            } catch (TransactionConflictException $conflict) {
+                self::assertInstanceOf(DependencyChangedException::class, $conflict->getPrevious(), $mode);
+                self::assertTrue($conflict->getPrevious()->isWidening(), $mode);
+            }
+
+            self::assertCount(1, $raced, $mode);
+            self::assertSame([], $hook->widenings, $mode);
+            self::assertSame([], self::rolesOf($first), $mode);
+            self::assertSame([], self::rolesOf($second), $mode);
+
+            $lockedEvidence = \array_filter($locks->getArrayCopy(), static fn (array $lock): bool => $lock[0] === 'authorizable_roles' && \in_array('p2', $lock[1], true));
+
+            self::assertNotSame([], $lockedEvidence, $mode);
+        }
+    }
+
+    /**
+     * The check after the locks reads the grantee's own row and the evidence of
+     * the identity and its principals under the lock, outside any operation's
+     * pins as well; the hook phase reads nothing under one.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheCheckAfterTheLocksReadsTheEvidenceUnderTheLock(): void
+    {
+        [, [$first, $second]] = $this->principals();
+
+        $this->hook();
+
+        self::grants()->grantRole($second, Role::query()->create(['name' => 'evidence']), tenant: self::tenant('acct1'));
+
+        $proposal = ProposedGrant::of(GrantTarget::ROLE, Role::query()->create(['name' => 'new']), new GrantScope(self::tenant('acct1'), null, true), null);
+        $locks    = $this->recordRowLocks();
+        $phase    = WideningPhase::before(Operation::begin(), $first, static fn (): array => [$proposal]);
+
+        self::assertCount(0, $locks);
+
+        $phase->assertCovers(static fn (): array => [$proposal]);
+
+        $locked = \array_map(static fn (array $lock): array => [$lock[0], \array_values(\array_intersect(['p1', 'p2', 'person'], $lock[1]))], $locks->getArrayCopy());
+
+        // The grantee's own row, then the grants that apply in the tenant, then
+        // those that reach below it.
+        $evidence = ['authorizable_roles', ['p1', 'p2', 'person']];
+
+        self::assertSame([['authorizable_roles', ['p1']], $evidence, $evidence], \array_map(static function (array $lock): array {
+            \sort($lock[1]);
+
+            return $lock;
+        }, $locked));
+    }
+
+    /**
+     * A delegated try made again inside a transaction the application opened,
+     * after another conflict, never calls the hook again under the row locks
+     * its failed try left held: once its grant would call the hook, it is
+     * thrown as `TransactionConflictException`, keeping that conflict. With the
+     * call opening the outermost transaction, the hook runs again instead.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATryMadeAgainInsideTheApplicationsTransactionNeverCallsTheHookAgain(): void
+    {
+        $actor = self::administrator(['authorization:*', 'posts:*']);
+
+        [, [$principal]] = $this->principals();
+
+        $hook = $this->hook();
+        $more = Permission::query()->create(['name' => 'comments:read']);
+
+        self::raceWith(PackagePermissions::ROLE_GRANT, static function () use ($actor, $more): void {
+            GrantChanges::table(GrantTarget::PERMISSION, $actor->principal(), null, GrantScope::platform())->grant(GrantChanges::key($more), null);
+        });
+
+        try {
+            self::grants()->grantRole($principal, Role::query()->create(['name' => 'new']), actor: $actor, tenant: self::tenant('acct1'));
+
+            self::fail('The grant was tried again with its hook.');
+        } catch (TransactionConflictException $conflict) {
+            $widening = $conflict->getPrevious();
+
+            self::assertInstanceOf(DependencyChangedException::class, $widening);
+            self::assertTrue($widening->isWidening());
+            self::assertInstanceOf(DependencyChangedException::class, $widening->getPrevious());
+            self::assertFalse($widening->getPrevious()->isWidening());
         }
 
-        self::assertSame([[WideningReason::NEW_TENANT->value], [WideningReason::NEW_TENANT->value]], $hook->reasons());
+        self::assertCount(1, $hook->widenings);
+        self::assertSame([], self::rolesOf($principal));
     }
 
     /**
@@ -390,15 +527,17 @@ final class WideningPhaseTest extends TestCase
      */
     public function testATrustedGrantThatConflictsOnEveryTryIsRefused(): void
     {
-        [, [$first, $second]] = $this->principals();
+        $this->useAnAuthorizationConnection();
 
-        $this->hook();
+        [, [$first, $second]] = $this->principals();
 
         config(['authorization.administration.retries' => 1]);
 
         $evidence = Role::query()->create(['name' => 'evidence']);
 
         self::grants()->grantRole($second, $evidence, tenant: self::tenant('acct1'));
+
+        $hook = $this->hook();
 
         DB::listen(static function (QueryExecuted $query) use ($second, $evidence): void {
             if (!\str_contains($query->sql, 'grant_roots')) {
@@ -419,7 +558,35 @@ final class WideningPhaseTest extends TestCase
             self::assertSame('administration.conflict', $refusal->getReason()->value);
         }
 
-        self::assertSame([], self::rolesOf($first));
+        self::assertSame([], self::rolesOf($first, self::authorizationConnection()->getName()));
+        self::assertSame([], $hook->widenings);
+    }
+
+    /**
+     * A binding of the contract to anything that does not implement it is
+     * refused, and the grant not written, rather than taken as no hook.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABindingThatIsNotAGrantHookIsRefused(): void
+    {
+        $this->principals();
+
+        $principal = self::principal();
+
+        $this->app?->bind(GrantHook::class, static fn (): \stdClass => new \stdClass);
+
+        try {
+            self::grants()->grantRole($principal, Role::query()->create(['name' => 'new']));
+
+            self::fail('The grant was made with no hook.');
+        } catch (\UnexpectedValueException $refusal) {
+            self::assertSame('The grant hook bound on ' . GrantHook::class . ' resolves to stdClass, which does not implement it.', $refusal->getMessage());
+        }
+
+        self::assertSame([], self::rolesOf($principal));
     }
 
     /**
@@ -459,39 +626,34 @@ final class WideningPhaseTest extends TestCase
     }
 
     /**
-     * Revoke the grantee's evidence role once, right after the hook phase's
-     * classification reads the grants, so the final classification finds it
-     * gone.
+     * Revoke the grantee's evidence role once the hook phase's classification
+     * has read the grants, as a concurrent call would, so the check after the
+     * locks finds it gone (see `RacesDelegatedCalls::raceOnQuery()`); return
+     * the SQL of the read it landed after.
      *
      * @param  \Tests\Feature\Stubs\StubSecondIdentity  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $evidence
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
-     * @return void
+     * @return \ArrayObject<int, string>
      */
-    private static function revokeOnFirstClassification(StubSecondIdentity $grantee, Role $evidence, Reference $tenant): void
+    private static function revokeAfterTheHookPhase(StubSecondIdentity $grantee, Role $evidence, Reference $tenant): \ArrayObject
     {
-        $armed = new \ArrayObject([true]);
-
-        DB::listen(static function (QueryExecuted $query) use ($grantee, $evidence, $tenant, $armed): void {
-            if ($armed[0] !== true || !\str_contains($query->sql, 'grant_roots')) {
-                return;
-            }
-
-            $armed[0] = false;
-
+        return self::raceOnQuery('/ as grant_roots\b/', static function () use ($grantee, $evidence, $tenant): void {
             GrantChanges::table(GrantTarget::ROLE, Reference::of($grantee), null, new GrantScope($tenant, null, true))->revoke([GrantChanges::key($evidence)]);
         });
     }
 
     /**
-     * Return the keys of the roles the grantee holds, in every scope.
+     * Return the keys of the roles the grantee holds, in every scope, on the
+     * connection given, else the default one.
      *
      * @param  \Tests\Feature\Stubs\StubSecondIdentity  $grantee
+     * @param  string|null  $connection
      * @return list<string>
      */
-    private static function rolesOf(StubSecondIdentity $grantee): array
+    private static function rolesOf(StubSecondIdentity $grantee, ?string $connection = null): array
     {
-        $keys = DB::table('authorizable_roles')
+        $keys = DB::connection($connection)->table('authorizable_roles')
             ->where('authorizable_type', $grantee->getMorphClass())
             ->where('authorizable_id', $grantee->getKey())
             ->pluck('role_id')

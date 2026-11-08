@@ -16,12 +16,16 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
+use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Permission\Created as PermissionCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
+use SineMacula\Laravel\Authorization\Exceptions\GrantRefusedException;
 use Tests\Concerns\UsesAnAuthorizationConnection;
+use Tests\Concerns\WidensGrants;
+use Tests\Fixtures\GrantHooks\RefusingGrantHook;
 use Tests\TestCase;
 
 /**
@@ -43,7 +47,7 @@ use Tests\TestCase;
 #[CoversClass(MigrateSpatieCommand::class)]
 final class MigrateSpatieCommandTest extends TestCase
 {
-    use UsesAnAuthorizationConnection;
+    use UsesAnAuthorizationConnection, WidensGrants;
 
     /** @var string The Spatie role ID used by the string-keyed fixture. */
     private const string STRING_ROLE_ID = '0192f0c4-3b1a-7d2e-9a4b-1c2d3e4f5a6b';
@@ -221,6 +225,70 @@ final class MigrateSpatieCommandTest extends TestCase
 
         self::assertInstanceOf(QueryException::class, $failure);
         self::assertSame(['editor'], self::authorizationConnection()->table('auth_roles')->pluck('name')->all());
+    }
+
+    /**
+     * Each grant is made as a call of its own once the roles, permissions and
+     * roles' permissions have committed, so its grant hook runs with no other
+     * transaction open on the package's connection, and so before any lock the
+     * package takes for it, never under the locks of the rows imported before.
+     *
+     * @return void
+     */
+    public function testEachGrantRunsItsHookOnceTheCatalogueHasCommitted(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        [, [$principal]] = $this->principals('person', ['42']);
+
+        foreach (['model_has_roles', 'model_has_permissions'] as $table) {
+            DB::table($table)->update(['model_type' => $principal->getMorphClass()]);
+        }
+
+        /** @var \ArrayObject<int, array{int, int, int}> $seen */
+        $seen = new \ArrayObject;
+        $hook = $this->hook(static function () use ($seen): void {
+            $connection = self::authorizationConnection();
+
+            $seen->append([$connection->transactionLevel(), $connection->table('auth_roles')->count(), $connection->table('auth_role_permissions')->count()]);
+        });
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie'));
+        self::assertSame([[1, 2, 2], [1, 2, 2]], $seen->getArrayCopy());
+        self::assertSame([['platform'], ['platform']], $hook->reasons());
+        self::assertSame(1, self::authorizationConnection()->table('auth_authorizable_roles')->where('authorizable_id', '42')->count());
+        self::assertSame(1, self::authorizationConnection()->table('auth_authorizable_permissions')->where('authorizable_id', '42')->count());
+    }
+
+    /**
+     * A grant a hook refuses stops the import: the roles, permissions and
+     * roles' permissions, committed first, stay, and no grant is written.
+     *
+     * @return void
+     */
+    public function testAGrantAHookRefusesStopsTheImportAfterTheCatalogue(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        [, [$principal]] = $this->principals('person', ['42']);
+
+        DB::table('model_has_roles')->update(['model_type' => $principal->getMorphClass()]);
+
+        $this->app?->instance(GrantHook::class, new RefusingGrantHook);
+
+        $failure = null;
+
+        try {
+            Artisan::call('authorization:migrate-spatie');
+        } catch (\Throwable $exception) {
+            $failure = $exception;
+        }
+
+        self::assertInstanceOf(GrantRefusedException::class, $failure);
+        self::assertSame(2, self::authorizationConnection()->table('auth_roles')->count());
+        self::assertSame(2, self::authorizationConnection()->table('auth_role_permissions')->count());
+        self::assertSame(0, self::authorizationConnection()->table('auth_authorizable_roles')->count());
+        self::assertSame(0, self::authorizationConnection()->table('auth_authorizable_permissions')->count());
     }
 
     /**

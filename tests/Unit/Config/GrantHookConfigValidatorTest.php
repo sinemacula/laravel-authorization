@@ -60,6 +60,19 @@ final class GrantHookConfigValidatorTest extends TestCase
             'authorization.grant_hooks.2',
             'class \'' . RecordingGrantHook::class . '\' is listed more than once.',
         ];
+
+        $lower = \strtolower(RecordingGrantHook::class);
+
+        yield 'a hook listed twice in another case' => [
+            [RecordingGrantHook::class, $lower],
+            'authorization.grant_hooks.1',
+            "class '{$lower}' is listed more than once.",
+        ];
+        yield 'a hook listed twice with a leading backslash' => [
+            ['\\' . RecordingGrantHook::class, RefusingGrantHook::class, RecordingGrantHook::class],
+            'authorization.grant_hooks.2',
+            'class \'' . RecordingGrantHook::class . '\' is listed more than once.',
+        ];
     }
 
     /**

@@ -9,6 +9,7 @@ use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 
@@ -25,7 +26,9 @@ use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
  * decides on it. Asked to race every try, it runs inside each try instead, and
  * never outside, so every try conflicts. A race can land on a query instead of
  * a decision, so a write between a service's read and its lock, or between the
- * validation and the write, is simulated alike.
+ * validation and the write, is simulated alike. The tries are those on the
+ * package's connection, whether a test's transaction holds them or, on a
+ * connection of its own, they open the outermost transaction there.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -66,7 +69,7 @@ trait RacesDelegatedCalls
             }
 
             $state['armed'] = false;
-            $state['level'] = DB::transactionLevel();
+            $state['level'] = AuthorizationConnection::connection()->transactionLevel();
 
             $change();
         });
@@ -108,7 +111,7 @@ trait RacesDelegatedCalls
             }
 
             $state['armed'] = false;
-            $state['level'] = DB::transactionLevel();
+            $state['level'] = AuthorizationConnection::connection()->transactionLevel();
 
             $raced->append($query->sql);
 
@@ -156,12 +159,15 @@ trait RacesDelegatedCalls
      */
     private static function replayOnRollback(\Closure $change, \ArrayObject $state, bool $isEveryTry): void
     {
-        Event::listen(TransactionRolledBack::class, static function () use ($change, $isEveryTry, $state): void {
-            // Only the rollback of the try raced counts: not one inside the
-            // change itself, nor the test's own once it ends.
-            $level = DB::transactionLevel();
+        Event::listen(TransactionRolledBack::class, static function (TransactionRolledBack $event) use ($change, $isEveryTry, $state): void {
+            // Only the rollback of the try raced counts, on the package's
+            // connection: not one inside the change itself, nor the test's own
+            // once it ends. A try that opened the outermost transaction there
+            // rolls back to none.
+            $level   = $event->connection->transactionLevel();
+            $isOther = $event->connectionName !== AuthorizationConnection::connection()->getName();
 
-            if ($state['committed'] === true || $level >= $state['level'] || $level === 0) {
+            if ($state['committed'] === true || $isOther || $level >= $state['level'] || ($level === 0 && $state['level'] > 1)) {
                 return;
             }
 

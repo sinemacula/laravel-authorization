@@ -92,24 +92,38 @@ the hook runs in a grant call.
     by the first that throws. With none listed nothing is classified. There is no runtime registrar.
 
 13. **Veto only.** A hook refuses by throwing, `Exceptions\GrantRefusedException` or anything else: the call rolls back
-    with nothing written and no event, and is not tried again; the package records no denial for it. A hook never
-    changes the grant, and while it runs `OperationScope::run()` refuses every operation with
-    `GrantHookRecursionException` (`OperationScope::whileHookRuns()`, cleared in `finally`); read-only queries stay
-    allowed.
+    with nothing written and no event, and is not tried again, unless what it threw is a concurrency error
+    `ConflictRetries` recognises, raised by the hook's own preparation, which a call handles as any other; the package
+    records no denial for it. A hook never changes the grant, and while it runs `OperationScope::run()` refuses every
+    operation with `GrantHookRecursionException` (`OperationScope::whileHookRuns()`, cleared in `finally`), so every
+    management service refuses; read-only queries stay allowed. A raw Eloquent write is not guarded: it stays the
+    trusted surface it always is.
 
 14. **Placement.** `Hooks\WideningPhase` is the one call point, for trusted and delegated grants alike and for
     break-glass (AUTHZ-11.7) to come. In `GrantService::grant()` and `sync()`, first in the work of
     `OperationScope::run()`: a non-locking preliminary proposal (the target, the scope, the reach, the expiry; a sync's
     additions and re-arms, never a row held live), its classification, and one hook call with every widening grant,
     before any lock and any write. The call then locks, rebuilds its grants, decides them, and hands them to
-    `assertCovers()`, which classifies them again and throws `DependencyChangedException::widening()` for one that now
-    widens with no hook run for it. A delegated call is tried again by `ConflictRetries`; a trusted call is tried again
-    for this conflict alone, up to the same `retries`, then refused as `administration.conflict`. The hook may run on
-    each try; it is never called under the package's locks.
+    `assertCovers()`, which classifies them again, after every other lock, with locking reads: the grantee's own rows
+    (`GrantTable::live()` and `liveRow()` under a row lock), and the evidence the hook was skipped or limited on, the
+    grants of the identity, the grantee and every listed principal that apply in the tenant, read table by table with
+    `GrantRoots::appliesUnderLock()`, never as a union, locked through `DependencyPins::lockCoverage()` as the last part
+    of the protocol (`DependencyPhase::COVERAGE`). A locking read sees the latest committed rows on MySQL whatever the
+    snapshot, and holds them until commit on PostgreSQL and MySQL, so a revocation committed after the hook phase is
+    seen and one made later waits. A grant that now widens with no hook run for it throws
+    `DependencyChangedException::widening()`. A delegated call is tried again by `ConflictRetries`; a trusted call is
+    tried again for this conflict alone, up to the same `retries`, then refused as `administration.conflict`. The hook
+    may run on each try; it is never called under the package's locks. Only the application's answers, the directory's
+    list and the tenant tree, are read as they stand.
 
-15. **Nested calls.** A grant made while another operation's work runs (`OperationScope::isNested()`) may follow that
-    operation's locks, so one that widens is refused with `NestedGrantException`. Grant calls made one after another in
-    the application's own transaction are each a call of their own.
+15. **Nested calls and outer transactions.** A grant made while another operation's work runs
+    (`OperationScope::isNested()`) may follow that operation's locks, so one that widens is refused with
+    `NestedGrantException`. Inside the application's own transaction a try is rolled back only to its savepoint, whose
+    row locks MySQL keeps, so a grant is never tried again there with its hook: a coverage conflict is thrown as
+    `TransactionConflictException`, and so is a retry after any other conflict whose grant would call its hook
+    (`OperationScope::retriedInPlace()`). Grant calls made one after another in the application's own transaction are
+    each a call of their own; `authorization:migrate-spatie` commits its catalogue, then makes each grant as one.
+    A binding of the contract to anything that is not a `GrantHook` is refused, never taken as none.
 
 ## Success Path
 
@@ -141,9 +155,11 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
 - **A row naming half a tenant.** `UNKNOWN` for `forIdentity()`, unless another root is outside.
 - **The same key under two types.** Never confused: grantees are matched by type and key together.
 - **Expired grants, boundaries, guardrails and policies attached to roles.** Never read as the grantees' grants.
-- **A hook that refuses.** Everything rolls back, a sync's revocations included; no event, no retry, no denial.
-- **A grant relied on vanishes before the locks.** The final classification finds the grant widening, the try is a
-  conflict, and the retry runs the hook.
+- **A hook that refuses.** Everything rolls back, a sync's revocations included; no event, no retry, no denial. A
+  concurrency error the hook's own preparation meets is handled as any other (invariant 13).
+- **A grant relied on vanishes before the locks.** The final classification, read under the lock, finds the grant
+  widening, the try is a conflict, and the retry runs the hook; inside the application's transaction the conflict is
+  thrown as `TransactionConflictException` instead.
 - **A hook that calls a service.** Refused with `GrantHookRecursionException`; the guard is lifted when the hook
   returns or throws.
 - **An unresolvable identity.** Refused with `UnresolvableRecipientException` when a grant is evaluated; a grant held
@@ -165,7 +181,10 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
 - `Contracts\GrantHook`, `Hooks\GrantHooks`, `Hooks\GrantWidening`, `Hooks\ProposedGrant` and
   `Enums\WideningReason` -- the hook contract, its default binding and what it is handed.
 - `Hooks\WideningClassifier` and `Hooks\WideningPhase` -- the classification, the call point and the coverage check.
-- `Support\OperationScope::whileHookRuns()`, `isNested()` and the trusted retry -- the recursion guard and nesting.
+- `Support\OperationScope::whileHookRuns()`, `isNested()`, `retriedInPlace()` and the trusted retry -- the recursion
+  guard, nesting and retries inside the application's transaction.
+- `Support\GrantRoots::appliesUnderLock()`, `Administration\DependencyPins::lockCoverage()` and
+  `Services\Support\GrantTable::live()` and `liveRow()` under a lock -- the locking reads of the coverage check.
 - `Services\GrantService::grant()`, `sync()` and `plan()` -- the placement.
 - `Exceptions\GrantRefusedException`, `GrantHookRecursionException`, `NestedGrantException` and
   `UnresolvableRecipientException`; `Config\GrantHookConfigValidator`.
@@ -179,21 +198,28 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
   queries that fail as they run, and grantees), under the closure-table and flat trees, and the status carrying nothing
   else.
 - `Feature\Support\GrantRootsTest` -- the classification, half-tenant rows, one query naming each grantee once,
-  grantees sharing a key under two types, applicability, inline policies, nested subtrees, refused subtrees and the
-  write connection, on a connection outside the test's transaction.
+  grantees sharing a key under two types, applicability, applicability under a lock table by table, inline policies,
+  nested subtrees, refused subtrees and the write connection, on a connection outside the test's transaction.
 - `Performance\GrantScopeQueryBudgetTest` -- the query count is the same for one grant and ten of each kind, and at
   depth one and depth eight.
 - `Feature\Resolvers\GuardUserIdentityDirectoryTest`, `Feature\ConfigValidatorTest` and
   `Feature\AuthorizationServiceProviderTest` -- the default directory, its validation and its binding.
 - `Feature\Hooks\WideningClassifierTest` -- the classification matrix: an identity grantee, the platform, a new
   tenant, an ancestor, a tenant held, siblings, a re-arm, a wider reach, an extension, a shortening, an unchanged
-  grant, an incomplete directory, an unreadable tree and unresolvable identities.
-- `Feature\Hooks\WideningPhaseTest` -- the hook before the first lock, a batch's hooks before any write, a veto
-  rolling back with no event, the coverage conflict and its retry, trusted and delegated, the recursion guard, the
-  grant scope query from a hook, and nested calls.
+  grant, an incomplete directory, an unreadable tree and unresolvable identities, a grantee by reference, a chain read
+  afresh inside a batch, and a locked classification answering as an unlocked one.
+- `Feature\Hooks\WideningPhaseTest` -- the hook before the first lock, a veto rolling back with no event, the coverage
+  conflict, the check after the locks reading the evidence under the lock, a revocation landing between the hook phase
+  and that check, tried again with the hook or, inside the application's transaction, thrown as
+  `TransactionConflictException`, a retry there never calling the hook again, trusted and delegated, the recursion
+  guard, the grant scope query from a hook, nested calls and a binding that is no hook.
 - `Feature\Services\GrantServiceTest` and `Feature\Hooks\GrantHookEntryPointsTest` -- every entry point (the service,
-  the trait helpers, `authorization:grant`), trusted and delegated, a BL-65 refusal after the hook, a hook run again
-  on a retried try, and a refusal not retried.
+  the trait helpers, `authorization:grant`), trusted and delegated, a sync's hooks all run before any lock or write
+  (`GrantServiceTest::testASyncRunsEveryHookBeforeAnyLockOrWrite`), the coverage race of a grant and a sync, a BL-65
+  refusal after the hook, a hook run again on a retried try, and a refusal not retried.
+- `Feature\MigrateSpatieCommandTest` -- the Spatie import's grants each made once its catalogue has committed.
+- `Feature\Services\GrantTableTest` and `Feature\Administration\DependencyPinsTest` -- the grantee's rows read under a
+  lock, and the coverage check's locks last in the lock order.
 - `Feature\Hooks\GrantHooksTest`, `Unit\Config\GrantHookConfigValidatorTest` and `Feature\OperationScopeTest` -- the
   composite's order and stop, its validation, the guard and the trusted retry.
 

@@ -6,7 +6,9 @@ namespace Tests\Feature\Hooks;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
@@ -23,12 +25,14 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\WidensGrants;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Fixtures\GrantHooks\PrincipalSubjectResolver;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\Fixtures\GrantScope\UnreadableTenantTree;
+use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\TestCase;
 
 /**
@@ -46,7 +50,7 @@ use Tests\TestCase;
 #[CoversClass(WideningClassifier::class)]
 final class WideningClassifierTest extends TestCase
 {
-    use WidensGrants;
+    use RecordsRowLocks, WidensGrants;
 
     /**
      * Set up the identity, its principals and the tree.
@@ -521,6 +525,171 @@ final class WideningClassifierTest extends TestCase
     }
 
     /**
+     * A grant that widens nothing does not stop the classification: a later
+     * grant of the call that widens is still found, alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantThatWidensNothingLeavesTheNextClassified(): void
+    {
+        $principal = self::principal('p1');
+
+        self::grants()->grantRole($principal, self::role('held'), tenant: self::tenant('acct1'));
+
+        $widening = WideningClassifier::classify(Operation::begin(), $principal, [
+            self::proposal(self::role('beside'), self::tenant('acct1')),
+            self::proposal(self::role('elsewhere'), self::tenant('acct2')),
+        ]);
+
+        self::assertNotNull($widening);
+        self::assertCount(1, $widening->changes);
+        self::assertSame('acct2', $widening->changes[0]->tenant?->id);
+        self::assertSame([WideningReason::NEW_TENANT], $widening->reasons);
+    }
+
+    /**
+     * A grantee named by reference is resolved from its model, its identity and
+     * itself as for the model.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGranteeByReferenceIsResolvedFromItsModel(): void
+    {
+        $widening = WideningClassifier::classify(Operation::begin(), Reference::of(self::principal('p1')), [self::proposal(self::role('by-reference'), self::tenant('acct2'))]);
+
+        self::assertSame([WideningReason::NEW_TENANT], $widening?->reasons);
+        self::assertSame([StubSecondIdentity::class, 'p1'], [$widening->grantee->type, $widening->grantee->id]);
+        self::assertSame([StubIdentity::class, 'person'], [$widening->identity->type, $widening->identity->id]);
+    }
+
+    /**
+     * Inside a batch of checks, the tenant's chain is read afresh each time, so
+     * a move of the tenant the tree did not report is seen by the next
+     * classification: into an organisation another principal holds a grant in,
+     * and out of it again.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheChainIsReadAfreshInsideABatch(): void
+    {
+        $principal = self::principal('p1');
+        $cache     = ResolutionCache::instance();
+
+        self::grants()->grantRole(self::principal('p2'), self::role('held'), tenant: self::tenant('org2'));
+
+        self::assertNotNull($cache);
+
+        $reasons = $cache->batch(static function () use ($principal): array {
+            $reasons = [self::classify($principal, self::tenant('acct2'))?->reasons];
+
+            self::move('acct2', 'org2');
+
+            $reasons[] = self::classify($principal, self::tenant('acct2'))?->reasons;
+
+            self::move('acct2', 'org1');
+
+            $reasons[] = self::classify($principal, self::tenant('acct2'))?->reasons;
+
+            return $reasons;
+        });
+
+        self::assertSame([[WideningReason::NEW_TENANT], null, [WideningReason::NEW_TENANT]], $reasons);
+    }
+
+    /**
+     * A resolver that makes the grantee a subject that is not a model cannot
+     * say whose scope widens, even with the grantee's own identity, so the
+     * grant is refused.
+     *
+     * @return void
+     */
+    public function testASubjectThatIsNotAModelIsRefused(): void
+    {
+        $this->app?->instance(SubjectResolver::class, new class (self::person()) implements SubjectResolver {
+            /**
+             * Create a resolver naming the identity given.
+             *
+             * @param  object  $identity
+             */
+            public function __construct(
+
+                /** The identity every user is given. */
+                private readonly object $identity,
+            ) {}
+
+            /**
+             * Resolve nothing.
+             *
+             * @return \SineMacula\Laravel\Authorization\Subject|null
+             */
+            #[\Override]
+            public function resolve(): ?Subject
+            {
+                return null;
+            }
+
+            /**
+             * Make every user a subject that is not a model.
+             *
+             * @param  object  $user
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function forUser(object $user): Subject
+            {
+                return new Subject(new \stdClass, $this->identity);
+            }
+        });
+
+        self::assertRefused(static fn (): mixed => self::classify(self::principal('p1'), null));
+    }
+
+    /**
+     * Asked to lock, the classification answers as it does without, reading the
+     * grantee's own row and the grants that apply under the lock; without, it
+     * locks nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testALockedClassificationAnswersAsAnUnlockedOne(): void
+    {
+        $principal = self::principal('p1');
+        $role      = self::role('proposed');
+
+        self::grants()->grantRole(self::principal('p2'), self::role('held'), tenant: self::tenant('acct1'), includeSubtree: false);
+
+        $locks     = $this->recordRowLocks();
+        $proposals = [
+            'held'      => self::proposal($role, self::tenant('acct1'), false),
+            'below'     => self::proposal($role, self::tenant('acct1')),
+            'elsewhere' => self::proposal($role, self::tenant('acct2')),
+        ];
+
+        foreach ($proposals as $case => $proposal) {
+            $unlocked = WideningClassifier::classify(Operation::begin(), $principal, [$proposal])?->reasons;
+
+            self::assertCount(0, $locks, $case);
+            self::assertSame($unlocked, WideningClassifier::classify(Operation::begin(), $principal, [$proposal], isLocked: true)?->reasons, $case);
+            self::assertNotCount(0, $locks, $case);
+
+            $locks->exchangeArray([]);
+        }
+
+        self::assertSame([WideningReason::NEW_SUBTREE], WideningClassifier::classify(Operation::begin(), $principal, [$proposals['below']], isLocked: true)?->reasons);
+        $roles = 'authorizable_roles';
+
+        self::assertSame([$roles, $roles, $roles, 'authorizable_permissions', 'authorizable_policies'], \array_column($locks->getArrayCopy(), 0));
+    }
+
+    /**
      * Assert that the call is refused for an identity that cannot be resolved.
      *
      * @param  \Closure(): mixed  $call
@@ -589,6 +758,26 @@ final class WideningClassifierTest extends TestCase
     private static function role(string $name): Role
     {
         return Role::query()->create(['name' => $name]);
+    }
+
+    /**
+     * Move the account under the organisation in the closure-table tree,
+     * without reporting the move.
+     *
+     * @param  string  $account
+     * @param  string  $organisation
+     * @return void
+     */
+    private static function move(string $account, string $organisation): void
+    {
+        DB::table(ClosureTenantTree::TABLE)->where('descendant_id', $account)->where('depth', '>', 0)->delete();
+        DB::table(ClosureTenantTree::TABLE)->insert([
+            'ancestor_type'   => 'tenant',
+            'ancestor_id'     => $organisation,
+            'descendant_type' => 'tenant',
+            'descendant_id'   => $account,
+            'depth'           => 1,
+        ]);
     }
 
     /**

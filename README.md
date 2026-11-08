@@ -1494,15 +1494,17 @@ A conflict found this way is tried again; so is a deadlock, serialisation failur
 the database refuses the call with (as Laravel's concurrency error detector tells them), when the call opened the
 transaction. A call is tried again at most `authorization.administration.retries` times (2 by default), so it runs at
 most that many times and once more; once every try has conflicted, it is refused with `AuthorizationException` as
-`administration.conflict`, at the `administration` stage, writing nothing, and the refusal is recorded and reported
-like any other (see **Audit**). Inside a transaction of your own, a database concurrency error is never tried again,
-since the database has rolled back, or needs to restart, your whole transaction: it is thrown as
+`administration.conflict`, at the `administration` stage, writing nothing, and the refusal is recorded and reported like
+any other (see **Audit**). Inside a transaction of your own, a database concurrency error is never tried again, since
+the database has rolled back, or needs to restart, your whole transaction: it is thrown as
 `TransactionConflictException`, whose code is `40001` and whose previous exception is the database's, so restart your
 transaction, for example with `DB::transaction($callback, attempts: 3)`, which tells it as a concurrency error. A
 changed dependency found by the second read is tried again there only back to the call's savepoint, and on MySQL
 (repeatable read) a snapshot your transaction already took is kept across that rollback, so the call can conflict on
 every try and be refused as `administration.conflict`: run delegated calls outside your own transaction, or before its
-first read.
+first read. A rollback to a savepoint also keeps the row locks the failed try took on MySQL, so a grant whose retry
+there would call its grant hook again is thrown as `TransactionConflictException` instead (see
+[Grant hooks](#grant-hooks)).
 
 The order holds within a call, but it cannot stop two calls that cross from deadlocking: one call's actor may be the
 other's target (A administers B while B administers A), or one's held role the other's granted one, so each holds a
@@ -1514,7 +1516,11 @@ PostgreSQL and MySQL hold the locks until the transaction ends, so a concurrent 
 call. SQLite serialises writers and compiles no row lock, so there the second read alone catches a change. The package
 takes no lock until the service first reads what the call changes, and the call's work starts inside its transaction
 before anything is read or locked, so a scope-widening grant hook (AUTHZ-11.3) run first in that work runs before every
-lock. A trusted call is unchanged: it runs once, with no extra lock and no retry.
+lock. A trusted call keeps its cost: it takes no extra lock and decides nothing, and with no grant hook configured it
+runs once, with no retry. With one, a trusted grant is tried again in the same way only when a grant it is about to
+write now widens an identity's scope with no hook run for it, up to `administration.retries` times, then refused as
+`administration.conflict`; inside your own transaction that conflict is thrown as `TransactionConflictException` (see
+[Grant hooks](#grant-hooks)).
 
 **Trusted surfaces.** Each of these is trusted system work when it is used without an actor: nothing is decided, so use
 it that way only from your own code, never as an endpoint for user-controlled administration:
@@ -2685,32 +2691,47 @@ may bind its own hook on the contract instead. There is no way to add a hook at 
 ],
 ```
 
-**Veto only.** A hook may refuse by throwing `GrantRefusedException`, or any other exception: the whole call rolls
-back, nothing is written, no change event is dispatched and the call is not tried again. A hook's refusal is never
-reported as a denial of the package's: it is thrown on as the hook threw it. Returning lets the call go on and decides
-nothing: a delegated call is still decided after the hook (see [Delegated administration](#delegated-administration)),
-and refused when it should be. A hook never changes the grant. While a hook runs, every management service of the
-package refuses with `GrantHookRecursionException`, so a hook cannot grant, revoke or edit anything, trusted or not;
-read-only queries, `GrantScopeQuery` among them, stay allowed. A hook may do the application's own transactional
-preparation on the package's connection, which rolls back with the grant.
+**Veto only.** A hook may refuse by throwing `GrantRefusedException`, or any other exception: the whole call rolls back,
+nothing is written, no change event is dispatched and the call is not tried again. A hook's refusal is never reported as
+a denial of the package's: it is thrown on as the hook threw it. The one exception is a database concurrency error
+raised by the hook's own preparation, a deadlock or a serialisation failure, say: it is handled as any concurrency error
+is (see [Delegated administration](#delegated-administration)), so a call that opened the transaction tries it again,
+hook included, and once no tries are left refuses it as `administration.conflict`, and inside your own transaction it is
+thrown as `TransactionConflictException`. Returning lets the call go on and decides nothing: a delegated call is still
+decided after the hook, and refused when it should be. A hook never changes the grant. While a hook runs, every
+management service of the package refuses with `GrantHookRecursionException`, so a hook cannot grant, revoke or edit
+anything through the package's services, trusted or delegated; read-only queries, `GrantScopeQuery` among them, stay
+allowed. A raw Eloquent write on the package's models, pivots or tables is not refused: it stays the unguarded trusted
+surface it always is (see **Raw writes** below), and belongs in no hook. A hook may do the application's own
+transactional preparation on the package's connection, which rolls back with the grant.
 
-**Before any lock, and again on a retry.** The hook runs for trusted and delegated calls alike, before the package
-takes any lock for the call. A batch, a sync, calls it once with every widening grant, before any lock and any write.
-Only then does the call lock, read its records again, rebuild what it writes and decide it; if what it writes now
-widens with no hook run for it, because a grant the classification relied on was revoked meanwhile, say, the try is a
-conflict and the whole call is tried again from the start, up to `administration.retries` times, then refused as
-`administration.conflict`. A hook is never called under the package's locks. So a hook can run more than once for one
-call: nothing that leaves the transaction belongs in it, no email, no remote call and no queued work. Use the events
-dispatched after commit (see [Listening to events](#listening-to-events)) for those. The second classification reads
-what the first did without locking it, so an integration whose own rule must hold across concurrent writes, such as
-SSO's, serialises them itself.
+**Before any lock, and again on a retry.** The hook runs for trusted and delegated calls alike, before the package takes
+any lock for the call. A batch, a sync, calls it once with every widening grant, before any lock and any write. Only
+then does the call lock, read its records again, rebuild what it writes and decide it. Last, after every other lock, it
+classifies what it writes again, reading under a lock the grantee's own rows and the grants of the identity and its
+principals that the hook phase relied on: a locking read sees the latest committed rows, whatever snapshot the
+transaction reads otherwise, and holds them until the call commits, so a revocation committed meanwhile is seen, and one
+made later waits for the call. If what it writes now widens with no hook run for it, because a grant the classification
+relied on was revoked meanwhile, say, the try is a conflict and the whole call is tried again from the start, up to
+`administration.retries` times, then refused as `administration.conflict`. A hook is never called under the package's
+locks. So a hook can run more than once for one call: nothing that leaves the transaction belongs in it, no email, no
+remote call and no queued work. Use the events dispatched after commit (see [Listening to events](#listening-to-events))
+for those. Only the application's own answers are read as they stand, the identity directory's list of principals and
+the tenant tree: a change to those, made concurrently, is the application's to serialise.
 
-**Nested calls and outer transactions.** A grant made inside another management call's work, from a model observer or
-a listener that call's own writes fire, may come after that call took the package's locks, so its hook cannot run
-before them; one that widens is refused with `NestedGrantException`, never written with its hook skipped. Grant calls
-made one after another inside a transaction of your own each run their hooks before their own locks, but the rows an
-earlier call locked stay locked until your transaction ends. To keep every hook ahead of every lock the package takes in
-the transaction, make the grant calls first, before anything else that takes the package's locks.
+**Nested calls and outer transactions.** A grant made inside another management call's work, from a model observer or a
+listener that call's own writes fire, may come after that call took the package's locks, so its hook cannot run before
+them; one that widens is refused with `NestedGrantException`, never written with its hook skipped. Inside a transaction
+of your own, a try that conflicts is rolled back only to its savepoint, and on MySQL the row locks it took stay held
+until your transaction ends, so a grant is never tried again there with its hook: a grant that now widens with no hook
+run for it, and a retry whose grant would call its hook again after another conflict, are thrown as
+`TransactionConflictException`, whose previous exception is the conflict. Restart your transaction, for example with
+`DB::transaction($callback, attempts: 3)`. Grant calls made one after another inside a transaction of your own each run
+their hooks before their own locks, but the rows an earlier call locked stay locked until your transaction ends. To keep
+every hook ahead of every lock the package takes in the transaction, make the grant calls first, before anything else
+that takes the package's locks. `authorization:migrate-spatie` does so: it commits the roles, permissions and roles'
+permissions first, then makes each grant as a call of its own, so run it outside any transaction of yours; a grant a
+hook refuses stops the import, with what was written before it kept.
 
 **What the hook does not cover.**
 
@@ -2728,6 +2749,9 @@ the transaction, make the grant calls first, before anything else that takes the
   use SineMacula\Laravel\Authorization\Support\Reference;
 
   DB::transaction(function () use ($person, $principal, $tenant, $membership) {
+      // Saved first, so the hook is handed its key; a refusal rolls it back.
+      $membership->save();
+
       app(GrantHook::class)->beforeWidening(new GrantWidening(
           operationId: (string) Str::uuid(),
           isTrusted: true,
@@ -2747,10 +2771,11 @@ the transaction, make the grant calls first, before anything else that takes the
           )],
           observedAt: now('UTC')->toImmutable(),
       ));
-
-      $membership->save();
   });
   ```
+
+  The membership is saved before the hook is called, inside the same transaction, so the hook sees its real key and a
+  refusal rolls the save back with everything else.
 
 - **Raw writes.** A raw Eloquent write on the package's models, pivots or tables is a trusted integration surface, as
   it is for delegated administration, and runs no hook. Only the grant service's calls, and everything built on them

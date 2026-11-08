@@ -50,7 +50,12 @@ use SineMacula\Laravel\Authorization\Support\Operation;
  * `DB::transaction()` given attempts tries again. A conflict the pins find is
  * tried again there too, rolled back to the operation's savepoint, though a
  * snapshot older than the application's transaction stays as old, so on MySQL
- * it may conflict every time.
+ * it may conflict every time. Rolling back to a savepoint keeps the row locks
+ * the try took on MySQL, so a grant's hook, which never runs under the
+ * package's locks, is never called again there: a grant that widens with no
+ * hook run for it is thrown as `TransactionConflictException` at once, and so
+ * is a try made again there as soon as its grant would call its hook (see
+ * `Hooks\WideningPhase`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -80,11 +85,13 @@ final class ConflictRetries
      * Run the try, and run it again while it conflicts and tries remain,
      * returning what the first try that does not conflict returns; once every
      * try has conflicted, refuse the operation, recorded and reported as the
-     * acting subject's refusal when the actor and the operation are given.
+     * acting subject's refusal when the actor and the operation are given. Each
+     * try is handed the conflict the one before it failed with, null for the
+     * first.
      *
      * @template TResult
      *
-     * @param  \Closure(): TResult  $try
+     * @param  \Closure(\Throwable|null): TResult  $try
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @param  \SineMacula\Laravel\Authorization\Support\Operation|null  $operation
      * @return TResult
@@ -95,12 +102,15 @@ final class ConflictRetries
     {
         $isOutermost = AuthorizationConnection::connection()->transactionLevel() === 0;
         $left        = self::retries();
+        $conflict    = null;
 
         while (true) {
             try {
-                return $try();
+                return $try($conflict);
             } catch (\Throwable $exception) {
                 self::assertRetryable($exception, $isOutermost, $left-- > 0, $actor, $operation);
+
+                $conflict = $exception;
             }
         }
     }
@@ -174,9 +184,10 @@ final class ConflictRetries
 
     /**
      * Determine whether the try that threw the exception conflicted and may run
-     * again; throw a concurrency error met inside a transaction the application
-     * opened as `TransactionConflictException`, for the application to restart
-     * its transaction.
+     * again; throw a concurrency error, or a grant that widens with no hook run
+     * for it, met inside a transaction the application opened, as
+     * `TransactionConflictException`, for the application to restart its
+     * transaction.
      *
      * @param  \Throwable  $exception
      * @param  bool  $isOutermost
@@ -186,18 +197,13 @@ final class ConflictRetries
      */
     private static function isRetryable(\Throwable $exception, bool $isOutermost): bool
     {
-        if ($exception instanceof DependencyChangedException) {
-            return true;
-        }
+        $isConflict = $exception instanceof DependencyChangedException;
+        $isRestart  = $isConflict ? $exception->isWidening() : self::isConcurrencyError($exception);
 
-        if (!self::isConcurrencyError($exception)) {
-            return false;
-        }
-
-        if (!$isOutermost) {
+        if ($isRestart && !$isOutermost) {
             throw new TransactionConflictException($exception);
         }
 
-        return true;
+        return $isConflict || $isRestart;
     }
 }

@@ -22,8 +22,9 @@ final class DependencyChangedExceptionTest extends TestCase
 {
     /**
      * Rows that changed are named by their table, a moved tree and a widening
-     * no grant hook was run for as such; each is a runtime exception, and only
-     * the widening is one.
+     * no grant hook was run for as such, keeping the conflict an earlier try
+     * failed with when given; each is a runtime exception, and only the
+     * widening is one.
      *
      * @return void
      */
@@ -39,5 +40,8 @@ final class DependencyChangedExceptionTest extends TestCase
         self::assertTrue(DependencyChangedException::widening()->isWidening());
         self::assertFalse($rows->isWidening());
         self::assertFalse($tree->isWidening());
+        self::assertNull(DependencyChangedException::widening()->getPrevious());
+        self::assertSame($rows, DependencyChangedException::widening($rows)->getPrevious());
+        self::assertNull($rows->getPrevious());
     }
 }

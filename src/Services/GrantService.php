@@ -134,9 +134,11 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * grant hook is called with every widening grant of the call, before the
  * package takes any lock for it (AUTHZ-11.3, see `Hooks\WideningPhase`): it may
  * refuse by throwing, which rolls the call back, and the call is tried again
- * when a grant it writes widens with no hook run for it. A widening grant made
- * inside another management call's work is refused with `NestedGrantException`,
- * and one whose identity cannot be resolved with
+ * when a grant it writes widens with no hook run for it, as read again under
+ * the lock once every decision is made, or, inside a transaction the
+ * application opened, thrown as `TransactionConflictException`. A widening
+ * grant made inside another management call's work is refused with
+ * `NestedGrantException`, and one whose identity cannot be resolved with
  * `UnresolvableRecipientException`.
  *
  * A grantee is an identity or a role: a policy attached to a role applies to
@@ -599,7 +601,7 @@ final class GrantService
 
             $actor?->authorizeIn($operation, ...GrantChanges::ofSync($kind, $reference, $live, $keep, $reaches, $written, $expiresAt));
 
-            $hooks->assertCovers(static fn (): array => WideningPhase::additions($kind, $expiresAt, $written, $table, $keep));
+            $hooks->assertCovers(static fn (): array => WideningPhase::additions($kind, $expiresAt, $written, $table, $keep, isLocked: true));
 
             $table->revoke($revoked);
 

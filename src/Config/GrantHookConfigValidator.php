@@ -12,10 +12,11 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * run by `ConfigValidator`.
  *
  * The value must be a list of class names, in the order the hooks run, each an
- * existing class implementing `GrantHook`, and each listed once: a hook listed
- * twice would run twice for one grant. An empty list, the default, binds a
- * composite that does nothing. Keys other than a list's are refused, so a map
- * whose order a reader might misjudge fails at boot.
+ * existing class implementing `GrantHook`, and each listed once, whatever the
+ * case of its name and with or without a leading backslash: a hook listed twice
+ * would run twice for one grant. An empty list, the default, binds a composite
+ * that does nothing. Keys other than a list's are refused, so a map whose order
+ * a reader might misjudge fails at boot.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,12 +43,20 @@ final class GrantHookConfigValidator
             throw new InvalidAuthorizationConfigException(self::KEY, 'expected a list of class names, got ' . \get_debug_type($config) . '.');
         }
 
+        $seen = [];
+
         foreach ($config as $index => $class) {
             ImplementationConfigValidator::validate(self::KEY . ".{$index}", $class, GrantHook::class, 'expected a class-string, got null.');
 
-            if (\array_search($class, $config, true) !== $index) {
+            // PHP names one class whatever the case, with or without a leading
+            // backslash, so a duplicate is told by its normalised name.
+            $name = \strtolower(\ltrim($class, '\\'));
+
+            if (isset($seen[$name])) {
                 throw new InvalidAuthorizationConfigException(self::KEY . ".{$index}", "class '{$class}' is listed more than once.");
             }
+
+            $seen[$name] = true;
         }
     }
 }

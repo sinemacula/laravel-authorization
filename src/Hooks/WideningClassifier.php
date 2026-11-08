@@ -52,8 +52,15 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * widens the identity's scope: a permission added to a role the identity holds
  * in one tenant widens nothing here, whatever `Narrowing` says of it.
  *
- * Nothing is locked or pinned: every read is a plain read, so the
- * classification can run before the package takes any lock for the call.
+ * Before the hooks run, nothing is locked or pinned: every read is a plain
+ * read, so the classification can run before the package takes any lock for the
+ * call. Once every decision is made, the call's final grants are classified
+ * again under the lock (see `WideningPhase::assertCovers()`): the grantee's own
+ * row of each grant, and the grants of the identity and its principals that
+ * applied in each tenant, are read with locking reads, table by table, so they
+ * see the latest committed rows and stay as read until the call commits. The
+ * directory and the tenant tree are the application's, and are read as they
+ * stand.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,20 +71,23 @@ final class WideningClassifier
 {
     /**
      * Return the widening of the grants the operation proposes for the grantee,
-     * or null when none of them widens the identity's scope.
+     * or null when none of them widens the identity's scope; asked to lock, the
+     * grants it reads are read under the lock, as described above.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  list<\SineMacula\Laravel\Authorization\Hooks\ProposedGrant>  $proposals
+     * @param  bool  $isLocked
      * @return \SineMacula\Laravel\Authorization\Hooks\GrantWidening|null
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnresolvableRecipientException
+     * @throws \LogicException
      */
-    public static function classify(Operation $operation, Model|Reference $grantee, array $proposals): ?GrantWidening
+    public static function classify(Operation $operation, Model|Reference $grantee, array $proposals, bool $isLocked = false): ?GrantWidening
     {
         $now       = CarbonImmutable::now('UTC');
         $reference = Reference::of($grantee);
-        $evaluated = \array_values(\array_filter($proposals, static fn (ProposedGrant $proposal): bool => self::isEvaluated($reference, $proposal, $now)));
+        $evaluated = \array_values(\array_filter($proposals, static fn (ProposedGrant $proposal): bool => self::isEvaluated($reference, $proposal, $now, $isLocked)));
 
         if ($evaluated === []) {
             return null;
@@ -85,7 +95,7 @@ final class WideningClassifier
 
         [$identity, $isIdentity] = self::recipient($grantee);
 
-        $widening = self::widening($identity, $reference, $isIdentity, $evaluated);
+        $widening = self::widening($identity, $reference, $isIdentity, $evaluated, $isLocked);
 
         return $widening === [] ? null : GrantWidening::of($operation, $identity, $reference, $widening, $now);
     }
@@ -98,9 +108,12 @@ final class WideningClassifier
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  bool  $isIdentity
      * @param  list<\SineMacula\Laravel\Authorization\Hooks\ProposedGrant>  $evaluated
+     * @param  bool  $isLocked
      * @return list<\SineMacula\Laravel\Authorization\Hooks\ProposedGrant>
+     *
+     * @throws \LogicException
      */
-    private static function widening(Reference $identity, Reference $grantee, bool $isIdentity, array $evaluated): array
+    private static function widening(Reference $identity, Reference $grantee, bool $isIdentity, array $evaluated, bool $isLocked): array
     {
         $principals = self::directory()->principalsOf($identity);
         $roots      = new GrantRoots([$identity, $grantee, ...$principals->principals]);
@@ -108,7 +121,7 @@ final class WideningClassifier
         $widening   = [];
 
         foreach ($evaluated as $proposal) {
-            $reasons = [...($isIdentity ? [WideningReason::IDENTITY] : []), ...self::scopeReasons($proposal, $roots), ...$doubts];
+            $reasons = [...($isIdentity ? [WideningReason::IDENTITY] : []), ...self::scopeReasons($proposal, $roots, $isLocked), ...$doubts];
 
             if ($reasons === []) {
                 continue;
@@ -127,37 +140,57 @@ final class WideningClassifier
      *
      * @param  \SineMacula\Laravel\Authorization\Hooks\ProposedGrant  $proposal
      * @param  \SineMacula\Laravel\Authorization\Support\GrantRoots  $roots
+     * @param  bool  $isLocked
      * @return list<\SineMacula\Laravel\Authorization\Enums\WideningReason>
+     *
+     * @throws \LogicException
      */
-    private static function scopeReasons(ProposedGrant $proposal, GrantRoots $roots): array
+    private static function scopeReasons(ProposedGrant $proposal, GrantRoots $roots, bool $isLocked): array
     {
         $chain = $proposal->tenant === null ? null : self::chainOf($proposal->tenant);
 
         return match (true) {
-            $proposal->tenant === null                                             => [WideningReason::PLATFORM],
-            $chain            === null                                             => [WideningReason::UNREADABLE_TREE],
-            !$roots->appliesIn($chain)                                             => [WideningReason::NEW_TENANT],
-            $proposal->includeSubtree && !$roots->appliesIn(self::belowOf($chain)) => [WideningReason::NEW_SUBTREE],
-            default                                                                => [],
+            $proposal->tenant === null                                                              => [WideningReason::PLATFORM],
+            $chain            === null                                                              => [WideningReason::UNREADABLE_TREE],
+            !self::appliesIn($roots, $chain, $isLocked)                                             => [WideningReason::NEW_TENANT],
+            $proposal->includeSubtree && !self::appliesIn($roots, self::belowOf($chain), $isLocked) => [WideningReason::NEW_SUBTREE],
+            default                                                                                 => [],
         };
+    }
+
+    /**
+     * Determine whether any grant of the roots applies in the chain's tenant,
+     * read under the lock when asked.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantRoots  $roots
+     * @param  \SineMacula\Laravel\Authorization\Support\TenantChain  $chain
+     * @param  bool  $isLocked
+     * @return bool
+     *
+     * @throws \LogicException
+     */
+    private static function appliesIn(GrantRoots $roots, TenantChain $chain, bool $isLocked): bool
+    {
+        return $isLocked ? $roots->appliesUnderLock($chain) : $roots->appliesIn($chain);
     }
 
     /**
      * Determine whether the grant is evaluated: the grantee holds no live row
      * of it in its scope, or the grant reaches below where the row did not, or
      * expires later than the row. A grant the row holds unchanged, or one that
-     * only shortens it, is not.
+     * only shortens it, is not. Asked to lock, the row is read under the lock.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Hooks\ProposedGrant  $proposal
      * @param  \Carbon\CarbonImmutable  $now
+     * @param  bool  $isLocked
      * @return bool
      */
-    private static function isEvaluated(Reference $grantee, ProposedGrant $proposal, CarbonImmutable $now): bool
+    private static function isEvaluated(Reference $grantee, ProposedGrant $proposal, CarbonImmutable $now, bool $isLocked): bool
     {
         $kind = self::kindOf($proposal->action);
         $live = $kind === null ? null : GrantChanges::table($kind, $grantee, null, new GrantScope($proposal->tenant, $proposal->application, $proposal->includeSubtree))
-            ->liveRow($proposal->target->id, Carbon::instance($now));
+            ->liveRow($proposal->target->id, Carbon::instance($now), $isLocked);
 
         if ($live === null) {
             return true;

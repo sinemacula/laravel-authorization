@@ -8,12 +8,15 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
  * Thrown when a package mutation service is called while a grant hook runs
  * (AUTHZ-11.3, N80).
  *
- * A hook may only veto: it never changes the grant, and it may not change any
+ * A hook may only veto: it never changes the grant, and it must not change any
  * other record of the package's either, since a call without an acting context
  * would be trusted and could hand out authority before the outer call is
  * decided. Every management service refuses while a hook runs; the read-only
  * queries, `GrantScopeQuery` among them, stay allowed. Calling one is a mistake
- * in the hook, not a refusal of the grant.
+ * in the hook, not a refusal of the grant. A raw Eloquent write on the
+ * package's models, pivots or tables is not guarded: it stays the trusted
+ * integration surface it always is, the application's responsibility, and
+ * belongs in no hook.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

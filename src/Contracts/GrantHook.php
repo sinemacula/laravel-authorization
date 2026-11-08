@@ -24,11 +24,15 @@ use SineMacula\Laravel\Authorization\Hooks\GrantWidening;
  * them, stay allowed.
  *
  * A hook may do the application's own transactional preparation on the
- * package's connection: it rolls back with the grant. A hook may run more than
- * once for one call, since a call that conflicts is tried again from the start,
- * so nothing that leaves the transaction belongs in it: no email, no remote
- * call and no queued work. The events dispatched once the call commits are the
- * place for those.
+ * package's connection: it rolls back with the grant. A database concurrency
+ * error that preparation meets is handled as any concurrency error is: tried
+ * again, hook included, when the call opened the transaction, else thrown as
+ * `TransactionConflictException`. A hook may run more than once for one call,
+ * since a call that conflicts is tried again from the start, so nothing that
+ * leaves the transaction belongs in it: no email, no remote call and no queued
+ * work. The events dispatched once the call commits are the place for those. A
+ * raw Eloquent write on the package's models is not refused while a hook runs,
+ * but is the application's responsibility and belongs in no hook.
  *
  * Exactly one hook is bound. The default is `Hooks\GrantHooks`, the ordered
  * composite of the classes `authorization.grant_hooks` lists, which with none

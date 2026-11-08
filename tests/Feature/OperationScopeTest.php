@@ -22,6 +22,7 @@ use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantHookRecursionException;
+use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -467,9 +468,10 @@ final class OperationScopeTest extends TestCase
 
     /**
      * A trusted operation whose grant hook phase finds a widening it did not
-     * cover conflicts, and is tried again `retries` times in a fresh
-     * transaction, then refused as `administration.conflict`; one that stops
-     * conflicting returns what its try returns.
+     * cover conflicts, and, when it opened the outermost transaction, is tried
+     * again `retries` times in a fresh transaction, then refused as
+     * `administration.conflict`; one that stops conflicting returns what its
+     * try returns.
      *
      * @return void
      *
@@ -477,6 +479,8 @@ final class OperationScopeTest extends TestCase
      */
     public function testATrustedOperationThatConflictsIsTriedAgain(): void
     {
+        $this->useAnAuthorizationConnection();
+
         config(['authorization.administration.retries' => 1]);
 
         /** @var \ArrayObject<int, bool> $tries */
@@ -487,13 +491,13 @@ final class OperationScopeTest extends TestCase
 
         $result = OperationScope::run(Operation::begin(), static function () use ($tries, $levels): string {
             $tries->append(true);
-            $levels->append(DB::transactionLevel());
+            $levels->append(self::authorizationConnection()->transactionLevel());
 
             return $tries->count() === 1 ? throw DependencyChangedException::widening() : 'written';
         });
 
         self::assertSame('written', $result);
-        self::assertSame([2, 2], $levels->getArrayCopy());
+        self::assertSame([1, 1], $levels->getArrayCopy());
 
         $refusal = null;
 
@@ -520,6 +524,76 @@ final class OperationScopeTest extends TestCase
         }
 
         self::assertSame(1, $once);
+    }
+
+    /**
+     * Inside a transaction the application opened, a trusted operation's
+     * widening is never tried again, since the try's row locks stay held: it is
+     * thrown as `TransactionConflictException`, keeping the conflict, after one
+     * try.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATrustedWideningInsideAnOpenTransactionIsThrownForTheApplication(): void
+    {
+        $tries    = 0;
+        $widening = DependencyChangedException::widening();
+        $caught   = null;
+
+        self::assertSame(1, DB::transactionLevel());
+
+        try {
+            OperationScope::run(Operation::begin(), static function () use (&$tries, $widening): never {
+                $tries++;
+
+                throw $widening;
+            });
+        } catch (TransactionConflictException $exception) {
+            $caught = $exception;
+        }
+
+        self::assertSame($widening, $caught->getPrevious());
+        self::assertSame(1, $tries);
+    }
+
+    /**
+     * A delegated try made again inside a transaction the operation did not
+     * open keeps the conflict the try before it failed with while its work
+     * runs, and only then; a first try, a try in a fresh transaction, and no
+     * operation at all keep none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATryMadeAgainInsideAnOpenTransactionKeepsItsConflict(): void
+    {
+        $conflict = DependencyChangedException::rows('roles');
+        $seen     = [];
+
+        $nested = OperationScope::run(self::delegated(), static function () use (&$seen, $conflict): bool {
+            $seen[] = OperationScope::retriedInPlace();
+
+            return \count($seen) < 2 ? throw $conflict : OperationScope::run(Operation::begin(), static fn (): bool => OperationScope::retriedInPlace() === null);
+        });
+
+        self::assertSame([null, $conflict], $seen);
+        self::assertTrue($nested);
+        self::assertNull(OperationScope::retriedInPlace());
+
+        $this->useAnAuthorizationConnection();
+
+        $fresh = [];
+
+        OperationScope::run(self::delegated(), static function () use (&$fresh, $conflict): bool {
+            $fresh[] = OperationScope::retriedInPlace();
+
+            return \count($fresh) < 2 ? throw $conflict : true;
+        });
+
+        self::assertSame([null, null], $fresh);
     }
 
     /**

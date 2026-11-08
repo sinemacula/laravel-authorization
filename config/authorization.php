@@ -627,12 +627,15 @@ return [
     | the transaction, the database refused it as a concurrency error (a
     | PostgreSQL serialisation failure or deadlock, a MySQL deadlock or lock
     | wait timeout, or a busy SQLite database): each try runs in a
-    | transaction of its own and decides everything again. Once the first
-    | try and every retry have conflicted, the call is refused as
+    | transaction of its own and decides everything again. A trusted call,
+    | with grant hooks configured, is tried again under the same limit only
+    | when a grant it is about to write now widens an identity's scope with
+    | no grant hook run for it (see `grant_hooks`). Once the first try and
+    | every retry have conflicted, the call is refused as
     | `administration.conflict`. Inside a transaction of your own, a
-    | concurrency error is thrown as `TransactionConflictException` for you
-    | to restart it. A whole number of at least 0; 0 refuses on the first
-    | conflict.
+    | concurrency error, and such a widening, is thrown as
+    | `TransactionConflictException` for you to restart it. A whole number of
+    | at least 0; 0 refuses on the first conflict.
     |
     */
 
@@ -656,13 +659,15 @@ return [
     | refuse, by throwing (`GrantRefusedException` for a refusal it means);
     | the first that throws stops the rest and rolls the call back. A hook may
     | run more than once for one call, as a call that conflicts is tried
-    | again, so nothing that leaves the transaction belongs in it. Under the
+    | again (up to `administration.retries` times), so nothing that leaves
+    | the transaction belongs in it. Under the
     | suite `sinemacula/laravel-iam` binds `laravel-sso`'s scope widening.
     |
     | The list is validated at boot: each entry must name a class implementing
-    | the contract, once. An empty list does nothing, and then nothing is
+    | the contract, once, whatever the case of its name and with or without a
+    | leading backslash. An empty list does nothing, and then nothing is
     | classified. An application may bind its own hook on the contract
-    | instead.
+    | instead; a binding that does not implement it is refused.
     |
     */
 

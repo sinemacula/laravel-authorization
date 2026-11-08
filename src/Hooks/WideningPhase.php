@@ -31,14 +31,27 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * included, so every hook runs before any lock and any write. Only then does
  * the call enter the concurrency protocol: it locks, reads its records again,
  * rebuilds the grants it writes and decides them, and hands them to
- * `assertCovers()` before writing. The final grants are classified again, and
- * one that now widens with no hook run for it, because a grant the
- * classification relied on is gone, say, aborts the try with a dependency
- * conflict: the whole call is tried again from the proposal, and a hook is
- * never called under the package's locks. The second classification reads what
- * the first did, unlocked, so it narrows the window rather than close it: an
- * integration whose own invariant must hold across concurrent writes, such as
- * SSO's, serialises them itself.
+ * `assertCovers()` before writing. The final grants are classified again, this
+ * time with locking reads, after every other lock the call takes (see
+ * `Administration\DependencyPins::lockCoverage()`): the grantee's own row of
+ * each grant, and the grants of the identity and its principals that applied in
+ * each tenant, the evidence the hook was skipped or limited on. A locking read
+ * sees the latest committed rows, whatever snapshot the transaction reads
+ * otherwise, and the rows it finds cannot be revoked until the call commits. A
+ * final grant that now widens with no hook run for it, because a grant the
+ * classification relied on was revoked and committed meanwhile, say, aborts the
+ * try with a dependency conflict: the whole call is tried again from the
+ * proposal, and a hook is never called under the package's locks. Only the
+ * application's own reads, the identity directory's list and the tenant tree,
+ * are read as they stand.
+ *
+ * A call made inside a transaction the application opened is never tried again
+ * there with its hook: the failed try's row locks stay held until that
+ * transaction ends, on MySQL even once rolled back to the try's savepoint. A
+ * coverage conflict there, and a try that would call the hook again after an
+ * earlier try of the call failed there, is thrown as
+ * `TransactionConflictException`, for the application to restart its
+ * transaction.
  *
  * While the hook runs, every package mutation service refuses (see
  * `OperationScope::whileHookRuns()`). A grant made inside another management
@@ -46,8 +59,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * before every lock, so one that widens is refused with `NestedGrantException`
  * rather than written with its hook skipped. With no hook configured or bound
  * (`GrantHooks` holding none), nothing is classified, since there is nothing to
- * call; a grant to a role widens no identity's scope and is never classified
- * either.
+ * call; a binding of the contract to anything that does not implement it is
+ * refused, never taken as none. A grant to a role widens no identity's scope
+ * and is never classified either.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,19 +71,15 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 final readonly class WideningPhase
 {
     /**
-     * Create the phase of a call, inactive when no operation is given.
+     * Create the phase of a call, inactive when no subject is given.
      *
-     * @param  \SineMacula\Laravel\Authorization\Support\Operation|null  $operation
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $grantee
+     * @param  array{\SineMacula\Laravel\Authorization\Support\Operation, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference}|null  $subject
      * @param  list<string>  $covered
      */
     private function __construct(
 
-        /** The operation the call runs as, or null when no hook runs for it. */
-        private ?Operation $operation = null,
-
-        /** The grantee the call writes for, or null when no hook runs for it. */
-        private Model|Reference|null $grantee = null,
+        /** The operation the call runs as and the grantee it writes for, or null when no hook runs for it. */
+        private ?array $subject = null,
 
         /** The key of each grant the hook was called for. */
         private array $covered = [],
@@ -101,13 +111,15 @@ final readonly class WideningPhase
             self::call($hook, $widening);
         }
 
-        return new self($operation, $grantee, \array_map(static fn (ProposedGrant $change): string => $change->key(), $widening->changes ?? []));
+        return new self([$operation, $grantee], \array_map(static fn (ProposedGrant $change): string => $change->key(), $widening->changes ?? []));
     }
 
     /**
      * Throw a dependency conflict when a final grant of the call widens the
-     * identity's scope with no hook run for it, so the try is rolled back and
-     * the call tried again; with no hook run for the call at all, do nothing.
+     * identity's scope with no hook run for it, classified with locking reads,
+     * so the try is rolled back and the call tried again; with no hook run for
+     * the call at all, do nothing. The proposal must read the grantee's rows it
+     * relies on under the lock too (see `additions()`).
      *
      * @param  \Closure(): list<\SineMacula\Laravel\Authorization\Hooks\ProposedGrant>  $propose
      * @return void
@@ -116,11 +128,13 @@ final readonly class WideningPhase
      */
     public function assertCovers(\Closure $propose): void
     {
-        if ($this->operation === null || $this->grantee === null) {
+        if ($this->subject === null) {
             return;
         }
 
-        $widening = WideningClassifier::classify($this->operation, $this->grantee, $propose());
+        [$operation, $grantee] = $this->subject;
+
+        $widening = WideningClassifier::classify($operation, $grantee, $propose(), isLocked: true);
 
         foreach ($widening->changes ?? [] as $change) {
             if (!\in_array($change->key(), $this->covered, true)) {
@@ -133,18 +147,20 @@ final readonly class WideningPhase
      * Return the grants a sync proposes: each target it keeps that the grantee
      * does not hold live in the written scope, a new grant or the re-arm of an
      * expired one, with the sync's expiry. A target held live is left as it is,
-     * so it proposes nothing.
+     * so it proposes nothing. Asked to lock, for the check after the locks, the
+     * rows held live are read under the lock.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $written
      * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantTable  $table
      * @param  array<string, \Illuminate\Database\Eloquent\Model>  $keep
+     * @param  bool  $isLocked
      * @return list<\SineMacula\Laravel\Authorization\Hooks\ProposedGrant>
      */
-    public static function additions(GrantTarget $kind, ?\DateTimeInterface $expiresAt, GrantScope $written, GrantTable $table, array $keep): array
+    public static function additions(GrantTarget $kind, ?\DateTimeInterface $expiresAt, GrantScope $written, GrantTable $table, array $keep, bool $isLocked = false): array
     {
-        $live      = $table->live(\array_map(\strval(...), \array_keys($keep)));
+        $live      = $table->live(\array_map(\strval(...), \array_keys($keep)), isLocked: $isLocked);
         $proposals = [];
 
         foreach ($keep as $model) {
@@ -160,18 +176,29 @@ final readonly class WideningPhase
 
     /**
      * Call the hook with the widening, while every package mutation service
-     * refuses; refuse a call made inside another management call's work.
+     * refuses; refuse a call made inside another management call's work, and
+     * conflict on a try made again inside the application's transaction, which
+     * still holds the locks the call's failed try took: the conflict is thrown
+     * as `TransactionConflictException` there, for the application to restart
+     * its transaction.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\GrantHook  $hook
      * @param  \SineMacula\Laravel\Authorization\Hooks\GrantWidening  $widening
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\NestedGrantException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException
      */
     private static function call(GrantHook $hook, GrantWidening $widening): void
     {
         if (OperationScope::isNested()) {
             throw new NestedGrantException;
+        }
+
+        $conflict = OperationScope::retriedInPlace();
+
+        if ($conflict !== null) {
+            throw DependencyChangedException::widening($conflict);
         }
 
         OperationScope::whileHookRuns(static function () use ($hook, $widening): void {
@@ -181,15 +208,29 @@ final readonly class WideningPhase
 
     /**
      * Return the bound hook, or null when none is bound or the bound one is the
-     * composite holding none, so there is nothing to call.
+     * composite holding none, so there is nothing to call; refuse a binding
+     * that resolves to anything else, rather than call no hook.
      *
      * @return \SineMacula\Laravel\Authorization\Contracts\GrantHook|null
+     *
+     * @throws \UnexpectedValueException
      */
     private static function hook(): ?GrantHook
     {
         $container = Container::getInstance();
-        $hook      = $container->bound(GrantHook::class) ? $container->make(GrantHook::class) : null;
 
-        return !$hook instanceof GrantHook || ($hook instanceof GrantHooks && $hook->isEmpty()) ? null : $hook;
+        if (!$container->bound(GrantHook::class)) {
+            return null;
+        }
+
+        // Read through the container's array access, which promises nothing of
+        // what the binding resolves to, so a wrong binding is caught here.
+        $hook = $container[GrantHook::class];
+
+        if (!$hook instanceof GrantHook) {
+            throw new \UnexpectedValueException('The grant hook bound on ' . GrantHook::class . ' resolves to ' . \get_debug_type($hook) . ', which does not implement it.');
+        }
+
+        return $hook instanceof GrantHooks && $hook->isEmpty() ? null : $hook;
     }
 }
