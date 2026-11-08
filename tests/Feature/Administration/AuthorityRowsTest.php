@@ -216,6 +216,85 @@ final class AuthorityRowsTest extends TestCase
     }
 
     /**
+     * The grantees are locked each once, by type and key, in the one order
+     * their serialised type and key sort in, whatever order they are given in:
+     * two of one key and two types are two grantees.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testGranteesAreLockedSortedEachOnce(): void
+    {
+        $locks = $this->recordRowLocks();
+
+        $zeta  = new Reference(StubIdentity::class, 'zeta');
+        $alpha = new Reference(StubIdentity::class, 'alpha');
+
+        AuthorityRows::in(self::pins(), DependencyPhase::ACTOR)->grantees($zeta, $alpha, new Reference('other_type', 'alpha'), $zeta)->lock();
+
+        self::assertSame(['authorizable_roles', ['other_type', 'alpha', StubIdentity::class, 'zeta', StubIdentity::class, 'alpha']], $locks[0] ?? null);
+    }
+
+    /**
+     * The tenants of every call and of every chain are gathered, each once by
+     * type and key, sorted, so the guardrails of each are locked: tenants named
+     * over two calls, two in one call, and two of one key and two types.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheTenantsOfEveryCallAreLockedSortedEachOnce(): void
+    {
+        $child = new Reference('stub_tenant', 'b');
+        $top   = new Reference('stub_tenant', 'a');
+        $twin  = new Reference('other_tenant', 'a');
+        $other = new Reference('stub_tenant', 'q');
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put($child, $top)->put($twin, null)->put($other, null));
+
+        $locks = $this->recordRowLocks();
+
+        AuthorityRows::in(self::pins(), DependencyPhase::TARGET)->tenants($child)->tenants($twin, $other, $top)->lock();
+
+        self::assertSame(['guardrails', ['stub_tenant', 'a', 'stub_tenant', 'b', 'stub_tenant', 'q', 'other_tenant', 'a']], $locks[0] ?? null);
+    }
+
+    /**
+     * A key reached twice, a permission held directly and carried by a held
+     * role, or a policy attached to a held role and set as a boundary, is
+     * locked once.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAKeyReachedTwiceIsLockedOnce(): void
+    {
+        $user       = StubIdentity::query()->create(['id' => 'user']);
+        $role       = Role::query()->create(['name' => 'editor']);
+        $permission = Permission::query()->create(['name' => 'posts:read']);
+        $policy     = Policy::query()->create(['name' => 'cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+
+        self::roles()->grantPermission($role, $permission);
+        self::grants()->grantRole($user, $role);
+        self::grants()->grantPermission($user, $permission);
+        self::grants()->attachPolicy($role, $policy);
+
+        BoundaryService::instance()?->set($user, $policy);
+
+        $locks = $this->recordRowLocks();
+
+        AuthorityRows::in(self::pins(), DependencyPhase::ACTOR)->grantees(Reference::of($user))->lock();
+
+        $locked = \array_column($locks->getArrayCopy(), 1, 0);
+
+        self::assertSame([$permission->getKey()], $locked['permissions'] ?? null);
+        self::assertSame([$policy->getKey()], $locked['policies'] ?? null);
+    }
+
+    /**
      * Return the tables a gathering of the change alone locks, in order.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $change

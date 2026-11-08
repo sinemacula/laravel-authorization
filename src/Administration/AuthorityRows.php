@@ -18,7 +18,7 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
 /**
  * The rows that make up authority, gathered for one part of a delegated
  * operation's dependencies and locked through its pins (see `DependencyPins`)
- * in one fixed order, so every operation takes its locks alike:
+ * in one fixed order within the part:
  *
  * 1. the grant rows of each grantee named, table by table: its roles, its
  *    permissions, its policies and its boundaries;
@@ -33,7 +33,10 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  *
  * Keys are sorted within each query, and every query reads on the write
  * connection, outside every tenant scope, whether or not a grant has expired,
- * so a re-armed grant's authority is pinned too.
+ * so a re-armed grant's authority is pinned too. The order keeps two operations
+ * of the same shape from waiting on each other in opposite orders; it cannot
+ * keep two that cross, such as one acting on the other's actor, from
+ * deadlocking, which the database detects (see `DependencyPins`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,19 +48,19 @@ final class AuthorityRows
     /** @var array<string, \SineMacula\Laravel\Authorization\Support\Reference> The grantees whose grant rows are locked, by type and key. */
     private array $grantees = [];
 
-    /** @var list<\SineMacula\Laravel\Authorization\Support\Reference|null>|null The tenants whose chains and guardrails are locked, null for the platform; null when guardrails are not locked at all. */
+    /** @var array<array-key, \SineMacula\Laravel\Authorization\Support\Reference|null>|null The tenants whose chains and guardrails are locked, null for the platform; null when guardrails are not locked at all. */
     private ?array $tenants = null;
 
     /** @var list<string> The resource types whose resource policies are locked. */
     private array $resources = [];
 
-    /** @var list<string> The keys of the roles whose chains are locked. */
+    /** @var array<array-key, string> The keys of the roles whose chains are locked. */
     private array $roles = [];
 
-    /** @var list<string> The keys of the permissions whose rows are locked. */
+    /** @var array<array-key, string> The keys of the permissions whose rows are locked. */
     private array $permissions = [];
 
-    /** @var list<string> The keys of the policies whose rows are locked. */
+    /** @var array<array-key, string> The keys of the policies whose rows are locked. */
     private array $policies = [];
 
     /**
@@ -111,7 +114,7 @@ final class AuthorityRows
      */
     public function tenants(?Reference ...$tenants): self
     {
-        $this->tenants = [...$this->tenants ?? [], ...\array_values($tenants)];
+        $this->tenants = [...$this->tenants ?? [], ...$tenants];
 
         return $this;
     }
@@ -138,7 +141,7 @@ final class AuthorityRows
      */
     public function roles(string ...$keys): self
     {
-        $this->roles = [...$this->roles, ...\array_values($keys)];
+        $this->roles = [...$this->roles, ...$keys];
 
         return $this;
     }
@@ -151,7 +154,7 @@ final class AuthorityRows
      */
     public function permissions(string ...$keys): self
     {
-        $this->permissions = [...$this->permissions, ...\array_values($keys)];
+        $this->permissions = [...$this->permissions, ...$keys];
 
         return $this;
     }
@@ -164,7 +167,7 @@ final class AuthorityRows
      */
     public function policies(string ...$keys): self
     {
-        $this->policies = [...$this->policies, ...\array_values($keys)];
+        $this->policies = [...$this->policies, ...$keys];
 
         return $this;
     }
@@ -190,7 +193,7 @@ final class AuthorityRows
             $this->grantee($change->action, $grant->grantee)->record($grant->target);
         }
 
-        $parent = $change->definition?->values['parent'] ?? null;
+        $parent = $change->definition->values['parent'] ?? null;
 
         $this->record($change->definition?->record)->roles(...(\is_string($parent) ? [$parent] : []));
 
@@ -219,6 +222,29 @@ final class AuthorityRows
     }
 
     /**
+     * Add a saved role, permission or policy by its key; anything else, or a
+     * record not saved yet, adds nothing.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|null  $record
+     * @return self
+     */
+    public function record(?Model $record): self
+    {
+        $key = $record?->getKey();
+
+        if (!\is_scalar($key)) {
+            return $this;
+        }
+
+        return match (true) {
+            $record instanceof Role       => $this->roles((string) $key),
+            $record instanceof Permission => $this->permissions((string) $key),
+            $record instanceof Policy     => $this->policies((string) $key),
+            default                       => $this,
+        };
+    }
+
+    /**
      * Add the grantee of a grant or a removal under the action: the resource
      * type a resource policy is attached to, a role, or a subject.
      *
@@ -233,29 +259,6 @@ final class AuthorityRows
         }
 
         return OperationGrantee::isRole($grantee) ? $this->roles($grantee->id) : $this->grantees($grantee);
-    }
-
-    /**
-     * Add a saved role, permission or policy by its key; anything else, or a
-     * record not saved yet, adds nothing.
-     *
-     * @param  \Illuminate\Database\Eloquent\Model|null  $record
-     * @return self
-     */
-    private function record(?Model $record): self
-    {
-        $key = $record?->getKey();
-
-        if (!\is_scalar($key)) {
-            return $this;
-        }
-
-        return match (true) {
-            $record instanceof Role       => $this->roles((string) $key),
-            $record instanceof Permission => $this->permissions((string) $key),
-            $record instanceof Policy     => $this->policies((string) $key),
-            default                       => $this,
-        };
     }
 
     /**
@@ -274,7 +277,7 @@ final class AuthorityRows
 
         \ksort($this->grantees, \SORT_STRING);
 
-        $grantees = \array_values($this->grantees);
+        $grantees = $this->grantees;
         $pairs    = static fn (Builder $query): Builder => self::pairs($query, 'authorizable_type', 'authorizable_id', $grantees);
 
         $this->roles(...$this->lockKeys($pairs(self::table('authorizable_roles')), 'role_id'));
@@ -308,7 +311,7 @@ final class AuthorityRows
         $query = self::table('guardrails')->where(static function (Builder $where) use ($chained): void {
             $where->where(static fn (Builder $platform): Builder => $platform->whereNull('tenant_type')->whereNull('tenant_id'));
 
-            self::pairs($where, 'tenant_type', 'tenant_id', \array_values($chained), 'or');
+            self::pairs($where, 'tenant_type', 'tenant_id', $chained, 'or');
         });
 
         $this->policies(...$this->lockKeys($query, 'policy_id'));
@@ -330,7 +333,7 @@ final class AuthorityRows
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
         $class = config('authorization.models.role', Role::class);
-        $chain = self::sorted(\array_map(\strval(...), \array_keys(RoleGraph::reach(self::sorted($this->roles)))));
+        $chain = self::sorted(\array_keys(RoleGraph::reach(self::sorted($this->roles))));
         $type  = (new $class)->getMorphClass();
 
         $this->pins->lock($this->phase, self::table('roles')->whereIn('id', $chain));
@@ -364,7 +367,7 @@ final class AuthorityRows
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $type
      * @param  string  $id
-     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $references
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\Reference>  $references
      * @param  string  $boolean
      * @return \Illuminate\Database\Query\Builder
      */
@@ -393,8 +396,8 @@ final class AuthorityRows
     }
 
     /**
-     * Lock the rows the query selects and return the keys in their column, each
-     * once.
+     * Lock the rows the query selects and return the keys in their column, a
+     * key some rows share once for each; the package's keys are text.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $column
@@ -404,10 +407,8 @@ final class AuthorityRows
      */
     private function lockKeys(Builder $query, string $column): array
     {
-        /** @var list<int|string> $keys */
-        $keys = \array_column($this->pins->lock($this->phase, $query), $column);
-
-        return \array_values(\array_unique(\array_map(\strval(...), $keys)));
+        /** @var list<string> */
+        return \array_column($this->pins->lock($this->phase, $query), $column);
     }
 
     /**
@@ -418,7 +419,7 @@ final class AuthorityRows
      */
     private static function sorted(array $keys): array
     {
-        $keys = \array_values(\array_unique($keys));
+        $keys = \array_unique($keys);
 
         \sort($keys, \SORT_STRING);
 

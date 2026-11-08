@@ -344,6 +344,8 @@ final class HasPermissionsTest extends TestCase
         self::assertRefusedAsNothingAllowed(static fn () => $user->givePermission('posts:edit', actor: $actor));
         self::assertRefusedAsNothingAllowed(static fn () => $user->revokePermission('posts:edit', actor: $actor));
         self::assertRefusedAsNothingAllowed(static fn () => $user->syncPermissions(['posts:edit'], actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->givePermissionTo('posts:edit', $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->revokePermissionTo('posts:edit', $actor));
         self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', 'user-actor')->count());
     }
 

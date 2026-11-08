@@ -247,6 +247,32 @@ final class AuthorizationManager
     }
 
     /**
+     * Record and report a decision the pipeline did not make, for the current
+     * subject on the action and the resource, as `check()` records and reports
+     * the one it makes, then report its refusal with `AuthorizationFailed`, as
+     * `authorize()` reports one, and return the `AuthorizationException` that
+     * carries it: what refuses a delegated operation that conflicted on every
+     * try (see `Administration\ConflictRetries`).
+     *
+     * @param  string  $action
+     * @param  mixed  $resource
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
+     * @return \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     *
+     * @internal
+     */
+    public function reportRefusal(string $action, mixed $resource, Decision $decision): AuthorizationException
+    {
+        $reference = ResourceReferences::of($resource);
+        $subject   = $this->currentSubject();
+
+        $this->batch()->recordOne($subject, new CheckInput($action, $reference), $decision);
+        $this->events?->dispatch(new AuthorizationFailed($subject?->subject, $action, ResourceReferences::identifierOf($reference), [], $decision));
+
+        return AuthorizationException::translated($decision->reason ?? DecisionReason::NO_MATCH, $this->translator, $decision);
+    }
+
+    /**
      * Decide the action for the current subject, the one core decision every
      * other form adapts (D22): `can()` and `cannot()` read whether it is
      * allowed, `any()` and `all()` read it for each action they decide, and

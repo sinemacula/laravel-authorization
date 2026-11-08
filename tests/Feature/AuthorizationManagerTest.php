@@ -926,6 +926,33 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * A decision the pipeline did not make is recorded and reported for the
+     * current subject as a refusal of `authorize()` is: the last decision, its
+     * decision event and its failure event, each naming the resource, and the
+     * `AuthorizationException` carrying it is returned.
+     *
+     * @return void
+     */
+    public function testARefusalMadeElsewhereIsReportedAsAuthorizeReportsOne(): void
+    {
+        $user     = StubIdentity::create(['id' => '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e']);
+        $decision = Decision::deny(DecisionReason::ADMINISTRATION_CONFLICT, DecisionStage::ADMINISTRATION);
+
+        Event::fake();
+
+        $refusal = Authorization::for($user)->reportRefusal('posts:delete', ['posts', 7], $decision);
+
+        self::assertSame($decision, $refusal->getDecision());
+        self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $refusal->getReason());
+        self::assertSame($decision, Authorization::lastDecision());
+        $evaluated = static fn (DecisionEvaluated $event): bool => [$event->resource, $event->principal, $event->decision] === ['posts:7', $user, $decision];
+        $failed    = static fn (AuthorizationFailed $event): bool => [$event->resource, $event->principal, $event->action] === ['posts:7', $user, 'posts:delete'];
+
+        Event::assertDispatched(DecisionEvaluated::class, $evaluated);
+        Event::assertDispatched(AuthorizationFailed::class, $failed);
+    }
+
+    /**
      * `authorize()` resolves its resource once: denied on a saved model, or on
      * a pair, it asks the bound resource tenant resolver about it exactly once,
      * and the failure event carries the resource's identifier.

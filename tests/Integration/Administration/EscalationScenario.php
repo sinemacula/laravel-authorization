@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\DB;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -16,6 +17,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions as Actions;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
@@ -49,6 +51,9 @@ final class EscalationScenario
 {
     /** @var list<string> The application's actions, as the catalogue declares them. */
     public const array ACTIONS = ['posts:read', 'posts:edit', 'posts:delete', 'comments:read', 'comments:write', 'reports:view'];
+
+    /** @var string An action of the catalogue no grant, role or policy of the scenario names, but the resource policy naming the role `named`, so the actor never holds it. */
+    private const string SHARED = 'files:share';
 
     /** @var list<string> The patterns a grant or a statement may name beside the actions. */
     private const array PATTERNS = ['posts:*', 'comments:*', '*:read'];
@@ -84,8 +89,17 @@ final class EscalationScenario
     /** @var \SineMacula\Laravel\Authorization\Administration\ActingContext The actor. */
     public readonly ActingContext $actor;
 
-    /** @var bool Whether the actor may grant what it does not hold, through a grantable right. */
-    public bool $isGrantable = false;
+    /** @var list<string> The action patterns the actor may grant without holding them, through a grantable right: every action under `authorization:*`, one permission's under a narrower right, or none. */
+    public array $grantable = [];
+
+    /** @var list<\SineMacula\Laravel\Authorization\Models\Policy> The policies naming principals, attached to no resource yet, that the actor may attach to the posts. */
+    public array $sharing = [];
+
+    /** @var \Illuminate\Database\Eloquent\Model|null The subject the latest operation changes, null for a change to a definition. */
+    public ?Model $target = null;
+
+    /** @var list<\SineMacula\Laravel\Authorization\Models\Role> The roles carrying nothing, so a grant of one is weighed on one rule alone: the most senior rank, or the allows of a resource policy naming it. */
+    private array $edges = [];
 
     /** @var list<string> What the scenario did, for its replay. */
     private array $log = [];
@@ -104,6 +118,9 @@ final class EscalationScenario
 
     /** @var \SineMacula\Laravel\Authorization\Services\BoundaryService The boundary service. */
     private readonly BoundaryService $boundaryService;
+
+    /** @var \SineMacula\Laravel\Authorization\Services\ResourcePolicyService The resource policy service. */
+    private readonly ResourcePolicyService $resourcePolicyService;
 
     /**
      * Create the scenario of the seed, with its actor, who holds nothing yet.
@@ -127,8 +144,10 @@ final class EscalationScenario
         $this->roleService     = $app->make(RoleService::class);
         $this->policyService   = $app->make(PolicyService::class);
         $this->boundaryService = $app->make(BoundaryService::class);
-        $this->actorModel      = StubIdentity::query()->create(['id' => 'actor']);
-        $this->actor           = ActingContext::for($this->actorModel);
+
+        $this->resourcePolicyService = $app->make(ResourcePolicyService::class);
+        $this->actorModel            = StubIdentity::query()->create(['id' => 'actor']);
+        $this->actor                 = ActingContext::for($this->actorModel);
     }
 
     /**
@@ -141,7 +160,7 @@ final class EscalationScenario
      */
     public function build(): void
     {
-        $definitions = \array_map(static fn (string $action): PermissionDefinition => new PermissionDefinition($action), self::ACTIONS);
+        $definitions = \array_map(static fn (string $action): PermissionDefinition => new PermissionDefinition($action), [...self::ACTIONS, self::SHARED]);
 
         $this->app->instance(DeclaredPermissions::class, new DeclaredPermissions($definitions));
         $this->app->make(ConfigRepository::class)->set('authorization.permission_providers', [DeclaredPermissions::class]);
@@ -163,12 +182,14 @@ final class EscalationScenario
      */
     public function operation(): array
     {
-        $kind = $this->random->pick(['permission', 'permission', 'role', 'role', 'policy', 'revoke', 'membership', 'parent', 'rewrite', 'boundary', 'unbound']);
+        $kind = $this->random->pick([
+            'permission', 'permission', 'role', 'role', 'role', 'policy', 'sync', 'attach', 'revoke', 'membership', 'parent', 'rewrite', 'boundary', 'unbound',
+        ]);
 
         [$description, $action, $call] = match ($kind) {
-            'permission', 'role', 'policy'  => $this->grant($kind),
-            'revoke', 'boundary', 'unbound' => $this->removal($kind),
-            default                         => $this->definition($kind),
+            'permission', 'role', 'policy', 'sync', 'attach' => $this->grant($kind),
+            'revoke', 'boundary', 'unbound'                  => $this->removal($kind),
+            default                                          => $this->definition($kind),
         };
 
         $this->log[] = "operation: {$kind} {$description}";
@@ -203,7 +224,9 @@ final class EscalationScenario
     /**
      * Return a random grant of the kind as the actor: of a permission, an
      * administration right included, a role or a policy, to a random subject,
-     * the actor now and then, in a random scope.
+     * the actor now and then, in a random scope; a sync of a random few roles,
+     * permissions or policies, keeping what is held and dropping the rest; or
+     * an attachment to the posts of a policy naming principals.
      *
      * @param  string  $kind
      * @return array{string, string, \Closure(): mixed}
@@ -214,11 +237,27 @@ final class EscalationScenario
 
         $actor  = $this->actor;
         $grants = $this->grantService;
+        $shared = $this->random->pick($this->sharing);
+        $synced = $this->random->pick(['roles', 'permissions', 'policies']);
+        $syncs  = [
+            'roles'       => [Actions::ROLE_GRANT, $grants->syncRoles(...), $this->roles],
+            'permissions' => [Actions::PERMISSION_GRANT, $grants->syncPermissions(...), \array_map(self::permission(...), self::HELD)],
+            'policies'    => [Actions::POLICY_ATTACH, $grants->syncPolicies(...), $this->policies],
+        ];
+
+        [$syncing, $sync, $pool] = $syncs[$synced];
+
+        $items = $this->random->some($pool, 2);
+        $names = \implode(', ', \array_map(static fn (Permission|Policy|Role $item): string => $item->name, $items));
 
         return match ($kind) {
+            'sync' => ["{$synced} [{$names}]{$where}", $syncing,
+                static fn (): mixed => $sync($target, $items, actor: $actor, tenant: $tenant, includeSubtree: $below)],
+            'attach' => [$shared->name . ' to the posts in ' . self::key($tenant, 'platform'), Actions::RESOURCE_POLICY_ATTACH,
+                fn (): mixed => $this->resourcePolicyService->attach($shared, 'post', $tenant, $below, actor: $actor)],
             'permission' => [($permission = self::permission($this->random->pick(self::GRANTABLE)))->name . $where, Actions::PERMISSION_GRANT,
                 static fn (): mixed => $grants->grantPermission($target, $permission, actor: $actor, tenant: $tenant, includeSubtree: $below)],
-            'role' => [($role = $this->random->pick($this->roles))->name . $where, Actions::ROLE_GRANT,
+            'role' => [($role = $this->random->pick($this->random->isOneIn(2) ? $this->edges : $this->roles))->name . $where, Actions::ROLE_GRANT,
                 static fn (): mixed => $grants->grantRole($target, $role, actor: $actor, tenant: $tenant, includeSubtree: $below)],
             default => [($policy = $this->random->pick($this->policies))->name . $where, Actions::POLICY_ATTACH,
                 static fn (): mixed => $grants->attachPolicy($target, $policy, actor: $actor, tenant: $tenant, includeSubtree: $below)],
@@ -259,6 +298,8 @@ final class EscalationScenario
      */
     private function definition(string $kind): array
     {
+        $this->target = null;
+
         $actor    = $this->actor;
         $role     = $this->random->pick($this->roles);
         $roles    = $this->roleService;
@@ -284,8 +325,10 @@ final class EscalationScenario
     {
         $target = $this->random->isOneIn(5) ? $this->actorModel : $this->random->pick(\array_slice($this->subjects, 0, -1));
         $tenant = $this->scope();
-        $below  = !$this->random->isOneIn(3);
-        $where  = ' for ' . self::key($target) . ' in ' . ($tenant === null ? 'platform' : 'tenant ' . self::key($tenant)) . ($below ? ' and below' : '');
+
+        $this->target = $target;
+        $below        = !$this->random->isOneIn(3);
+        $where        = ' for ' . self::key($target) . ' in ' . ($tenant === null ? 'platform' : 'tenant ' . self::key($tenant)) . ($below ? ' and below' : '');
 
         return [$target, $tenant, $below, $where];
     }
@@ -388,13 +431,28 @@ final class EscalationScenario
             $this->grantService->grantRole($this->actorModel, Role::query()->create(['name' => 'actor-rank', 'rank' => $rank]));
         }
 
-        $rights            = $this->random->isOneIn(5) ? ['authorization:*'] : \array_values(\array_filter(self::RIGHTS, fn (): bool => !$this->random->isOneIn(3)));
-        $tenant            = $this->random->isOneIn(4) ? $this->random->pick($this->tenants) : null;
-        $this->isGrantable = \in_array('authorization:*', $rights, true);
-        $this->log[]       = 'actor rank ' . \json_encode($rank) . ', rights ' . \implode(', ', $rights) . ' in ' . self::key($tenant, 'platform');
+        $some            = \array_values(\array_filter([...self::RIGHTS, Actions::RESOURCE_POLICY_ATTACH], fn (): bool => !$this->random->isOneIn(3)));
+        $rights          = $this->random->isOneIn(5) ? ['authorization:*'] : $some;
+        $tenant          = $this->random->isOneIn(4) ? $this->random->pick($this->tenants) : null;
+        $this->grantable = \in_array('authorization:*', $rights, true) ? ['*'] : [];
+        $this->log[]     = 'actor rank ' . \json_encode($rank) . ', rights ' . \implode(', ', $rights) . ' in ' . self::key($tenant, 'platform');
 
         foreach ($rights as $right) {
             $this->grantService->grantPermission($this->actorModel, self::permission($right), tenant: $tenant);
+        }
+
+        // Now and then, the actor may grant one permission it need not hold,
+        // and only that one, as a policy on the grantable descriptor allows.
+        foreach ($this->grantable === [] && $this->random->isOneIn(3) ? [$this->random->pick(self::HELD)] : [] as $name) {
+            $this->grantService->attachPolicy($this->actorModel, $this->policyService->create('grantable', ['statements' => [[
+                'effect'     => 'allow',
+                'actions'    => [Actions::PERMISSION_GRANTABLE],
+                'resources'  => [OperationResource::TYPE . ':*'],
+                'conditions' => ['eq' => ['resource.permission' => $name]],
+            ]]]));
+
+            $this->grantable[] = $name;
+            $this->log[]       = "actor may grant {$name}";
         }
 
         $this->hold($this->actorModel, 3);
@@ -457,8 +515,10 @@ final class EscalationScenario
     }
 
     /**
-     * Now and then, set a guardrail on the platform or a tenant, and attach to
-     * the posts a resource policy naming a role or a subject.
+     * Now and then, set a guardrail on the platform or a tenant; create two
+     * roles carrying nothing, one of the most senior rank and one a resource
+     * policy on the posts names; and create one or two policies naming a role
+     * or a subject, attached to nothing, for the actor to attach to the posts.
      *
      * @return void
      *
@@ -474,15 +534,28 @@ final class EscalationScenario
             $this->log[] = 'guardrail in ' . self::key($tenant, 'platform') . ' allowing ' . \implode(', ', $allowed);
         }
 
-        $named    = $this->random->isOneIn(2) ? $this->random->pick($this->roles) : $this->random->pick($this->subjects);
-        $selector = ($named instanceof Role ? 'role' : StubIdentity::class) . ':' . self::key($named);
-        $actions  = $this->random->some(self::ACTIONS, 2);
+        // Two roles carrying nothing, so a grant of either passes or fails on
+        // one rule alone: the most senior rank there is, and the allows of a
+        // resource policy on the posts naming the role.
+        $senior = Role::query()->create(['name' => 'senior', 'rank' => 1]);
+        $named  = Role::query()->create(['name' => 'named', 'rank' => $this->random->pick([null, 8])]);
+        $naming = ['effect' => 'allow', 'actions' => [self::SHARED], 'principals' => ['role:' . self::key($named)]];
+        $policy = $this->policyService->create('naming', ['statements' => [$naming]]);
 
-        foreach ($this->random->isOneIn(2) ? [['effect' => 'allow', 'actions' => $actions === [] ? ['posts:read'] : $actions, 'principals' => [$selector]]] : [] as $statement) {
-            $shared = $this->policyService->create('shared', ['statements' => [$statement]]);
+        DB::table('resource_policies')->insert(['policy_id' => $policy->getKey(), 'resource_type' => 'post', 'resource_id' => null]);
 
-            DB::table('resource_policies')->insert(['policy_id' => $shared->getKey(), 'resource_type' => 'post', 'resource_id' => null]);
-            $this->log[] = "resource policy on post naming {$selector}";
+        $this->edges = [$senior, $named];
+        $this->roles = [...$this->roles, $senior, $named];
+        $this->log[] = 'role senior rank 1 and role named rank ' . \json_encode($named->rank) . ', named on the posts by ' . \json_encode($policy->document);
+
+        for ($index = 0, $count = $this->random->between(1, 2); $index < $count; $index++) {
+            $named    = $this->random->isOneIn(2) ? $this->random->pick($this->roles) : $this->random->pick($this->subjects);
+            $selector = ($named instanceof Role ? 'role' : StubIdentity::class) . ':' . self::key($named);
+            $actions  = $this->random->some(self::HELD, 2);
+            $document = ['statements' => [['effect' => 'allow', 'actions' => $actions === [] ? ['posts:delete'] : $actions, 'principals' => [$selector]]]];
+
+            $this->sharing[] = $this->policyService->create('sharing-' . $index, $document);
+            $this->log[]     = "sharing-{$index}: " . \json_encode($document);
         }
     }
 

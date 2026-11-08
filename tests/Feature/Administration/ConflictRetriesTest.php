@@ -5,16 +5,27 @@ declare(strict_types = 1);
 namespace Tests\Feature\Administration;
 
 use Illuminate\Contracts\Database\ConcurrencyErrorDetector;
+use Illuminate\Database\ConcurrencyErrorDetector as LaravelDetector;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\ConflictRetries;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
+use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use Tests\Concerns\UsesAnAuthorizationConnection;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -113,6 +124,50 @@ final class ConflictRetriesTest extends TestCase
     }
 
     /**
+     * Once every try has conflicted, the refusal is recorded and reported as
+     * the actor's, when the actor and the operation are given: its decision
+     * evaluated and its failure, on the operation resource, under the
+     * operation's first action; with either missing, it is thrown alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheRefusalIsRecordedForTheActorOfTheOperation(): void
+    {
+        config(['authorization.administration.retries' => 0]);
+
+        $actor     = ActingContext::for(StubIdentity::query()->create(['id' => 'admin']));
+        $operation = Operation::begin($actor, [PackagePermissions::ROLE_GRANT, PackagePermissions::ROLE_REVOKE]);
+        $tries     = new \ArrayObject;
+
+        /** @var \ArrayObject<int, \SineMacula\Laravel\Authorization\Events\AuthorizationFailed|\SineMacula\Laravel\Authorization\Events\DecisionEvaluated> $events */
+        $events = new \ArrayObject;
+
+        Event::listen([DecisionEvaluated::class, AuthorizationFailed::class], static fn (AuthorizationFailed|DecisionEvaluated $event) => $events->append($event));
+
+        foreach ([[$actor, null], [null, $operation]] as [$given, $begun]) {
+            self::refusalOf(static fn (): int => self::conflictUntil($tries, \PHP_INT_MAX), $given, $begun);
+        }
+
+        self::assertSame([], $events->getArrayCopy());
+
+        $refusal = self::refusalOf(static fn (): int => self::conflictUntil($tries, \PHP_INT_MAX), $actor, $operation);
+
+        self::assertCount(2, $events);
+        self::assertInstanceOf(DecisionEvaluated::class, $events[0]);
+        self::assertInstanceOf(AuthorizationFailed::class, $events[1]);
+
+        foreach ($events as $event) {
+            self::assertSame(PackagePermissions::ROLE_GRANT, $event->action);
+            self::assertSame(OperationResource::TYPE . ':' . $operation->id, $event->resource);
+            self::assertSame($refusal->getDecision(), $event->decision);
+        }
+
+        self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $refusal->getReason());
+    }
+
+    /**
      * Anything else a try throws is thrown at once, never tried again.
      *
      * @return void
@@ -138,29 +193,65 @@ final class ConflictRetriesTest extends TestCase
 
     /**
      * A database's concurrency error inside a transaction the application
-     * opened is thrown as it is, never tried again: only the application can
-     * restart its transaction.
+     * opened is never tried again, since only the application can restart its
+     * transaction: it is thrown as `TransactionConflictException`, keeping the
+     * database's error, which Laravel's detector tells as a concurrency error
+     * so the application's own `DB::transaction()` attempts retry it. So is the
+     * `DeadlockException` Laravel throws for one a nested transaction met.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testAConcurrencyErrorInsideAnOpenTransactionIsThrown(): void
+    public function testAConcurrencyErrorInsideAnOpenTransactionIsThrownForTheApplication(): void
     {
-        $tries = new \ArrayObject;
-        $error = self::serialisationFailure();
+        foreach ([self::serialisationFailure(), new DeadlockException('lost', 0, self::serialisationFailure())] as $error) {
+            $tries     = new \ArrayObject;
+            $exception = null;
 
-        try {
-            ConflictRetries::run(static function () use ($tries, $error): never {
-                $tries->append(true);
+            try {
+                ConflictRetries::run(static function () use ($tries, $error): never {
+                    $tries->append(true);
 
-                throw $error;
-            });
-        } catch (QueryException $exception) {
-            self::assertSame($error, $exception);
+                    throw $error;
+                });
+            } catch (TransactionConflictException $exception) {
+                // Asserted below.
+            }
+
+            self::assertInstanceOf(TransactionConflictException::class, $exception);
+            self::assertSame($error, $exception->getPrevious());
+            self::assertSame(TransactionConflictException::SERIALIZATION_FAILURE, $exception->getCode());
+            self::assertStringContainsString($error->getMessage(), $exception->getMessage());
+            self::assertTrue((new LaravelDetector)->causedByConcurrencyError($exception));
+            self::assertCount(1, $tries);
         }
+    }
 
-        self::assertCount(1, $tries);
+    /**
+     * The `DeadlockException` Laravel throws once a nested transaction met a
+     * concurrency error, its code and message no longer saying so, is a
+     * concurrency error, tried again when the operation opened the outermost
+     * transaction.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testANestedDeadlockIsTriedAgainAtTheOutermostTransaction(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $tries = new \ArrayObject;
+        $error = new DeadlockException('could not serialize access due to concurrent update', 0, self::serialisationFailure());
+
+        self::assertTrue(ConflictRetries::isConcurrencyError($error));
+        self::assertSame('done', ConflictRetries::run(static function () use ($tries, $error): string {
+            $tries->append(true);
+
+            return $tries->count() < 2 ? throw $error : 'done';
+        }));
+        self::assertCount(2, $tries);
     }
 
     /**
@@ -252,17 +343,20 @@ final class ConflictRetriesTest extends TestCase
     }
 
     /**
-     * Run the call and return the `AuthorizationException` it is refused with.
+     * Run the call, for the actor and the operation when they are given, and
+     * return the `AuthorizationException` it is refused with.
      *
      * @param  \Closure(): mixed  $call
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation|null  $operation
      * @return \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      *
      * @throws \Throwable
      */
-    private static function refusalOf(\Closure $call): AuthorizationException
+    private static function refusalOf(\Closure $call, ?ActingContext $actor = null, ?Operation $operation = null): AuthorizationException
     {
         try {
-            ConflictRetries::run($call);
+            ConflictRetries::run($call, $actor, $operation);
         } catch (AuthorizationException $refusal) {
             return $refusal;
         }

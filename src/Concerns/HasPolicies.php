@@ -172,18 +172,21 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * Create an inline policy that belongs to this grantee, through the policy
      * service, validated as any policy's document is. The policy is attached to
      * this grantee alone and deleted with it; creating it does not attach it,
-     * so attach it with `attachPolicy()`, in the scope it holds in.
+     * so attach it with `attachPolicy()`, in the scope it holds in. Given
+     * `actor:`, its creation is decided as that actor under
+     * `authorization:policy.create`.
      *
      * @param  string  $name
      * @param  array<array-key, mixed>|string  $document
      * @param  string|null  $description
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Policy
      *
      * @throws \Throwable
      */
-    public function createInlinePolicy(string $name, array|string $document, ?string $description = null): Policy
+    public function createInlinePolicy(string $name, array|string $document, ?string $description = null, ?ActingContext $actor = null): Policy
     {
-        return self::authorizationPolicies()->createInline($this, $name, $document, $description);
+        return self::authorizationPolicies()->createInline($this, $name, $document, $description, $actor);
     }
 
     /**

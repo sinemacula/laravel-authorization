@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\ConflictRetries;
 use SineMacula\Laravel\Authorization\Administration\DependencyPins;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
@@ -44,13 +45,14 @@ use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
  * A delegated operation runs under the concurrency protocol (AUTHZ-11.1): each
  * try runs in a transaction of its own and holds `DependencyPins`, which lock
  * and pin what its decisions read and validate it before the write, and a try
- * that conflicts is rolled back and tried again (see `ConflictRetries`). The
- * protocol takes no lock until the operation makes its first decision, and the
- * work starts inside the transaction before the service reads or locks
- * anything, so a grant hook (AUTHZ-11.3) called first in the work runs before
- * every lock the package takes for the call: that is the seam scope-widening
- * hooks are run from. A trusted operation runs once, as it always has, with no
- * pins and no extra lock.
+ * that conflicts is rolled back and tried again, then refused as
+ * `administration.conflict`, recorded and reported as the actor's refusal (see
+ * `ConflictRetries`). The work starts inside the transaction before the service
+ * reads or locks anything, and the protocol takes no lock until the service
+ * first reads what the operation changes, so a grant hook (AUTHZ-11.3) called
+ * first in the work runs before every lock the package takes for the call: that
+ * is the seam scope-widening hooks are run from. A trusted operation runs once,
+ * as it always has, with no pins and no extra lock.
  *
  * @managed-static
  *
@@ -75,23 +77,26 @@ final class OperationScope
      * package's connection: once for a trusted operation, and, for a delegated
      * one, under the concurrency protocol, again in a fresh transaction for
      * each try that conflicts, up to `authorization.administration.retries`
-     * times, then refused as `administration.conflict`.
+     * times, then refused as `administration.conflict`, recorded and reported
+     * as the refusal of the actor given, the acting context the operation was
+     * begun with.
      *
      * @template TResult
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \Closure(\SineMacula\Laravel\Authorization\Support\Operation): TResult  $work
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return TResult
      *
      * @throws \Throwable
      */
-    public static function run(Operation $operation, \Closure $work): mixed
+    public static function run(Operation $operation, \Closure $work, ?ActingContext $actor = null): mixed
     {
         if ($operation->isTrusted) {
             return self::attempt($operation, $work, null);
         }
 
-        return ConflictRetries::run(static fn (): mixed => self::attempt($operation, $work, new DependencyPins($operation)));
+        return ConflictRetries::run(static fn (): mixed => self::attempt($operation, $work, new DependencyPins($operation)), $actor, $operation);
     }
 
     /**
@@ -103,6 +108,20 @@ final class OperationScope
     public static function pins(): ?DependencyPins
     {
         return self::$pins === [] ? null : self::$pins[\count(self::$pins) - 1];
+    }
+
+    /**
+     * Return the pins of the delegated operation whose work is running, for
+     * work that only ever runs delegated, such as a guardrail change; none
+     * running, or a trusted one, is a mistake, refused with `LogicException`.
+     *
+     * @return \SineMacula\Laravel\Authorization\Administration\DependencyPins
+     *
+     * @throws \LogicException
+     */
+    public static function delegatedPins(): DependencyPins
+    {
+        return self::pins() ?? throw new \LogicException('No delegated operation is running.');
     }
 
     /**

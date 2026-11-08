@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Administration;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -14,6 +15,7 @@ use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -23,6 +25,8 @@ use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubIdentity;
@@ -245,6 +249,70 @@ final class PossessionLimitsTest extends TestCase
         self::assertTrue(self::limits('posts:read', subject: new Subject($user, $user)));
         self::assertTrue(self::limits('posts:read', subject: new Subject($user, $user), scope: new GrantScope($other)));
         self::assertFalse(self::limits('posts:read', subject: new Subject($user, $user), scope: new GrantScope($child)));
+    }
+
+    /**
+     * More resource-policy attachments, or more guardrails, in the reach than
+     * the impact limit allows limit every permission; inside a delegated
+     * operation, those within it are locked and pinned, with the policies read,
+     * so a deny attached before the write is noticed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheAttachmentsAndGuardrailsOfTheReachAreBoundedAndPinned(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $subject = new Subject($user, $user);
+        $allow   = self::allowing('open', 'posts:read');
+
+        foreach (['1', '2'] as $id) {
+            DB::table('resource_policies')->insert(['policy_id' => $allow->getKey(), 'resource_type' => 'posts', 'resource_id' => $id]);
+        }
+
+        config(['authorization.administration.max_impact' => 1]);
+
+        self::assertTrue(self::limits('posts:edit', subject: $subject));
+
+        config(['authorization.administration.max_impact' => 2]);
+
+        self::assertFalse(self::limits('posts:edit', subject: $subject));
+
+        DB::table('resource_policies')->delete();
+        DB::table('guardrails')->insert(['policy_id' => self::allowing('rail', '*')->getKey(), 'tenant_type' => null, 'tenant_id' => null]);
+        DB::table('guardrails')->insert(['policy_id' => self::allowing('other', '*')->getKey(), 'tenant_type' => 'tenant', 'tenant_id' => 'a']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(new Reference('tenant', 'a'), null)->put(new Reference('tenant', 'b'), null));
+
+        config(['authorization.administration.max_impact' => 1]);
+
+        self::assertFalse(self::limits('posts:edit', subject: $subject, scope: new GrantScope(new Reference('tenant', 'b'))));
+        self::assertTrue(self::limits('posts:edit', subject: $subject, scope: new GrantScope(new Reference('tenant', 'a'))));
+        self::assertTrue(self::limits('posts:edit', subject: $subject));
+
+        config(['authorization.administration.max_impact' => 2]);
+
+        $operation = new Operation('op', new Reference('user', 'admin'), CarbonImmutable::now('UTC'), false);
+        $deny      = self::denying('deny', 'posts:edit');
+
+        $noticed = OperationScope::run($operation, static function () use ($subject, $deny): bool {
+            self::assertFalse(self::limits('posts:edit', subject: $subject));
+
+            OperationScope::delegatedPins()->validate();
+
+            DB::table('resource_policies')->insert(['policy_id' => $deny->getKey(), 'resource_type' => 'posts', 'resource_id' => '3']);
+
+            try {
+                OperationScope::delegatedPins()->validate();
+            } catch (DependencyChangedException) {
+                return true;
+            }
+
+            return false;
+        });
+
+        self::assertTrue($noticed);
     }
 
     /**

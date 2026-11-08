@@ -74,8 +74,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * of the scopes above it are locked and pinned before the right is decided and
  * read again once it is allowed, so a right revoked, a policy rewritten or a
  * tenant moved meanwhile has the change tried again, and refused as
- * `administration.conflict` once `authorization.administration.retries` tries
- * have all conflicted.
+ * `administration.conflict` once the first try and every one of the
+ * `authorization.administration.retries` retries have conflicted.
  *
  * Every call runs in one transaction on the package's connection, is one
  * operation for the actor, recorded on the row it writes, and dispatches
@@ -128,7 +128,7 @@ final class GuardrailService
             }
 
             return $outcome;
-        });
+        }, $actor);
     }
 
     /**
@@ -163,7 +163,7 @@ final class GuardrailService
             OperationScope::dispatch(new GuardrailRemoved($operation, Reference::of($stored), PolicyDocument::nameOf($stored->getAttribute('name')), new GrantScope($named)));
 
             return true;
-        });
+        }, $actor);
     }
 
     /**
@@ -186,14 +186,13 @@ final class GuardrailService
      */
     private static function assertPermitted(ActingContext $actor, Policy $policy, ?Reference $tenant): void
     {
-        $pins = OperationScope::pins();
-        $key  = $policy->getKey();
+        $pins = OperationScope::delegatedPins();
 
-        $pins?->lockGuardrail(\is_scalar($key) ? (string) $key : null, $tenant);
+        $pins->lockGuardrail($policy, $tenant);
 
         GuardrailAuthority::assertPermitted($actor, $tenant);
 
-        $pins?->validate();
+        $pins->validate();
     }
 
     /**

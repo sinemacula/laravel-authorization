@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Concerns;
 
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -22,7 +23,9 @@ use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
  * that try is rolled back, it runs again outside it, inside the test's own
  * transaction, as though the concurrent call had committed, so the next try
  * decides on it. Asked to race every try, it runs inside each try instead, and
- * never outside, so every try conflicts.
+ * never outside, so every try conflicts. A race can land on a query instead of
+ * a decision, so a write between a service's read and its lock, or between the
+ * validation and the write, is simulated alike.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,27 +71,53 @@ trait RacesDelegatedCalls
             $change();
         });
 
-        Event::listen(TransactionRolledBack::class, static function () use ($change, $isEveryTry, $state): void {
-            // Only the rollback of the try raced counts: not one inside the
-            // change itself, nor the test's own once it ends.
-            $level = DB::transactionLevel();
+        self::replayOnRollback($change, $state, $isEveryTry);
 
-            if ($state['committed'] === true || $level >= $state['level'] || $level === 0) {
+        return $decisions;
+    }
+
+    /**
+     * Run the change once the query matching the pattern, its identifiers
+     * unquoted, has run the given number of times inside a try, as a write of a
+     * concurrent call landing between that read and what follows it, then, when
+     * the try is rolled back, again outside it, as `raceWith()` does; return
+     * the SQL of the query it ran after.
+     *
+     * @param  string  $pattern
+     * @param  \Closure(): mixed  $change
+     * @param  int  $occurrence
+     * @return \ArrayObject<int, string>
+     */
+    protected static function raceOnQuery(string $pattern, \Closure $change, int $occurrence = 1): \ArrayObject
+    {
+        /** @var \ArrayObject<int, string> $raced */
+        $raced = new \ArrayObject;
+
+        /** @var \ArrayObject<string, bool|int> $state */
+        $state = new \ArrayObject(['armed' => true, 'level' => 0, 'committed' => false, 'seen' => 0]);
+
+        DB::listen(static function (QueryExecuted $query) use ($pattern, $change, $occurrence, $raced, $state): void {
+            if ($state['armed'] !== true || \preg_match($pattern, \str_replace(['"', '`'], '', $query->sql)) !== 1) {
                 return;
             }
 
-            if ($isEveryTry) {
-                $state['armed'] = true;
+            $state['seen'] = (int) $state['seen'] + 1;
 
+            if ($state['seen'] < $occurrence) {
                 return;
             }
 
-            $state['committed'] = true;
+            $state['armed'] = false;
+            $state['level'] = DB::transactionLevel();
+
+            $raced->append($query->sql);
 
             $change();
         });
 
-        return $decisions;
+        self::replayOnRollback($change, $state, false);
+
+        return $raced;
     }
 
     /**
@@ -113,5 +142,38 @@ trait RacesDelegatedCalls
         });
 
         return $changes;
+    }
+
+    /**
+     * Run the change again outside the try it raced once that try is rolled
+     * back, as though the concurrent call had committed, or, racing every try,
+     * arm it for the next.
+     *
+     * @param  \Closure(): mixed  $change
+     * @param  \ArrayObject<string, bool|int>  $state
+     * @param  bool  $isEveryTry
+     * @return void
+     */
+    private static function replayOnRollback(\Closure $change, \ArrayObject $state, bool $isEveryTry): void
+    {
+        Event::listen(TransactionRolledBack::class, static function () use ($change, $isEveryTry, $state): void {
+            // Only the rollback of the try raced counts: not one inside the
+            // change itself, nor the test's own once it ends.
+            $level = DB::transactionLevel();
+
+            if ($state['committed'] === true || $level >= $state['level'] || $level === 0) {
+                return;
+            }
+
+            if ($isEveryTry) {
+                $state['armed'] = true;
+
+                return;
+            }
+
+            $state['committed'] = true;
+
+            $change();
+        });
     }
 }

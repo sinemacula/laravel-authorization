@@ -6,7 +6,6 @@ namespace SineMacula\Laravel\Authorization\Models;
 
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Attributes\ScopedBy;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -14,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
-use SineMacula\Laravel\Authorization\Database\LiveGrants;
+use SineMacula\Laravel\Authorization\Database\RolePermissionRelation;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
@@ -146,19 +145,10 @@ class Permission extends Model
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleModel */
         $roleModel = config('authorization.models.role', Role::class);
 
-        /** @var string $pivot */
-        $pivot = config('authorization.tables.role_permissions', 'role_permissions');
-
-        return $this->belongsToMany(
-            related: $roleModel,
-            table: $pivot,
-            foreignPivotKey: 'permission_id',
-            relatedPivotKey: 'role_id',
-        )->using(RolePermission::class)
+        return $this->belongsToMany($roleModel, RolePermissionRelation::table(), 'permission_id', 'role_id')
+            ->using(RolePermission::class)
             ->withPivot('expires_at')
-            ->where(static function (Builder $query) use ($pivot): void {
-                LiveGrants::only($query, $pivot);
-            });
+            ->where(RolePermissionRelation::live(...));
     }
 
     /**

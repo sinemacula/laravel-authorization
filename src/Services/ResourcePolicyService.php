@@ -140,7 +140,7 @@ final class ResourcePolicyService
             }
 
             return $outcome;
-        });
+        }, $actor);
     }
 
     /**
@@ -181,7 +181,7 @@ final class ResourcePolicyService
             OperationScope::dispatch(new PolicyDetached($operation, (string) $reference->type, $reference->id, Reference::of($stored), self::name($stored), $detached));
 
             return 1;
-        });
+        }, $actor);
     }
 
     /**
@@ -229,7 +229,7 @@ final class ResourcePolicyService
             OperationScope::dispatch(...$events);
 
             return \count($events);
-        });
+        }, $actor);
     }
 
     /**

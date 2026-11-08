@@ -202,6 +202,41 @@ final class ActingContextTest extends TestCase
     }
 
     /**
+     * The refusal of an operation as a whole is recorded and reported as the
+     * acting subject's, on the operation resource and under the operation's
+     * first action, the operation type standing for an operation with none, and
+     * the `AuthorizationException` carrying it is returned.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheRefusalOfAnOperationIsReportedAsTheActors(): void
+    {
+        Event::fake();
+
+        $admin    = StubIdentity::create(['id' => 'admin-1']);
+        $actor    = ActingContext::for($admin);
+        $decision = Decision::deny(DecisionReason::ADMINISTRATION_CONFLICT, DecisionStage::ADMINISTRATION);
+        $named    = Operation::begin($actor, [PackagePermissions::ROLE_GRANT, PackagePermissions::ROLE_REVOKE]);
+        $bare     = Operation::begin($actor);
+
+        self::assertSame($decision, $actor->reportRefusal($named, $decision)->getDecision());
+        self::assertSame($decision, $actor->reportRefusal($bare, $decision)->getDecision());
+
+        $principal = $actor->subject->subject;
+        $failed    = static function (Operation $operation, string $action) use ($principal): \Closure {
+            $resource = OperationResource::TYPE . ':' . $operation->id;
+
+            return static fn (AuthorizationFailed $event): bool => $event->principal === $principal && $event->action === $action && $event->resource === $resource;
+        };
+
+        Event::assertDispatched(AuthorizationFailed::class, $failed($named, PackagePermissions::ROLE_GRANT));
+        Event::assertDispatched(AuthorizationFailed::class, $failed($bare, OperationResource::TYPE));
+        Event::assertDispatchedTimes(DecisionEvaluated::class, 2);
+    }
+
+    /**
      * A machine actor keeps the scopes of its credential, which cap what it may
      * administer as they cap its other checks: none allow nothing, and an
      * administration action they do not cover is refused.

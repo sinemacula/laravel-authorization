@@ -27,7 +27,11 @@ use SineMacula\Laravel\Authorization\Support\OperationScope;
  * is written, a policy given a document on the resource
  * `OperationResource::rewrite()` builds, so the change can be compared with the
  * stored one exactly as a screen compares it, and a refusal throws with nothing
- * written. A new record is owned by the tenant it is given (see `ownedBy()`).
+ * written. A delegated change works on a fresh instance each try (see
+ * `stored()`), and once it commits, the model given takes on the record as
+ * written, so a try the concurrency protocol rolls back and tries again never
+ * starts from a model that try changed. A new record is owned by the tenant it
+ * is given (see `ownedBy()`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,15 +68,18 @@ final class RecordWriter
      */
     public static function save(?ActingContext $actor, string $action, \Closure $model, array $attributes): Model
     {
-        return OperationScope::run(Operation::begin($actor, [$action]), static function (Operation $operation) use ($actor, $action, $model, $attributes): Model {
-            $record = self::stored($model(), $actor);
+        [$given, $record] = OperationScope::run(Operation::begin($actor, [$action]), static function (Operation $operation) use ($actor, $action, $model, $attributes): array {
+            $given  = $model();
+            $record = self::stored($given, $actor);
 
             $actor?->authorizeIn($operation, self::resourceOf($action, $record, $attributes));
 
             $record->forceFill($attributes)->save();
 
-            return $record;
-        });
+            return [$given, $record];
+        }, $actor);
+
+        return StoredRecords::adopt($given, $record);
     }
 
     /**
@@ -134,13 +141,18 @@ final class RecordWriter
      */
     public static function delete(?ActingContext $actor, string $action, \Closure $model): void
     {
-        OperationScope::run(Operation::begin($actor, [$action]), static function (Operation $operation) use ($actor, $action, $model): void {
-            $record = self::stored($model(), $actor);
+        [$given, $record] = OperationScope::run(Operation::begin($actor, [$action]), static function (Operation $operation) use ($actor, $action, $model): array {
+            $given  = $model();
+            $record = self::stored($given, $actor);
 
             $actor?->authorizeIn($operation, OperationResource::definition($action, $record));
 
             $record->delete();
-        });
+
+            return [$given, $record];
+        }, $actor);
+
+        StoredRecords::adopt($given, $record);
     }
 
     /**
@@ -166,20 +178,30 @@ final class RecordWriter
 
     /**
      * Return the record a change is weighed on and writes: for a delegated
-     * change to a saved record, the record read again as stored, discarding
-     * changes to it not saved, so a change is never judged on a rank, a parent
-     * or a document the row does not hold, and never writes one it did not
-     * weigh; the record as given otherwise.
+     * change, a fresh instance each try, never the model given, so a try that
+     * conflicts and is rolled back leaves the model given as it was and the
+     * next try starts from what is stored, not from a model the rolled-back try
+     * saved or deleted: a saved record read again as stored by its key,
+     * discarding changes to it not saved, so a change is never judged on a
+     * rank, a parent or a document the row does not hold, and never writes one
+     * it did not weigh, and a new one copied; the record as given for trusted
+     * work, which runs once.
      *
      * @template TModel of \Illuminate\Database\Eloquent\Model
      *
      * @param  TModel  $record
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return TModel
+     *
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
      */
     private static function stored(Model $record, ?ActingContext $actor): Model
     {
-        return $actor === null || !$record->exists ? $record : $record->refresh();
+        if ($actor === null) {
+            return $record;
+        }
+
+        return $record->exists ? $record->newQueryWithoutScopes()->useWritePdo()->whereKey($record->getKey())->firstOrFail() : clone $record;
     }
 
     /**

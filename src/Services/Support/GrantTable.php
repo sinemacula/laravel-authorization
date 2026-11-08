@@ -156,14 +156,15 @@ final readonly class GrantTable extends ExpiringGrants
     }
 
     /**
-     * Delete the grantee's rows in the scope for the given keys.
+     * Delete the grantee's rows in the scope for the given keys, and return how
+     * many were deleted.
      *
      * @param  list<string>  $ids
-     * @return void
+     * @return int
      */
-    public function revoke(array $ids): void
+    public function revoke(array $ids): int
     {
-        $this->inScope()->whereIn($this->column, $ids)->delete();
+        return $this->inScope()->whereIn($this->column, $ids)->delete();
     }
 
     /**

@@ -22,6 +22,7 @@ use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
@@ -206,6 +207,42 @@ final class CheckBatchTest extends TestCase
         self::assertEquals(Authorization::checkMany($checks), $silent);
         self::assertEquals(Authorization::check('posts:edit', $posts[1]), $one);
         self::assertSame([true, false, true], \array_values(\array_map(static fn (Decision $decision): bool => $decision->isAllowed(), $silent)));
+    }
+
+    /**
+     * A decision the pipeline did not make is recorded and reported for its
+     * check as one the pipeline made is, as the last decision with its own
+     * decision event naming the check's resource; a batch made not to record
+     * records nothing of it either.
+     *
+     * @return void
+     */
+    public function testADecisionMadeElsewhereIsRecordedAsTheChecksDecision(): void
+    {
+        $user     = $this->subject();
+        $decision = Decision::deny(DecisionReason::ADMINISTRATION_CONFLICT, DecisionStage::ADMINISTRATION);
+        $check    = new CheckInput('posts:edit', ['posts', 7]);
+
+        /** @var \Illuminate\Foundation\Application $app */
+        $app      = $this->app;
+        $contexts = $app->make(CheckContextFactory::class);
+        $pipeline = new DecisionPipeline($app->make(PolicyEvaluator::class), $app->make(PolicyResolver::class), $contexts, new ResourcePolicyResolver, new GuardrailResolver);
+        $store    = $app->make(LastDecisionStore::class);
+        $batch    = static fn (bool $isRecording): CheckBatch => new CheckBatch($pipeline, $store, $app->make(SubjectResolver::class), $app->make(Dispatcher::class), $isRecording);
+
+        Event::fake([DecisionEvaluated::class]);
+
+        $subject = Authorization::currentSubject();
+
+        self::assertSame($decision, $batch(false)->recordOne($subject, $check, $decision));
+        self::assertNotSame($decision, Authorization::lastDecision());
+        Event::assertNotDispatched(DecisionEvaluated::class);
+
+        self::assertSame($decision, $batch(true)->recordOne($subject, $check, $decision));
+        self::assertSame($decision, Authorization::lastDecision());
+        $evaluated = static fn (DecisionEvaluated $event): bool => [$event->decision, $event->resource, $event->principal] === [$decision, 'posts:7', $user];
+
+        Event::assertDispatched(DecisionEvaluated::class, $evaluated);
     }
 
     /**

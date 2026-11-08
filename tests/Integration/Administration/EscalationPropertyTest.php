@@ -35,19 +35,33 @@ use Tests\TestCase;
  * leaves nothing changed and dispatches no change event.
  *
  * `permissionsFor()` before and after each operation is the oracle, at the
- * platform and in every tenant of the scenario: for every subject that may take
- * an action after the operation that it could not before,
+ * platform and in every tenant of the scenario, with no resource and on a post,
+ * which the resource policies of the scenario reach: for every subject that may
+ * take an action after the operation that it could not before,
  *
  * - the actor may take the operation's own administration action there, so it
  *   administers the subject in that scope;
  * - the actor outranks the subject in that scope, its roles held there and
- *   above it counting, or the subject is the actor itself;
+ *   above it counting, both before the operation and after it, or the subject
+ *   is the actor itself;
  * - a subject that is the actor was allowed `authorization:administration.self`
  *   there;
- * - the actor could take the action there itself, unless it holds a grantable
- *   right, or the operation lifts a boundary under
- *   `authorization:administration.unbounded`, which explicitly allow handing
- *   out what it does not hold.
+ * - the actor could take the action there itself, or holds a grantable right
+ *   covering it (every action under `authorization:*`, or the one permission a
+ *   narrower right names), unless the operation lifts a boundary under
+ *   `authorization:administration.unbounded`, which explicitly allows handing
+ *   out what the actor does not hold.
+ *
+ * And no operation that changes a subject other than the actor leaves any
+ * subject the actor outranked in a scope as senior as the actor there, gained
+ * an action or not.
+ *
+ * The operations are grants of permissions, roles and policies, syncs of each,
+ * attachments to the posts of policies naming principals, revocations, boundary
+ * changes, and changes to what a role carries, its parent and a policy's
+ * document. Two roles carry nothing, so a grant of either is weighed on one
+ * rule alone: one of the most senior rank, and one a resource policy on the
+ * posts names.
  *
  * The scenarios are drawn from `AUTHZ_PARITY_SEED`, a random seed when it is
  * not set, and there are `AUTHZ_PARITY_RUNS` of them, 150 by default; a failure
@@ -134,13 +148,18 @@ final class EscalationPropertyTest extends TestCase
             return 0;
         }
 
-        $isExplicit = $scenario->isGrantable || ($isUnbounding && self::isAllowedAnywhere($before['actor'], Actions::ADMINISTRATION_UNBOUNDED));
+        $grantable = $isUnbounding && self::isAllowedAnywhere($before['actor'], Actions::ADMINISTRATION_UNBOUNDED) ? ['*'] : $scenario->grantable;
+        $still     = $this->outranked($scenario);
+
+        self::assertNoneRanked($scenario->target === $scenario->actorModel ? [] : $ranked, $still, $replay);
 
         foreach ($after as $subject => $scopes) {
             foreach ($scopes as $scope => $listed) {
                 $gained = \array_values(\array_diff($listed, $before[$subject][$scope]));
+                $place  = \explode('@', $scope)[0];
+                $senior = ($ranked[$place][$subject] ?? false) && ($still[$place][$subject] ?? false);
 
-                self::assertJustified($before['actor'][$scope], $subject, $gained, [$action, $ranked[$scope], $isExplicit, "in {$scope}.\n{$replay}"]);
+                self::assertJustified($before['actor'][$scope], $subject, $gained, [$action, $senior, $grantable, "in {$scope}.\n{$replay}"]);
             }
         }
 
@@ -150,31 +169,71 @@ final class EscalationPropertyTest extends TestCase
     /**
      * Assert that what the subject gained in a scope is justified by what the
      * actor could take there before the operation: the operation's action, so
-     * it administers the scope; rank over the subject, or the subject is the
-     * actor and was allowed `authorization:administration.self`; and every
-     * action gained, unless the operation was explicitly allowed to hand out
-     * what the actor does not hold.
+     * it administers the scope; rank over the subject before and after the
+     * operation, or the subject is the actor and was allowed
+     * `authorization:administration.self`; and every action gained, held by the
+     * actor or covered by a grantable right it holds.
      *
      * @param  list<string>  $actor
      * @param  string  $subject
      * @param  list<string>  $gained
-     * @param  array{string, array<string, bool>, bool, string}  $operation
+     * @param  array{string, bool, list<string>, string}  $operation
      * @return void
      */
     private static function assertJustified(array $actor, string $subject, array $gained, array $operation): void
     {
-        [$action, $ranked, $isExplicit, $where] = $operation;
+        [$action, $isSenior, $grantable, $where] = $operation;
 
         if ($gained === []) {
             return;
         }
 
-        $where = "{$subject} gained " . \implode(', ', $gained) . " {$where}";
+        $where    = "{$subject} gained " . \implode(', ', $gained) . " {$where}";
+        $unbacked = \array_filter($gained, static fn (string $gain): bool => !\in_array($gain, $actor, true) && !self::isCovered($grantable, $gain));
 
         self::assertContains($action, $actor, "The actor does not administer the scope: {$where}");
-        self::assertTrue($subject === 'actor' || ($ranked[$subject] ?? false), "The actor does not outrank the subject: {$where}");
+        self::assertTrue($subject === 'actor' || $isSenior, "The actor does not outrank the subject before and after: {$where}");
         self::assertTrue($subject !== 'actor' || \in_array(Actions::ADMINISTRATION_SELF, $actor, true), "The actor benefited itself unallowed: {$where}");
-        self::assertTrue($isExplicit || \array_diff($gained, $actor) === [], "The actor handed out what it could not take: {$where}");
+        self::assertSame([], \array_values($unbacked), "The actor handed out what it could not take: {$where}");
+    }
+
+    /**
+     * Assert that every subject but the actor the actor outranked in a scope
+     * before an operation that changed someone else, it still outranks there
+     * after it: no operation leaves a subject as senior as the actor, whether
+     * or not it gained an action.
+     *
+     * @param  array<string, array<string, bool>>  $before
+     * @param  array<string, array<string, bool>>  $after
+     * @param  string  $replay
+     * @return void
+     */
+    private static function assertNoneRanked(array $before, array $after, string $replay): void
+    {
+        foreach ($before as $scope => $subjects) {
+            foreach ($subjects as $subject => $isOutranked) {
+                self::assertTrue($subject === 'actor' || !$isOutranked || $after[$scope][$subject], "The operation left {$subject} as senior as the actor in {$scope}.\n{$replay}");
+            }
+        }
+    }
+
+    /**
+     * Determine whether a grantable right covers the action: one of the
+     * patterns matches it.
+     *
+     * @param  list<string>  $grantable
+     * @param  string  $action
+     * @return bool
+     */
+    private static function isCovered(array $grantable, string $action): bool
+    {
+        foreach ($grantable as $pattern) {
+            if (\fnmatch($pattern, $action, \FNM_NOESCAPE)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -201,8 +260,9 @@ final class EscalationPropertyTest extends TestCase
     }
 
     /**
-     * Return what each subject may take at the platform and in every tenant, by
-     * subject and scope, each listed with a cold cache.
+     * Return what each subject may take at the platform and in every tenant,
+     * with no resource and on a post, by subject and scope, each listed with a
+     * cold cache.
      *
      * @param  \Tests\Integration\Administration\EscalationScenario  $scenario
      * @return array<string, array<string, list<string>>>
@@ -213,6 +273,10 @@ final class EscalationPropertyTest extends TestCase
 
         foreach ($scenario->tenants as $tenant) {
             $scopes[EscalationScenario::key($tenant)] = AuthorizationScope::tenant($tenant);
+        }
+
+        foreach ($scopes as $name => $scope) {
+            $scopes[$name . '@post'] = $scope->withResource(['post', 'p1']);
         }
 
         $listings = [];

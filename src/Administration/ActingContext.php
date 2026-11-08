@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
  * Who is making a delegated administration call (AUTHZ-11.1): the resolved
@@ -270,6 +271,27 @@ final readonly class ActingContext
     public function authorizeChanges(Operation $operation, array $changes, OperationResource ...$unchanged): void
     {
         $this->authorizeIn($operation, ...($changes === [] ? $unchanged : $changes));
+    }
+
+    /**
+     * Record and report the decision that refuses the operation as a whole, as
+     * the acting subject's, with the call's caps, on the operation resource
+     * `authorization:operation:{id}` and the operation's first action, as
+     * `authorize()` records and reports a refusal, and return the
+     * `AuthorizationException` that carries it: what refuses an operation that
+     * conflicted on every try (see `ConflictRetries`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
+     * @return \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function reportRefusal(Operation $operation, Decision $decision): AuthorizationException
+    {
+        $resource = new ResourceReference(OperationResource::TYPE . ':' . $operation->id, OperationResource::TYPE, $operation->id);
+
+        return $this->manager()->reportRefusal($operation->actions[0] ?? OperationResource::TYPE, $resource, $decision);
     }
 
     /**

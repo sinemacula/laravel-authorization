@@ -9,6 +9,10 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -17,6 +21,8 @@ use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
@@ -163,6 +169,61 @@ final class GrantChangesTest extends TestCase
         self::assertEquals(Reference::of($tenant), $changes[3]->tenant);
         self::assertSame('cap', $changes[3]->attributes()['policy']);
         self::assertSame([], GrantChanges::everything(new Reference('user', 'nobody')));
+    }
+
+    /**
+     * Revoking everything as trusted work revokes every row of every kind and
+     * every boundary, whoever granted them; revoking what was decided revokes
+     * exactly those rows, each by its key in its scope, and the boundaries
+     * decided, leaving a row granted since, and a row decided that is gone
+     * refuses, revoking nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEverythingIsRevokedOrExactlyWhatWasDecided(): void
+    {
+        $tenant    = self::createTenant('tenant-a');
+        $user      = StubIdentity::create(['id' => 'user-1']);
+        $grantee   = Reference::of($user);
+        $cap       = Policy::create(['name' => 'cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:*']]]]]);
+        $operation = Operation::begin();
+
+        self::grants()->grantRole($user, Role::create(['name' => 'editor']), tenant: $tenant);
+        self::grants()->grantPermission($user, Permission::create(['name' => 'posts:edit']));
+        BoundaryService::instance()?->set($user, $cap, $tenant);
+
+        $decided = GrantChanges::everything($grantee);
+
+        self::grants()->grantPermission($user, Permission::create(['name' => 'posts:read']), tenant: $tenant);
+
+        $events = OperationScope::run($operation, static fn (Operation $operation): array => GrantChanges::revokeDecided($grantee, $operation, $decided));
+
+        self::assertSame([RoleRevoked::class, PermissionRevoked::class, BoundaryRemoved::class], \array_map(\get_class(...), $events));
+        self::assertSame(1, DB::table('authorizable_permissions')->where('authorizable_id', 'user-1')->count());
+        self::assertSame(0, DB::table('authorizable_boundaries')->count());
+
+        $gone = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $grantee, Permission::create(['name' => 'posts:delete']), GrantScope::platform());
+
+        try {
+            $decided = [...GrantChanges::everything($grantee), $gone];
+
+            OperationScope::run($operation, static fn (Operation $operation): array => GrantChanges::revokeDecided($grantee, $operation, $decided));
+
+            self::fail('A row decided that is gone was revoked.');
+        } catch (DependencyChangedException $exception) {
+            self::assertStringContainsString('[authorizable_permissions]', $exception->getMessage());
+        }
+
+        self::assertSame(1, DB::table('authorizable_permissions')->where('authorizable_id', 'user-1')->count());
+
+        BoundaryService::instance()?->set($user, $cap);
+
+        $everything = OperationScope::run($operation, static fn (Operation $operation): array => GrantChanges::revokeEverywhere($grantee, $operation));
+
+        self::assertSame([PermissionRevoked::class, BoundaryRemoved::class], \array_map(\get_class(...), $everything));
+        self::assertSame([], GrantChanges::everything($grantee));
     }
 
     /**

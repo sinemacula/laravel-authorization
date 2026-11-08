@@ -242,14 +242,18 @@ trait HasRoles // @phpstan-ignore trait.unused
     // ------------------------------------------------------------------
 
     /**
-     * Spatie alias for the canonical `revokeRole()` helper.
+     * Spatie alias for the canonical `revokeRole()` helper, handing the acting
+     * context, when there is one, on.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
+     *
+     * @throws \Throwable
      */
-    public function removeRole(Role|string $role): static
+    public function removeRole(Role|string $role, ?ActingContext $actor = null): static
     {
-        return $this->revokeRole($role);
+        return $this->revokeRole($role, actor: $actor);
     }
 
     /**

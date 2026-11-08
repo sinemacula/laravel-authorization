@@ -37,6 +37,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Services\SyncResult;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsAdministrator;
@@ -45,6 +46,7 @@ use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\AssertsTransactions;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\UsesAnAuthorizationConnection;
@@ -69,7 +71,7 @@ use Tests\TestCase;
 final class RoleServiceTest extends TestCase
 {
     use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals, ComparesReferences,
-        ReadsDispatchedEvents, RecordsRowLocks, UsesAnAuthorizationConnection;
+        RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, UsesAnAuthorizationConnection;
 
     /**
      * A delegated revocation of a role's permission is decided under its action
@@ -1175,6 +1177,94 @@ final class RoleServiceTest extends TestCase
 
         self::assertSame(0, Role::query()->count());
         Event::assertNotDispatched(RoleCreated::class);
+    }
+
+    /**
+     * The same for a role's permissions: a permission a sync reads as carried,
+     * revoked while it reads, is never written back, but decided as a grant to
+     * the role's holder, refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleSyncNeverWritesBackAPermissionRevokedWhileItReads(): void
+    {
+        $actor  = self::administrator([PackagePermissions::PERMISSION_GRANT, PackagePermissions::PERMISSION_REVOKE]);
+        $role   = self::role('billing');
+        $revoke = static fn (): int => self::service()->revokePermission($role, 'billing:refund');
+
+        self::service()->grantPermission($role, Permission::query()->create(['name' => 'billing:refund']));
+        app(GrantService::class)->grantRole(StubIdentity::query()->create(['id' => 'user']), $role);
+
+        $raced   = self::raceOnQuery('/^select permission_id from role_permissions .*expires_at/', $revoke);
+        $refusal = self::refusalOf(static fn (): SyncResult => self::service()->syncPermissions($role, ['billing:refund'], actor: $actor));
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertFalse($refusal->getDecision()?->isAllowed());
+        self::assertCount(1, $raced);
+        self::assertSame(0, DB::table('role_permissions')->where('role_id', $role->getKey())->count());
+    }
+
+    /**
+     * A permission a role sync decided as carried live and finds gone when it
+     * writes is never written back: the sync is tried again and decides the
+     * permission as a grant to the role's holder, refused, leaving everything
+     * as it was.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleSyncNeverWritesBackAPermissionGoneByTheWrite(): void
+    {
+        $admin  = self::administrator([PackagePermissions::PERMISSION_GRANT, PackagePermissions::PERMISSION_REVOKE, 'posts:read']);
+        $role   = self::role('billing');
+        $revoke = static fn (): int => self::service()->revokePermission($role, 'billing:refund');
+
+        self::service()->grantPermission($role, Permission::query()->create(['name' => 'billing:refund']));
+        self::service()->grantPermission($role, Permission::query()->firstOrCreate(['name' => 'posts:read']));
+        app(GrantService::class)->grantRole(StubIdentity::query()->create(['id' => 'user']), $role);
+
+        $raced   = self::raceOnQuery('/^delete from role_permissions/', $revoke);
+        $refusal = self::refusalOf(static fn (): SyncResult => self::service()->syncPermissions($role, ['billing:refund'], actor: $admin));
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertCount(1, $raced);
+        self::assertSame(['posts:read'], $role->getPermissions());
+    }
+
+    /**
+     * A delegated change to what a role carries works on the role as stored,
+     * read afresh, never on the caller's model, which it leaves as it was but
+     * for its loaded permissions, dropped once the change commits, as a trusted
+     * change drops them.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedChangeLeavesTheCallersRoleAsItWasButItsPermissions(): void
+    {
+        $admin = self::administrator([PackagePermissions::PERMISSION_GRANT, PackagePermissions::PERMISSION_REVOKE, 'posts:read', 'posts:edit']);
+        $role  = self::role('editor');
+        $calls = [
+            static fn (): GrantOutcome => self::service()->grantPermission($role, 'posts:read', actor: $admin),
+            static fn (): int => self::service()->revokePermission($role, 'posts:read', $admin),
+            static fn (): SyncResult => self::service()->syncPermissions($role, ['posts:edit'], actor: $admin),
+        ];
+
+        foreach ($calls as $call) {
+            $role->load('permissions');
+            $role->description = 'unsaved';
+
+            $call();
+
+            self::assertFalse($role->relationLoaded('permissions'));
+            self::assertSame('unsaved', $role->description);
+        }
+
+        self::assertSame(['posts:edit'], $role->getPermissions());
     }
 
     /**

@@ -15,6 +15,8 @@ use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -38,13 +40,16 @@ use Tests\TestCase;
 /**
  * Races between a delegated decision and the write it allows (AUTHZ-11.1, the
  * concurrency protocol): a concurrent revocation of the actor's authority, a
- * role that grows, a policy rewritten and a tenant moved, each landing after
- * the decision and before the write, have the operation tried again and decided
- * on what was committed, so it is refused; a change that alters nothing the
- * operation relies on is tried again and made; and one that lands on every try
- * is refused as `administration.conflict`. Each race is simulated inside the
- * operation's try, as the reads that follow it would see a concurrent commit,
- * so the version check runs on SQLite as on PostgreSQL and MySQL.
+ * role that grows, a policy rewritten, a resource policy naming a granted role
+ * attached and a tenant moved, each landing after the decision and before the
+ * write, and a rank or a document changed between the service's read of a
+ * record and its lock, have the operation tried again and decided on what was
+ * committed, so it is refused; a change that alters nothing the operation
+ * relies on is tried again and made; and one that lands on every try is refused
+ * as `administration.conflict`, recorded and reported as the actor's refusal.
+ * Each race is simulated inside the operation's try, as the reads that follow
+ * it would see a concurrent commit, so the version check runs on SQLite as on
+ * PostgreSQL and MySQL.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -225,9 +230,57 @@ final class DelegatedRacesTest extends TestCase
 
         self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $refusal->getReason());
         self::assertSame(DecisionStage::ADMINISTRATION, $refusal->getDecision()?->stage);
-        self::assertCount(1 + ConflictRetries::DEFAULT_RETRIES, $decisions);
+        self::assertSame([...\array_fill(0, 1 + ConflictRetries::DEFAULT_RETRIES, true), false], $decisions->getArrayCopy());
         self::assertFalse(self::holds($user, 'posts:edit'));
         self::assertSame([], $changes->getArrayCopy());
+    }
+
+    /**
+     * The refusal of an operation that conflicted on every try is recorded and
+     * reported as any refusal is: the acting subject's `DecisionEvaluated` and
+     * `AuthorizationFailed`, on the operation resource, under the operation's
+     * action, as `administration.conflict`, after the decisions of every try
+     * under the same operation id.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheConflictRefusalIsRecordedAndReported(): void
+    {
+        $actor = self::actor('admin', [Actions::PERMISSION_GRANT, 'posts:edit']);
+        $user  = self::user('user');
+        $admin = self::model($actor);
+        $touch = static fn (): int => DB::table('authorizable_permissions')->where('authorizable_id', $admin->getKey())->update(['updated_at' => '2001-01-01 00:00:00']);
+
+        self::raceWith(Actions::PERMISSION_GRANT, $touch, true);
+
+        /** @var \ArrayObject<int, \SineMacula\Laravel\Authorization\Events\DecisionEvaluated> $evaluated */
+        $evaluated = new \ArrayObject;
+
+        /** @var \ArrayObject<int, \SineMacula\Laravel\Authorization\Events\AuthorizationFailed> $failed */
+        $failed = new \ArrayObject;
+
+        Event::listen(DecisionEvaluated::class, static fn (DecisionEvaluated $event) => $event->action === Actions::PERMISSION_GRANT ? $evaluated->append($event) : null);
+        Event::listen(AuthorizationFailed::class, static fn (AuthorizationFailed $event) => $failed->append($event));
+
+        $refusal = self::refusalOf(static fn (): GrantOutcome => self::grants()->grantPermission($user, 'posts:edit', actor: $actor));
+
+        [$first] = $evaluated->getArrayCopy();
+        [$fail]  = $failed->getArrayCopy();
+        $last    = \array_slice($evaluated->getArrayCopy(), -1)[0];
+
+        self::assertCount(1, $failed);
+        self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $fail->decision->reason);
+        self::assertSame(Actions::PERMISSION_GRANT, $fail->action);
+        self::assertSame($admin, $fail->principal);
+        self::assertSame($refusal->getDecision(), $fail->decision);
+        self::assertSame($refusal->getDecision(), $last->decision);
+        self::assertSame($admin, $last->principal);
+        self::assertSame($fail->resource, $last->resource);
+        self::assertSame($first->resource, $last->resource);
+        self::assertStringStartsWith('authorization:operation:', (string) $last->resource);
+        self::assertSame($refusal->getDecision(), Authorization::lastDecision());
     }
 
     /**
@@ -249,7 +302,84 @@ final class DelegatedRacesTest extends TestCase
         $refusal   = self::refusalOf(static fn (): GrantOutcome => self::grants()->grantPermission($user, 'posts:edit', actor: $actor));
 
         self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $refusal->getReason());
-        self::assertSame([true], $decisions->getArrayCopy());
+        self::assertSame([true, false], $decisions->getArrayCopy());
+    }
+
+    /**
+     * A role whose rank rises between the service's read of it and its lock is
+     * read again under the lock, so the grant is tried again and refused on the
+     * rank stored, never decided on the rank the service read first.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARankChangedBeforeTheLockIsTriedAgainAndRefused(): void
+    {
+        $actor = self::actor('admin', [Actions::ROLE_GRANT]);
+        $user  = self::user('user');
+        $role  = Role::query()->create(['name' => 'junior', 'rank' => 10]);
+        $raise = static fn (): int => DB::table('roles')->where('id', $role->getKey())->update(['rank' => 1]);
+        $raced = self::raceOnQuery('/^select \* from roles where roles\.id = \? limit 1$/', $raise);
+
+        $refusal = self::refusalOf(static fn (): GrantOutcome => self::grants()->grantRole($user, $role, actor: $actor));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $refusal->getReason());
+        self::assertCount(1, $raced);
+        self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', 'user')->count());
+    }
+
+    /**
+     * A policy rewritten between the service's read of it and its lock is read
+     * again under the lock, so the attachment is tried again and refused on the
+     * document stored.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADocumentChangedBeforeTheLockIsTriedAgainAndRefused(): void
+    {
+        $actor   = self::actor('admin', [Actions::POLICY_ATTACH, 'posts:read']);
+        $user    = self::user('user');
+        $policy  = self::document('readers', ['posts:read']);
+        $widened = ['name' => 'readers', 'statements' => [['effect' => 'allow', 'actions' => ['posts:delete']]]];
+        $rewrite = static fn (): int => DB::table('policies')->where('id', $policy->getKey())->update(['document' => \json_encode($widened)]);
+        $raced   = self::raceOnQuery('/^select \* from policies where policies\.id = \? limit 1$/', $rewrite);
+
+        $refusal = self::refusalOf(static fn (): GrantOutcome => self::grants()->attachPolicy($user, $policy, actor: $actor));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $refusal->getReason());
+        self::assertCount(1, $raced);
+        self::assertSame(0, DB::table('authorizable_policies')->where('authorizable_id', 'user')->count());
+    }
+
+    /**
+     * A resource policy naming a role, allowing what the actor does not hold,
+     * attached between the decision of a grant of that role and the write, has
+     * the grant tried again, and refused, as the role now hands out what the
+     * actor cannot.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAResourcePolicyNamingTheRoleAttachedMeanwhileIsRefusedOnTheRetry(): void
+    {
+        $actor  = self::actor('admin', [Actions::ROLE_GRANT]);
+        $user   = self::user('user');
+        $role   = Role::query()->create(['name' => 'sharer']);
+        $allow  = ['effect' => 'allow', 'actions' => ['posts:delete'], 'principals' => ['role:' . $role->id]];
+        $policy = Policy::query()->create(['name' => 'sharing', 'document' => ['statements' => [$allow]]]);
+        $attach = static fn (): bool => DB::table('resource_policies')->insert(['policy_id' => $policy->getKey(), 'resource_type' => 'post', 'resource_id' => null]);
+
+        $decisions = self::raceWith(Actions::ROLE_GRANT, $attach);
+
+        $refusal = self::refusalOf(static fn (): GrantOutcome => self::grants()->grantRole($user, $role, actor: $actor));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $refusal->getReason());
+        self::assertSame([true, false], $decisions->getArrayCopy());
+        self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', 'user')->count());
     }
 
     /**

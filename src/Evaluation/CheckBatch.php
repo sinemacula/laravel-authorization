@@ -151,6 +151,21 @@ final readonly class CheckBatch
     }
 
     /**
+     * Record and report a decision the pipeline did not make for the check, as
+     * `decideOne()` records and reports the one it makes, and return it: what
+     * refuses a delegated operation that conflicted on every try.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckInput  $check
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     */
+    public function recordOne(?Subject $subject, CheckInput $check, Decision $decision): Decision
+    {
+        return $this->record($subject, $check, ResourceReferences::of($check->resource), $decision);
+    }
+
+    /**
      * Decide the checks a chunk at a time, or, for one check, as it stands.
      *
      * @template TKey of array-key

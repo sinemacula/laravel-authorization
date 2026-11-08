@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -16,12 +18,14 @@ use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -394,6 +398,120 @@ final class RecordWriterTest extends TestCase
         self::assertSame(['statements' => [], 'name' => 'viewers'], $rewritten->definition?->document);
         self::assertSame(['rank' => 2], $ranked->definition?->values);
         self::assertNull($ranked->definition->document);
+    }
+
+    /**
+     * A delegated write works on a fresh record each try, never on the model
+     * given, so a try that conflicts after it wrote, and is rolled back, leaves
+     * the model given as it was, and the next starts from what is stored: a
+     * creation made again, a rename and a deletion of the row as stored; once
+     * the write commits, the model given takes on the record as written.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEachTryOfADelegatedWriteStartsFromTheStoredRecord(): void
+    {
+        $admin = self::administrator();
+        $roles = RoleService::instance();
+
+        self::assertInstanceOf(RoleService::class, $roles);
+
+        $tries   = self::conflictOnce('created');
+        $created = $roles->create('editor', actor: $admin);
+
+        self::assertCount(1, $tries);
+        self::assertTrue($created->exists);
+        self::assertSame($created->getKey(), Role::query()->where('name', 'editor')->sole()->getKey());
+
+        $tries = self::conflictOnce('updated');
+        $given = Role::query()->whereKey($created->getKey())->firstOrFail();
+
+        self::assertSame($given, $roles->rename($given, 'author', $admin));
+        self::assertCount(1, $tries);
+        self::assertSame('author', $given->name);
+        self::assertSame([], $given->getDirty());
+
+        $tries = self::conflictOnce('deleted');
+
+        $roles->delete($given, $admin);
+
+        self::assertCount(1, $tries);
+        self::assertFalse($given->exists);
+        self::assertSame(0, Role::query()->whereKey($created->getKey())->count());
+    }
+
+    /**
+     * A concurrency error the database raises in a nested transaction of a
+     * delegated deletion, such as the deleted role's grants revoked by its
+     * observer, is tried again when the deletion opened the outermost
+     * transaction, from the role as stored rather than the model the
+     * rolled-back try deleted.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADeadlockInANestedTransactionIsTriedAgainFromTheStoredRecord(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $admin = self::administrator();
+        $role  = Role::query()->create(['name' => 'editor']);
+        $roles = RoleService::instance();
+
+        self::assertInstanceOf(RoleService::class, $roles);
+
+        /** @var \ArrayObject<int, bool> $tries */
+        $tries = new \ArrayObject;
+
+        DB::listen(static function (QueryExecuted $query) use ($tries): void {
+            if ($tries->count() > 0 || \preg_match('/^delete from authorizable_roles/', \str_replace(['"', '`'], '', $query->sql)) !== 1) {
+                return;
+            }
+
+            $tries->append(true);
+
+            $pdo = new \PDOException('SQLSTATE[40001]: Serialization failure: could not serialize access due to concurrent update');
+
+            // A PDOException's code is its SQLSTATE, a string.
+            (new \ReflectionProperty(\Exception::class, 'code'))->setValue($pdo, '40001');
+
+            throw new QueryException('authorization', $query->sql, [], $pdo);
+        });
+
+        $roles->delete($role, $admin);
+
+        self::assertCount(1, $tries);
+        self::assertFalse($role->exists);
+        self::assertSame(0, self::authorizationConnection()->table('roles')->where('name', 'editor')->count());
+    }
+
+    /**
+     * Throw a conflict once, from the first role model event of the name, once
+     * the write it reports is made and the model it was made on changed, and
+     * return the conflicts thrown.
+     *
+     * @param  string  $event
+     * @return \ArrayObject<int, bool>
+     */
+    private static function conflictOnce(string $event): \ArrayObject
+    {
+        /** @var \ArrayObject<int, bool> $tries */
+        $tries = new \ArrayObject;
+
+        Event::listen("eloquent.{$event}: " . Role::class, static function () use ($tries): void {
+            if ($tries->count() > 0) {
+                return;
+            }
+
+            $tries->append(true);
+
+            throw DependencyChangedException::rows('roles');
+        });
+
+        return $tries;
     }
 
     /**

@@ -49,6 +49,35 @@ final class StoredRecordsTest extends TestCase
     }
 
     /**
+     * The model a caller handed a change takes on the record the change wrote:
+     * its attributes, as the original, whether it exists and whether it was
+     * just created; a model that is the record is returned as it is.
+     *
+     * @return void
+     */
+    public function testTheModelGivenTakesOnTheRecordWritten(): void
+    {
+        $given        = new Role(['name' => 'draft']);
+        $given->rank  = 3;
+        $record       = Role::query()->create(['name' => 'editor', 'rank' => 7]);
+        $record->rank = 8;
+
+        self::assertSame($given, StoredRecords::adopt($given, $record));
+        self::assertSame($record->getAttributes(), $given->getAttributes());
+        self::assertSame($record->getAttributes(), $given->getRawOriginal());
+        self::assertTrue($given->exists);
+        self::assertTrue($given->wasRecentlyCreated);
+
+        $record->delete();
+
+        StoredRecords::adopt($given, $record);
+
+        self::assertFalse($given->exists);
+        self::assertSame($record, StoredRecords::adopt($record, $record));
+        self::assertSame(8, $record->rank);
+    }
+
+    /**
      * A model whose row is gone is refused as an invalid target of its kind.
      *
      * @return void

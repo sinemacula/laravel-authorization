@@ -39,10 +39,15 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * (see `Impact`), so the reach of a change is never approximated. A principal
  * named by a document that cannot be read puts the set over its limit too.
  *
- * Inside a delegated operation, every set's rows are locked and pinned before
- * they are read (see `DependencyPins`), the roles below a role with every role
- * whose parent is one of them, so a holder granted, or a role re-parented
- * below, meanwhile has the operation tried again rather than written past it.
+ * Inside a delegated operation, every set within the limit has its rows locked
+ * and pinned, and is read from the rows as locked (see `DependencyPins`), the
+ * roles named, and with the hierarchy those below them and every role whose
+ * parent is one of them, so a holder granted, or a role re-parented below,
+ * meanwhile has the operation tried again rather than written past it. A set
+ * over the limit is never locked: the change is refused as it is. A role's row
+ * is locked whether or not the hierarchy is on, so a change that reaches a
+ * role's holders, such as a resource policy naming the role, and a concurrent
+ * grant of that role, which locks the same row, never both commit unseen.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -150,7 +155,7 @@ final class AffectedHolders
         $this->addFrom(self::table('authorizable_boundaries')->where('policy_id', $key));
         $this->ofRoles($this->keysFrom(self::table('authorizable_policies')->where('policy_id', $key)->where('authorizable_type', $role), 'authorizable_id'));
 
-        if (!self::pinned(self::table('resource_policies')->where('policy_id', $key))->exists()) {
+        if (!self::isAttachedToResource($key)) {
             return $this;
         }
 
@@ -218,11 +223,9 @@ final class AffectedHolders
             return;
         }
 
-        $rows = self::pinned($query)->distinct()->limit($this->limit + 1)->get(['authorizable_type', 'authorizable_id']);
-
-        foreach ($rows as $row) {
+        foreach ($this->within($query, ['authorizable_type', 'authorizable_id']) as $row) {
             /** @var array{authorizable_type: string, authorizable_id: int|string} $columns */
-            $columns = (array) $row;
+            $columns = $row;
 
             $this->add(new Reference($columns['authorizable_type'], (string) $columns['authorizable_id']));
         }
@@ -244,11 +247,69 @@ final class AffectedHolders
         }
 
         /** @var list<string> $keys */
-        $keys = self::pinned($query)->distinct()->limit($this->limit + 1)->pluck($column)->all();
+        $keys = \array_column($this->within($query, [$column]), $column);
 
         $this->isOver = \count($keys) > $this->limit;
 
         return $keys;
+    }
+
+    /**
+     * Return the distinct values of the columns in the rows the query selects,
+     * at most one more than the limit. Inside a delegated operation, a set
+     * within the limit is then locked and pinned (see `DependencyPins`), and
+     * the values are those of the rows as locked, so the decision reads what
+     * the locks hold and a holder granted meanwhile is either seen or noticed
+     * before the write; a set over the limit is refused as it is, never locked,
+     * so a change reaching more holders than the limit never locks them all.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  list<string>  $columns
+     * @return list<array<array-key, mixed>>
+     *
+     * @throws \LogicException
+     */
+    private function within(Builder $query, array $columns): array
+    {
+        $rows = [];
+        $pins = OperationScope::pins();
+
+        foreach ((clone $query)->distinct()->limit($this->limit + 1)->get($columns) as $row) {
+            $rows[] = (array) $row;
+        }
+
+        if ($pins === null || \count($rows) > $this->limit) {
+            return $rows;
+        }
+
+        $distinct = [];
+
+        foreach ($pins->lock(DependencyPhase::HOLDERS, $query) as $row) {
+            $values = \array_intersect_key($row, \array_flip($columns));
+
+            $distinct[\serialize($values)] = $values;
+        }
+
+        return \array_values($distinct);
+    }
+
+    /**
+     * Determine whether the policy is attached to any resource; inside a
+     * delegated operation, one attachment, if any, is locked and pinned, so a
+     * last attachment detached or a first one made meanwhile is noticed before
+     * the write, without locking every attachment of the policy.
+     *
+     * @param  mixed  $policy
+     * @return bool
+     *
+     * @throws \LogicException
+     */
+    private static function isAttachedToResource(mixed $policy): bool
+    {
+        $query = self::table('resource_policies')->where('policy_id', $policy);
+        $pins  = OperationScope::pins();
+
+        return $pins === null ? $query->exists() : $pins->lock(DependencyPhase::HOLDERS, $query->select('policy_id')->limit(1)) !== [];
     }
 
     /**
@@ -284,6 +345,8 @@ final class AffectedHolders
         $hierarchy = config('authorization.hierarchy.enabled', true);
 
         if (!$hierarchy) {
+            self::pin(self::table('roles')->whereIn('id', $keys));
+
             return $keys;
         }
 
@@ -309,27 +372,26 @@ final class AffectedHolders
 
         $below = \array_column($rows, $model->getKeyName());
 
-        self::pinned(self::table('roles')->whereIn($model->getKeyName(), $below)->orWhereIn('parent_id', $below));
+        self::pin(self::table('roles')->whereIn($model->getKeyName(), $below)->orWhereIn('parent_id', $below));
 
         return $below;
     }
 
     /**
-     * Lock and pin the rows the query selects as holders of the operation whose
-     * work is running, when it is delegated (see `DependencyPins`), so a holder
-     * granted, re-parented in or moved meanwhile is noticed before the change
-     * is written; return the query.
+     * Lock and pin the rows of the roles the query selects, when the operation
+     * whose work is running is delegated (see `DependencyPins`), so a role
+     * re-parented in or out meanwhile is noticed before the change is written,
+     * and a concurrent grant of one of them, which locks its row too, waits for
+     * the operation or is seen by it.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
-     * @return \Illuminate\Database\Query\Builder
+     * @return void
      *
      * @throws \LogicException
      */
-    private static function pinned(Builder $query): Builder
+    private static function pin(Builder $query): void
     {
-        OperationScope::pins()?->lock(DependencyPhase::HOLDERS, clone $query);
-
-        return $query;
+        OperationScope::pins()?->lock(DependencyPhase::HOLDERS, $query);
     }
 
     /**

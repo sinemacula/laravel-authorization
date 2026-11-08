@@ -303,6 +303,7 @@ final class HasRolesTest extends TestCase
         self::assertRefusedAsNothingAllowed(static fn () => $user->assignRole('editor', actor: $actor));
         self::assertRefusedAsNothingAllowed(static fn () => $user->revokeRole('editor', actor: $actor));
         self::assertRefusedAsNothingAllowed(static fn () => $user->syncRoles(['editor'], actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->removeRole('editor', $actor));
         self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', 'user-actor')->count());
     }
 

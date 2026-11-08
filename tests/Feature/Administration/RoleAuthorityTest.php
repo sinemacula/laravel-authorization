@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Administration;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -15,6 +16,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -23,6 +25,8 @@ use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubIdentity;
@@ -260,6 +264,61 @@ final class RoleAuthorityTest extends TestCase
         self::assertSame([], DB::getQueryLog());
 
         DB::disableQueryLog();
+    }
+
+    /**
+     * The impact limit counts attachments, not policies: one policy attached to
+     * more records than the limit reads as no authority. Inside a delegated
+     * operation, the attachments of the reach and the policies among them are
+     * locked and pinned, so a policy attached, or one rewritten, before the
+     * write is noticed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheAttachmentsOfTheReachAreBoundedAndPinned(): void
+    {
+        $role   = Role::query()->create(['name' => 'editor']);
+        $shared = self::resourcePolicy('shared', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['role:' . $role->id]]]);
+
+        ResourcePolicyService::instance()?->attach($shared, ['posts', '1']);
+
+        config(['authorization.administration.max_impact' => 1]);
+
+        self::assertNull(RoleAuthority::of([$role->id]));
+
+        config(['authorization.administration.max_impact' => 2]);
+
+        $operation = new Operation('op', new Reference('user', 'admin'), CarbonImmutable::now('UTC'), false);
+
+        $changes = OperationScope::run($operation, static function () use ($role, $shared): array {
+            $pins    = OperationScope::delegatedPins();
+            $changes = [self::names(\array_column(RoleAuthority::of([$role->id])->selecting ?? [], 0))];
+
+            $pins->validate();
+
+            $rewrite = static fn (): int => DB::table('policies')->where('id', $shared->getKey())->update(['description' => 'rewritten']);
+            $attach  = static fn (): bool => DB::table('resource_policies')->insert(['policy_id' => $shared->getKey(), 'resource_type' => 'posts', 'resource_id' => '2']);
+
+            foreach ([$rewrite, $attach] as $change) {
+                $change();
+
+                try {
+                    $pins->validate();
+                } catch (DependencyChangedException $exception) {
+                    $changes[] = $exception->getMessage();
+                }
+            }
+
+            return $changes;
+        });
+
+        self::assertSame([
+            ['shared'],
+            'The rows of [policies] a delegated decision read changed before the write.',
+            'The rows of [resource_policies] a delegated decision read changed before the write.',
+        ], $changes);
     }
 
     /**

@@ -8,14 +8,18 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Reads the grant tables for the grant service: the writer of a grantee's rows
  * of one kind, and the changes a sync or the revocation of everything makes, as
- * operation resources, so each can be decided before any is written.
+ * operation resources, so each can be decided before any is written; and
+ * revokes everything a grantee holds, every row for trusted work, exactly the
+ * rows decided for an acting context.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -158,6 +162,90 @@ final class GrantChanges
         }
 
         return [...$changes, ...self::boundaries($grantee)];
+    }
+
+    /**
+     * Revoke every row the grantee holds, of every kind and in every scope, and
+     * remove its boundaries, inside the caller's trusted operation, and return
+     * a revoked, detached or removed event for each, in its scope: what is done
+     * for a grantee that was deleted, with nothing decided.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @return list<\SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent>
+     */
+    public static function revokeEverywhere(Reference $grantee, Operation $operation): array
+    {
+        $events = [];
+
+        foreach (GrantTarget::cases() as $kind) {
+            $table  = self::table($kind, $grantee, $operation->actor, GrantScope::platform());
+            $grants = $table->grantsInEveryScope();
+            $models = [];
+
+            foreach ($kind->find(\array_column($grants, 0)) as $model) {
+                $models[self::key($model)] = $model;
+            }
+
+            $table->revokeInEveryScope();
+
+            foreach ($grants as [$id, $scope]) {
+                $events[] = $kind->revokedEvent($operation, $grantee, $models[$id], $scope);
+            }
+        }
+
+        return [...$events, ...BoundaryService::removeEverywhere($grantee, $operation)];
+    }
+
+    /**
+     * Revoke exactly the rows the changes decided, inside the caller's
+     * delegated operation, each by its key in its scope, and remove the
+     * boundaries they decided, each in its scope, and return a revoked,
+     * detached or removed event for each: what revoking everything a grantee
+     * holds does for an acting context, so a row granted after the decision
+     * read the grantee's rows is never revoked undecided. A row decided that is
+     * no longer there to revoke throws `DependencyChangedException`, so the
+     * operation is tried again.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  list<\SineMacula\Laravel\Authorization\Administration\OperationResource>  $changes
+     * @return list<\SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException
+     */
+    public static function revokeDecided(Reference $grantee, Operation $operation, array $changes): array
+    {
+        $kinds      = [];
+        $events     = [];
+        $boundaries = [];
+
+        foreach (GrantTarget::cases() as $kind) {
+            $kinds[$kind->revokeAction()] = $kind;
+        }
+
+        foreach ($changes as $change) {
+            /** @var \SineMacula\Laravel\Authorization\Administration\OperationChange $made */
+            $made = $change->change;
+
+            /** @var \Illuminate\Database\Eloquent\Model $target */
+            $target = $made->target;
+            $kind   = $kinds[$change->action] ?? null;
+
+            if ($kind === null) {
+                $boundaries[] = [self::key($target), $made->scope];
+
+                continue;
+            }
+
+            if (self::table($kind, $grantee, $operation->actor, $made->scope)->revoke([self::key($target)]) !== 1) {
+                throw DependencyChangedException::rows($kind->table());
+            }
+
+            $events[] = $kind->revokedEvent($operation, $grantee, $target, $made->scope);
+        }
+
+        return [...$events, ...BoundaryService::removeDecided($grantee, $operation, $boundaries)];
     }
 
     /**

@@ -18,13 +18,16 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Feature\Stubs\NonMorphRolesGrantee;
@@ -488,7 +491,36 @@ final class HasPoliciesTest extends TestCase
         self::assertRefusedAsNothingAllowed(static fn () => $user->attachPolicy($policy, actor: $actor));
         self::assertRefusedAsNothingAllowed(static fn () => $user->detachPolicy($policy, actor: $actor));
         self::assertRefusedAsNothingAllowed(static fn () => $user->syncPolicies([$policy], actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->createInlinePolicy('own', ['statements' => []], actor: $actor));
         self::assertSame(0, DB::table('authorizable_policies')->where('authorizable_id', 'user-actor')->count());
+        self::assertSame(0, DB::table('policies')->where('name', 'own')->count());
+    }
+
+    /**
+     * An inline policy created with an actor is decided as that actor under
+     * `authorization:policy.create`, and made when it is allowed, as a
+     * delegated operation.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnInlinePolicyCreatedWithAnActorIsDecidedAsTheActor(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-actor']);
+        $admin = StubIdentity::create(['id' => 'admin']);
+
+        $admin->givePermission(Permission::create(['name' => PackagePermissions::POLICY_CREATE]));
+
+        /** @var \ArrayObject<int, bool> $trusted */
+        $trusted = new \ArrayObject;
+
+        Event::listen(PolicyCreated::class, static fn (PolicyCreated $event) => $trusted->append($event->operation->isTrusted));
+
+        $policy = $user->createInlinePolicy('own', ['statements' => []], actor: ActingContext::for($admin));
+
+        self::assertTrue($policy->exists);
+        self::assertSame([false], $trusted->getArrayCopy());
     }
 
     /**

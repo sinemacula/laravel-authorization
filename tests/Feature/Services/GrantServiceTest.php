@@ -52,12 +52,14 @@ use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\AssertsTransactions;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\ApiGuardedUser;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
@@ -76,7 +78,8 @@ use Tests\TestCase;
 #[CoversClass(SyncResult::class)]
 final class GrantServiceTest extends TestCase
 {
-    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals, ComparesReferences, ReadsDispatchedEvents, UsesAnAuthorizationConnection;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals, ComparesReferences,
+        RacesDelegatedCalls, ReadsDispatchedEvents, UsesAnAuthorizationConnection;
 
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
@@ -2058,6 +2061,181 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
+     * A grant weighed as only shortening a row the grantee holds is weighed on
+     * the row as locked: a row revoked while the service reads it has the grant
+     * tried again, and decided as the new grant it is, refused, never written
+     * as a shortening of a row no longer there.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedShorteningOfARowRevokedMeanwhileIsTriedAgainAsAGrant(): void
+    {
+        $admin  = self::administrator([PackagePermissions::PERMISSION_GRANT]);
+        $user   = self::user();
+        $revoke = static fn (): int => self::service()->revokePermission($user, 'billing:refund');
+
+        self::service()->grantPermission($user, Permission::query()->create(['name' => 'billing:refund']));
+
+        $raced   = self::raceOnQuery('/^select expires_at, include_subtree from authorizable_permissions/', $revoke);
+        $refusal = self::refusalOf(static fn (): GrantOutcome => self::service()->grantPermission($user, 'billing:refund', Carbon::now()->addDay(), actor: $admin));
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $refusal->getReason());
+        self::assertCount(1, $raced);
+        self::assertFalse(self::holdsPermission($user, 'billing:refund'));
+    }
+
+    /**
+     * A delegated revocation reads the rows it revokes only once the grantee's
+     * rows are locked: a row revoked while it reads has the call tried again,
+     * finding nothing to revoke, rather than reporting a revocation it never
+     * made.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedRevocationOfARowRevokedMeanwhileRevokesNothing(): void
+    {
+        $admin  = self::administrator([PackagePermissions::PERMISSION_REVOKE]);
+        $user   = self::user();
+        $revoke = static fn (): int => self::service()->revokePermission($user, 'posts:edit');
+
+        self::service()->grantPermission($user, Permission::query()->create(['name' => 'posts:edit']));
+
+        $raced   = self::raceOnQuery('/^select permission_id as target_id, include_subtree from authorizable_permissions/', $revoke);
+        $changes = self::recordChanges();
+
+        self::assertSame(0, self::service()->revokePermission($user, 'posts:edit', $admin));
+        self::assertCount(1, $raced);
+        self::assertSame([PermissionRevoked::class], $changes->getArrayCopy());
+    }
+
+    /**
+     * A row a sync reads as held, revoked while it reads, is noticed before the
+     * write, so the sync is tried again and decides the row as a grant,
+     * refused, rather than writing back the revoked row undecided.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncNeverWritesBackARowRevokedWhileItReads(): void
+    {
+        $actor  = self::administrator([PackagePermissions::PERMISSION_GRANT, PackagePermissions::PERMISSION_REVOKE]);
+        $user   = self::user();
+        $revoke = static fn (): int => self::service()->revokePermission($user, 'billing:refund');
+
+        self::service()->grantPermission($user, self::permission('billing:refund'));
+
+        $raced   = self::raceOnQuery('/^select distinct permission_id from authorizable_permissions/', $revoke);
+        $refusal = self::refusalOf(static fn (): SyncResult => self::service()->syncPermissions($user, ['billing:refund'], actor: $actor));
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $refusal->getReason());
+        self::assertCount(1, $raced);
+        self::assertFalse(self::holdsPermission($user, 'billing:refund'));
+    }
+
+    /**
+     * A row a sync decided as held live and finds gone when it writes is never
+     * written back: the sync is tried again and decides the row as a grant,
+     * refused, leaving everything as it was.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncNeverWritesBackARowGoneByTheWrite(): void
+    {
+        $actor  = self::administrator([PackagePermissions::PERMISSION_GRANT, PackagePermissions::PERMISSION_REVOKE, 'posts:read']);
+        $user   = self::user();
+        $revoke = static fn (): int => self::service()->revokePermission($user, 'billing:refund');
+
+        self::service()->grantPermission($user, self::permission('billing:refund'));
+        self::service()->grantPermission($user, self::permission('posts:read'));
+
+        $raced   = self::raceOnQuery('/^delete from authorizable_permissions/', $revoke);
+        $refusal = self::refusalOf(static fn (): SyncResult => self::service()->syncPermissions($user, ['billing:refund'], actor: $actor));
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $refusal->getReason());
+        self::assertCount(1, $raced);
+        self::assertFalse(self::holdsPermission($user, 'billing:refund'));
+        self::assertTrue(self::holdsPermission($user, 'posts:read'));
+    }
+
+    /**
+     * A row granted, in a tenant the actor does not administer, while
+     * `revokeAll()` reads the grantee's rows is noticed before the write, so
+     * the call is tried again, decides that row too, and is refused, revoking
+     * nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARowGrantedWhileRevokeAllReadsIsTriedAgainAndRefused(): void
+    {
+        [$tenant, $other] = \array_map(self::createTenant(...), ['tenant', 'other']);
+
+        $actor = self::revoker($tenant);
+        $user  = self::user();
+
+        $this->actAsTenant($tenant);
+
+        $later = self::permission('comments:read');
+        $grant = static fn (): GrantOutcome => self::service()->grantPermission($user, $later, tenant: $other);
+
+        self::service()->grantPermission($user, self::permission('posts:edit'), tenant: $tenant);
+
+        $raced = self::raceOnQuery('/^select permission_id as target_id/', $grant);
+
+        self::refusalOf(static fn (): int => self::service()->revokeAll($user, $actor));
+
+        self::assertCount(1, $raced);
+        self::assertTrue(self::holdsPermission($user, 'posts:edit'));
+        self::assertTrue(self::holdsPermission($user, 'comments:read'));
+    }
+
+    /**
+     * `revokeAll()` revokes exactly the rows it decided, each by its key in its
+     * scope, so a row granted after the validation, before the write reaches
+     * its table, is left as it is and reported nowhere.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARevocationOfEverythingRevokesOnlyWhatItDecided(): void
+    {
+        [$tenant, $other] = \array_map(self::createTenant(...), ['tenant', 'other']);
+
+        $actor = self::revoker($tenant);
+        $user  = self::user();
+
+        $this->actAsTenant($tenant);
+
+        $later = self::permission('comments:read');
+        $grant = static fn (): GrantOutcome => self::service()->grantPermission($user, $later, tenant: $other);
+
+        self::service()->grantRole($user, Role::query()->create(['name' => 'editor']), tenant: $tenant);
+        self::service()->grantPermission($user, self::permission('posts:edit'), tenant: $tenant);
+
+        $raced   = self::raceOnQuery('/^delete from authorizable_roles/', $grant);
+        $changes = self::recordChanges();
+
+        self::assertSame(2, self::service()->revokeAll($user, $actor));
+        self::assertCount(1, $raced);
+        self::assertFalse(self::holdsPermission($user, 'posts:edit'));
+        self::assertTrue(self::holdsPermission($user, 'comments:read'));
+        self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', 'user-1')->count());
+        self::assertSame([PermissionGranted::class, RoleRevoked::class, PermissionRevoked::class], $changes->getArrayCopy());
+    }
+
+    /**
      * Assert that no grant event was dispatched.
      *
      * @return void
@@ -2098,6 +2276,58 @@ final class GrantServiceTest extends TestCase
         $row = DB::table($table)->where('authorizable_id', 'user-1')->sole(['granted_by_type', 'granted_by_id']);
 
         return [$row->granted_by_type, $row->granted_by_id];
+    }
+
+    /**
+     * Return the acting context of a new identity of the most senior rank that
+     * may revoke every kind of grant and remove boundaries, unbounded, in the
+     * tenant and below it.
+     *
+     * @param  \Tests\Feature\Stubs\StubTenant  $tenant
+     * @return \SineMacula\Laravel\Authorization\Administration\ActingContext
+     *
+     * @throws \Throwable
+     */
+    private static function revoker(StubTenant $tenant): ActingContext
+    {
+        $actor = self::administrator([]);
+
+        /** @var \Tests\Feature\Stubs\StubIdentity $admin */
+        $admin = $actor->subject->subject;
+
+        foreach ([PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE] as $name) {
+            self::service()->grantPermission($admin, self::permission($name), tenant: $tenant);
+        }
+
+        return $actor;
+    }
+
+    /**
+     * Determine whether the identity holds the permission directly, as stored,
+     * in any scope.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  string  $permission
+     * @return bool
+     */
+    private static function holdsPermission(StubIdentity $user, string $permission): bool
+    {
+        return DB::table('authorizable_permissions')
+            ->join('permissions', 'permissions.id', '=', 'authorizable_permissions.permission_id')
+            ->where('authorizable_id', $user->getKey())
+            ->where('permissions.name', $permission)
+            ->exists();
+    }
+
+    /**
+     * Return the permission of the name, created when there is none.
+     *
+     * @param  string  $name
+     * @return \SineMacula\Laravel\Authorization\Models\Permission
+     */
+    private static function permission(string $name): Permission
+    {
+        return Permission::query()->firstOrCreate(['name' => $name]);
     }
 
     /**

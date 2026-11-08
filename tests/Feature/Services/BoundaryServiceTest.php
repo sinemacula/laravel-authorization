@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundarySet;
 use SineMacula\Laravel\Authorization\Exceptions\BoundaryException;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
@@ -21,6 +22,8 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
+use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -31,6 +34,7 @@ use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\InterleavesWrites;
+use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\VanishedPolicy;
@@ -50,7 +54,7 @@ use Tests\TestCase;
 #[CoversClass(BoundaryService::class)]
 final class BoundaryServiceTest extends TestCase
 {
-    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, CatchesRefusals, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, CatchesRefusals, ComparesReferences, InterleavesWrites, RacesDelegatedCalls, ReadsDispatchedEvents;
 
     /**
      * The service is bound once in the container.
@@ -618,6 +622,83 @@ final class BoundaryServiceTest extends TestCase
         self::assertSame(0, DB::table('authorizable_boundaries')->count());
         self::assertCount(1, self::dispatchedEvents(BoundaryRemoved::class));
         self::assertTrue($policy->delete());
+    }
+
+    /**
+     * `BoundaryService::removeAll()` removes exactly the boundaries it decided,
+     * so one set after the validation, before the write, is left as it is.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARemovalOfEveryBoundaryRemovesOnlyWhatItDecided(): void
+    {
+        [$tenant, $other] = \array_map(self::createTenant(...), ['tenant', 'other']);
+
+        $actor = self::administrator([]);
+        $user  = StubIdentity::query()->create(['id' => 'user']);
+
+        /** @var \Tests\Feature\Stubs\StubIdentity $admin */
+        $admin = $actor->subject->subject;
+
+        foreach ([PackagePermissions::BOUNDARY_REMOVE, PackagePermissions::ADMINISTRATION_UNBOUNDED] as $name) {
+            GrantService::instance()?->grantPermission($admin, Permission::query()->firstOrCreate(['name' => $name]), tenant: $tenant);
+        }
+
+        $this->actAsTenant($tenant);
+
+        $cap = self::cap('cap');
+        $set = static fn (): GrantOutcome => self::service()->set($user, $cap, $other);
+
+        self::service()->set($user, $cap, $tenant);
+
+        $raced = self::raceOnQuery('/^select policy_id, include_subtree from authorizable_boundaries/', $set);
+
+        self::assertSame(1, self::service()->removeAll($user, $actor));
+        self::assertCount(1, $raced);
+        self::assertSame([$other->getKey()], DB::table('authorizable_boundaries')->where('authorizable_id', 'user')->pluck('tenant_id')->all());
+    }
+
+    /**
+     * Exactly the boundaries decided are removed: a scope decided with no
+     * boundary that has one by the write, or whose boundary is another policy,
+     * throws `DependencyChangedException` and removes nothing, so the operation
+     * is tried again; a scope decided with none and holding none removes
+     * nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testExactlyTheBoundariesDecidedAreRemoved(): void
+    {
+        $user      = StubIdentity::query()->create(['id' => 'user']);
+        $grantee   = Reference::of($user);
+        $cap       = self::cap('cap');
+        $other     = self::cap('other');
+        $platform  = new GrantScope(null);
+        $operation = Operation::begin();
+
+        $remove = static function (array $decided) use ($operation, $grantee): array {
+            /** @var list<array{string|null, \SineMacula\Laravel\Authorization\Support\GrantScope}> $decided */
+            return OperationScope::run($operation, static fn (Operation $operation): array => BoundaryService::removeDecided($grantee, $operation, $decided));
+        };
+
+        self::assertSame([], $remove([[null, $platform]]));
+
+        self::service()->set($user, $cap);
+
+        foreach ([[null, $platform], [$other->id, $platform]] as $decided) {
+            self::assertInstanceOf(DependencyChangedException::class, self::refusalOf(static fn (): array => $remove([$decided])));
+            self::assertSame(1, DB::table('authorizable_boundaries')->where('authorizable_id', 'user')->count());
+        }
+
+        $removed = $remove([[$cap->id, $platform]]);
+
+        self::assertCount(1, $removed);
+        self::assertSame($cap->id, $removed[0]->policy->id);
+        self::assertSame(0, DB::table('authorizable_boundaries')->where('authorizable_id', 'user')->count());
     }
 
     /**

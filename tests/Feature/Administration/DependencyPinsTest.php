@@ -12,21 +12,26 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Administration\DependencyPins;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Fixtures\EmptyLockGrammar;
+use Tests\Fixtures\ReversingLockGrammar;
 use Tests\TestCase;
 
 /**
@@ -67,6 +72,7 @@ final class DependencyPinsTest extends TestCase
         $again = $pins->lock(DependencyPhase::ACTOR, self::permissions('posts:read'));
 
         self::assertSame([$read->getKey()], \array_column($rows, 'id'));
+        self::assertIsArray($rows[0]);
         self::assertSame($rows, $again);
         self::assertSame([['permissions', ['posts:read']]], $locks->getArrayCopy());
     }
@@ -345,11 +351,8 @@ final class DependencyPinsTest extends TestCase
         $guarded = self::pins();
         $before  = $locks->count();
 
-        /** @var string $key */
-        $key = $policy->getKey();
-
-        $guarded->lockGuardrail($key, null);
-        $guarded->lockGuardrail(null, null);
+        $guarded->lockGuardrail($policy, null);
+        $guarded->lockGuardrail(new Policy(['name' => 'unsaved']), null);
 
         $locked = \array_slice($locks->getArrayCopy(), $before);
 
@@ -378,6 +381,291 @@ final class DependencyPinsTest extends TestCase
         $this->expectExceptionMessage('[authorizable_permissions]');
 
         $pins->validate();
+    }
+
+    /**
+     * A query is pinned as it was given: a caller that goes on to change its
+     * own query never changes what is read again.
+     *
+     * @return void
+     */
+    public function testAPinnedQueryIsCopied(): void
+    {
+        Permission::query()->create(['name' => 'posts:read']);
+
+        $pins  = self::pins();
+        $query = self::permissions('posts:read');
+
+        $pins->lock(DependencyPhase::ACTOR, $query);
+
+        $query->where('name', 'posts:edit');
+
+        $pins->validate();
+
+        self::assertSame(1, self::permissions('posts:read')->count());
+    }
+
+    /**
+     * Two reads of the same rows in different orders hold the same rows: the
+     * digest is of the rows whatever their order.
+     *
+     * @return void
+     */
+    public function testRowsReadInAnotherOrderValidate(): void
+    {
+        $connection = self::sqlite();
+
+        Permission::query()->create(['name' => 'posts:read']);
+        Permission::query()->create(['name' => 'posts:edit']);
+
+        $connection->setQueryGrammar(new ReversingLockGrammar($connection));
+
+        try {
+            $pins = self::pins();
+            $rows = $pins->lock(DependencyPhase::ACTOR, self::table('permissions')->whereIn('name', ['posts:read', 'posts:edit']));
+
+            self::assertSame(['posts:read', 'posts:edit'], \array_column($rows, 'name'));
+
+            $pins->validate();
+        } finally {
+            $connection->useDefaultQueryGrammar();
+        }
+    }
+
+    /**
+     * An actor with no identity behind its principal has its principal's rows
+     * locked alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActorWithNoIdentityLocksItsPrincipalAlone(): void
+    {
+        $locks = $this->recordRowLocks();
+        $pins  = new DependencyPins(new Operation('op', new Reference(StubIdentity::class, 'admin'), CarbonImmutable::now('UTC'), false));
+
+        $pins->lockActor();
+
+        self::assertSame(['authorizable_roles', [StubIdentity::class, 'admin']], $locks[0] ?? null);
+    }
+
+    /**
+     * A tenant pinned again after its chain moved keeps its first chain, so the
+     * move fails validation; and two tenants of one id and two types are pinned
+     * apart, so a move of either fails it.
+     *
+     * @return void
+     */
+    public function testATenantKeepsTheChainItWasFirstPinnedWith(): void
+    {
+        $child  = new Reference('stub_tenant', 'x');
+        $twin   = new Reference('other_tenant', 'x');
+        $parent = new Reference('stub_tenant', 'parent');
+        $other  = new Reference('stub_tenant', 'other');
+        $tree   = (new StubTenantTree)->put($child, $parent)->put($twin, $parent);
+
+        $this->app?->instance(TenantTree::class, $tree);
+
+        $pins = self::pins();
+
+        $pins->lockChains(DependencyPhase::TARGET, $child, $twin);
+        $tree->put($child, $other);
+        $pins->lockChains(DependencyPhase::HOLDERS, $child);
+
+        self::assertDependencyChanged($pins);
+
+        $tree->put($child, $parent);
+
+        $twins = self::pins();
+
+        $twins->lockChains(DependencyPhase::TARGET, $child, $twin);
+        $tree->put($twin, $other);
+
+        self::assertDependencyChanged($twins);
+    }
+
+    /**
+     * A chain is read afresh, never from the answer a batch of checks keeps, so
+     * a tenant moved by another process, unreported, still fails validation.
+     *
+     * @return void
+     */
+    public function testAChainIsReadAfreshWithinABatch(): void
+    {
+        $child  = new Reference('stub_tenant', 'child');
+        $parent = new Reference('stub_tenant', 'parent');
+        $other  = new Reference('stub_tenant', 'other');
+        $tree   = (new StubTenantTree)->put($child, $parent);
+        $cache  = new ResolutionCache;
+
+        $this->app?->instance(TenantTree::class, $tree);
+        $this->app?->instance(ResolutionCache::class, $cache);
+
+        $cache->batch(static function () use ($child, $other, $tree): void {
+            TenantChain::of($child, $tree);
+
+            $pins = self::pins();
+
+            $pins->lockChains(DependencyPhase::TARGET, $child);
+            $tree->put($child, $other);
+
+            self::assertDependencyChanged($pins);
+        });
+    }
+
+    /**
+     * The grantees' rows are locked after the actor's, in the target part: an
+     * identity's grant rows, and a role's chain; a role, permission or policy
+     * given as a model is then compared with its row as locked, and one that
+     * changed since it was read, or is gone, fails, while any other model, or
+     * one not saved, is not compared.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testGranteesAreLockedAfterTheActorAndComparedWithTheirRows(): void
+    {
+        $role  = Role::query()->whereKey(Role::query()->create(['name' => 'editor', 'rank' => 5])->getKey())->firstOrFail();
+        $user  = StubIdentity::query()->create(['id' => 'user']);
+        $locks = $this->recordRowLocks();
+        $pins  = self::pins();
+
+        $pins->lockGrantees($user, $role);
+        $pins->lockChanges(OperationResource::definition(PackagePermissions::ROLE_CREATE, new Role(['name' => 'new'])));
+
+        self::assertSame(DependencyPhase::TARGET, $pins->phase());
+        self::assertSame(['authorizable_roles', [StubIdentity::class, 'admin', StubIdentity::class, 'identity']], $locks[0] ?? null);
+        self::assertContains(['authorizable_roles', [StubIdentity::class, 'user']], $locks->getArrayCopy());
+        self::assertContains(['roles', [$role->getKey()]], $locks->getArrayCopy());
+
+        DB::table('roles')->where('id', $role->getKey())->update(['rank' => 1]);
+
+        self::assertDependencyChanged(static fn () => self::pins()->lockGrantees($role));
+
+        $fresh = Role::query()->whereKey($role->getKey())->firstOrFail();
+
+        self::pins()->lockGrantees($fresh, $user, Role::query()->create(['name' => 'author']));
+
+        DB::table('roles')->where('id', $role->getKey())->delete();
+
+        self::assertDependencyChanged(static fn () => self::pins()->lockGrantees($fresh));
+    }
+
+    /**
+     * What a change hands out or redefines, as the service read it, is compared
+     * with its row as locked: a permission renamed, or a policy rewritten,
+     * since it was read fails, as stored it passes.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testWhatAChangeHandsOutIsComparedWithItsRow(): void
+    {
+        $permission = Permission::query()->whereKey(Permission::query()->create(['name' => 'posts:read'])->getKey())->firstOrFail();
+        $policy     = Policy::query()->whereKey(Policy::query()->create(['name' => 'readers', 'document' => ['statements' => []]])->getKey())->firstOrFail();
+        $grantee    = new Reference(StubIdentity::class, 'user');
+        $grant      = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $grantee, $permission, GrantScope::platform());
+        $rewrite    = OperationResource::definition(PackagePermissions::POLICY_UPDATE, $policy);
+
+        self::pins()->lockChanges($grant, $rewrite);
+
+        DB::table('permissions')->where('id', $permission->getKey())->update(['name' => 'posts:edit']);
+
+        self::assertDependencyChanged(static fn () => self::pins()->lockChanges($grant));
+
+        DB::table('policies')->where('id', $policy->getKey())->update(['description' => 'changed']);
+
+        self::assertDependencyChanged(static fn () => self::pins()->lockChanges($rewrite));
+    }
+
+    /**
+     * A set within the limit is locked, pinned and returned, and a second lock
+     * of it reads nothing again; a set over it is returned as null, never
+     * pinned, so a change to it fails nothing.
+     *
+     * @return void
+     */
+    public function testASetIsLockedWithinTheLimitOnly(): void
+    {
+        foreach (['posts:read', 'posts:edit', 'posts:delete'] as $name) {
+            Permission::query()->create(['name' => $name]);
+        }
+
+        $locks = $this->recordRowLocks();
+        $pins  = self::pins();
+        $all   = self::table('permissions')->where('name', 'like', 'posts:%');
+
+        self::assertNull($pins->lockWithin(DependencyPhase::HOLDERS, $all, 2));
+
+        DB::table('permissions')->where('name', 'posts:delete')->delete();
+
+        $pins->validate();
+
+        self::assertCount(2, (array) $pins->lockWithin(DependencyPhase::HOLDERS, $all, 2));
+        self::assertCount(2, (array) $pins->lockWithin(DependencyPhase::HOLDERS, $all, 2));
+        self::assertCount(2, $locks);
+        self::assertSame(DependencyPhase::HOLDERS, $pins->phase());
+
+        Permission::query()->create(['name' => 'posts:publish']);
+
+        self::assertDependencyChanged($pins);
+    }
+
+    /**
+     * The keys in a column of a set within the limit are returned as text, each
+     * once, in the order read; a set over it is null. Outside a delegated
+     * operation the rows are read as they stand; inside one they are locked and
+     * pinned, so a row added before the write fails validation.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheKeysOfASetWithinTheLimit(): void
+    {
+        $user = StubIdentity::query()->create(['id' => 'user']);
+
+        foreach ([['a', 'posts:read'], ['a', 'posts:edit'], ['b', 'posts:read']] as [$id, $name]) {
+            GrantService::instance()?->grantPermission(StubIdentity::query()->firstOrCreate(['id' => $id]), Permission::query()->firstOrCreate(['name' => $name]));
+        }
+
+        $rows = static fn (): Builder => self::table('authorizable_permissions')->orderBy('authorizable_id');
+
+        self::assertSame(['a', 'b'], DependencyPins::keysWithin($rows(), 'authorizable_id', 3));
+        self::assertNull(DependencyPins::keysWithin($rows(), 'authorizable_id', 2));
+
+        $operation = new Operation('op', new Reference(StubIdentity::class, 'admin'), CarbonImmutable::now('UTC'), false);
+
+        OperationScope::run($operation, static function () use ($rows, $user): void {
+            self::assertSame(['a', 'b'], DependencyPins::keysWithin($rows(), 'authorizable_id', 3));
+
+            GrantService::instance()?->grantPermission($user, Permission::query()->create(['name' => 'posts:publish']));
+
+            self::assertDependencyChanged(OperationScope::delegatedPins());
+        });
+    }
+
+    /**
+     * Assert that the pins fail validation, or that the call throws, with
+     * `DependencyChangedException`.
+     *
+     * @param  \Closure(): mixed|\SineMacula\Laravel\Authorization\Administration\DependencyPins  $pins
+     * @return void
+     */
+    private static function assertDependencyChanged(\Closure|DependencyPins $pins): void
+    {
+        $thrown = null;
+
+        try {
+            $pins instanceof DependencyPins ? $pins->validate() : $pins();
+        } catch (DependencyChangedException $exception) {
+            $thrown = $exception;
+        }
+
+        self::assertInstanceOf(DependencyChangedException::class, $thrown, 'Nothing that changed was noticed.');
     }
 
     /**

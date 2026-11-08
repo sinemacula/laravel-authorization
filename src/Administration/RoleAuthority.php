@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Administration;
 
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
+use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Evaluation\StatementValidator;
@@ -13,6 +14,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 
 /**
@@ -39,10 +41,16 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  *
  * Nothing it cannot read whole is ever proved: a chain that cannot be read
  * whole, a role or a parent missing from it, or one that returns to a role it
- * has passed, a reach whose tenants cannot be read, more resource policies in
- * the reach than `authorization.administration.max_impact` allows, or a
- * resource policy whose document cannot be read, each reads as no authority at
- * all, so a change it would justify is refused as unprovable.
+ * has passed, a reach whose tenants cannot be read, more resource-policy
+ * attachments in the reach than `authorization.administration.max_impact`
+ * allows, or a resource policy whose document cannot be read, each reads as no
+ * authority at all, so a change it would justify is refused as unprovable.
+ *
+ * Inside a delegated operation, the resource-policy attachments of the reach
+ * and the rows of the policies among them are locked and pinned before they are
+ * read (see `DependencyPins`), so a policy naming the role attached, or
+ * rewritten, meanwhile has the operation tried again rather than written past
+ * it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -261,6 +269,11 @@ final readonly class RoleAuthority
         $selectors = \array_map(static fn (string $key): string => StatementValidator::ROLE_SELECTOR . ':' . $key, $chain);
         $selecting = [];
 
+        /** @var string $table */
+        $table = config('authorization.tables.policies', 'policies');
+
+        OperationScope::pins()?->lock(DependencyPhase::HOLDERS, AuthorizationConnection::connection()->table($table)->whereIn('id', $keys));
+
         foreach ($class::query()->withoutGlobalScopes()->useWritePdo()->whereKey($keys)->get() as $policy) {
             $allows = PolicyRoute::allowsOf(DocumentComparison::read($policy->document));
             $named  = \array_filter($allows ?? [], static fn (Statement $allow): bool => \array_intersect($allow->principals ?? [], $selectors) !== []);
@@ -282,8 +295,10 @@ final readonly class RoleAuthority
     /**
      * Return the keys of the policies attached to a resource in a tenant of the
      * reach, or platform-wide, each once, in one query, or null when the reach
-     * cannot be read or holds more of them than the impact limit allows (see
-     * `AffectedHolders::limit()`).
+     * cannot be read or holds more attachments than the impact limit allows
+     * (see `AffectedHolders::limit()`). Inside a delegated operation the
+     * attachments are locked and pinned (see `DependencyPins::keysWithin()`),
+     * so one made or removed meanwhile is noticed before the write.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
      * @return list<string>|null
@@ -300,9 +315,6 @@ final readonly class RoleAuthority
             return null;
         }
 
-        /** @var list<string> $keys */
-        $keys = $query->distinct()->limit($limit + 1)->pluck($table . '.policy_id')->all();
-
-        return \count($keys) > $limit ? null : $keys;
+        return DependencyPins::keysWithin($query, 'policy_id', $limit);
     }
 }

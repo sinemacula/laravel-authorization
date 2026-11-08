@@ -294,25 +294,33 @@ trait HasPermissions // @phpstan-ignore trait.unused
     // ------------------------------------------------------------------
 
     /**
-     * Spatie alias for the canonical `givePermission()` helper.
+     * Spatie alias for the canonical `givePermission()` helper, handing the
+     * acting context, when there is one, on.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
+     *
+     * @throws \Throwable
      */
-    public function givePermissionTo(Permission|string $permission): static
+    public function givePermissionTo(Permission|string $permission, ?ActingContext $actor = null): static
     {
-        return $this->givePermission($permission);
+        return $this->givePermission($permission, actor: $actor);
     }
 
     /**
-     * Spatie alias for the canonical `revokePermission()` helper.
+     * Spatie alias for the canonical `revokePermission()` helper, handing the
+     * acting context, when there is one, on.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
+     *
+     * @throws \Throwable
      */
-    public function revokePermissionTo(Permission|string $permission): static
+    public function revokePermissionTo(Permission|string $permission, ?ActingContext $actor = null): static
     {
-        return $this->revokePermission($permission);
+        return $this->revokePermission($permission, actor: $actor);
     }
 
     /**
