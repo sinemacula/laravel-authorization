@@ -7,6 +7,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
@@ -407,6 +408,29 @@ return [
     */
 
     'tenant_tree' => FlatTenantTree::class,
+
+    /*
+    |---------------------------------------------------------------------------
+    | Identity directory
+    |---------------------------------------------------------------------------
+    |
+    | A class implementing `IdentityDirectory`, which lists the principals an
+    | identity owns and says whether that list is complete. The grant scope
+    | query (`GrantScopeQuery::forIdentity()`) counts the grants of the identity
+    | and of every principal listed, and never answers `within` unless the list
+    | is complete: with an incomplete list it answers `unknown`, unless a grant
+    | already proves the identity reaches `outside` the tenant. The package
+    | never infers an identity's principals. The shipped default knows them only
+    | under the shipped subject resolver, where every user is its own identity
+    | with no other principal; under any other resolver it reports an incomplete
+    | list. An application with principals, or the `sinemacula/laravel-iam`
+    | umbrella, names its own class here or binds the contract directly. Null or
+    | a class that does not implement the contract is refused at boot; like the
+    | subject resolver, a class named here is built per request or job.
+    |
+    */
+
+    'identity_directory' => GuardUserIdentityDirectory::class,
 
     /*
     |---------------------------------------------------------------------------

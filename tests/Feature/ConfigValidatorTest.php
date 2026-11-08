@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
+use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
@@ -21,6 +22,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
@@ -37,6 +39,7 @@ use Tests\Feature\Stubs\ReservedContextSource;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenantTree;
+use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\TestCase;
 
 /**
@@ -703,6 +706,51 @@ final class ConfigValidatorTest extends TestCase
             fn () => ConfigValidator::validate(['requirement_checker' => \stdClass::class] + $config, $this->app),
             'authorization.requirement_checker',
             'class \'stdClass\' does not implement ' . AuthenticationRequirementChecker::class . '.',
+        );
+    }
+
+    /**
+     * The shipped identity directory, any class implementing the contract, and
+     * a config without the key pass validation.
+     *
+     * @return void
+     */
+    public function testIdentityDirectoryImplementingTheContractPasses(): void
+    {
+        $config = $this->authorizationConfig();
+
+        self::assertSame(GuardUserIdentityDirectory::class, $config['identity_directory']);
+
+        foreach ([GuardUserIdentityDirectory::class, ListedIdentityDirectory::class] as $directory) {
+            ConfigValidator::validate(['identity_directory' => $directory] + $config, $this->app);
+        }
+
+        unset($config['identity_directory']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        $this->addToAssertionCount(3);
+    }
+
+    /**
+     * An explicit null, or a class that is no directory, is refused under its
+     * key, so no directory never means no principals by accident.
+     *
+     * @return void
+     */
+    public function testInvalidIdentityDirectoryIsRejected(): void
+    {
+        $config = $this->authorizationConfig();
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate(['identity_directory' => null] + $config, $this->app),
+            'authorization.identity_directory',
+            'an identity directory class is required; set it to \\' . GuardUserIdentityDirectory::class . ' for the default.',
+        );
+        $this->assertRejected(
+            fn () => ConfigValidator::validate(['identity_directory' => \stdClass::class] + $config, $this->app),
+            'authorization.identity_directory',
+            'class \'stdClass\' does not implement ' . IdentityDirectory::class . '.',
         );
     }
 

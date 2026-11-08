@@ -33,6 +33,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
+use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
@@ -59,11 +60,13 @@ use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
+use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
@@ -87,6 +90,7 @@ use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Feature\Stubs\SwitchableSubjectResolver;
+use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\TestCase;
 
 /**
@@ -167,6 +171,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             ActionCatalogue::class,
             SubjectResolver::class,
             TenantTree::class,
+            IdentityDirectory::class,
             ResourceTenantResolver::class,
             AuthenticationRequirementChecker::class,
             SessionPolicySource::class,
@@ -382,6 +387,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             BoundaryService::class,
             GuardrailService::class,
             ApplicationAccess::class,
+            GrantScopeQuery::class,
         ];
 
         foreach ($services as $service) {
@@ -534,6 +540,31 @@ final class AuthorizationServiceProviderTest extends TestCase
         $configured = $app->make(TenantTree::class);
 
         self::assertInstanceOf(StubTenantTree::class, $configured);
+    }
+
+    /**
+     * The identity directory that knows the shipped resolver's users is bound
+     * by default, and the configured class in its place.
+     *
+     * @return void
+     */
+    public function testConfiguredIdentityDirectoryIsBound(): void
+    {
+        $app = $this->application();
+
+        $default = $app->make(IdentityDirectory::class);
+
+        self::assertInstanceOf(GuardUserIdentityDirectory::class, $default);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $app->make(ConfigRepository::class);
+        $config->set('authorization.identity_directory', ListedIdentityDirectory::class);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        $configured = $app->make(IdentityDirectory::class);
+
+        self::assertInstanceOf(ListedIdentityDirectory::class, $configured);
     }
 
     /**
