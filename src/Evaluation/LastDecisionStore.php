@@ -70,6 +70,19 @@ final class LastDecisionStore
     }
 
     /**
+     * Return the provenance the decision was recorded with, when it is the most
+     * recent decision recorded, or null when it is not, as when a later
+     * decision replaced it, or it was never recorded.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
+     * @return \SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance|null
+     */
+    public function provenanceOf(Decision $decision): ?DecisionProvenance
+    {
+        return $this->last === $decision ? $this->provenance : null;
+    }
+
+    /**
      * Determine whether the most recent decision was recorded in the session
      * given: the session of the request that recorded it, whatever subject the
      * decision was about.

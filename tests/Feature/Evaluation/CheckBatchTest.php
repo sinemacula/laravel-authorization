@@ -39,6 +39,7 @@ use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -318,6 +319,52 @@ final class CheckBatchTest extends TestCase
         $evaluated = static fn (DecisionEvaluated $event): bool => [$event->reason, $event->resource, $event->subject?->id] === $named;
 
         Event::assertDispatched(DecisionEvaluated::class, $evaluated);
+    }
+
+    /**
+     * A batch decided in an `AuthorizationScope`, as `permissionsFor()` decides
+     * its listing, records and reports each decision in that scope's tenant and
+     * application, whatever tenant the subject names; `permissionsFor()` itself
+     * still records nothing.
+     *
+     * @return void
+     */
+    public function testABatchInAnAuthorizationScopeNamesThatScope(): void
+    {
+        $tenant = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
+        $other  = StubTenant::query()->create(['id' => 't2', 'name' => 't2']);
+
+        $this->subject($tenant);
+
+        Event::fake([DecisionEvaluated::class]);
+
+        /** @var \Illuminate\Foundation\Application $app */
+        $app      = $this->app;
+        $pipeline = new DecisionPipeline($app->make(PolicyEvaluator::class), $app->make(PolicyResolver::class), $app->make(CheckContextFactory::class));
+        $batch    = new CheckBatch($pipeline, $app->make(LastDecisionStore::class), $app->make(SubjectResolver::class), $app->make(Dispatcher::class), true, true);
+        $subject  = Authorization::currentSubject();
+        $scope    = AuthorizationScope::tenant($other, 'admin');
+
+        $scope->within(static fn (): array => $batch->decide($subject, [new CheckInput(self::ACTION), new CheckInput('posts:edit')]));
+
+        $events = self::dispatchedEvents(DecisionEvaluated::class);
+
+        self::assertSame($tenant, $subject?->tenant);
+        self::assertCount(2, $events);
+
+        foreach ($events as $event) {
+            self::assertEquals(Reference::of($other), $event->tenant);
+            self::assertSame('admin', $event->application);
+        }
+
+        $recorded = Authorization::lastDecisionProvenance();
+
+        self::assertEquals(Reference::of($other), $recorded?->tenant);
+
+        Authorization::permissionsFor(null, $scope);
+
+        self::assertSame($recorded, Authorization::lastDecisionProvenance());
+        self::assertCount(2, self::dispatchedEvents(DecisionEvaluated::class));
     }
 
     /**

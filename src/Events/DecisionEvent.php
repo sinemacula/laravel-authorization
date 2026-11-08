@@ -22,10 +22,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * A snapshot of references, names and ids, never a model, the caller's context,
  * a session, or a condition or attribute value: the keys are names alone. The
  * subject and the identity are null when the decision had none, a guest's
- * included, and are never filled from the authenticated user. The previewer is
- * null for a decision that is not a preview, and `usedBreakGlass` is false
- * until break-glass grants arrive. The decision itself, with its trace, is not
- * carried: a listener that needs it reads `Authorization::lastDecision()`.
+ * included, and are never filled from the authenticated user. The tenant and
+ * the application are the scope the decision was made in, never read from the
+ * subject (see `DecisionProvenance`). The previewer is null for a decision that
+ * is not a preview, and `usedBreakGlass` is false until break-glass grants
+ * arrive. The decision itself, with its trace, is not carried: a listener that
+ * needs it reads `Authorization::lastDecision()`.
  *
  * Decision events are dispatched when the decision is made, not after a commit,
  * since a denial is a fact even if the surrounding transaction rolls back.
@@ -85,7 +87,7 @@ abstract readonly class DecisionEvent implements AuthorizationEvent
         /** Why the check was denied; null when it was allowed. */
         public ?DecisionReason $reason,
 
-        /** The statements that decided it, each by its policy, the stored policy's key and its sid, in the order assessed. */
+        /** The statements that decided it, each by its policy's name, the stored policy's key, its index, its sid and, for a resource policy, the resource it is attached to, in the order assessed. */
         public array $statements,
 
         /** Whether a break-glass grant allowed the check; false until break-glass grants arrive. */

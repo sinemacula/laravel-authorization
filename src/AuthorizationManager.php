@@ -218,7 +218,11 @@ final class AuthorizationManager
      * `InsufficientAuthenticationException`, with the requirements any one of
      * which met would allow the action, when the denial is
      * `insufficient_authentication`, and an `AuthorizationException` with the
-     * reason code otherwise. Either carries the decision that refused.
+     * reason code otherwise. Either carries the decision that refused. The
+     * `AuthorizationFailed` it dispatches first carries the provenance the
+     * decision was recorded with, so it names the scope the decision was made
+     * in, as its `DecisionEvaluated` does; when a listener has meanwhile
+     * recorded another decision, it names the scope in place.
      *
      * @param  string  $action
      * @param  mixed  $resource
@@ -238,7 +242,9 @@ final class AuthorizationManager
             return;
         }
 
-        $this->events?->dispatch(AuthorizationFailed::of(DecisionProvenance::of($this->currentSubject()), $action, ResourceReferences::identifierOf($reference), $decision));
+        $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? DecisionProvenance::of($this->currentSubject());
+
+        $this->events?->dispatch(AuthorizationFailed::of($provenance, $action, ResourceReferences::identifierOf($reference), $decision));
 
         $reason = $decision->reason ?? DecisionReason::NO_MATCH;
         $stepUp = $reason === DecisionReason::INSUFFICIENT_AUTHENTICATION;

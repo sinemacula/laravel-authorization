@@ -268,8 +268,8 @@ final class GuardrailAuthorityTest extends TestCase
 
     /**
      * The right is decided through the one decision path, so the decision is
-     * reported like any other, and the request's tenant is in place again
-     * afterwards.
+     * reported like any other, in the parent tenant it was weighed in rather
+     * than the actor's, and the request's tenant is in place again afterwards.
      *
      * @return void
      *
@@ -286,9 +286,13 @@ final class GuardrailAuthorityTest extends TestCase
 
         GuardrailAuthority::assertPermitted(self::acting($actor), Reference::of($this->account));
 
-        $decided = static fn (DecisionEvaluated $event): bool => $event->action === PackagePermissions::GUARDRAIL_MANAGE && $event->isAllowed();
+        $org     = Reference::of($this->org);
+        $decided = static fn (DecisionEvaluated $event): bool => $event->action === PackagePermissions::GUARDRAIL_MANAGE
+            && $event->isAllowed()
+            && [$event->tenant?->type, $event->tenant?->id] === [$org->type, $org->id];
 
         Event::assertDispatched(DecisionEvaluated::class, $decided);
+        self::assertEquals($org, Authorization::lastDecisionProvenance()?->tenant);
         self::assertSame([$this->team->getMorphClass(), 'team'], TenantScope::currentTenant());
         self::assertFalse(TenantScope::isBelowTenant());
     }

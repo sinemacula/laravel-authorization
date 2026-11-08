@@ -96,17 +96,21 @@ carry references, names and ids, never a value the decision read, and are dispat
    refused with `GuardrailException`, so no `Policy\Deleted` or `Policy\Updated` is dispatched for it until each
    guardrail is removed, each reported as `GuardrailRemoved`.
 
-9. **Decisions as references (AUTHZ-15.3, AUTHZ-15.4).** A decision event carries `subject` and `identity`,
-   references to the principal the decision was about and its identity, null for a guest and never filled from the
-   authenticated user; `previewer`, whoever previewed it, null for a decision that is not a preview; the `action`; the
-   `resource` as `type:id`, `type:*` or the name given; the `tenant` and `application` the decision was made in, those
-   of its subject; its `effect` and `reason`; the `statements` that decided it, each a `StatementReference` naming its
-   policy, the stored policy's key, its index and its sid; `usedBreakGlass`, false until break-glass grants arrive; and
-   `keys`, the name of each condition key the decision tested, held or failed, never its value. Neither the caller's
-   context nor the decision, with its trace, is carried: the last decision holds the decision, stored before the event
-   is dispatched, with its provenance (`Evaluation\DecisionProvenance`), so a listener that needs it reads
-   `Authorization::lastDecision()` and `lastDecisionProvenance()`. Dispatching the event and storing the last decision
-   are separate switches of `Evaluation\CheckBatch`: `check()` and `checkMany()` do both, `permissionsFor()` neither.
+9. **Decisions as references (AUTHZ-15.3, AUTHZ-15.4).** A decision event carries `subject` and `identity`, references
+   to the principal the decision was about and its identity, null for a guest and never filled from the authenticated
+   user; `previewer`, whoever previewed it, null for a decision that is not a preview; the `action`; the `resource` as
+   `type:id`, `type:*` or the name given; the `tenant` and `application` the decision was made in, as `TenantScope` held
+   them where the pipeline decided it (the resource's own tenant, platform scope for a resource admitted from outside
+   the request's tenant and for a delegated change to the platform, a scope put in place, or the request's, a guest's
+   decision included), never read from its subject; its `effect` and `reason`; the `statements` that decided it, each a
+   `StatementReference` naming its policy's name, the stored policy's key, its index and its sid and, for a statement of
+   a resource policy, the resource that policy is attached to (`type:id` or `type:*`); `usedBreakGlass`, false until
+   break-glass grants arrive; and `keys`, the name of each condition key the decision tested, held or failed, never its
+   value. Neither the caller's context nor the decision, with its trace, is carried: the last decision holds the
+   decision, stored before the event is dispatched, with its provenance (`Evaluation\DecisionProvenance`), so a listener
+   that needs it reads `Authorization::lastDecision()` and `lastDecisionProvenance()`. Dispatching the event and storing
+   the last decision are separate switches of `Evaluation\CheckBatch`: `check()` and `checkMany()` do both,
+   `permissionsFor()` neither.
 
 10. **Digests, not documents.** A policy event carries its document's version and the SHA-256 of its canonical JSON
     (keys sorted at every depth, lists in order, slashes and Unicode unescaped) as a `DocumentDigest`.

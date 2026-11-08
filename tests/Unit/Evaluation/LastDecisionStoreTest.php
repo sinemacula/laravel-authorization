@@ -169,6 +169,32 @@ final class LastDecisionStoreTest extends TestCase
     }
 
     /**
+     * The provenance of a decision is the one it was put with while it is the
+     * last decision put, and none once another replaced it, or for one never
+     * put.
+     *
+     * @return void
+     */
+    public function testGivesTheProvenanceOfTheDecisionOnlyWhileItIsTheLast(): void
+    {
+        $store      = new LastDecisionStore;
+        $decision   = Decision::allow(DecisionStage::ALLOW);
+        $later      = Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
+        $provenance = new DecisionProvenance(new Reference('user', '1'));
+
+        self::assertNull($store->provenanceOf($decision));
+
+        $store->put($decision, $provenance);
+
+        self::assertSame($provenance, $store->provenanceOf($decision));
+        self::assertNull($store->provenanceOf(Decision::allow(DecisionStage::ALLOW)));
+
+        $store->put($later, new DecisionProvenance(new Reference('user', '2')));
+
+        self::assertNull($store->provenanceOf($decision));
+    }
+
+    /**
      * The provenance is that of the decision last put, even once the store no
      * longer hands the decision back, so a reader asks for the decision first.
      *

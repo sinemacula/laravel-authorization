@@ -1676,8 +1676,8 @@ final class AuthorizationManagerTest extends TestCase
     /**
      * The last decision is kept with its provenance: the request's subject for
      * `check()`, the subject named with `for()` or translated with `forUser()`,
-     * each in the request's tenant and application, and nobody for a guest,
-     * never filled from the request's subject; listing actions leaves it as it
+     * and nobody for a guest, never filled from the request's subject, each in
+     * the request's tenant and application; listing actions leaves it as it
      * was, and forgetting the decision forgets it.
      *
      * @return void
@@ -1715,12 +1715,12 @@ final class AuthorizationManagerTest extends TestCase
 
         $guest = $manager->lastDecisionProvenance();
 
-        self::assertEquals(new DecisionProvenance, $guest);
+        self::assertEquals(new DecisionProvenance(null, null, null, $where, 'admin'), $guest);
         self::assertFalse($guest?->isPreview());
 
-        $manager->permissionsFor($user, AuthorizationScope::current());
+        $manager->permissionsFor($user, AuthorizationScope::platform('web'));
 
-        self::assertEquals(new DecisionProvenance, $manager->lastDecisionProvenance());
+        self::assertSame($guest, $manager->lastDecisionProvenance());
 
         $manager->forgetLastDecision();
 

@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -18,8 +19,14 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * guest's has none, or when it is no saved record; neither is ever filled from
  * the authenticated user. The previewer is whoever previewed the decision as
  * the subject, and null for any decision that is not a preview. The tenant and
- * the application are those of the subject the decision was made for, so a
- * decision with no subject names neither.
+ * the application are those of the scope the decision was made in, as
+ * `TenantScope` held it when the decision was made: a resource's own tenant for
+ * a check on a resource of the request's tenant or below it, platform scope for
+ * one admitted from outside it and for a delegated change to the platform, the
+ * scope `within()` or an `AuthorizationScope` put in place, and otherwise the
+ * request's, a guest's decision included. They are never read from the subject,
+ * whose tenant and application need not be where it was decided. A tenant that
+ * cannot be read is named as none.
  *
  * It holds references and names alone, never a model, a session or a value, so
  * it is safe to log or store. The last decision is kept with it, which
@@ -60,7 +67,8 @@ final readonly class DecisionProvenance
 
     /**
      * Return the provenance of a decision about the subject, null for none,
-     * previewed by the previewer, null for a decision that is not a preview.
+     * previewed by the previewer, null for a decision that is not a preview,
+     * made in the scope in place (see `inCurrentScope()`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $previewer
@@ -68,13 +76,22 @@ final readonly class DecisionProvenance
      */
     public static function of(?Subject $subject, ?Reference $previewer = null): self
     {
-        return new self(
-            self::referenceTo($subject?->subject),
-            self::referenceTo($subject?->identity),
-            $previewer,
-            self::referenceTo($subject?->tenant),
-            $subject?->application,
-        );
+        return (new self(self::referenceTo($subject?->subject), self::referenceTo($subject?->identity), $previewer))->inCurrentScope();
+    }
+
+    /**
+     * Return the provenance of a decision about the same subject, by the same
+     * previewer, made in the scope in place: the tenant and the application
+     * `TenantScope` decides checks in now, the tenant null for the platform or
+     * for one that cannot be read, and the application null for none.
+     *
+     * @return self
+     */
+    public function inCurrentScope(): self
+    {
+        [$tenant, $application] = self::currentScope();
+
+        return new self($this->subject, $this->identity, $this->previewer, $tenant, $application);
     }
 
     /**
@@ -86,6 +103,27 @@ final readonly class DecisionProvenance
     public function isPreview(): bool
     {
         return $this->previewer !== null;
+    }
+
+    /**
+     * Return the tenant and the application checks are decided in now: no
+     * tenant for the platform, or for one that cannot be read, and no
+     * application for none, or when the scope cannot be read at all.
+     *
+     * @return array{\SineMacula\Laravel\Authorization\Support\Reference|null, string|null}
+     */
+    private static function currentScope(): array
+    {
+        $application = null;
+
+        try {
+            $application = TenantScope::currentApplication();
+            $tenant      = TenantScope::currentTenant();
+        } catch (\Throwable) {
+            return [null, $application];
+        }
+
+        return [$tenant === null ? null : new Reference(...$tenant), $application];
     }
 
     /**

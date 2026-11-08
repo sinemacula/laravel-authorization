@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\DecidesOnAttributeValues;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\TestCase;
@@ -72,6 +73,68 @@ final class AuthorizationFailedTest extends TestCase
     }
 
     /**
+     * A refusal by `authorize()` on a resource of a tenant below the request's
+     * names the resource's tenant, where it was decided, as its
+     * `DecisionEvaluated` does.
+     *
+     * @return void
+     */
+    public function testARefusalNamesTheScopeItWasDecidedIn(): void
+    {
+        $this->valueReadingSubject();
+
+        $child = $this->childTenant();
+
+        Event::fake([DecisionEvaluated::class, AuthorizationFailed::class]);
+
+        self::assertRefused(static fn () => Authorization::authorize(self::VALUE_ACTION, ResourceReference::record('posts', '7', Reference::of($child))));
+
+        $evaluated = self::dispatchedEvents(DecisionEvaluated::class);
+        $failed    = self::dispatchedEvents(AuthorizationFailed::class);
+
+        self::assertCount(1, $failed);
+        self::assertEquals(Reference::of($child), $failed[0]->tenant);
+        self::assertSame('admin', $failed[0]->application);
+        self::assertEquals(\get_object_vars($evaluated[0]), \get_object_vars($failed[0]));
+    }
+
+    /**
+     * A refusal whose decision a listener replaced as the last decision, by
+     * deciding another check, names the scope in place, the request's.
+     *
+     * @return void
+     */
+    public function testARefusalWhoseDecisionWasReplacedNamesTheScopeInPlace(): void
+    {
+        $this->valueReadingSubject();
+
+        $child = $this->childTenant();
+
+        /** @var \ArrayObject<int, \SineMacula\Laravel\Authorization\Events\AuthorizationFailed> $failed */
+        $failed = new \ArrayObject;
+
+        Event::listen(DecisionEvaluated::class, static function (DecisionEvaluated $event): void {
+            if ($event->action !== self::VALUE_ACTION) {
+                return;
+            }
+
+            Authorization::check('posts:audit');
+        });
+        Event::listen(AuthorizationFailed::class, static fn (AuthorizationFailed $event) => $failed->append($event));
+
+        self::assertRefused(static fn () => Authorization::authorize(self::VALUE_ACTION, ResourceReference::record('posts', '7', Reference::of($child))));
+
+        $reported = \array_values($failed->getArrayCopy());
+
+        self::assertCount(1, $reported);
+        self::assertSame(self::VALUE_ACTION, $reported[0]->action);
+        self::assertSame('tenant-1', $reported[0]->tenant?->id);
+        // The last decision is the listener's, made in the request's tenant,
+        // not the refused one, made in the resource's.
+        self::assertSame('tenant-1', Authorization::lastDecisionProvenance()?->tenant?->id);
+    }
+
+    /**
      * A decision the pipeline did not make, reported as a refusal, names the
      * current subject, the resource and the decision's reason.
      *
@@ -96,5 +159,22 @@ final class AuthorizationFailedTest extends TestCase
         self::assertSame('posts:edit', $failed[0]->action);
         self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $failed[0]->reason);
         self::assertSame('admin', $failed[0]->application);
+    }
+
+    /**
+     * Assert the call is refused with an `AuthorizationException`.
+     *
+     * @param  \Closure(): mixed  $call
+     * @return void
+     */
+    private static function assertRefused(\Closure $call): void
+    {
+        try {
+            $call();
+
+            self::fail('The check is refused.');
+        } catch (AuthorizationException $exception) {
+            self::assertSame(DecisionReason::NO_MATCH, $exception->getReason());
+        }
     }
 }

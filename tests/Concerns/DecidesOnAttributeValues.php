@@ -7,12 +7,15 @@ namespace Tests\Concerns;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Fixtures\BulkChecks\StatusAttributes;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 
@@ -68,6 +71,21 @@ trait DecidesOnAttributeValues
         Authorization::clearResolvedInstance('authorization');
 
         return $user;
+    }
+
+    /**
+     * Create a tenant below the request's tenant, `tenant-1`, in the tenant
+     * tree, and return it.
+     *
+     * @return \Tests\Feature\Stubs\StubTenant
+     */
+    protected function childTenant(): StubTenant
+    {
+        $child = StubTenant::query()->create(['id' => 'tenant-2', 'name' => 'tenant-2']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), new Reference($child->getMorphClass(), 'tenant-1')));
+
+        return $child;
     }
 
     /**

@@ -135,12 +135,10 @@ final readonly class Decision
         $keys = [];
 
         foreach ($this->trace as $entry) {
-            foreach (\array_keys($entry->conditions) as $key) {
-                $keys[$key] = true;
-            }
+            $keys = [...$keys, ...\array_map(\strval(...), \array_keys($entry->conditions))];
         }
 
-        return \array_map(\strval(...), \array_keys($keys));
+        return \array_values(\array_unique($keys));
     }
 
     /**

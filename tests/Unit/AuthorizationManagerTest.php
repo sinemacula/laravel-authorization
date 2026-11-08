@@ -1065,6 +1065,30 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * A refusal reported with no dispatcher is still recorded as the last
+     * decision, and returned on the exception, with its reason.
+     *
+     * @return void
+     */
+    public function testReportRefusalWithoutEventsStillRecordsAndReturns(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            subjectResolver: new StubSubjectResolver,
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: new LastDecisionStore,
+            events: null,
+        );
+
+        $decision = Decision::deny(DecisionReason::ADMINISTRATION_CONFLICT, DecisionStage::ADMINISTRATION);
+        $refusal  = $manager->reportRefusal('posts:delete', ResourceReference::record('posts', '7'), $decision);
+
+        self::assertSame($decision, $refusal->getDecision());
+        self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $refusal->getReason());
+        self::assertSame($decision, $manager->lastDecision());
+    }
+
+    /**
      * `for()` produces a clone. The clone's principal override is isolated.
      * Pins the CloneRemoval mutant on line 249.
      *
