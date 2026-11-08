@@ -132,7 +132,7 @@ final class Impact
      */
     private static function scope(OperationResource $operation, ResourceReference $resource, GrantScope $reach, FurtherChecks $checks): ?DecisionReason
     {
-        return AdministeredScope::refusal($operation->action, $resource, $reach, $checks);
+        return AdministeredScope::refusal($operation, $resource, $reach, $checks);
     }
 
     /**

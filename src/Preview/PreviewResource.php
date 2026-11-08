@@ -11,21 +11,22 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 /**
  * The resource a preview's admission is decided on (AUTHZ-11.4, N84): the
  * subject previewed, by references to its principal and to the identity behind
- * it, and the scope the preview is made in, its tenant and application.
+ * it, and the scope one of the target's decisions is made in, its tenant and
+ * application, and whether it is decided just below that tenant.
  *
  * Its reference is a record of type `authorization:preview` whose id is the
  * principal's morph type and key (`user:42`), so a statement's resource pattern
  * can name the targets a previewer may preview
  * (`authorization:preview:user:*`), and whose tenant is the scope's tenant,
- * never the tenant the request is in: a preview in a tenant is decided in that
- * tenant's scope, and one in a tenant outside the previewer's scope, an
- * ancestor's included, is denied as `tenant_scope`, as any resource of that
- * tenant is; a preview with no tenant, at platform scope, is decided at
- * platform scope, where only a platform-wide grant of the right counts (see
- * `ResourceScope`). The reference hands the resource on as its source, so the
- * package's attribute provider (see `PreviewAttributes`) offers its attributes
- * to policies under `resource`, and the admission stage (see
- * `PreviewAdmission`) reads it.
+ * never the tenant the request is in. Each admission is decided with that scope
+ * in place, the tenant, or the platform, and the application (see
+ * `PreviewAdmission`), so the resource is decided as any resource of the tenant
+ * in place is (see `ResourceScope`): in the tenant, or just below it when the
+ * decision is, where the previewer's grants and denies reaching the tenant
+ * count, and, with no tenant, at platform scope, where only a platform-wide
+ * grant of the right counts. The reference hands the resource on as its source,
+ * so the package's attribute provider (see `PreviewAttributes`) offers its
+ * attributes to policies under `resource`.
  *
  * It names references and names alone, never a model, a session or a value of
  * the target's.
@@ -45,6 +46,7 @@ final readonly class PreviewResource implements AuthorizableResource
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $identity
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  string|null  $application
+     * @param  bool  $isBelow
      */
     public function __construct(
 
@@ -59,7 +61,25 @@ final readonly class PreviewResource implements AuthorizableResource
 
         /** The application the preview is made in; null for none. */
         public ?string $application,
+
+        /** Whether the decision is made just below the tenant, where only a grant that reaches the tenants below it counts. */
+        public bool $isBelow = false,
     ) {}
+
+    /**
+     * Return the preview of the same target in the scope given: the tenant, or
+     * none for the platform, the application, and whether it is decided just
+     * below the tenant.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  string|null  $application
+     * @param  bool  $isBelow
+     * @return self
+     */
+    public function in(?Reference $tenant, ?string $application, bool $isBelow): self
+    {
+        return new self($this->target, $this->identity, $tenant, $application, $isBelow);
+    }
 
     /**
      * Return what the preview names, as the package's attribute provider offers

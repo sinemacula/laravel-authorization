@@ -28,6 +28,7 @@ use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Query\AuthorizedQuery;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
@@ -225,7 +226,16 @@ final class AuthorizationManager
      * `AuthorizationFailed` it dispatches first carries the provenance the
      * decision was recorded with, so it names the scope the decision was made
      * in, as its `DecisionEvaluated` does; when a listener has meanwhile
-     * recorded another decision, it names the scope in place.
+     * recorded another decision, it names the scope in place, or, on a preview,
+     * the preview's scope and its previewer.
+     *
+     * On a preview from `previewFor()`, the `AuthorizationFailed` listeners run
+     * as part of the preview's evaluation, so a package mutation they make is
+     * refused as `administration.previewing`, and an
+     * `insufficient_authentication` denial throws a plain
+     * `AuthorizationException`, never `InsufficientAuthenticationException`:
+     * the requirement is made of the target, which has no session, so no
+     * step-up by the caller could meet it.
      *
      * @param  string  $action
      * @param  mixed  $resource
@@ -245,12 +255,19 @@ final class AuthorizationManager
             return;
         }
 
-        $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? DecisionProvenance::of($this->currentSubject(), $this->preview?->previewer);
+        $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? $this->preview?->provenance() ?? DecisionProvenance::of($this->currentSubject());
+        $failed     = AuthorizationFailed::of($provenance, $action, ResourceReferences::identifierOf($reference), $decision);
 
-        $this->events?->dispatch(AuthorizationFailed::of($provenance, $action, ResourceReferences::identifierOf($reference), $decision));
+        if ($this->preview === null) {
+            $this->events?->dispatch($failed);
+        } else {
+            // Its listeners run as a preview's evaluation, so they may change
+            // nothing.
+            Previewing::current()->during(fn (): mixed => $this->events?->dispatch($failed));
+        }
 
         $reason = $decision->reason ?? DecisionReason::NO_MATCH;
-        $stepUp = $reason === DecisionReason::INSUFFICIENT_AUTHENTICATION;
+        $stepUp = $this->preview === null && $reason === DecisionReason::INSUFFICIENT_AUTHENTICATION;
         $denial = $stepUp ? InsufficientAuthenticationException::translated($decision->requirements, $this->translator, $decision) : null;
 
         throw $denial ?? AuthorizationException::translated($reason, $this->translator, $decision);
@@ -428,10 +445,13 @@ final class AuthorizationManager
      * dispatched.
      *
      * On a preview, each compile, now and at each execution, admits the preview
-     * again, recorded as its admission is, and compiles for its target in its
-     * scope; and the scope is read-only: an update, a delete or an insert from
-     * the query is refused (`preview_write`). The rows it keeps are those the
-     * target may take the action on, which is no proof the caller may see them.
+     * again, in every scope its classes of rows are decided in, recorded as its
+     * admission is, and compiles for its target in its scope; and the scope
+     * refuses its own writes: an update, a delete or an insert from the query,
+     * or from one nesting it whole, is refused (`preview_write`), though one
+     * taking it in as SQL text is not (see `AuthorizedQuery`). The rows it
+     * keeps are those the target may take the action on, which is no proof the
+     * caller may see them.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @param  string  $action
@@ -573,9 +593,13 @@ final class AuthorizationManager
     public function permissionsFor(?object $subject, AuthorizationScope $scope, array $context = []): array
     {
         $preview = $this->preview;
-        $named   = match (true) {
+
+        if ($subject !== null && $preview !== null) {
+            throw InvalidPreviewException::retargeted('permissionsFor');
+        }
+
+        $named = match (true) {
             $subject === null           => $this->currentSubject(),
-            $preview !== null           => throw InvalidPreviewException::retargeted('permissionsFor'),
             $subject instanceof Subject => $subject,
             default                     => $this->for($subject)->currentSubject(),
         };
@@ -591,12 +615,14 @@ final class AuthorizationManager
             // told, and its attributes read, once for the listing.
             $resource  = ResourceReferences::of($scope->resource);
             $checks    = \array_map(static fn (string $action): CheckInput => new CheckInput($action, $resource, $context), $actions);
-            $decisions = $this->batch($preview !== null, false)->decide($scope->subjectIn($about), $checks);
+            $decisions = $this->batch($preview !== null, false)->decide($about, $checks);
 
             return \array_values(\array_filter($actions, static fn (int $key): bool => $decisions[$key]->isAllowed(), \ARRAY_FILTER_USE_KEY));
         });
 
-        return $preview === null ? $list($named) : $preview->run($list);
+        // A preview's target is already the subject of its scope, which is the
+        // listing's.
+        return $preview === null ? $list($scope->subjectIn($named)) : $preview->run($list);
     }
 
     /**

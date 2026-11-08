@@ -17,13 +17,15 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *
  * - `target_type`, `target_id`: the principal previewed, by morph type and key;
  * - `identity_type`, `identity_id`: the identity behind it, missing for none;
- * - `application`: the application the preview is made in, missing for none.
+ * - `application`: the application the decision admitted is made in, missing
+ *   for none.
  *
  * The built-ins `resource.id` (the principal's morph type and key),
- * `resource.type` and `resource.tenant` (the tenant the preview is made in,
- * missing for the platform) come from the reference, as for every resource. Any
- * other resource of the type, one that is not a preview resource, has no
- * attributes.
+ * `resource.type`, and `resource.tenant.type` and `resource.tenant.id` (the
+ * tenant the decision admitted is made in, missing at platform scope) come from
+ * the reference, as for every resource. A deny on a missing key cannot be
+ * decided, so it refuses. Any other resource of the type, one that is not a
+ * preview resource, has no attributes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

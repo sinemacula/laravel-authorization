@@ -28,7 +28,11 @@ evaluates, and refuses whatever it cannot prove (N64).
    the state then, each time the grammar compiles the query. No decision is cached and none is reused, so a revocation
    is seen by the next execution (N68). A builder another query takes whole (`whereHas()`, `whereExists()`,
    `where($column, $builder)`) and a base query taken with `toBase()` are compiled again each time they are. Compiling
-   records no last decision and dispatches no `DecisionEvaluated`.
+   records no last decision and dispatches no `DecisionEvaluated`, except through a preview, whose every compile admits
+   the preview again in each scope its classes of rows are decided in, recording and reporting each admission as any
+   check (see [Preview](preview.md)). A query taken into another as SQL text (`whereIn()`, `fromSub()`, `joinSub()`,
+   `selectSub()`, `withCount()` or `has()` with a count) is compiled once, when it is taken in, and never again when
+   the outer query runs.
 
 4. **The place, the group and the condition, no bindings.** The macro holds the scope's place on the builder with a
    condition of its own type (`AuthorizedScope`), which the grammar compiles through a macro the registrar adds. When
@@ -206,7 +210,7 @@ class has a pattern that resolves, since `fnmatch()` refuses an identifier of `P
 | `query_union`, `query_from`, `query_or`, `query_changed` | A query that would escape the condition, at the call or when it runs                                                                                                                                 |
 | `scope_removed`                                          | A scope removed after the call, or never applied: called inside a `where` group or a relation's definition, or its query run past its scopes                                                         |
 | `reentrant`                                              | The model-level scope applied while a scope is decided, or on the subject's own model                                                                                                                |
-| `preview_write`                                          | A scope given a preview manager, compiled for an `update()`, `updateFrom()`, `delete()` or an insert from its query                                                                                  |
+| `preview_write`                                          | A scope given a preview manager, compiled for an `update()`, `updateFrom()`, `delete()` or an insert from its own query or one nesting it whole                                                      |
 
 - A guest, an inactive subject, or a morph type holding a NUL byte keeps no row, as `check()` denies every row.
 - A model's promise (`QueryableResource`) is that its key and tenant columns are read raw, with no hook changing them

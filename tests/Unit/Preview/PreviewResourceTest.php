@@ -59,4 +59,25 @@ final class PreviewResourceTest extends TestCase
         self::assertSame(['target_type' => 'user', 'target_id' => '42', 'identity_type' => 'person', 'identity_id' => '7', 'application' => 'admin'], $full->attributes());
         self::assertSame(['target_type' => 'user', 'target_id' => '42'], $bare->attributes());
     }
+
+    /**
+     * A preview is put in another scope keeping its target: the tenant, the
+     * application and whether it is decided just below the tenant are the ones
+     * given, and a preview is decided in its tenant unless told.
+     *
+     * @return void
+     */
+    public function testAPreviewIsPutInAnotherScopeKeepingItsTarget(): void
+    {
+        $target   = new Reference('user', '42');
+        $identity = new Reference('person', '7');
+        $tenant   = new Reference('tenant', 't2');
+        $preview  = new PreviewResource($target, $identity, new Reference('tenant', 't1'), 'admin');
+        $below    = $preview->in($tenant, 'billing', true);
+
+        self::assertFalse($preview->isBelow);
+        self::assertSame([$target, $identity, $tenant, 'billing', true], [$below->target, $below->identity, $below->tenant, $below->application, $below->isBelow]);
+        self::assertFalse($preview->in(null, null, false)->isBelow);
+        self::assertNull($preview->in(null, null, false)->tenant);
+    }
 }

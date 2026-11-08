@@ -166,6 +166,46 @@ final class ResourceScopeTest extends TestCase
     }
 
     /**
+     * A preview resource of a decision made just below its tenant is decided
+     * just below that tenant when the tenant is in scope, and at platform
+     * scope, never below it, when it is admitted from outside; any other
+     * resource of the tenant, a preview's of a decision in the tenant included,
+     * is decided in the tenant itself.
+     *
+     * @return void
+     */
+    public function testAPreviewOfADecisionBelowItsTenantIsDecidedBelowIt(): void
+    {
+        $subject = $this->request($this->org, 'admin');
+        $preview = new PreviewResource(new Reference('user', '1'), null, Reference::of($this->account), 'admin');
+        $seen    = [];
+
+        foreach ([$preview->in(Reference::of($this->account), 'admin', true), $preview, $this->postOf($this->account)] as $resource) {
+            $reference = $resource instanceof PreviewResource ? $resource->toResourceReference() : $resource;
+
+            ResourceScope::decide($subject, 'posts:edit', $reference, static function () use (&$seen): Decision {
+                $seen[] = [TenantScope::currentTenant(), TenantScope::isBelowTenant()];
+
+                return Decision::allow(DecisionStage::ALLOW);
+            });
+        }
+
+        $this->user->givePermission('posts:edit');
+
+        $outside = $preview->in(Reference::of($this->account), 'admin', true)->toResourceReference();
+
+        ResourceScope::decide($this->request($this->sibling, 'admin'), 'posts:edit', $outside, static function () use (&$seen): Decision {
+            $seen[] = [TenantScope::currentTenant(), TenantScope::isBelowTenant()];
+
+            return Decision::allow(DecisionStage::ALLOW);
+        });
+
+        $account = [$this->account->getMorphClass(), 'account'];
+
+        self::assertSame([[$account, true], [$account, false], [$account, false], [null, false]], $seen);
+    }
+
+    /**
      * A resource of the active tenant is decided in that tenant, where a grant
      * the subject holds there allows it.
      *

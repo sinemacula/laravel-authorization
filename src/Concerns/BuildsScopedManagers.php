@@ -6,7 +6,6 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException;
 use SineMacula\Laravel\Authorization\Preview\PreviewContext;
-use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 
@@ -119,12 +118,15 @@ trait BuildsScopedManagers
      * proved. A null scope is the request's tenant and application, captured
      * now. The caller must be allowed `authorization:subject.preview` on the
      * preview resource naming the subject and the scope (see
-     * `Preview\PreviewAdmission`), decided as an ordinary check about the
+     * `Preview\PreviewResource`), decided as an ordinary check about the
      * caller, with its own session, denies, boundaries, guardrails and caps:
-     * now, and again at every use of the preview, each check, batch, listing
-     * and execution of a query scoped through it, so a revocation is seen at
-     * the next use. A refusal throws `AuthorizationException` before anything
-     * about the subject is decided.
+     * now, in the scope, and again at every use of the preview, each check,
+     * batch, listing and compile of a query scoped through it, in the scope and
+     * in every other scope one of its decisions is made in, a resource's own
+     * tenant, the tenants below it or the platform (see
+     * `Preview\PreviewAdmission`), so a revocation is seen at the next use. A
+     * refusal throws `AuthorizationException` before anything about the subject
+     * is decided there.
      *
      * `check()`, `can()`, `cannot()`, `any()`, `all()`, `authorize()`,
      * `explain()`, `checkMany()`, `canEach()`, `filterAuthorized()`,
@@ -132,7 +134,7 @@ trait BuildsScopedManagers
      * preview decide about the subject through the one decision path, each
      * decision reported with both parties and every listed action reported too
      * (see `PreviewContext`). Nothing a preview evaluates may change the
-     * package's records, and its queries are read-only.
+     * package's records, and its queries refuse their own writes.
      *
      * @param  object  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope|null  $scope
@@ -148,7 +150,8 @@ trait BuildsScopedManagers
 
         $context = PreviewContext::of($this->scopedTo($this->currentSubject()), $subject, $scope ?? AuthorizationScope::current());
 
-        Previewing::current()->during($context->admit(...));
+        // Admitted now, as a use deciding nothing about the target.
+        $context->run(static fn (): null => null);
 
         $preview          = $this->scopedTo($context->target);
         $preview->preview = $context;

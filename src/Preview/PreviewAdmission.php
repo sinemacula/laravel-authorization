@@ -4,40 +4,45 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Preview;
 
-use SineMacula\Laravel\Authorization\Administration\AdministeredScope;
-use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
-use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
-use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
-use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
-use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
-use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * The reach of a preview's admission (N84): the right to preview, decided as
- * the previewer on the preview resource, is weighed after the allow, inside the
- * one decision path (D22), by the administered-scope rule (see
- * `AdministeredScope`), so it can only refuse what the allow permitted.
+ * The admissions of one use of a preview (N84): each check, each batch, each
+ * listing and each compile of a query scoped through the preview is one use,
+ * and is admitted wherever one of its decisions is made.
  *
- * The stage applies to a check of `authorization:subject.preview` on a preview
- * resource (see `PreviewResource`); any other check passes it untouched. The
- * right's own decision is made in the preview's tenant (see `ResourceScope`),
- * so a previewer whose right reaches that tenant, from a parent with authority
- * over its subtree or from the platform, is admitted from its own context, and
- * one whose right does not reach it is refused before the stage. The stage then
- * decides the right again at the preview's node, the tenant alone, never below
- * it, or the platform, in the preview's application, so a preview for no
- * application needs the right for every application. A platform preview reaches
- * every tenant, so it is also refused when anything that denies or caps the
- * previewer anywhere could limit the right (see `PossessionLimits`): a
- * previewer allowed the right at the platform but denied it in one tenant may
- * preview in no platform scope. A preview it refuses is refused as
- * `administration.scope` at the `administration` stage, the trace naming it;
- * one it admits records one satisfied step there.
+ * A decision about the target is made where `ResourceScope` puts it: in the
+ * preview's scope, in the tenant of a resource of that scope's subtree, a child
+ * tenant's included, or just below it, or at platform scope for a resource
+ * admitted from outside; a further check and a query's class of rows are made
+ * where they are asked. Before the target's sources are gathered in such a
+ * scope (see `Previewing::admit()`), the previewer is decided
+ * `authorization:subject.preview` on the preview resource of that scope, its
+ * tenant, its application and whether it is decided just below the tenant (see
+ * `PreviewResource`), through its own manager, with its session, denies,
+ * boundaries, guardrails and caps, in that scope, so a deny the previewer holds
+ * in a tenant refuses every answer made there. That is an ordinary check,
+ * recorded and reported as any is: a refusal throws `AuthorizationException`,
+ * carrying the previewer's decision, and no decision about the target is made
+ * in that scope, nor any after it in the use. A preview distributes no
+ * authority, so nothing beyond the ordinary check is weighed: a deny,
+ * conditional or not, refuses only where it applies, and a policy on the
+ * preview resource's attributes restricts who may be previewed, and where. No
+ * rank rule applies.
  *
- * No rank rule applies: an application restricts who may be previewed by
- * policy, on the preview resource's attributes.
+ * Each scope is admitted once in the use, keyed as the resolution cache keys a
+ * scope, by its tenant, whether it is decided just below it, and its
+ * application, so a batch over many resources costs one admission per scope its
+ * decisions are made in, not one per resource. Nothing is kept from one use to
+ * the next: a right revoked meanwhile refuses the next use.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,34 +51,93 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  */
 final class PreviewAdmission
 {
+    /** @var array<string, bool> The scopes the use is admitted in, each true, by the key of the scope. */
+    private array $admitted = [];
+
     /**
-     * Weigh the reach of the preview the check admits, when the decision
-     * allowed the right to preview on a preview resource, deciding the further
-     * checks it needs through the checks; return any other decision as it is.
+     * Create the admissions of a use, none made yet.
+     *
+     * @param  \SineMacula\Laravel\Authorization\AuthorizationManager  $admitter
+     * @param  \SineMacula\Laravel\Authorization\Preview\PreviewResource  $resource
+     */
+    public function __construct(
+
+        /** The previewer's own manager, which decides each admission. */
+        private readonly AuthorizationManager $admitter,
+
+        /** The preview resource naming the target, put in each scope admitted. */
+        private readonly PreviewResource $resource,
+    ) {}
+
+    /**
+     * Admit the use in the scope in place, once: decide the previewer the right
+     * on the preview resource of the scope, and throw `AuthorizationException`,
+     * carrying that decision, when it is not allowed, a step-up the right needs
+     * included.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    public function admitHere(): void
+    {
+        $key = TenantScope::scopeKey();
+
+        if ($this->admitted[$key] ?? false) {
+            return;
+        }
+
+        $tenant      = TenantScope::currentTenant();
+        $application = TenantScope::currentApplication();
+        $resource    = $this->resource->in($tenant === null ? null : new Reference(...$tenant), $application, TenantScope::isBelowTenant());
+
+        $this->authorize($resource);
+
+        $this->admitted[$key] = true;
+    }
+
+    /**
+     * Return the previewer, the subject the previewer's manager decides about.
+     *
+     * @return \SineMacula\Laravel\Authorization\Subject|null
+     */
+    public function previewer(): ?Subject
+    {
+        return $this->admitter->currentSubject();
+    }
+
+    /**
+     * Decide the previewer the right on the preview resource, recorded and
+     * reported as `authorize()` records and reports a refusal, and throw
+     * `AuthorizationException` when it is not allowed: a step-up the right
+     * needs is refused as any other denial, carrying the decision that asked
+     * for it.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Preview\PreviewResource  $resource
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    private function authorize(PreviewResource $resource): void
+    {
+        try {
+            $this->admitter->authorize(PackagePermissions::SUBJECT_PREVIEW, $resource);
+        } catch (InsufficientAuthenticationException $exception) {
+            throw self::refusal($exception->getDecision() ?? throw $exception);
+        }
+    }
+
+    /**
+     * Return the refusal the decision makes, an `AuthorizationException` with
+     * its reason and the one `denied` line, carrying the decision.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
-     * @param  string  $action
-     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
-     * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
-     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     * @return \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
-    public static function weigh(Decision $decision, string $action, ?ResourceReference $resource, FurtherChecks $checks): Decision
+    private static function refusal(Decision $decision): AuthorizationException
     {
-        $preview = $resource?->source;
-
-        if (!$preview instanceof PreviewResource || $action !== PackagePermissions::SUBJECT_PREVIEW || !$decision->isAllowed()) {
-            return $decision;
-        }
-
-        /** @var \SineMacula\Laravel\Authorization\Support\ResourceReference $resource */
-        $reason = AdministeredScope::refusal($action, $resource, new GrantScope($preview->tenant, $preview->application, false), $checks);
-
-        if ($reason === null) {
-            return $decision->withStep(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED));
-        }
-
-        $step = new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, cap: $reason->value);
-
-        return Decision::deny($reason, DecisionStage::ADMINISTRATION, [], [...$decision->trace, $step])->withFreshness($decision->freshness);
+        return ActingContext::refusal($decision);
     }
 }

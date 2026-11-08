@@ -131,4 +131,16 @@ trait PreviewsSubjects
 
         GrantService::instance()?->attachPolicy($grantee, $policy);
     }
+
+    /**
+     * Return a statement allowing the action once multifactor authentication is
+     * met.
+     *
+     * @param  string  $action
+     * @return array<string, mixed>
+     */
+    protected static function requiring(string $action): array
+    {
+        return ['effect' => 'allow', 'actions' => [$action], 'conditions' => ['authentication_requirement' => ['authentication' => ['multifactor' => []]]]];
+    }
 }

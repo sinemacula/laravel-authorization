@@ -12,20 +12,26 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
+use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
@@ -45,7 +51,7 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationManager::class)]
 final class AuthorizationManagerTest extends TestCase
 {
-    use PreviewsSubjects, ReadsDispatchedEvents;
+    use CatchesRefusals, PreviewsSubjects, ReadsDispatchedEvents;
 
     /** @var string A value a check is given, which no event may carry. */
     private const string SECRET = 'not-for-the-audit-trail';
@@ -195,7 +201,7 @@ final class AuthorizationManagerTest extends TestCase
 
     /**
      * A refusal on a preview is reported with both parties even when a listener
-     * has meanwhile recorded another decision, in the scope in place.
+     * has meanwhile recorded another decision, in the preview's own scope.
      *
      * @return void
      *
@@ -207,7 +213,7 @@ final class AuthorizationManagerTest extends TestCase
 
         [$manager, $target, $caller] = $this->previewed();
 
-        $preview = $manager->previewFor($target);
+        $preview = $manager->previewFor($target, AuthorizationScope::platform('admin'));
 
         Event::listen(DecisionEvaluated::class, static function (DecisionEvaluated $event) use ($manager): void {
             if ($event->previewer === null) {
@@ -229,6 +235,106 @@ final class AuthorizationManagerTest extends TestCase
         self::assertCount(1, $failed);
         self::assertEquals(Reference::of($caller), $failed[0]->previewer);
         self::assertEquals(Reference::of($target), $failed[0]->subject);
+        self::assertSame('admin', $failed[0]->application);
+        self::assertNull($failed[0]->tenant);
+    }
+
+    /**
+     * A listener of a preview's `AuthorizationFailed` runs as part of the
+     * preview's evaluation, so a management service it calls is refused as
+     * `administration.previewing` and nothing is written; the refusal itself is
+     * still thrown.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPreviewsRefusalListenersMayChangeNothing(): void
+    {
+        [$manager, $target] = $this->previewed();
+
+        $grantee = StubIdentity::query()->create(['id' => 'grantee']);
+        $preview = $manager->previewFor($target);
+        /** @var \ArrayObject<int, mixed> $calls */
+        $calls = new \ArrayObject;
+
+        Event::listen(AuthorizationFailed::class, static function (AuthorizationFailed $event) use ($grantee, $calls): void {
+            if ($event->previewer === null) {
+                return;
+            }
+
+            $calls[] = self::refusalOf(static fn (): mixed => GrantService::instance()?->grantPermission($grantee, self::permission('posts:edit')));
+        });
+
+        $refusal = self::refusalOf(static function () use ($preview): void {
+            $preview->authorize('posts:delete');
+        });
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $refusal->getReason());
+        self::assertCount(1, $calls);
+        self::assertInstanceOf(AuthorizationException::class, $calls[0]);
+        self::assertSame(DecisionReason::ADMINISTRATION_PREVIEWING, $calls[0]->getReason());
+        self::assertFalse($grantee->fresh()?->hasPermission('posts:edit'));
+    }
+
+    /**
+     * A preview's denial for a requirement made of the target is refused with a
+     * plain `AuthorizationException`, carrying the decision, never with the
+     * step-up exception: the target has no session, so no step-up by the caller
+     * could meet it. Its `AuthorizationFailed` still names both parties.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPreviewsUnmetRequirementAsksForNoStepUp(): void
+    {
+        Event::fake([AuthorizationFailed::class]);
+
+        $caller = self::previewer();
+        $target = self::target('target', []);
+
+        self::attachStatements($target, 'stepped-up-export', [self::requiring('reports:export')]);
+
+        $preview = $this->signIn($caller, 'session-1', null, null, new StubRequirementChecker(RequirementResult::met()))->previewFor($target);
+        $refusal = self::refusalOf(static function () use ($preview): void {
+            $preview->authorize('reports:export');
+        });
+
+        self::assertSame(AuthorizationException::class, $refusal::class);
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $refusal->getReason());
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $refusal->getDecision()?->reason);
+
+        $failed = self::dispatchedEvents(AuthorizationFailed::class);
+
+        self::assertCount(1, $failed);
+        self::assertEquals(Reference::of($caller), $failed[0]->previewer);
+        self::assertEquals(Reference::of($target), $failed[0]->subject);
+    }
+
+    /**
+     * A listing naming any subject on a preview, a model or a resolved
+     * `Subject`, is refused as a change of the preview's target by
+     * `permissionsFor()` itself.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAListingNamingASubjectIsRefusedAsARetarget(): void
+    {
+        [$manager, $target] = $this->previewed();
+
+        $preview = $manager->previewFor($target);
+
+        foreach ([$target, new Subject($target, $target)] as $named) {
+            $refusal = self::refusalOf(static fn (): mixed => $preview->permissionsFor($named, AuthorizationScope::current()));
+
+            self::assertInstanceOf(InvalidPreviewException::class, $refusal);
+            self::assertStringContainsString('permissionsFor()', $refusal->getMessage());
+        }
     }
 
     /**

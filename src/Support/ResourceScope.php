@@ -28,7 +28,9 @@ use SineMacula\Laravel\Authorization\Subject;
  * allow stage alone, after every deny and cap, the resource's tenant's
  * guardrails included (see `GuardrailResolver`). The application stays the
  * request's. A resource with no tenant is decided where the request is, but an
- * operation or a preview resource with none at platform scope.
+ * operation or a preview resource with none at platform scope. A preview
+ * resource of a decision made just below its tenant (see `PreviewResource`) is
+ * decided just below that tenant, when it is in scope.
  *
  * A bulk check reads what its resources need in the scope each is decided in,
  * through `prepare()`, which groups them as `decide()` scopes them, admitting
@@ -74,7 +76,7 @@ final class ResourceScope
             return Decision::deny(DecisionReason::TENANT_SCOPE, DecisionStage::TENANT);
         }
 
-        return TenantScope::within($inScope ? $tenant : null, $application, $decide);
+        return TenantScope::within($inScope ? $tenant : null, $application, $decide, $inScope && self::isBelow($resource));
     }
 
     /**
@@ -168,6 +170,18 @@ final class ResourceScope
     private static function isPlatformWide(ResourceReference $resource): bool
     {
         return $resource->source instanceof OperationResource || $resource->source instanceof PreviewResource;
+    }
+
+    /**
+     * Determine whether a resource in scope is decided just below its tenant
+     * rather than in it: a preview resource of a decision made there.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @return bool
+     */
+    private static function isBelow(ResourceReference $resource): bool
+    {
+        return $resource->source instanceof PreviewResource && $resource->source->isBelow;
     }
 
     /**

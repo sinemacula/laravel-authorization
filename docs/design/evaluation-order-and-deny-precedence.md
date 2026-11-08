@@ -368,10 +368,7 @@ refuses never reads the permissions, since the session stage runs before the all
       every one holds, it adds one `satisfied` step and the allow stands. A further check a constraint needs, such as
       `authorization:administration.impersonated`, is decided as the subject through every stage up to the allow, in the
       scope in place, never through the administration stage again. A check of an administration action with no
-      operation resource, or with another action's, passes the stage untouched and records nothing. A check of
-      `authorization:subject.preview` on its own preview resource (`authorization:preview:*`) runs the stage too: it
-      decides the right again at the preview's node, the tenant alone or the platform, and refuses as
-      `administration.scope` when anything could limit the right across that reach (see [Preview](preview.md)).
+      operation resource, or with another action's, passes the stage untouched and records nothing.
    8. *Implicit*: nothing allowed. The denial is `insufficient_authentication` when an allow statement names the action
       and the resource and only its authentication requirement is unmet (invariant 7); `condition_failed` when an allow
       statement names them but its conditions do not hold or cannot be decided; and `no_match` otherwise.

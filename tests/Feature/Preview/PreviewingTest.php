@@ -13,9 +13,12 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Preview\PreviewAdmission;
 use SineMacula\Laravel\Authorization\Preview\Previewing;
+use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Feature\Stubs\StubIdentity;
@@ -23,8 +26,9 @@ use Tests\TestCase;
 
 /**
  * Feature tests for `Previewing`, what the request or job knows of its previews
- * (N87): nothing a preview evaluates, and nothing built from one, acts with
- * authority, and nothing of a request's previews reaches the next.
+ * (N84, N87): nothing a preview evaluates, and nothing built from one, acts
+ * with authority, each use's subject is admitted where its sources are
+ * gathered, and nothing of a request's previews reaches the next.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -176,6 +180,63 @@ final class PreviewingTest extends TestCase
         unset($target);
 
         self::assertNull($weak->get());
+    }
+
+    /**
+     * While a use runs, the subject it decides about, that very instance, is
+     * held with its admission: its previewer is named for it alone, and the
+     * preview is admitted for it alone, so a refused admission refuses it,
+     * until the use returns or throws; without the binding, nothing is admitted
+     * or named.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAUseHoldsItsSubjectWithItsAdmissionUntilItEnds(): void
+    {
+        $caller    = self::previewer('previewer', false);
+        $target    = self::target();
+        $about     = new Subject($target, $target);
+        $apart     = new Subject($target, $target);
+        $admission = new PreviewAdmission($this->signIn($caller), new PreviewResource(Reference::of($target), null, null, null));
+        $previews  = Previewing::current();
+
+        $named = $previews->evaluating($about, $admission, static function () use ($about, $apart): array {
+            Previewing::admit($apart);
+
+            return [Previewing::previewerOf($about)?->subject, Previewing::previewerOf($apart), Previewing::current()->isEvaluating()];
+        });
+
+        self::assertSame([$caller, null, true], $named);
+        self::assertNull(Previewing::previewerOf($about));
+
+        Previewing::admit($about);
+
+        self::assertInstanceOf(\RuntimeException::class, self::refusalOf(static fn (): mixed => $previews->evaluating($about, $admission, static fn (): never => self::failing())));
+        self::assertNull(Previewing::previewerOf($about));
+        self::assertFalse($previews->isEvaluating());
+
+        $admit = static function () use ($about): void {
+            Previewing::admit($about);
+        };
+        $refusal = self::refusalOf(static function () use ($previews, $about, $admission, $admit): void {
+            $previews->evaluating($about, $admission, $admit);
+        });
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertSame(DecisionReason::NO_MATCH, $refusal->getReason());
+
+        $app = $this->app;
+
+        self::assertNotNull($app);
+
+        $app->offsetUnset(Previewing::class);
+
+        Previewing::admit($about);
+
+        self::assertNull(Previewing::previewerOf($about));
+        self::assertFalse($app->bound(Previewing::class));
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Preview;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
@@ -70,6 +71,8 @@ final class PreviewContextTest extends TestCase
 
         self::assertNotSame($manager, $preview);
         self::assertSame($target, $preview->currentSubject()?->subject);
+        self::assertSame($target, $preview->currentSubject()->identity);
+        self::assertSame('web', $preview->currentSubject()->guard);
         self::assertNull($preview->currentSubject()->session);
         self::assertSame($caller, $manager->currentSubject()?->subject);
         self::assertSame('session-1', $manager->currentSubject()->session);
@@ -133,34 +136,6 @@ final class PreviewContextTest extends TestCase
         foreach ($checker->calls as [, $subject]) {
             self::assertSame($caller, $subject->subject);
             self::assertSame('session-1', $subject->session);
-        }
-    }
-
-    /**
-     * A right to preview that needs a step-up the caller has not met refuses
-     * the preview with `AuthorizationException`, as
-     * `insufficient_authentication`, never with the step-up exception, so a
-     * refusal always has the one shape.
-     *
-     * @return void
-     *
-     * @throws \Throwable
-     */
-    public function testAnUnmetStepUpRefusesThePreviewAsAnAuthorizationException(): void
-    {
-        $caller = self::previewer('previewer', false);
-        $target = self::target();
-
-        self::attachStatements($caller, 'stepped-up-preview', [self::requiring(PackagePermissions::SUBJECT_PREVIEW)]);
-
-        $manager = $this->signIn($caller, 'session-1', null, null, new StubRequirementChecker(RequirementResult::unmet(['multifactor'])));
-
-        try {
-            $manager->previewFor($target);
-            self::fail('The preview was admitted without its step-up.');
-        } catch (AuthorizationException $exception) {
-            self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $exception->getReason());
-            self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $exception->getDecision()?->reason);
         }
     }
 
@@ -267,6 +242,56 @@ final class PreviewContextTest extends TestCase
     }
 
     /**
+     * The provenance a preview names for a decision whose own is no longer
+     * recorded is made in the preview's scope, naming both parties, whatever
+     * scope the request is in.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheFallbackProvenanceIsMadeInThePreviewsScope(): void
+    {
+        $caller  = self::previewer();
+        $target  = self::target();
+        $tenant  = StubTenant::query()->create(['id' => 'scoped', 'name' => 'scoped']);
+        $context = PreviewContext::of($this->signIn($caller), $target, AuthorizationScope::tenant($tenant, 'admin'));
+
+        $provenance = $context->provenance();
+
+        self::assertEquals(Reference::of($target), $provenance->subject);
+        self::assertEquals(Reference::of($caller), $provenance->previewer);
+        self::assertEquals(Reference::of($tenant), $provenance->tenant);
+        self::assertSame('admin', $provenance->application);
+        self::assertNull(TenantScope::currentApplication());
+    }
+
+    /**
+     * A use sets the request's resolution memo aside and restores it, so the
+     * caller's own check, warm before the use, reads nothing again after it,
+     * while the next use is admitted afresh.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAUseLeavesWhatTheCallerResolvedInPlace(): void
+    {
+        $caller  = self::previewer();
+        $target  = self::target();
+        $tenant  = StubTenant::query()->create(['id' => 'memo', 'name' => 'memo']);
+        $manager = $this->signIn($caller, 'session-1', $tenant);
+        $preview = $manager->previewFor($target);
+
+        $caller->givePermission(self::permission('posts:edit'));
+
+        self::assertTrue($manager->can('posts:edit'));
+        self::assertTrue($preview->can('posts:read'));
+        self::assertSame(0, self::queriesOf(static fn (): bool => $manager->can('posts:edit')));
+        self::assertGreaterThan(0, self::queriesOf(static fn (): bool => $preview->can('posts:read')));
+    }
+
+    /**
      * The target is decided as a subject of the preview's scope: its tenant is
      * the scope's, as a policy reads it under `subject.tenant`, whatever tenant
      * it was named in.
@@ -314,6 +339,7 @@ final class PreviewContextTest extends TestCase
             static fn (): mixed => $preview->permissionsFor(null, AuthorizationScope::tenant($tenant)),
             static fn (): mixed => $inTenant->permissionsFor(null, AuthorizationScope::tenant($other)),
             static fn (): mixed => $preview->permissionsFor($target, AuthorizationScope::current()),
+            static fn (): mixed => $preview->permissionsFor(new Subject($target, $target), AuthorizationScope::current()),
         ];
 
         foreach ($refusals as $refusal) {
@@ -354,9 +380,38 @@ final class PreviewContextTest extends TestCase
             self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $exception->getReason());
         }
 
+        $unsaved = new StubIdentity;
+
+        try {
+            $this->signIn($unsaved)->previewFor($target);
+            self::fail('A previewer naming no record previewed.');
+        } catch (AuthorizationException $exception) {
+            self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $exception->getReason());
+        }
+
         $this->expectException(InvalidPreviewException::class);
 
         $this->signIn(self::previewer())->previewFor(new \stdClass);
+    }
+
+    /**
+     * Return how many queries the callback runs.
+     *
+     * @param  \Closure(): mixed  $callback
+     * @return int
+     */
+    private static function queriesOf(\Closure $callback): int
+    {
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        try {
+            $callback();
+        } finally {
+            DB::disableQueryLog();
+        }
+
+        return \count(DB::getQueryLog());
     }
 
     /**
@@ -374,17 +429,5 @@ final class PreviewContextTest extends TestCase
             self::assertSame(DecisionReason::NO_MATCH, $exception->getReason());
             self::assertFalse($exception->getDecision()?->isAllowed());
         }
-    }
-
-    /**
-     * Return a statement allowing the action once multifactor authentication is
-     * met.
-     *
-     * @param  string  $action
-     * @return array<string, mixed>
-     */
-    private static function requiring(string $action): array
-    {
-        return ['effect' => 'allow', 'actions' => [$action], 'conditions' => ['authentication_requirement' => ['authentication' => ['multifactor' => []]]]];
     }
 }

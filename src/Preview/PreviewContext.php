@@ -6,16 +6,15 @@ namespace SineMacula\Laravel\Authorization\Preview;
 
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
-use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
-use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -32,18 +31,25 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * evaluated in, given, or the request's when the preview was built.
  *
  * Every use of the preview (`run()`), each check, each batch, each listing and
- * each execution of a query scoped through it, first admits it again: the
- * previewer is decided `authorization:subject.preview` on the preview resource,
+ * each compile of a query scoped through it, is admitted afresh (see
+ * `PreviewAdmission`): first in the preview's scope, then wherever one of its
+ * decisions about the target is made, a resource's own tenant, the tenants
+ * below it or the platform, each scope once in the use. The previewer is
+ * decided `authorization:subject.preview` there on the preview resource,
  * through the previewer's own manager, with its session, denies, boundaries,
- * guardrails and caps, recorded and reported as any check is (see
- * `PreviewAdmission`). Admission is never kept from one use to the next, so a
- * right revoked meanwhile refuses the next use. A refusal throws
- * `AuthorizationException`, carrying the previewer's decision, before anything
- * about the target is decided, so it reveals nothing about the target. Once
- * admitted, the target is evaluated in the scope, which is put in place for the
- * tenant and the application, and restored afterwards, even when the evaluation
- * throws (see `AuthorizationScope`). The whole use runs marked as a preview
- * being evaluated (see `Previewing`), so nothing it calls acts with authority.
+ * guardrails and caps, recorded and reported as any check is. Admission is
+ * never kept from one use to the next, so a right revoked meanwhile refuses the
+ * next use. A refusal throws `AuthorizationException`, carrying the previewer's
+ * decision, before anything about the target is decided in that scope, so it
+ * reveals nothing about the target there; in a batch, a listing or a query, it
+ * refuses the whole call, which returns nothing. Once admitted, the target is
+ * evaluated in the scope, which is put in place for the tenant and the
+ * application, and restored afterwards, even when the evaluation throws (see
+ * `AuthorizationScope`). The whole use runs marked as a preview being evaluated
+ * (see `Previewing`), so nothing it calls acts with authority, and with the
+ * request's resolution memo set aside and restored afterwards (see
+ * `ResolutionCache::batch()`), so a use leaves what the caller's own checks
+ * have resolved in place.
  *
  * The target is evaluated in the caller's request context: what the request,
  * the environment and the authentication namespace supply is the caller's
@@ -104,11 +110,13 @@ final readonly class PreviewContext
     public static function of(AuthorizationManager $admitter, object $target, AuthorizationScope $scope): self
     {
         $previewer = $admitter->currentSubject();
-        $reference = DecisionProvenance::of($previewer)->subject ?? throw self::refusal(Decision::deny(DecisionReason::SUBJECT_UNRESOLVED, DecisionStage::SUBJECT));
+        $reference = DecisionProvenance::of($previewer)->subject ?? throw self::unresolved();
+
+        /** @var \SineMacula\Laravel\Authorization\Subject $previewer */
 
         // A copy of its own, with no session, so the previewer's subject is
         // never taken for the target, even when it previews itself.
-        $named   = $target instanceof Subject ? $target : $previewer?->withSubject($target) ?? new Subject($target, $target);
+        $named   = $target instanceof Subject ? $target : $previewer->withSubject($target);
         $subject = new Subject($named->subject, $named->identity, $named->tenant, $named->application, $named->guard);
 
         $about     = DecisionProvenance::of($subject);
@@ -119,44 +127,46 @@ final readonly class PreviewContext
     }
 
     /**
-     * Admit the preview, then evaluate it through the callback, given the
-     * target in the scope, with the scope in place, and return what the
-     * callback returns, the whole marked as a preview being evaluated. A
-     * refused admission throws `AuthorizationException` (see `admit()`) before
-     * the callback is called.
+     * Admit the preview in its scope, then evaluate it through the callback,
+     * given the target in the scope, with the scope in place, and return what
+     * the callback returns: one use, every decision of which about the target
+     * is admitted where it is made (see `PreviewAdmission`), the whole marked
+     * as a preview being evaluated, with the request's resolution memo set
+     * aside. A refused admission throws `AuthorizationException` before
+     * anything about the target is decided where it is refused.
      *
      * @template TResult
      *
-     * @param  \Closure(\SineMacula\Laravel\Authorization\Subject|null): TResult  $evaluate
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Subject): TResult  $evaluate
      * @return TResult
      */
     public function run(\Closure $evaluate): mixed
     {
-        return Previewing::current()->during(function () use ($evaluate): mixed {
-            $this->admit();
+        $about     = $this->scope->subjectIn($this->target);
+        $admission = new PreviewAdmission($this->admitter, $this->resource);
+        $evaluated = static function () use ($admission, $evaluate, $about): mixed {
+            $admission->admitHere();
 
-            return $this->scope->within(fn (): mixed => $evaluate($this->scope->subjectIn($this->target)));
-        });
+            return $evaluate($about);
+        };
+
+        $use = fn (): mixed => Previewing::current()->evaluating($about, $admission, fn (): mixed => $this->scope->within($evaluated));
+
+        $cache = ResolutionCache::instance();
+
+        return $cache === null ? $use() : $cache->batch($use, true);
     }
 
     /**
-     * Decide the previewer `authorization:subject.preview` on the preview
-     * resource, through the previewer's manager, recorded and reported as
-     * `authorize()` records and reports a refusal, and throw
-     * `AuthorizationException`, carrying that decision, when it is not allowed,
-     * a step-up the right needs included.
+     * Return the provenance of a decision about the target made in the
+     * preview's scope, naming the previewer: what reports a decision whose own
+     * provenance is no longer recorded.
      *
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @return \SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance
      */
-    public function admit(): void
+    public function provenance(): DecisionProvenance
     {
-        try {
-            $this->admitter->authorize(PackagePermissions::SUBJECT_PREVIEW, $this->resource);
-        } catch (InsufficientAuthenticationException $exception) {
-            throw self::refusal($exception->getDecision() ?? Decision::deny(DecisionReason::INSUFFICIENT_AUTHENTICATION, DecisionStage::ALLOW));
-        }
+        return $this->scope->within(fn (): DecisionProvenance => DecisionProvenance::of($this->target, $this->previewer));
     }
 
     /**
@@ -179,14 +189,14 @@ final readonly class PreviewContext
     }
 
     /**
-     * Return the refusal the decision makes, an `AuthorizationException` with
-     * its reason and the one `denied` line, carrying the decision.
+     * Return the refusal of a previewer that names no record, a guest included,
+     * as `subject_unresolved`, an `AuthorizationException` with the one
+     * `denied` line, carrying the denial.
      *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
      * @return \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
-    private static function refusal(Decision $decision): AuthorizationException
+    private static function unresolved(): AuthorizationException
     {
-        return ActingContext::refusal($decision);
+        return ActingContext::refusal(Decision::deny(DecisionReason::SUBJECT_UNRESOLVED, DecisionStage::SUBJECT));
     }
 }

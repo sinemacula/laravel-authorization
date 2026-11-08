@@ -13,8 +13,7 @@ use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
-use SineMacula\Laravel\Authorization\Preview\PreviewAdmission;
-use SineMacula\Laravel\Authorization\Preview\PreviewResource;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
@@ -239,7 +238,10 @@ final class DecisionPipeline
      * caps, as `decideGrants()` weighs them. `whereAuthorized()` reads them
      * before they are weighed, so a query is decided from exactly the sources
      * `check()` is. A check of a bulk check reads its resource's attributes
-     * through the batch's.
+     * through the batch's. The subject a running use of a preview decides about
+     * is first admitted in the scope in place, where its sources are gathered
+     * (see `Preview\Previewing::admit()`), so a decision about a preview's
+     * target is never made where its previewer may not preview.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -254,6 +256,10 @@ final class DecisionPipeline
      */
     public function sources(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes = null): CheckSources
     {
+        // The subject of a preview's use is admitted where its sources are
+        // gathered, before any is read (see `Preview\PreviewAdmission`).
+        Previewing::admit($subject);
+
         $policies   = $this->gatherPolicies($subject, $resource);
         $guardrails = $action === PackagePermissions::GUARDRAIL_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
         $boundaries = SubjectGrants::boundaries($subject);
@@ -364,9 +370,7 @@ final class DecisionPipeline
      * check they need is decided here, as this one is up to the allow, in the
      * scope in place when they ask, and never through the administration stage
      * again; the stage also learns the tenant the check was made from, before
-     * the operation's own tenant was put in place. An allow of the right to
-     * preview on a preview resource passes the preview's reach the same way
-     * (see `PreviewAdmission`).
+     * the operation's own tenant was put in place.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -385,13 +389,10 @@ final class DecisionPipeline
         ?Reference $from = null,
     ): Decision {
         $decision = $this->decideAlone($subject, $action, $resource, $context, $attributes);
-        $source   = $resource?->source;
 
-        return match (true) {
-            $source instanceof OperationResource => OperationConstraints::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from)),
-            $source instanceof PreviewResource   => PreviewAdmission::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from)),
-            default                              => $decision,
-        };
+        return $resource?->source instanceof OperationResource
+            ? OperationConstraints::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from))
+            : $decision;
     }
 
     /**

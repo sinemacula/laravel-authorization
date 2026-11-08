@@ -6,13 +6,20 @@ namespace Tests\Feature\Query;
 
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Preview\PreviewAdmission;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
+use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Query\ScopeAnchors;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ScopesQueries;
+use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
@@ -135,5 +142,44 @@ final class ScopeAnchorsTest extends TestCase
         $identity->givePermission(Permission::create(['name' => 'posts:list']), null, new Reference('teams', 'identity'));
 
         self::assertSame(['identity', 'railed'], $ids(ScopeAnchors::read(new Subject(new \stdClass, $identity), (new ScopedPost)->getMorphClass(), true)[0]));
+    }
+
+    /**
+     * For the subject of a running use of a preview, the previewer's grant
+     * tenants are read too, with the tenants of the policies attached to
+     * preview resources; for any other subject, the same principal named apart
+     * included, and once the use has ended, they are not.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPreviewsSubjectReadsItsPreviewersTenantsToo(): void
+    {
+        $target = StubIdentity::create(['id' => 'target']);
+        $caller = StubIdentity::create(['id' => 'caller']);
+
+        $target->givePermission(Permission::create(['name' => 'posts:view']), null, new Reference('teams', 'theirs'));
+        $caller->givePermission(Permission::create(['name' => PackagePermissions::SUBJECT_PREVIEW]), null, new Reference('teams', 'callers'));
+        app(ResourcePolicyService::class)->attach(self::storedPolicy('previews', []), PreviewResource::TYPE, new Reference('teams', 'previews'));
+
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($caller, $caller)));
+        $this->app?->forgetInstance(AuthorizationManager::class);
+
+        /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
+        $manager   = $this->app?->make(AuthorizationManager::class);
+        $about     = new Subject($target, $target);
+        $type      = (new ScopedPost)->getMorphClass();
+        $admission = new PreviewAdmission($manager, new PreviewResource(Reference::of($target), null, null, null));
+        $ids       = static fn (array $tenants): array => \array_map(static fn (Reference $tenant): string => $tenant->id, $tenants);
+
+        [$during, $apart] = Previewing::current()->evaluating($about, $admission, static fn (): array => [
+            ScopeAnchors::read($about, $type, true)[0],
+            ScopeAnchors::read(new Subject($target, $target), $type, true)[0],
+        ]);
+
+        self::assertEqualsCanonicalizing(['theirs', 'callers', 'previews'], $ids($during));
+        self::assertSame(['theirs'], $ids($apart));
+        self::assertSame(['theirs'], $ids(ScopeAnchors::read($about, $type, true)[0]));
     }
 }

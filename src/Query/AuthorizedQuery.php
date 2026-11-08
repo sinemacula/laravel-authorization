@@ -65,11 +65,14 @@ use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
  * not being run (nested in another, or compiled to text) is refused
  * (`read_replica`), since it cannot be.
  *
- * A scope compiled for a preview (`Authorization::previewFor()`) is read-only:
- * compiled for a write, an `update()`, `updateFrom()`, `delete()`,
+ * A scope compiled for a preview (`Authorization::previewFor()`) refuses its
+ * own writes: compiled for a write, an `update()`, `updateFrom()`, `delete()`,
  * `insertUsing()` or `insertOrIgnoreUsing()`, of its own query or of one it is
- * nested in, it is refused (`preview_write`), so a preview never changes a row.
- * Which is running is read from the call stack, as `InlinedQuery` reads it.
+ * nested in whole, it is refused (`preview_write`). Which is running is read
+ * from the call stack, as `InlinedQuery` reads it. A query that takes it in as
+ * SQL text (`whereIn()`, `fromSub()`, `joinSub()`, `selectSub()`) compiles it
+ * when it is taken in, before any write runs, so a write of that other query is
+ * not refused, and deletes or changes the rows the preview's subject may see.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

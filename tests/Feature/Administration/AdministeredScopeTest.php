@@ -20,7 +20,6 @@ use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Subject;
@@ -182,30 +181,6 @@ final class AdministeredScopeTest extends TestCase
     }
 
     /**
-     * The rule weighs any action it is given on any resource, a preview's right
-     * on a preview resource included: the action is decided again on that
-     * resource at the reach's node, in its application.
-     *
-     * @return void
-     *
-     * @throws \Throwable
-     */
-    public function testTheActionGivenIsDecidedOnTheResourceGiven(): void
-    {
-        $preview = (new PreviewResource(new Reference('user', '1'), null, new Reference('tenant', 'a'), 'admin'))->toResourceReference();
-        $asked   = [];
-        $actor   = StubIdentity::query()->firstOrCreate(['id' => 'admin']);
-        $checks  = new FurtherChecks(new Subject($actor, $actor), static function (string $action, ?ResourceReference $on) use (&$asked): Decision {
-            $asked[] = [$action, $on?->type, TenantScope::currentTenant(), TenantScope::currentApplication()];
-
-            return Decision::allow(DecisionStage::ALLOW);
-        }, static fn (): null => null);
-
-        self::assertNull(AdministeredScope::refusal(PackagePermissions::SUBJECT_PREVIEW, $preview, new GrantScope(new Reference('tenant', 'a'), 'admin', false), $checks));
-        self::assertSame([[PackagePermissions::SUBJECT_PREVIEW, PreviewResource::TYPE, ['tenant', 'a'], 'admin']], $asked);
-    }
-
-    /**
      * Return why the role grant, decided across the reach through the checks,
      * is refused.
      *
@@ -218,7 +193,7 @@ final class AdministeredScopeTest extends TestCase
         $role      = Role::query()->firstOrCreate(['name' => 'named']);
         $operation = OperationResource::grant(PackagePermissions::ROLE_GRANT, StubIdentity::query()->firstOrCreate(['id' => 'u1']), $role, $reach);
 
-        return AdministeredScope::refusal($operation->action, $operation->toResourceReference(), $reach, $checks);
+        return AdministeredScope::refusal($operation, $operation->toResourceReference(), $reach, $checks);
     }
 
     /**

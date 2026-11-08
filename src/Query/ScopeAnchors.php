@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
+use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
@@ -35,6 +37,13 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * the request's scope reads (its tenant chain's guardrails, and the denies
  * attached in its tenant chain), so they are told apart.
  *
+ * For the target of a running use of a preview, whose every class of rows is
+ * also admitted, as the previewer, where it is decided (see
+ * `Preview\PreviewAdmission`), the grants are read for the previewer too, with
+ * the tenants of every policy attached to preview resources, so the previewer
+ * reads the same sources across each class as the target does, and a class is
+ * cut wherever either's might differ.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -44,8 +53,9 @@ final class ScopeAnchors
 {
     /**
      * Return the tenants every source of a decision may sit at, the subject's
-     * grants read only when asked, and those whose own sources a row admitted
-     * from outside the scope reads; each tenant once.
+     * grants, and a preview's previewer's, read only when asked, and those
+     * whose own sources a row admitted from outside the scope reads; each
+     * tenant once.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $type
@@ -59,7 +69,11 @@ final class ScopeAnchors
             self::tenantsOf('resource_policies', static fn (Builder $query, string $table): Builder => $query->where("{$table}.resource_type", $type)),
         ]);
 
-        return [$isGrantRead ? self::distinct([...self::grantTenantsOf($subject), $admitted]) : $admitted, $admitted];
+        $previewer = Previewing::previewerOf($subject);
+        $previews  = static fn (Builder $query, string $table): Builder => $query->where("{$table}.resource_type", PreviewResource::TYPE);
+        $preview   = $previewer === null ? [] : [...self::grantTenantsOf($previewer), self::tenantsOf('resource_policies', $previews)];
+
+        return [$isGrantRead ? self::distinct([...self::grantTenantsOf($subject), ...$preview, $admitted]) : $admitted, $admitted];
     }
 
     /**

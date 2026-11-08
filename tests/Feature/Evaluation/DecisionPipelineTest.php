@@ -22,9 +22,12 @@ use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Preview\PreviewAdmission;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
@@ -38,6 +41,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\PreviewsSubjects;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubSessionPolicySource;
@@ -60,6 +64,8 @@ use Tests\TestCase;
 #[CoversClass(DecisionPipeline::class)]
 final class DecisionPipelineTest extends TestCase
 {
+    use PreviewsSubjects;
+
     /**
      * Tear down Mockery instances after every test.
      *
@@ -419,41 +425,31 @@ final class DecisionPipelineTest extends TestCase
     }
 
     /**
-     * An allow of the right to preview on a preview resource passes the
-     * preview's reach, at the administration stage after the allow: at the
-     * platform, a deny of the right anywhere refuses it as
-     * `administration.scope`; in a tenant, decided at the tenant's node, it is
-     * admitted; another action on the resource is never weighed.
+     * The subject a running use of a preview decides about has its sources
+     * gathered only once the preview is admitted in the scope in place: any
+     * other subject, the same principal named apart included, is decided as
+     * always, while a refused admission throws before the subject's check is
+     * decided.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testThePreviewStageFollowsTheAllow(): void
+    public function testAPreviewsSubjectIsAdmittedBeforeItsSourcesAreGathered(): void
     {
-        $user    = StubIdentity::create(['id' => 'previewer-1']);
-        $subject = new Subject($user, $user);
-        $tenant  = new Reference('tenant', 'a');
+        $caller    = self::previewer('previewer', false);
+        $target    = self::target();
+        $about     = new Subject($target, $target);
+        $apart     = new Subject($target, $target);
+        $pipeline  = $this->pipeline();
+        $admission = new PreviewAdmission($this->signIn($caller), new PreviewResource(Reference::of($target), null, null, null));
 
-        $user->givePermission(Permission::create(['name' => 'authorization:*']));
-        $boss = ['effect' => 'deny', 'actions' => [PackagePermissions::SUBJECT_PREVIEW], 'resources' => [PreviewResource::TYPE . ':user:boss']];
+        self::assertTrue(Previewing::current()->evaluating($about, $admission, static fn (): bool => $pipeline->decide($apart, 'posts:read', null, [])->isAllowed()));
+        self::assertTrue($pipeline->decide($about, 'posts:read', null, [])->isAllowed());
 
-        $user->attachPolicy(self::stored('not-the-boss', [$boss]));
+        $this->expectException(AuthorizationException::class);
 
-        $pipeline = $this->pipeline();
-        $platform = (new PreviewResource(new Reference('user', '1'), null, null, null))->toResourceReference();
-        $inTenant = (new PreviewResource(new Reference('user', '1'), null, $tenant, null))->toResourceReference();
-        $refused  = $pipeline->decide($subject, PackagePermissions::SUBJECT_PREVIEW, $platform, []);
-        $admitted = TenantScope::within($tenant, null, static fn (): Decision => $pipeline->decide($subject, PackagePermissions::SUBJECT_PREVIEW, $inTenant, []));
-
-        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, $refused->reason);
-        self::assertSame(DecisionStage::ADMINISTRATION, $refused->stage);
-        self::assertTrue($admitted->isAllowed());
-        self::assertEquals(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED), $admitted->trace[\count($admitted->trace) - 1]);
-        $other = $pipeline->decide($subject, PackagePermissions::ROLE_READ, $platform, []);
-
-        self::assertTrue($other->isAllowed());
-        self::assertNotSame(DecisionStage::ADMINISTRATION, $other->trace[\count($other->trace) - 1]->stage);
+        Previewing::current()->evaluating($about, $admission, static fn (): Decision => $pipeline->decide($about, 'posts:read', null, []));
     }
 
     /**
