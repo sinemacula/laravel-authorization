@@ -15,16 +15,17 @@ use SineMacula\Laravel\Authorization\Support\Messages;
  * the package's route middleware, denies a request.
  *
  * Extends Laravel's own authorization exception, so the application's handler
- * renders it as a `403`. It carries the decision's reason code and nothing
- * else: the action, the resource, the matched statement and the trace stay out
- * of the exception, and the message is the generic `denied` line of the
- * package's `authorization` language file, whatever the reason, so an
- * application that words a message per reason reads the reason code. A denied
- * decision, from `authorize()` or the `permission` and `authorize` middleware,
- * is recorded as the manager's last decision and fires the
- * `AuthorizationFailed` event first, so a consumer that needs the full decision
- * reads it there. A missing role is not a decision: it carries `no_match`,
- * records nothing and fires no event.
+ * renders it as a `403`. It carries the decision's reason code and, for audit,
+ * the denying decision (`getDecision()`), neither of which reaches the client:
+ * the message is the generic `denied` line of the package's `authorization`
+ * language file, whatever the reason, so an application that words a message
+ * per reason reads the reason code. A denied decision, from `authorize()` or
+ * the `permission` and `authorize` middleware, is recorded as the manager's
+ * last decision and fires the `AuthorizationFailed` event first, which carries
+ * references, ids and key names alone, so a consumer that needs the full
+ * decision reads it from `getDecision()` or `Authorization::lastDecision()`. A
+ * missing role is not a decision: it carries `no_match`, records nothing and
+ * fires no event.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\GuardrailException;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -244,24 +245,31 @@ final class GuardrailAuthorityTest extends TestCase
         ]);
         DB::table('policies')->where('id', $broken->id)->update(['document' => '{"statements": "broken"}']);
 
-        Event::fake([DecisionEvaluated::class]);
+        /** @var \ArrayObject<int, \SineMacula\Laravel\Authorization\Evaluation\Decision|null> $decided */
+        $decided = new \ArrayObject;
+
+        // The event carries no trace: a listener reads the full decision as the
+        // last decision, stored before the event is dispatched.
+        Event::listen(DecisionEvaluated::class, static fn () => $decided->append(Authorization::lastDecision()));
 
         self::assertPermitted($actor, null);
         self::assertPermitted($actor, $this->org);
         self::assertPermitted($actor, $this->team);
 
         $isExempt = static fn (TraceEntry $entry): bool => $entry->stage === DecisionStage::GUARDRAIL && $entry->outcome === TraceOutcome::EXEMPT;
-        $exempt   = static fn (DecisionEvaluated $event): bool => $event->decision->isAllowed() && \array_filter($event->decision->trace, $isExempt) !== [];
 
-        Event::assertDispatchedTimes(DecisionEvaluated::class, 3);
-        Event::assertDispatched(DecisionEvaluated::class, $exempt);
-        Event::assertNotDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => !$exempt($event));
+        self::assertCount(3, $decided);
+
+        foreach ($decided as $decision) {
+            self::assertTrue($decision?->isAllowed());
+            self::assertNotSame([], \array_filter($decision->trace, $isExempt));
+        }
     }
 
     /**
      * The right is decided through the one decision path, so the decision is
-     * reported like any other, and the request's tenant is in place again
-     * afterwards.
+     * reported like any other, in the parent tenant it was weighed in rather
+     * than the actor's, and the request's tenant is in place again afterwards.
      *
      * @return void
      *
@@ -278,9 +286,13 @@ final class GuardrailAuthorityTest extends TestCase
 
         GuardrailAuthority::assertPermitted(self::acting($actor), Reference::of($this->account));
 
-        $decided = static fn (DecisionEvaluated $event): bool => $event->action === PackagePermissions::GUARDRAIL_MANAGE && $event->decision->isAllowed();
+        $org     = Reference::of($this->org);
+        $decided = static fn (DecisionEvaluated $event): bool => $event->action === PackagePermissions::GUARDRAIL_MANAGE
+            && $event->isAllowed()
+            && [$event->tenant?->type, $event->tenant?->id] === [$org->type, $org->id];
 
         Event::assertDispatched(DecisionEvaluated::class, $decided);
+        self::assertEquals($org, Authorization::lastDecisionProvenance()?->tenant);
         self::assertSame([$this->team->getMorphClass(), 'team'], TenantScope::currentTenant());
         self::assertFalse(TenantScope::isBelowTenant());
     }

@@ -92,9 +92,9 @@ it hands over.
 
 ## Trade-offs
 
-- **No dedicated impersonation event.** The `DecisionEvaluated` event carries the principal, so an audit listener can
-  detect that the evaluated principal differs from `$request->user()`. Consumers who need an explicit "admin X previewed
-  user Y" signal should emit their own event at the call site.
+- **No dedicated impersonation event.** The `DecisionEvaluated` event carries a reference to the principal the decision
+  was about, so an audit listener can detect that it differs from `$request->user()`. Consumers who need an explicit
+  "admin X previewed user Y" signal should emit their own event at the call site.
 - **The permission step uses the target principal's permissions.** When `for($user)` is active, the held-permission
   check is made at the allow stage, after the caps and only when no allow statement decides, through
   `SubjectGrants::permissionFor()` over the target subject's grantees, its principal and its identity -- the target
@@ -133,4 +133,5 @@ it hands over.
 - Adding a dedicated impersonation event requires a new event class and a dispatch call inside `for()` or
   `currentSubject()`.
 - Introducing a "caller context" that preserves the original principal alongside the target would require a second
-  field on the scoped clone and a contract change on the `DecisionEvaluated` event.
+  field on the scoped clone. The decision events and the last decision's provenance already carry a `previewer`
+  reference for it, null for every decision today.

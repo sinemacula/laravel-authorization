@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -30,6 +31,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions as Actions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsAdministrator;
+use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -59,7 +61,7 @@ use Tests\TestCase;
 #[CoversClass(ResourcePolicyService::class)]
 final class DelegatedAdministrationTest extends TestCase
 {
-    use ActsAsAdministrator, CatchesRefusals;
+    use ActsAsAdministrator, ActsAsTenant, CatchesRefusals;
 
     /** @var list<string> The tables a management service writes. */
     private const array TABLES = [
@@ -674,8 +676,41 @@ final class DelegatedAdministrationTest extends TestCase
 
         foreach ($decisions as $decision) {
             self::assertSame(OperationResource::TYPE . ':' . $events[0]->operation->id, $decision->resource);
-            self::assertSame($actor->subject->subject, $decision->principal);
+            self::assertEquals($actor->principal(), $decision->subject);
         }
+    }
+
+    /**
+     * A delegated change to the platform is decided, and reported, at platform
+     * scope, though the request, and the actor's subject, are in a tenant.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedChangeToThePlatformIsReportedAtPlatformScope(): void
+    {
+        $tenant = self::createTenant('tenant-1');
+
+        $this->actAsTenant($tenant);
+
+        $actor = self::administrator();
+        $mark  = \count(self::dispatched(DecisionEvaluated::class));
+
+        self::grants()->grantRole(self::user(), self::role('editor'), actor: $actor);
+
+        $decisions = \array_slice(self::dispatched(DecisionEvaluated::class), $mark);
+
+        self::assertSame($tenant, $actor->subject->tenant);
+        self::assertNotSame([], $decisions);
+
+        foreach ($decisions as $decision) {
+            self::assertTrue($decision->isAllowed());
+            self::assertNull($decision->tenant);
+        }
+
+        self::assertNull(Authorization::lastDecisionProvenance()?->tenant);
+        self::assertEquals($actor->principal(), Authorization::lastDecisionProvenance()?->subject);
     }
 
     /**
@@ -699,7 +734,7 @@ final class DelegatedAdministrationTest extends TestCase
         self::assertSame($reason, $refusal->getReason());
         self::assertSame($before, self::snapshot());
         self::assertCount($changes, self::changes());
-        self::assertSame($refusal->getDecision(), \array_reverse(self::dispatched(AuthorizationFailed::class))[0]->decision);
+        self::assertSame($refusal->getDecision()?->reason, \array_reverse(self::dispatched(AuthorizationFailed::class))[0]->reason);
 
         if ($action === null) {
             return;

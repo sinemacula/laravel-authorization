@@ -7,6 +7,7 @@ namespace Tests\Unit;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Translation\Translator;
+use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -33,6 +34,7 @@ use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Events\DecisionEvent;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
@@ -542,11 +544,11 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame($decision, $manager->lastDecision());
         self::assertCount(1, $reported);
         self::assertInstanceOf(DecisionEvaluated::class, $reported[0]);
-        self::assertSame($principal, $reported[0]->principal);
         self::assertSame('posts:update', $reported[0]->action);
         self::assertNull($reported[0]->resource);
-        self::assertSame(['tenant' => 'org-1'], $reported[0]->context);
-        self::assertSame($decision, $reported[0]->decision);
+        self::assertSame([], $reported[0]->keys);
+        self::assertSame([$decision->effect, $decision->reason, $decision->statements], [$reported[0]->effect, $reported[0]->reason, $reported[0]->statements]);
+        self::assertStringNotContainsString('org-1', \serialize($reported[0]));
     }
 
     /**
@@ -775,8 +777,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * DecisionEvaluated fires once on every check, carrying the decision the
-     * check returns.
+     * DecisionEvaluated fires once on every check, carrying the effect and
+     * reason of the decision the check returns.
      *
      * @return void
      */
@@ -803,7 +805,8 @@ final class AuthorizationManagerTest extends TestCase
         $decision = $manager->check('x');
 
         self::assertCount(1, $reported);
-        self::assertSame($decision, $reported[0]->decision);
+        self::assertSame($decision->effect, $reported[0]->effect);
+        self::assertSame($decision->reason, $reported[0]->reason);
         self::assertSame('x', $reported[0]->action);
     }
 
@@ -841,7 +844,8 @@ final class AuthorizationManagerTest extends TestCase
 
     /**
      * authorize() reports the denial with AuthorizationFailed, carrying the
-     * same decision the check recorded, and throws with the decision's reason.
+     * reason and statements of the decision the check recorded, and throws with
+     * the decision's reason.
      *
      * @return void
      *
@@ -882,10 +886,10 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame($decision, $exception->getDecision());
         self::assertCount(2, $reported);
         self::assertInstanceOf(DecisionEvaluated::class, $reported[0]);
-        self::assertSame($decision, $reported[0]->decision);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $reported[0]->reason);
         self::assertInstanceOf(AuthorizationFailed::class, $reported[1]);
-        self::assertSame($decision, $reported[1]->decision);
-        self::assertSame($principal, $reported[1]->principal);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $reported[1]->reason);
+        self::assertSame($decision->statements, $reported[1]->statements);
         self::assertSame('posts:delete', $reported[1]->action);
         self::assertSame('arn:posts:1', $reported[1]->resource);
     }
@@ -1058,6 +1062,30 @@ final class AuthorizationManagerTest extends TestCase
         $manager->check('x');
 
         self::assertTrue(true, 'dispatch() must not throw when events is null.');
+    }
+
+    /**
+     * A refusal reported with no dispatcher is still recorded as the last
+     * decision, and returned on the exception, with its reason.
+     *
+     * @return void
+     */
+    public function testReportRefusalWithoutEventsStillRecordsAndReturns(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            subjectResolver: new StubSubjectResolver,
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: new LastDecisionStore,
+            events: null,
+        );
+
+        $decision = Decision::deny(DecisionReason::ADMINISTRATION_CONFLICT, DecisionStage::ADMINISTRATION);
+        $refusal  = $manager->reportRefusal('posts:delete', ResourceReference::record('posts', '7'), $decision);
+
+        self::assertSame($decision, $refusal->getDecision());
+        self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $refusal->getReason());
+        self::assertSame($decision, $manager->lastDecision());
     }
 
     /**
@@ -1333,7 +1361,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * The decision events carry the model the subject is about.
+     * The decision events carry a reference to the model the subject is about,
+     * never the model.
      *
      * @return void
      *
@@ -1341,10 +1370,17 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testDecisionEventsCarryTheSubjectsModel(): void
     {
-        $user   = $this->stubAuthorizable();
+        $user = \Mockery::mock(Model::class, AuthorizableIdentity::class);
+        $user->shouldReceive('getPermissions')->andReturn([]);
+        $user->shouldReceive('getPolicies')->andReturn([]);
+        $user->shouldReceive('isAuthorizationActive')->andReturnTrue();
+        $user->shouldReceive('getMorphClass')->andReturn('user');
+        $user->shouldReceive('getKey')->andReturn('user-1');
+
+        $named  = static fn (object $event): bool => $event instanceof DecisionEvent && [$event->subject?->type, $event->subject?->id] === ['user', 'user-1'];
         $events = \Mockery::mock(Dispatcher::class);
-        $events->shouldReceive('dispatch')->with(\Mockery::on(static fn (object $event): bool => $event instanceof DecisionEvaluated && $event->principal === $user))->twice();
-        $events->shouldReceive('dispatch')->with(\Mockery::on(static fn (object $event): bool => $event instanceof AuthorizationFailed && $event->principal === $user))->once();
+        $events->shouldReceive('dispatch')->with(\Mockery::on(static fn (object $event): bool => $event instanceof DecisionEvaluated && $named($event)))->twice();
+        $events->shouldReceive('dispatch')->with(\Mockery::on(static fn (object $event): bool => $event instanceof AuthorizationFailed && $named($event)))->once();
 
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
@@ -1464,13 +1500,14 @@ final class AuthorizationManagerTest extends TestCase
     public function testAnyIsAllowedAtTheFirstAllowAndDecidesNoMore(): void
     {
         $reported = [];
-        $manager  = $this->recordingManager($this->stubAuthorizable(['posts:create', 'posts:read']), $reported);
+        $manager  = $this->recordingManager($this->stubAuthorizable(['posts:read']), $reported);
+        $policy   = Policy::fromArray(['name' => 'p', 'statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['input.k' => 'v']]]]]);
 
-        self::assertTrue($manager->any(['posts:delete', 'posts:create', 'posts:read'], 'posts:7', ['k' => 'v']));
+        self::assertTrue($manager->withPolicies([$policy])->any(['posts:delete', 'posts:create', 'posts:read'], 'posts:7', ['k' => 'v']));
         self::assertSame(['posts:delete', 'posts:create'], \array_column($reported, 'action'));
         self::assertSame(['posts:7', 'posts:7'], \array_column($reported, 'resource'));
-        self::assertSame([['k' => 'v'], ['k' => 'v']], \array_column($reported, 'context'));
-        self::assertTrue($reported[1]['decision']->isAllowed());
+        self::assertSame([[], ['input.k']], \array_column($reported, 'keys'));
+        self::assertTrue($reported[1]['decision']?->isAllowed());
         self::assertSame($reported[1]['decision'], $manager->lastDecision());
     }
 
@@ -1602,32 +1639,35 @@ final class AuthorizationManagerTest extends TestCase
         self::assertFalse($manager->for($principal)->capped(['posts:read'])->all(['posts:read', 'posts:create']));
         self::assertTrue($manager->for($principal)->capped(['posts:read'])->any(['posts:create', 'posts:read']));
         self::assertTrue($manager->for($principal)->withPolicies([self::allowingPolicy('posts:publish')])->all(['posts:publish', 'posts:read']));
-        self::assertSame(DecisionReason::SESSION_POLICY, $reported[8]['decision']->reason);
-        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $reported[0]['decision']->reason);
+        self::assertSame(DecisionReason::SESSION_POLICY, $reported[8]['decision']?->reason);
+        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $reported[0]['decision']?->reason);
         self::assertCount(13, $reported);
     }
 
     /**
      * Build a manager resolving the supplied principal, or no subject, that
-     * records every decision event's action, resource, context and decision.
+     * records every decision event's action, resource and keys, with the
+     * decision it reports, read as the last decision, which is stored before
+     * the event is dispatched.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity|null  $principal
-     * @param  list<array{action: string, resource: string|null, context: array<string, mixed>, decision: \SineMacula\Laravel\Authorization\Evaluation\Decision}>  $reported
+     * @param  list<array{action: string, resource: string|null, keys: list<string>, decision: \SineMacula\Laravel\Authorization\Evaluation\Decision|null}>  $reported
      * @return \SineMacula\Laravel\Authorization\AuthorizationManager
      */
     private function recordingManager(?AuthorizableIdentity $principal, array &$reported): AuthorizationManager
     {
+        $store  = new LastDecisionStore;
         $events = \Mockery::mock(Dispatcher::class);
         $events->shouldReceive('dispatch')
-            ->andReturnUsing(static function (DecisionEvaluated $event) use (&$reported): void {
-                $reported[] = ['action' => $event->action, 'resource' => $event->resource, 'context' => $event->context, 'decision' => $event->decision];
+            ->andReturnUsing(static function (DecisionEvaluated $event) use (&$reported, $store): void {
+                $reported[] = ['action' => $event->action, 'resource' => $event->resource, 'keys' => $event->keys, 'decision' => $store->get()];
             });
 
         return new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             subjectResolver: new StubSubjectResolver($principal),
             policyResolver: new DefaultPolicyResolver,
-            lastDecisionStore: new LastDecisionStore,
+            lastDecisionStore: $store,
             events: $events,
         );
     }

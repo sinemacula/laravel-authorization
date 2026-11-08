@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Evaluation\CheckBatch;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
@@ -217,7 +218,11 @@ final class AuthorizationManager
      * `InsufficientAuthenticationException`, with the requirements any one of
      * which met would allow the action, when the denial is
      * `insufficient_authentication`, and an `AuthorizationException` with the
-     * reason code otherwise. Either carries the decision that refused.
+     * reason code otherwise. Either carries the decision that refused. The
+     * `AuthorizationFailed` it dispatches first carries the provenance the
+     * decision was recorded with, so it names the scope the decision was made
+     * in, as its `DecisionEvaluated` does; when a listener has meanwhile
+     * recorded another decision, it names the scope in place.
      *
      * @param  string  $action
      * @param  mixed  $resource
@@ -237,7 +242,9 @@ final class AuthorizationManager
             return;
         }
 
-        $this->events?->dispatch(new AuthorizationFailed($this->currentSubject()?->subject, $action, ResourceReferences::identifierOf($reference), $context, $decision));
+        $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? DecisionProvenance::of($this->currentSubject());
+
+        $this->events?->dispatch(AuthorizationFailed::of($provenance, $action, ResourceReferences::identifierOf($reference), $decision));
 
         $reason = $decision->reason ?? DecisionReason::NO_MATCH;
         $stepUp = $reason === DecisionReason::INSUFFICIENT_AUTHENTICATION;
@@ -267,7 +274,7 @@ final class AuthorizationManager
         $subject   = $this->currentSubject();
 
         $this->batch()->recordOne($subject, new CheckInput($action, $reference), $decision);
-        $this->events?->dispatch(new AuthorizationFailed($subject?->subject, $action, ResourceReferences::identifierOf($reference), [], $decision));
+        $this->events?->dispatch(AuthorizationFailed::of(DecisionProvenance::of($subject), $action, ResourceReferences::identifierOf($reference), $decision));
 
         return AuthorizationException::translated($decision->reason ?? DecisionReason::NO_MATCH, $this->translator, $decision);
     }
@@ -440,6 +447,19 @@ final class AuthorizationManager
     }
 
     /**
+     * Return the provenance of the decision `lastDecision()` returns: who it
+     * was about, as references to the principal and its identity, who previewed
+     * it, for a preview, and the tenant and application it was made in (see
+     * `DecisionProvenance`). Null whenever `lastDecision()` is.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance|null
+     */
+    public function lastDecisionProvenance(): ?DecisionProvenance
+    {
+        return $this->lastDecision() === null ? null : $this->lastDecisionStore->provenance();
+    }
+
+    /**
      * Decide the supplied action and return the decision's explanation: the
      * verdict, the stage and statements that decided it, each requirement an
      * insufficient authentication names with its unmet parts, and every step of
@@ -529,7 +549,7 @@ final class AuthorizationManager
             // told, and its attributes read, once for the listing.
             $resource  = ResourceReferences::of($scope->resource);
             $checks    = \array_map(static fn (string $action): CheckInput => new CheckInput($action, $resource, $context), $actions);
-            $decisions = $this->batch(false)->decide($scope->subjectIn($named), $checks);
+            $decisions = $this->batch(false, false)->decide($scope->subjectIn($named), $checks);
 
             return \array_values(\array_filter($actions, static fn (int $key): bool => $decisions[$key]->isAllowed(), \ARRAY_FILTER_USE_KEY));
         });
@@ -581,13 +601,15 @@ final class AuthorizationManager
     /**
      * Return the batch that decides this manager's checks, through its
      * pipeline, so `check()`, `checkMany()` and `permissionsFor()` take the one
-     * path, recording each decision, or, for introspection, none.
+     * path, dispatching each decision's event and storing it as the last
+     * decision, or, for introspection, neither.
      *
-     * @param  bool  $isRecording
+     * @param  bool  $isDispatching
+     * @param  bool  $isStoring
      * @return \SineMacula\Laravel\Authorization\Evaluation\CheckBatch
      */
-    private function batch(bool $isRecording = true): CheckBatch
+    private function batch(bool $isDispatching = true, bool $isStoring = true): CheckBatch
     {
-        return new CheckBatch($this->pipeline, $this->lastDecisionStore, $this->subjectResolver, $this->events, $isRecording);
+        return new CheckBatch($this->pipeline, $this->lastDecisionStore, $this->subjectResolver, $this->events, $isDispatching, $isStoring);
     }
 }

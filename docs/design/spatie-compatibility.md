@@ -166,7 +166,9 @@ The package also ships `AuthorizationFailed` (hard-denial, fired from `authorize
 `authorize` middleware, before the exception is thrown; a `role` denial is not a decision and fires none)
 and `DecisionEvaluated` (every evaluation path, success or denial, including a Gate check whose argument cannot be
 identified as a resource, which is recorded as an implicit deny with a `null` resource) — Spatie has no equivalents;
-audit consumers subscribe to these to persist the decision trace.
+audit consumers subscribe to these to persist who each decision was about, its reason, the statements that decided it
+and the context keys it read, never their values. The decision itself, with its trace, is read from
+`Authorization::lastDecision()`.
 
 See each event class under `src/Events/` for the full audit payload — every event carries a stable `@api` contract
 and breaking changes require a major version bump.

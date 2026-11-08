@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
@@ -260,7 +261,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     public function testResetClearsTheStore(): void
     {
         $store = new LastDecisionStore;
-        $store->put(Decision::allow(DecisionStage::ALLOW));
+        $store->put(Decision::allow(DecisionStage::ALLOW), new DecisionProvenance);
 
         self::assertNotNull($store->get());
 

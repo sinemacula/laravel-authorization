@@ -35,6 +35,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager withPolicies(array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy> $policies)
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager capped(list<string> $actions)
  * @method static \SineMacula\Laravel\Authorization\Evaluation\Decision|null lastDecision()
+ * @method static \SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance|null lastDecisionProvenance()
  * @method static void forgetLastDecision()
  * @method static string explain(string $action, mixed $resource = null, array<string, mixed> $context = [])
  * @method static list<string> permissionsFor(object|null $subject, \SineMacula\Laravel\Authorization\Support\AuthorizationScope $scope, array<string, mixed> $context = [])

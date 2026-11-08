@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -29,6 +30,7 @@ use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
@@ -807,7 +809,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame([], $decision->trace);
         self::assertSame($decision, Authorization::lastDecision());
 
-        self::assertSoleDecisionEvent($user, ['tenant' => 'org-1'], $decision);
+        self::assertSoleDecisionEvent($user, $decision);
     }
 
     /**
@@ -836,7 +838,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame([], $decision->trace);
         self::assertSame($decision, Authorization::lastDecision());
 
-        self::assertSoleDecisionEvent($user, ['tenant' => 'org-2'], $decision);
+        self::assertSoleDecisionEvent($user, $decision);
     }
 
     /**
@@ -945,8 +947,8 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame($decision, $refusal->getDecision());
         self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $refusal->getReason());
         self::assertSame($decision, Authorization::lastDecision());
-        $evaluated = static fn (DecisionEvaluated $event): bool => [$event->resource, $event->principal, $event->decision] === ['posts:7', $user, $decision];
-        $failed    = static fn (AuthorizationFailed $event): bool => [$event->resource, $event->principal, $event->action] === ['posts:7', $user, 'posts:delete'];
+        $evaluated = static fn (DecisionEvaluated $event): bool => [$event->resource, $event->subject?->id, $event->reason] === ['posts:7', $user->getKey(), $decision->reason];
+        $failed    = static fn (AuthorizationFailed $event): bool => [$event->resource, $event->subject?->id, $event->action] === ['posts:7', $user->getKey(), 'posts:delete'];
 
         Event::assertDispatched(DecisionEvaluated::class, $evaluated);
         Event::assertDispatched(AuthorizationFailed::class, $failed);
@@ -1468,7 +1470,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertEquals([new StatementReference('step-up', 0, null, 'Export')], $manager->lastDecision()->statements);
         Event::assertDispatched(
             AuthorizationFailed::class,
-            static fn (AuthorizationFailed $event): bool => $event->decision->reason === DecisionReason::INSUFFICIENT_AUTHENTICATION,
+            static fn (AuthorizationFailed $event): bool => $event->reason === DecisionReason::INSUFFICIENT_AUTHENTICATION,
         );
     }
 
@@ -1669,6 +1671,86 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $decision->reason);
         self::assertEquals(new RequirementFreshness(null), $decision->freshness);
         self::assertNull($this->inSession($user, 'session-2')->lastDecision());
+    }
+
+    /**
+     * The last decision is kept with its provenance: the request's subject for
+     * `check()`, the subject named with `for()` or translated with `forUser()`,
+     * and nobody for a guest, never filled from the request's subject, each in
+     * the request's tenant and application; listing actions leaves it as it
+     * was, and forgetting the decision forgets it.
+     *
+     * @return void
+     */
+    public function testTheLastDecisionIsKeptWithWhoItWasAbout(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $other  = StubIdentity::create(['id' => 'user-2']);
+        $second = StubSecondIdentity::create(['id' => 'user-3']);
+        $tenant = StubTenant::query()->create(['id' => 'tenant-1', 'name' => 'tenant-1']);
+        $where  = new Reference($tenant->getMorphClass(), 'tenant-1');
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $tenant, 'admin'));
+        $this->app?->forgetInstance(AuthorizationManager::class);
+        $this->app?->forgetInstance('authorization');
+
+        /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
+        $manager = $this->app?->make(AuthorizationManager::class);
+
+        self::assertNull(Authorization::lastDecisionProvenance());
+
+        $manager->check('posts:read');
+
+        self::assertEquals(new DecisionProvenance(Reference::of($user), Reference::of($user), null, $where, 'admin'), $manager->lastDecisionProvenance());
+
+        $manager->for($other)->check('posts:read');
+
+        self::assertEquals(new DecisionProvenance(Reference::of($other), Reference::of($other), null, $where, 'admin'), Authorization::lastDecisionProvenance());
+
+        $manager->forUser($second)->checkMany([new CheckInput('posts:read'), new CheckInput('posts:edit')]);
+
+        self::assertEquals(new DecisionProvenance(Reference::of($second), Reference::of($second), null, $where, 'admin'), $manager->lastDecisionProvenance());
+
+        $manager->forUser(null)->check('posts:read');
+
+        $guest = $manager->lastDecisionProvenance();
+
+        self::assertEquals(new DecisionProvenance(null, null, null, $where, 'admin'), $guest);
+        self::assertFalse($guest?->isPreview());
+
+        $manager->permissionsFor($user, AuthorizationScope::platform('web'));
+
+        self::assertSame($guest, $manager->lastDecisionProvenance());
+
+        $manager->forgetLastDecision();
+
+        self::assertNull($manager->lastDecisionProvenance());
+    }
+
+    /**
+     * The provenance goes with the decision: none once the decision has stopped
+     * being fresh, or in another session, and the decision's again while it is
+     * fresh.
+     *
+     * @return void
+     */
+    public function testTheLastDecisionsProvenanceGoesWithTheDecision(): void
+    {
+        Carbon::setTestNow('2026-11-06 12:00:00');
+
+        $user    = StubIdentity::create(['id' => '1c7f8e2d-6bde-4345-9cef-2a3b4c5d6e1b']);
+        $manager = $this->inSession($user, 'session-1', new StubRequirementChecker(RequirementResult::met(new \DateTimeImmutable('2026-11-06 12:15:00'))));
+
+        $manager->withPolicies([self::requiringPolicy()])->check('reports:export');
+
+        self::assertEquals(Reference::of($user), $manager->lastDecisionProvenance()?->subject);
+        self::assertNull($this->inSession($user, 'session-2')->lastDecisionProvenance());
+
+        Carbon::setTestNow('2026-11-06 12:15:00');
+
+        self::assertNull($manager->lastDecisionProvenance());
+
+        Carbon::setTestNow();
     }
 
     /**
@@ -3616,15 +3698,15 @@ final class AuthorizationManagerTest extends TestCase
 
     /**
      * Assert that exactly one decision event was dispatched, for the check of
-     * `posts:create` without a resource, carrying the supplied principal,
-     * context and decision, and that no failure event was dispatched.
+     * `posts:create` without a resource, carrying a reference to the supplied
+     * principal and the decision's effect, reason and statements, but never the
+     * check's context, and that no failure event was dispatched.
      *
-     * @param  object  $principal
-     * @param  array<string, mixed>  $context
+     * @param  \Illuminate\Database\Eloquent\Model  $principal
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
      * @return void
      */
-    private static function assertSoleDecisionEvent(object $principal, array $context, Decision $decision): void
+    private static function assertSoleDecisionEvent(Model $principal, Decision $decision): void
     {
         $events = \array_values(
             Event::dispatched(DecisionEvaluated::class)
@@ -3633,11 +3715,11 @@ final class AuthorizationManagerTest extends TestCase
         );
 
         self::assertCount(1, $events);
-        self::assertSame($principal, $events[0]->principal);
+        self::assertEquals(Reference::of($principal), $events[0]->subject);
         self::assertSame('posts:create', $events[0]->action);
         self::assertNull($events[0]->resource);
-        self::assertSame($context, $events[0]->context);
-        self::assertSame($decision, $events[0]->decision);
+        self::assertSame([$decision->effect, $decision->reason, $decision->statements], [$events[0]->effect, $events[0]->reason, $events[0]->statements]);
+        self::assertStringNotContainsString('org-', \serialize($events[0]));
         Event::assertNotDispatched(AuthorizationFailed::class);
     }
 

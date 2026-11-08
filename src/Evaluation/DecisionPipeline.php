@@ -131,15 +131,28 @@ final class DecisionPipeline
      * then the grants decide. A check of a bulk check reads its resource's
      * attributes through the batch's.
      *
+     * A witness given is called in the scope the grants are weighed in, just
+     * before they are, so the caller can read where the check was decided: the
+     * resource's tenant, platform scope, or the scope in place. It is not
+     * called for a check denied before then, by the subject, resource or tenant
+     * stage, which is decided in the scope in place.
+     *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  string  $action
      * @param  false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @param  array<string, mixed>  $context
      * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
+     * @param  (\Closure(): void)|null  $witness
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    public function decide(?Subject $subject, string $action, false|ResourceReference|null $resource, array $context, ?ResourceAttributeBatch $attributes = null): Decision
-    {
+    public function decide(
+        ?Subject $subject,
+        string $action,
+        false|ResourceReference|null $resource,
+        array $context,
+        ?ResourceAttributeBatch $attributes = null,
+        ?\Closure $witness = null,
+    ): Decision {
         if ($subject === null || SubjectGrants::isInactive($subject)) {
             return Decision::deny($subject === null ? DecisionReason::SUBJECT_UNRESOLVED : DecisionReason::SUBJECT_INACTIVE, DecisionStage::SUBJECT);
         }
@@ -150,7 +163,13 @@ final class DecisionPipeline
 
         $here   = $resource?->source instanceof OperationResource ? TenantScope::currentTenant() : null;
         $from   = $here === null ? null : new Reference($here[0], $here[1]);
-        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource, $context, $attributes, $from);
+        $decide = function () use ($subject, $action, $resource, $context, $attributes, $from, $witness): Decision {
+            if ($witness !== null) {
+                $witness();
+            }
+
+            return $this->decideGrants($subject, $action, $resource, $context, $attributes, $from);
+        };
 
         return $resource === null ? $decide() : ResourceScope::decide($subject, $action, $resource, $decide);
     }

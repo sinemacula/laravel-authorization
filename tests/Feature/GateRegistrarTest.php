@@ -288,7 +288,8 @@ final class GateRegistrarTest extends TestCase
         self::assertTrue(Gate::allows('posts:create', [['tenant' => 'org-2'], 'post', 42, ['tenant' => 'org-1']]));
         self::assertFalse(Gate::allows('posts:create', ['post', 42, ['tenant' => 'org-2']]));
         self::assertSame(['post:42', 'post:42', 'post:42', 'post:42', 'post:42'], $this->evaluatedResources());
-        self::assertSame(['tenant' => 'org-2'], $this->decisions()[4]->context);
+        self::assertSame(['input.tenant'], $this->decisions()[4]->keys);
+        self::assertFalse($this->decisions()[4]->isAllowed());
     }
 
     /**
@@ -373,17 +374,18 @@ final class GateRegistrarTest extends TestCase
 
         self::assertTrue(Gate::forUser($user)->allows('posts:create', [null]));
         self::assertSame([null, null], $this->evaluatedResources());
-        self::assertSame($user, $this->decisions()[1]->principal);
+        self::assertEquals(Reference::of($user), $this->decisions()[1]->subject);
         self::assertEquals([$this->wildcardAllowReference()], Authorization::lastDecision()?->statements);
     }
 
     /**
-     * The context supplied alongside an unidentifiable argument is carried on
-     * the recorded refusal, as it is for any other check.
+     * The context supplied alongside an unidentifiable argument is never
+     * carried on the recorded refusal's event, as it is not for any other check
+     * (AUTHZ-15.4).
      *
      * @return void
      */
-    public function testUnidentifiableArgumentRefusalCarriesTheContext(): void
+    public function testUnidentifiableArgumentRefusalNeverCarriesTheContext(): void
     {
         $user = $this->actAsFullyPermittedPrincipal();
 
@@ -498,13 +500,13 @@ final class GateRegistrarTest extends TestCase
         $denial = $this->decisions()[0];
 
         self::assertSame('stub:target-1', $denial->resource);
-        self::assertSame(DecisionReason::TENANT_SCOPE, $denial->decision->reason);
-        self::assertSame(DecisionStage::TENANT, $denial->decision->stage);
-        self::assertSame([], $denial->decision->trace);
+        self::assertSame(DecisionReason::TENANT_SCOPE, $denial->reason);
+        self::assertSame(DecisionStage::TENANT, Authorization::lastDecision()?->stage);
+        self::assertSame([], Authorization::lastDecision()->trace);
 
         self::assertTrue(Gate::forUser($holder)->allows('posts:create', [$target]));
         self::assertSame(['stub:target-1', 'stub:target-1'], $this->evaluatedResources());
-        self::assertSame($holder, $this->decisions()[1]->principal);
+        self::assertEquals(Reference::of($holder), $this->decisions()[1]->subject);
     }
 
     /**
@@ -609,7 +611,7 @@ final class GateRegistrarTest extends TestCase
         Authorization::clearResolvedInstance('authorization');
 
         self::assertTrue(Gate::forUser($user)->allows('posts:create'));
-        self::assertSame($principal, $this->decisions()[0]->principal);
+        self::assertEquals(Reference::of($principal), $this->decisions()[0]->subject);
         self::assertFalse($user->hasPermission('posts:create'));
     }
 
@@ -627,7 +629,7 @@ final class GateRegistrarTest extends TestCase
 
         self::assertTrue(Gate::allows('posts:create'));
         self::assertFalse(Gate::forUser($other)->allows('posts:create'));
-        self::assertSame($other, $this->decisions()[1]->principal);
+        self::assertEquals(Reference::of($other), $this->decisions()[1]->subject);
     }
 
     /**
@@ -645,8 +647,8 @@ final class GateRegistrarTest extends TestCase
 
         self::assertTrue(Gate::forUser($principal)->allows('posts:create'));
         self::assertFalse(Gate::forUser(null)->allows('posts:create'));
-        self::assertNull($this->decisions()[1]->principal);
-        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $this->decisions()[1]->decision->reason);
+        self::assertNull($this->decisions()[1]->subject);
+        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $this->decisions()[1]->reason);
         self::assertSame($principal, Authorization::currentSubject()?->subject);
     }
 
@@ -964,7 +966,7 @@ final class GateRegistrarTest extends TestCase
         $this->actingAs($user);
 
         self::assertTrue(Gate::allows('posts:create'));
-        self::assertSame($user, $this->decisions()[1]->principal);
+        self::assertEquals(Reference::of($user), $this->decisions()[1]->subject);
     }
 
     /**
@@ -997,6 +999,8 @@ final class GateRegistrarTest extends TestCase
      * @param  \Tests\Feature\Stubs\StubIdentity  $principal
      * @param  array<string, mixed>  $context
      * @return void
+     *
+     * @throws \JsonException
      */
     private function assertRefusalRecorded(int $previousCount, StubIdentity $principal, array $context = []): void
     {
@@ -1006,16 +1010,19 @@ final class GateRegistrarTest extends TestCase
 
         $decision = $decisions[$previousCount];
 
-        self::assertSame($principal, $decision->principal);
+        self::assertEquals(Reference::of($principal), $decision->subject);
         self::assertSame('posts:create', $decision->action);
         self::assertNull($decision->resource);
-        self::assertSame($context, $decision->context);
-        self::assertFalse($decision->decision->isAllowed());
-        self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, $decision->decision->reason);
-        self::assertSame(DecisionStage::RESOURCE, $decision->decision->stage);
-        self::assertSame([], $decision->decision->statements);
-        self::assertSame([], $decision->decision->trace);
-        self::assertSame($decision->decision, Authorization::lastDecision());
+        self::assertSame([], $decision->keys);
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, $decision->reason);
+        self::assertSame([], $decision->statements);
+        self::assertSame(DecisionStage::RESOURCE, Authorization::lastDecision()?->stage);
+        self::assertSame([], Authorization::lastDecision()->trace);
+
+        foreach ($context as $value) {
+            self::assertStringNotContainsString(\json_encode($value, \JSON_THROW_ON_ERROR), \serialize($decision));
+        }
     }
 
     /**
@@ -1034,8 +1041,8 @@ final class GateRegistrarTest extends TestCase
 
         self::assertCount($previousCount + 1, $decisions);
         self::assertNull($decisions[$previousCount]->resource);
-        self::assertEquals([$this->wildcardAllowReference()], $decisions[$previousCount]->decision->statements);
-        self::assertSame($decisions[$previousCount]->decision, Authorization::lastDecision());
+        self::assertEquals([$this->wildcardAllowReference()], $decisions[$previousCount]->statements);
+        self::assertEquals($decisions[$previousCount]->statements, Authorization::lastDecision()?->statements);
     }
 
     /**

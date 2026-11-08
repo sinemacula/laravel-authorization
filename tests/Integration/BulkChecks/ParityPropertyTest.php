@@ -165,8 +165,10 @@ final class ParityPropertyTest extends TestCase
 
         /** @var \Illuminate\Events\Dispatcher $events */
         $events = $this->app?->make(Dispatcher::class);
-        $events->listen(DecisionEvaluated::class, static function (DecisionEvaluated $event) use (&$reported): void {
-            $reported[] = $event->decision;
+        // The event carries no decision: a listener reads it as the last
+        // decision, which is stored before the event is dispatched.
+        $events->listen(DecisionEvaluated::class, static function () use (&$reported, $scenario): void {
+            $reported[] = $scenario->manager->lastDecision();
         });
 
         try {

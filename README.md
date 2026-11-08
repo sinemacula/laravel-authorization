@@ -571,12 +571,13 @@ that cannot be read, or that is over a configured limit, denies every check for 
 
 `Authorization::authorize()` throws `SineMacula\Laravel\Authorization\Exceptions\AuthorizationException` when the check
 is denied. It extends Laravel's `Illuminate\Auth\Access\AuthorizationException`, so Laravel's handler answers `403`. It
-carries the decision's reason code (`getReason()`) and nothing else: its message is the translated
-`authorization::authorization.denied` line, whatever the reason, and the action, the resource and the policies stay out
-of it. A denial as `insufficient_authentication` throws `InsufficientAuthenticationException` instead (see
-[Authentication requirements](#authentication-requirements)). The full decision is on the `AuthorizationFailed` event
-and `Authorization::lastDecision()`. To reword the message, add a locale or word a message per reason, see
-[Localisation](#localisation).
+carries the decision's reason code (`getReason()`) and, for audit, the denying decision (`getDecision()`), but neither
+reaches the client: its message is the translated `authorization::authorization.denied` line, whatever the reason, and
+the action, the resource and the policies stay out of it. A denial as `insufficient_authentication` throws
+`InsufficientAuthenticationException` instead (see [Authentication requirements](#authentication-requirements)).
+`Authorization::lastDecision()` returns the decision too; the `AuthorizationFailed` event carries its reason, statements
+and keys (see [Listening to events](#listening-to-events)). To reword the message, add a locale or word a message per
+reason, see [Localisation](#localisation).
 
 ### Role and inline policies
 
@@ -2215,7 +2216,42 @@ through a model outside the services is a trusted operation of its own with no a
 dispatches `SystemOverrideUsed`, naming the record, the change and the actor.
 
 `DecisionEvaluated` and `AuthorizationFailed` implement the marker too, but are dispatched when the decision is made,
-not after a commit, and still carry the principal, the context and the decision as they were evaluated.
+not after a commit: a denial is a fact even if the surrounding transaction rolls back. `DecisionEvaluated` is
+dispatched for every decision `check()` makes, and `AuthorizationFailed` when `authorize()` refuses. Both are
+`final readonly` snapshots of the same references, names and ids (AUTHZ-15.3), never a model, the context the caller
+passed, a session, or a condition or attribute value (AUTHZ-15.4):
+
+```php
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+
+Event::listen(static function (DecisionEvaluated $event): void {
+    $event->subject;        // Reference to the principal the decision was about, or null for a guest
+    $event->identity;       // Reference to the identity behind it, or null
+    $event->previewer;      // Reference to whoever previewed it, or null for a decision that is not a preview
+    $event->action;         // 'posts:update'
+    $event->resource;       // 'post:42', 'post:*', the name given, or null for none
+    $event->tenant;         // Reference to the tenant the decision was made in, or null
+    $event->application;    // the application it was made in, or null
+    $event->effect;         // DecisionEffect::ALLOW or DecisionEffect::DENY; $event->isAllowed() reads it
+    $event->reason;         // the DecisionReason of a denial, or null for an allow
+    $event->statements;     // the StatementReference of each statement that decided it (see below)
+    $event->usedBreakGlass; // whether a break-glass grant allowed it; false until break-glass grants arrive
+    $event->keys;           // the context keys it read, such as ['resource.status', 'input.reason'], never their values
+});
+```
+
+The subject and the identity are taken from the subject the decision was about, null when it had none, and never from
+the authenticated user, so a decision made with `for($user)` names `$user`. A record that is not saved is named by no
+reference. The tenant and the application are the scope the decision was made in, never read from the subject: the
+resource's own tenant for a check on a resource of the request's tenant or below it, platform scope for a resource
+admitted from outside it and for a delegated change to the platform, a scope put in place around the check (with
+`TenantScope::within()` or an `AuthorizationScope`), and otherwise the request's, a guest's decision included. Each
+statement is named by its policy's name, the stored policy's key, its index and its sid and, for a statement of a
+resource policy, the resource that policy is attached to (`type:id` or `type:*`). The keys are the condition keys the
+decision tested, held or failed, each once: a policy that reads `resource.status` puts the key on the event, never the
+status. The decision itself, with its stage and its trace, is not on the event; a listener that needs it for debugging
+reads `Authorization::lastDecision()`, which holds it by the time the event is dispatched, and
+`Authorization::lastDecisionProvenance()` (see [The programmatic API](#the-programmatic-api)).
 
 ### The programmatic API
 
@@ -2236,6 +2272,7 @@ or about the subject of the scoped manager it is called on:
 | `filterAuthorized($action, $resources, $context)` | Returns the resources the action is allowed on, with their keys and order, a `Collection` as its own class                |
 | `explain($action, $resource, $context)`           | Decides the action and returns its explanation as text                                                                    |
 | `lastDecision()`                                  | Returns the latest decision of the request or job, whichever manager made it                                              |
+| `lastDecisionProvenance()`                        | Returns who the latest decision was about, who previewed it and where it was made, or null whenever `lastDecision()` is   |
 | `permissionsFor($subject, $scope, $context)`      | Lists the actions of the permission catalogue the subject may take in the scope                                           |
 | `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's tenant and application, or a `Subject` as it is |
 | `forUser($user)`                                  | Returns a scoped manager deciding about the subject the resolver translates the user into                                 |
@@ -2283,8 +2320,16 @@ scoped manager made from another keeps its subject, its caps and its policies, a
 $preview = Authorization::for($user)->capped(['posts:*'])->withPolicies([$hypothetical]);
 
 $preview->all(['posts:read', 'posts:update'], $post);
-Authorization::lastDecision();  // the decision of the last action $preview decided
+Authorization::lastDecision();            // the decision of the last action $preview decided
+Authorization::lastDecisionProvenance();  // DecisionProvenance: a Reference to $user as subject and identity
 ```
+
+The last decision is kept with its provenance, a `DecisionProvenance` of references and names alone: `subject` and
+`identity`, references to the principal the decision was about and its identity, null for a guest; `previewer`, whoever
+previewed it, null for a decision that is not a preview (`isPreview()` says which); and `tenant` and `application`, the
+scope it was made in, as the decision events name it. `lastDecisionProvenance()` returns it exactly when
+`lastDecision()` returns the decision, so a decision that read an authentication requirement has none once it stops
+being fresh or when asked for in another session. `permissionsFor()` leaves both as they were.
 
 Injected, the manager is the same one the facade resolves. Inject it into a class built for the request or job, such
 as a controller, an action or a queued job's `handle()`; a singleton would keep the manager of the request it was
