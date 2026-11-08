@@ -206,6 +206,7 @@ class has a pattern that resolves, since `fnmatch()` refuses an identifier of `P
 | `query_union`, `query_from`, `query_or`, `query_changed` | A query that would escape the condition, at the call or when it runs                                                                                                                                 |
 | `scope_removed`                                          | A scope removed after the call, or never applied: called inside a `where` group or a relation's definition, or its query run past its scopes                                                         |
 | `reentrant`                                              | The model-level scope applied while a scope is decided, or on the subject's own model                                                                                                                |
+| `preview_write`                                          | A scope given a preview manager, compiled for an `update()`, `updateFrom()`, `delete()` or an insert from its query                                                                                  |
 
 - A guest, an inactive subject, or a morph type holding a NUL byte keeps no row, as `check()` denies every row.
 - A model's promise (`QueryableResource`) is that its key and tenant columns are read raw, with no hook changing them

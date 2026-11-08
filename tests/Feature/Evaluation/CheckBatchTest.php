@@ -284,6 +284,61 @@ final class CheckBatchTest extends TestCase
     }
 
     /**
+     * A preview's batch names its previewer in the provenance of every decision
+     * it records and in every event it dispatches, many checks, one on its own
+     * and a decision made elsewhere alike, beside the subject; any other batch
+     * names none.
+     *
+     * @return void
+     */
+    public function testAPreviewsBatchNamesItsPreviewerBesideTheSubject(): void
+    {
+        $user = $this->subject();
+
+        $user->givePermission(Permission::create(['name' => self::ACTION]));
+
+        $posts     = $this->posts(2);
+        $checks    = ['a' => new CheckInput(self::ACTION, $posts[0]), 'b' => new CheckInput('posts:edit', $posts[1])];
+        $previewer = new Reference('previewer', 'p1');
+        $refusal   = Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
+
+        Event::fake([DecisionEvaluated::class]);
+
+        /** @var \Illuminate\Foundation\Application $app */
+        $app      = $this->app;
+        $contexts = $app->make(CheckContextFactory::class);
+        $pipeline = new DecisionPipeline($app->make(PolicyEvaluator::class), $app->make(PolicyResolver::class), $contexts, new ResourcePolicyResolver, new GuardrailResolver);
+        $store    = $app->make(LastDecisionStore::class);
+        $batch    = new CheckBatch($pipeline, $store, $app->make(SubjectResolver::class), $app->make(Dispatcher::class), true, true, $previewer);
+        $subject  = Authorization::currentSubject();
+
+        $batch->decide($subject, $checks);
+
+        self::assertSame($previewer, $store->provenance()?->previewer);
+
+        $batch->decideOne($subject, $checks['a']);
+
+        self::assertSame($previewer, $store->provenance()->previewer);
+
+        $batch->recordOne($subject, $checks['b'], $refusal);
+
+        self::assertEquals(DecisionProvenance::of($subject, $previewer), Authorization::lastDecisionProvenance());
+
+        $events = self::dispatchedEvents(DecisionEvaluated::class);
+
+        self::assertCount(4, $events);
+
+        foreach ($events as $event) {
+            self::assertSame($previewer, $event->previewer);
+            self::assertEquals(Reference::of($user), $event->subject);
+        }
+
+        Authorization::check(self::ACTION, $posts[0]);
+
+        self::assertNull($store->provenance()->previewer);
+    }
+
+    /**
      * A decision the pipeline did not make is recorded and reported for its
      * check as one the pipeline made is, as the last decision with its own
      * decision event naming the check's resource; a batch made neither to

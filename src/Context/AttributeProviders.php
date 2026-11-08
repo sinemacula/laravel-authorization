@@ -11,6 +11,8 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider;
 use SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
+use SineMacula\Laravel\Authorization\Preview\PreviewAttributes;
+use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
@@ -77,8 +79,9 @@ final class AttributeProviders
     /**
      * Return the providers `authorization.attributes` registers, which the
      * service provider validated at boot, with the package's own provider of
-     * the administration operation resources (see `OperationAttributes`), which
-     * a provider configured for their type never replaces.
+     * the administration operation resources (see `OperationAttributes`) and of
+     * the preview resources (see `Preview\PreviewAttributes`), which a provider
+     * configured for their type never replaces.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @return self
@@ -94,6 +97,7 @@ final class AttributeProviders
         $resources = (array) $config->get('authorization.attributes.resources', []);
 
         $resources[OperationResource::TYPE] = OperationAttributes::class;
+        $resources[PreviewResource::TYPE]   = PreviewAttributes::class;
 
         /** @var array<string, class-string<\SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider>> $subjects */
         $subjects = (array) $config->get('authorization.attributes.subjects', []);

@@ -26,7 +26,10 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
  * version of a policy it does not hold, and `administration.unbounded` lets a
  * delegated change lift or widen a permission boundary; the read actions are
  * declared for a later part of delegated administration, and nothing checks
- * them yet.
+ * them yet. `subject.preview` is the right to preview another subject
+ * (`Authorization::previewFor()`), decided on a preview resource (see
+ * `Preview\PreviewResource`); it is spelt as the administration actions are,
+ * the subject its noun, though a preview administers nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -129,6 +132,9 @@ final readonly class PackagePermissions implements PermissionProvider
     /** @var string The further right a delegated boundary change needs when it may lift or widen what a boundary caps. */
     public const string ADMINISTRATION_UNBOUNDED = 'authorization:administration.unbounded';
 
+    /** @var string The right to preview what a subject may do, as that subject, in a tenant and application (AUTHZ-11.4). */
+    public const string SUBJECT_PREVIEW = 'authorization:subject.preview';
+
     /** @var string The category every package permission is filed under. */
     private const string CATEGORY = 'authorization';
 
@@ -166,6 +172,7 @@ final readonly class PackagePermissions implements PermissionProvider
         self::ADMINISTRATION_SELF         => 'Make an otherwise permitted change that benefits the actor itself.',
         self::ADMINISTRATION_IMPERSONATED => 'Make a delegated change while impersonating.',
         self::ADMINISTRATION_UNBOUNDED    => 'Replace a permission boundary with a wider one, or remove one.',
+        self::SUBJECT_PREVIEW             => 'Preview what a subject may do, without acting as it.',
     ];
 
     /**

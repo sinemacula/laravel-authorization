@@ -194,7 +194,7 @@ final class OperationConstraints
      */
     private static function scope(OperationResource $operation, OperationChange $change, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
-        return $operation->isNarrowing ? null : AdministeredScope::refusal($operation, $resource, $change->scope, $checks);
+        return $operation->isNarrowing ? null : AdministeredScope::refusal($operation->action, $resource, $change->scope, $checks);
     }
 
     /**

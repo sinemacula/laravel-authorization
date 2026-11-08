@@ -39,9 +39,9 @@ final class RefusalReasonTest extends TestCase
     }
 
     /**
-     * The reasons the tenancy, attachments and model-level scope raise are
-     * there, and those no longer raised, the flat tree's and platform
-     * admission's, are gone.
+     * The reasons the tenancy, attachments, model-level scope and preview
+     * scopes raise are there, and those no longer raised, the flat tree's and
+     * platform admission's, are gone.
      *
      * @return void
      */
@@ -51,7 +51,7 @@ final class RefusalReasonTest extends TestCase
 
         $declared = [
             'column_collation', 'subtree_connection', 'attachment_connection', 'attachment_collation', 'too_many_scopes', 'too_many_attachments', 'inline_value', 'read_replica',
-            'reentrant',
+            'reentrant', 'preview_write',
         ];
 
         foreach ($declared as $value) {

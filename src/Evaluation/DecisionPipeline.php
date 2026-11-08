@@ -13,6 +13,8 @@ use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Preview\PreviewAdmission;
+use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
@@ -104,6 +106,17 @@ final class DecisionPipeline
         $pipeline->policyOverride = $policies;
 
         return $pipeline;
+    }
+
+    /**
+     * Determine whether the pipeline evaluates only the policies
+     * `withPolicies()` supplied, in place of the stored ones.
+     *
+     * @return bool
+     */
+    public function hasPolicyOverride(): bool
+    {
+        return $this->policyOverride !== null;
     }
 
     /**
@@ -351,7 +364,9 @@ final class DecisionPipeline
      * check they need is decided here, as this one is up to the allow, in the
      * scope in place when they ask, and never through the administration stage
      * again; the stage also learns the tenant the check was made from, before
-     * the operation's own tenant was put in place.
+     * the operation's own tenant was put in place. An allow of the right to
+     * preview on a preview resource passes the preview's reach the same way
+     * (see `PreviewAdmission`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -370,10 +385,13 @@ final class DecisionPipeline
         ?Reference $from = null,
     ): Decision {
         $decision = $this->decideAlone($subject, $action, $resource, $context, $attributes);
+        $source   = $resource?->source;
 
-        return $resource?->source instanceof OperationResource
-            ? OperationConstraints::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from))
-            : $decision;
+        return match (true) {
+            $source instanceof OperationResource => OperationConstraints::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from)),
+            $source instanceof PreviewResource   => PreviewAdmission::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from)),
+            default                              => $decision,
+        };
     }
 
     /**

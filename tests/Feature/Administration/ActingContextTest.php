@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -151,6 +152,43 @@ final class ActingContextTest extends TestCase
 
         self::assertNull(ActingContext::for(new Subject($user, new \stdClass))->identity());
         self::assertNull(ActingContext::for(new Subject($user, new StubIdentity(['id' => 'ghost'])))->identity());
+    }
+
+    /**
+     * A preview confers no authority: an acting context built while a preview
+     * is evaluated, for the request or for a model, and one built from a
+     * preview's target, whenever, is refused as `administration.previewing`, at
+     * the administration stage; the target's model, named by the application
+     * outside a preview, is its own acting subject.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testAContextBuiltWhileOrFromAPreviewIsRefused(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $target = StubIdentity::create(['id' => 'user-2']);
+        $named  = Previewing::current()->track(new Subject($target, $target));
+
+        $this->resolving(new Subject($user, $user));
+
+        $refusals = [
+            static fn (): ActingContext => Previewing::current()->during(static fn (): ActingContext => ActingContext::current()),
+            static fn (): ActingContext => Previewing::current()->during(static fn (): ActingContext => ActingContext::for($target)),
+            static fn (): ActingContext => ActingContext::for($named),
+        ];
+
+        foreach ($refusals as $refused) {
+            $refusal = self::refusalOf($refused);
+
+            self::assertInstanceOf(AuthorizationException::class, $refusal);
+            self::assertSame(DecisionReason::ADMINISTRATION_PREVIEWING, $refusal->getReason());
+            self::assertSame(DecisionStage::ADMINISTRATION, $refusal->getDecision()?->stage);
+        }
+
+        self::assertSame($target, ActingContext::for($target)->subject->subject);
+        self::assertSame($user, ActingContext::current()->subject->subject);
     }
 
     /**

@@ -118,6 +118,11 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   scope (a tenant or the platform, an application and a resource, named with `AuthorizationScope`), exactly those
   `check()` would allow there, for a UI to show or hide its controls. The actions share one read of the subject's
   grants and policies, and listing them records no decision and dispatches no event.
+- **Preview**: `previewFor($subject)` answers what another subject may do, for "what can this person do?" screens,
+  while the caller stays who is asking. The caller must hold `authorization:subject.preview` for the subject in the
+  scope, admitted as a check about the caller at every use; the subject is evaluated with no session, every decision
+  is reported with both the previewer and the previewed subject, and nothing a preview evaluates may change anything.
+  The package never impersonates.
 - **Grant scope query**: `GrantScopeQuery` tells a trusted integration whether every grant of an identity and of the
   principals an application-bound identity directory lists lies within a tenant (`within`), any lies outside it
   (`outside`), or that cannot be told (`unknown`), and whether a principal holds a grant that applies in a tenant. It
@@ -1557,7 +1562,8 @@ step-up, carrying the decision (`getDecision()`), its stage and its trace, for a
 line. The administration stage refuses with these reasons, each at the `administration` stage with a trace step naming
 it: `administration.impersonating`, `administration.scope`, `administration.rank_uncomparable`, `administration.rank`,
 `administration.self`, `administration.owner`, `administration.not_grantable` and `administration.unprovable`; a call
-that conflicted on every try is refused as `administration.conflict`, at the same stage. The owner rule (D20) applies to
+that conflicted on every try is refused as `administration.conflict`, at the same stage, and every call made while a
+preview is evaluated as `administration.previewing` (see [Preview](#preview)). The owner rule (D20) applies to
 definitions (roles, permissions and policies), what a role carries (its permissions, policies and parent), never to a
 resource policy's attachment or to grant rows.
 
@@ -1605,7 +1611,7 @@ administration stage can still refuse an allow; no allow is weighed before every
 | `boundary`       | Every permission boundary of the principal and of its identity that applies must allow the check                  | `boundary`, `invalid_policy`                                                                                                                                                                                                  |
 | `session`        | Every session cap, the credential's scopes and each set of actions `capped()` was given, must cover the action    | `session_policy`                                                                                                                                                                                                              |
 | `allow`          | Every allow statement that applies to the subject, a resource policy's naming it included, then a permission held | `invalid_policy`                                                                                                                                                                                                              |
-| `administration` | The operation's constraints, for an administration action on its own operation resource; refuses only             | `administration.scope`, `administration.rank_uncomparable`, `administration.rank`, `administration.self`, `administration.owner`, `administration.not_grantable`, `administration.unprovable`, `administration.impersonating` |
+| `administration` | The operation's constraints on its own operation resource, or a preview's reach on its resource; refuses only     | `administration.scope`, `administration.rank_uncomparable`, `administration.rank`, `administration.self`, `administration.owner`, `administration.not_grantable`, `administration.unprovable`, `administration.impersonating` |
 | `implicit`       | Nothing allowed                                                                                                   | `insufficient_authentication`, `condition_failed`, `no_match`                                                                                                                                                                 |
 
 Within each stage, the policies are assessed in a fixed order (name, stored key, resource, then document) and each
@@ -2276,6 +2282,7 @@ or about the subject of the scoped manager it is called on:
 | `permissionsFor($subject, $scope, $context)`      | Lists the actions of the permission catalogue the subject may take in the scope                                           |
 | `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's tenant and application, or a `Subject` as it is |
 | `forUser($user)`                                  | Returns a scoped manager deciding about the subject the resolver translates the user into                                 |
+| `previewFor($subject, $scope)`                    | Returns a preview deciding about the subject as the caller, admitted at every use (see [Preview](#preview))               |
 | `capped($actions)`                                | Returns a scoped manager whose checks are capped by the actions given                                                     |
 | `withPolicies($policies)`                         | Returns a scoped manager that evaluates only the policies given                                                           |
 | `queryScope($model, $action, $context)`           | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))                               |
@@ -2311,16 +2318,17 @@ with an `InvalidCheckArgumentException` (an `InvalidArgumentException`) before a
 throwing form over several actions: call `authorize()` for each action that must be allowed.
 
 The facade resolves the manager scoped to the current request or job, so every call in that lifecycle reaches the same
-manager, and the next request or job gets a new one. `for()`, `forUser()`, `capped()` and `withPolicies()` never change
-it: each returns a new scoped manager, which every method above works on, and which shares the lifecycle's last
-decision, so `Authorization::lastDecision()` returns the latest decision whichever of them made it. They chain: a
-scoped manager made from another keeps its subject, its caps and its policies, and a further cap narrows its caps:
+manager, and the next request or job gets a new one. `for()`, `forUser()`, `previewFor()`, `capped()` and
+`withPolicies()` never change it: each returns a new scoped manager, which every method above works on, and which shares
+the lifecycle's last decision, so `Authorization::lastDecision()` returns the latest decision whichever of them made it.
+They chain: a scoped manager made from another keeps its subject, its caps and its policies, and a further cap narrows
+its caps:
 
 ```php
-$preview = Authorization::for($user)->capped(['posts:*'])->withPolicies([$hypothetical]);
+$scoped = Authorization::for($user)->capped(['posts:*'])->withPolicies([$hypothetical]);
 
-$preview->all(['posts:read', 'posts:update'], $post);
-Authorization::lastDecision();            // the decision of the last action $preview decided
+$scoped->all(['posts:read', 'posts:update'], $post);
+Authorization::lastDecision();            // the decision of the last action $scoped decided
 Authorization::lastDecisionProvenance();  // DecisionProvenance: a Reference to $user as subject and identity
 ```
 
@@ -2567,6 +2575,94 @@ is read from code on each call and touches no database. A scope already in place
 again, so a listing in it reads what the request's checks have already resolved, and a check after it still does. A
 listing in another scope keeps what the request has resolved and puts it back once it returns, unless a write emptied
 the cache meanwhile. See [Effective permissions](docs/design/effective-permissions.md) for the design.
+
+### Preview
+
+`previewFor()` answers "what can this person do?" for a support or administration screen: it returns a manager whose
+checks are about another subject, while the caller stays who is asking. The package never impersonates: the guard, the
+session, the Gate, Blade and the facade stay the caller's.
+
+```php
+use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+
+$preview = Authorization::previewFor($user);                            // the request's tenant and application
+$preview = Authorization::previewFor($user, AuthorizationScope::tenant($account, 'admin'));
+
+$preview->can('posts:update', $post);
+$preview->checkMany($checks);
+$preview->explain('posts:delete', $post);
+$preview->permissionsFor(null, AuthorizationScope::tenant($account, 'admin')); // null: the previewed subject
+
+Post::query()->whereAuthorized('posts:view', [], $preview)->select(['id', 'title'])->paginate();
+```
+
+**Admission and the right.** A preview is itself an action checked here: the caller must be allowed
+`authorization:subject.preview`, a permission the package declares, spelt as its administration actions are. It is
+decided through `check()` as the caller, with the caller's own session, denies, boundaries, guardrails and caps, on a
+preview resource, `authorization:preview:{type}:{id}` in the scope's tenant, that names the subject and the scope.
+Policies read `resource.target_type`, `resource.target_id`, `resource.identity_type`, `resource.identity_id`,
+`resource.tenant` and `resource.application`, so an application restricts who may be previewed, and where, by policy;
+no rank rule is imposed, so an auditor may inspect senior staff on purpose:
+
+```json
+{"statements": [
+    {"effect": "allow", "actions": ["authorization:subject.preview"]},
+    {
+        "effect": "deny",
+        "actions": ["authorization:subject.preview"],
+        "conditions": {"eq": {"resource.target_type": "admin"}}
+    }
+]}
+```
+
+The right is decided in the scope's tenant, as any resource of that tenant is, so a parent's right that reaches its
+subtree admits a preview in a child, and a tenant outside the caller's request tenant needs a platform-wide grant of the
+right. It is then decided again at the scope's node, the tenant alone or the platform, in the scope's application, so a
+preview for no application needs the right for every application. A platform preview reaches every tenant: it is
+refused as `administration.scope` when anything could limit the right anywhere, such as a deny naming it in one tenant,
+or a policy restricting previews, conditional or not; preview in a tenant scope where the right is restricted.
+
+**Revalidation.** The preview is admitted when it is built and again at every use: each check, each batch, each listing
+and each execution of a query scoped through it. Nothing is cached between uses, so a right revoked after the preview
+or a query is built refuses the next use. A refused admission throws `AuthorizationException`, with the one `denied`
+line and the caller's own decision, before anything about the subject is decided, so it reveals nothing about the
+subject; it is recorded and reported as any check about the caller.
+
+**The subject has no session.** A resolved `Subject` keeps its principal and identity but not its session, and a model
+is named as `for()` names it, so no authentication requirement made of the subject is met, whatever the caller has
+proved; the caller's step-up counts for the admission alone. The subject is evaluated in the caller's request context:
+the `request`, `environment` and `authentication` namespaces are the caller's request's, which is no prediction of what
+the subject would see when signed in.
+
+**What is recorded.** Every decision about the subject dispatches `DecisionEvaluated`, or `AuthorizationFailed` for an
+`authorize()` refusal, with `subject` the previewed subject and `previewer` the caller; previews always dispatch. A
+preview `check()` or `checkMany()` stores the last decision with that provenance. A preview `permissionsFor()`
+dispatches one event for each action it evaluates, but stores none of them, so the last decision stays its admission.
+The admission is a check about the caller, recorded and reported as normal, with no previewer. `explain()` and a
+decision's trace are disclosed under the right to preview; they name statements, conditions, caps and requirements,
+never a value or a session.
+
+**What is refused.** On a preview, `for()`, `forUser()`, `previewFor()` and `permissionsFor()` naming a subject would
+change the target, a listing in another tenant or application would change the scope, and `withPolicies()` would decide
+through hypothetical policies: each throws `InvalidPreviewException` before anything is decided, and so does
+`previewFor()` on a manager carrying a policy override. `capped()` is allowed and caps the subject's checks alone,
+never the caller's admission. A preview never becomes authority to act: an `ActingContext` built while a preview is
+evaluated, or from a preview's subject, and every management service call made while a preview is evaluated, from a
+callback or a listener, trusted or delegated, is refused with `AuthorizationException` as `administration.previewing`.
+There is no override.
+
+**Queries.** `whereAuthorized()` given a preview keeps the rows the previewed subject may take the action on, and is
+read-only: an `update()`, a `delete()` or an `insertUsing()` with it is refused as `preview_write`.
+
+**The disclosure point.** Rows the subject may see are not automatically rows the caller may read. A preview answers
+what the subject could do; the application decides what of it to show, with a check of its own about the caller, or by
+showing constrained metadata, as the `select()` above does.
+
+**The limits.** A manager clone cannot sandbox everything. A raw Eloquent write on the package's models, pivots or
+tables, and a trusted actorless service the application calls outside the preview's evaluation, stay the trusted
+integration surfaces they always are. A preview query taken into another as SQL text (`whereIn()`, `fromSub()`) is
+admitted once, when it is taken in. See [Preview](docs/design/preview.md) for the design.
 
 ### Grant scope query
 
@@ -3044,6 +3140,7 @@ else that could change a decision refuses, with no pruning:
 | `query_union`, `query_from`, `query_or`, `query_changed` | A query that would escape the condition                                                                                                              |
 | `scope_removed`                                          | A scope removed after the call, or never applied: called inside a `where` group or a relation's definition, or run past its scopes                   |
 | `reentrant`                                              | The model-level scope on the subject's model, or on a model the decision reads                                                                       |
+| `preview_write`                                          | A scope given a preview, run as an `update()`, a `delete()` or an insert from its query                                                              |
 
 #### The model-level scope
 
@@ -3412,6 +3509,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Query scoping](docs/design/query-scoping.md)                                               | `whereAuthorized()`, what it compiles and what it refuses     |
 | [Bulk checks](docs/design/bulk-checks.md)                                                   | `checkMany()`, what it reads once and in bulk, and its events |
 | [Effective permissions](docs/design/effective-permissions.md)                               | `permissionsFor()`, its scope, exactness and introspection    |
+| [Preview](docs/design/preview.md)                                                           | `previewFor()`, its admission, recording and what it refuses  |
 | [Grant scope](docs/design/grant-scope.md)                                                   | The identity directory, the scope query and the grant hooks   |
 
 ## Requirements

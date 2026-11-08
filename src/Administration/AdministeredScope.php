@@ -33,7 +33,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * Every change to a subject (see `OperationConstraints`) and every impact check
  * of a definition or a resource-policy attachment (see `Impact`) is weighed by
  * this one rule, so what a change reaches never exceeds what its actor
- * administers. A change it refuses is refused as `administration.scope`.
+ * administers, and so is a preview's admission, at the preview's node (see
+ * `Preview\PreviewAdmission`), so what a preview discloses never exceeds what
+ * its previewer may preview. A change or a preview it refuses is refused as
+ * `administration.scope`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,19 +47,19 @@ final class AdministeredScope
 {
     /**
      * Return `administration.scope` when the actor does not administer the
-     * whole reach of the operation: its action is not allowed in the reach, or
-     * anything that applies to the actor anywhere in a reach wider than its
-     * node could limit the action; null when it administers it all.
+     * whole reach of the action on the resource, an operation's or a preview's:
+     * the action is not allowed in the reach, or anything that applies to the
+     * actor anywhere in a reach wider than its node could limit the action;
+     * null when it administers it all.
      *
-     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      */
-    public static function refusal(OperationResource $operation, ResourceReference $resource, GrantScope $reach, FurtherChecks $checks): ?DecisionReason
+    public static function refusal(string $action, ResourceReference $resource, GrantScope $reach, FurtherChecks $checks): ?DecisionReason
     {
-        $action      = $operation->action;
         $below       = $reach->tenant !== null && $reach->includeSubtree;
         $administers = static fn (): bool => $checks->decide($action, $resource)->isAllowed() && !self::isLimited($action, $reach, $checks);
 

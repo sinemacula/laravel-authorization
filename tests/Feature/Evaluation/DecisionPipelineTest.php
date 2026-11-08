@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
@@ -415,6 +416,61 @@ final class DecisionPipelineTest extends TestCase
 
         self::assertSame(DecisionReason::ADMINISTRATION_OWNER, $decide()->reason);
         self::assertTrue(TenantScope::within($tenant, null, $decide)->isAllowed());
+    }
+
+    /**
+     * An allow of the right to preview on a preview resource passes the
+     * preview's reach, at the administration stage after the allow: at the
+     * platform, a deny of the right anywhere refuses it as
+     * `administration.scope`; in a tenant, decided at the tenant's node, it is
+     * admitted; another action on the resource is never weighed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testThePreviewStageFollowsTheAllow(): void
+    {
+        $user    = StubIdentity::create(['id' => 'previewer-1']);
+        $subject = new Subject($user, $user);
+        $tenant  = new Reference('tenant', 'a');
+
+        $user->givePermission(Permission::create(['name' => 'authorization:*']));
+        $boss = ['effect' => 'deny', 'actions' => [PackagePermissions::SUBJECT_PREVIEW], 'resources' => [PreviewResource::TYPE . ':user:boss']];
+
+        $user->attachPolicy(self::stored('not-the-boss', [$boss]));
+
+        $pipeline = $this->pipeline();
+        $platform = (new PreviewResource(new Reference('user', '1'), null, null, null))->toResourceReference();
+        $inTenant = (new PreviewResource(new Reference('user', '1'), null, $tenant, null))->toResourceReference();
+        $refused  = $pipeline->decide($subject, PackagePermissions::SUBJECT_PREVIEW, $platform, []);
+        $admitted = TenantScope::within($tenant, null, static fn (): Decision => $pipeline->decide($subject, PackagePermissions::SUBJECT_PREVIEW, $inTenant, []));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, $refused->reason);
+        self::assertSame(DecisionStage::ADMINISTRATION, $refused->stage);
+        self::assertTrue($admitted->isAllowed());
+        self::assertEquals(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED), $admitted->trace[\count($admitted->trace) - 1]);
+        $other = $pipeline->decide($subject, PackagePermissions::ROLE_READ, $platform, []);
+
+        self::assertTrue($other->isAllowed());
+        self::assertNotSame(DecisionStage::ADMINISTRATION, $other->trace[\count($other->trace) - 1]->stage);
+    }
+
+    /**
+     * A pipeline carries a policy override only once `withPolicies()` gives it
+     * one, and `capped()` keeps whether it does.
+     *
+     * @return void
+     */
+    public function testAPipelineKnowsWhetherItCarriesAPolicyOverride(): void
+    {
+        $pipeline   = $this->pipeline();
+        $overridden = $pipeline->withPolicies([]);
+
+        self::assertFalse($pipeline->hasPolicyOverride());
+        self::assertFalse($pipeline->capped(['posts:*'])->hasPolicyOverride());
+        self::assertTrue($overridden->hasPolicyOverride());
+        self::assertTrue($overridden->capped(['posts:*'])->hasPolicyOverride());
     }
 
     /**

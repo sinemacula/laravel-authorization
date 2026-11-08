@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantHookRecursionException;
 use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
@@ -637,6 +638,34 @@ final class OperationScopeTest extends TestCase
     }
 
     /**
+     * While a preview is evaluated every operation, trusted or delegated, is
+     * refused as `administration.previewing`, before its work runs, and the
+     * refusal is lifted once the evaluation returns or throws.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryOperationIsRefusedWhileAPreviewIsEvaluated(): void
+    {
+        $previews = Previewing::current();
+        $worked   = new \ArrayObject;
+        $reasons  = $previews->during(static fn (): array => [self::refusalWhileRunning(Operation::begin(), $worked), self::refusalWhileRunning(self::delegated(), $worked)]);
+
+        self::assertSame([DecisionReason::ADMINISTRATION_PREVIEWING, DecisionReason::ADMINISTRATION_PREVIEWING], $reasons);
+        self::assertCount(0, $worked);
+        self::assertTrue(OperationScope::run(Operation::begin(), static fn (): bool => true));
+
+        try {
+            $previews->during(self::failing(...));
+        } catch (\RuntimeException) {
+            // The refusal must be lifted after an evaluation that throws.
+        }
+
+        self::assertTrue(OperationScope::run(Operation::begin(), static fn (): bool => true));
+    }
+
+    /**
      * An operation is nested only while it runs inside another's work.
      *
      * @return void
@@ -796,6 +825,43 @@ final class OperationScopeTest extends TestCase
     private static function delegated(): Operation
     {
         return new Operation((string) Str::uuid(), new Reference('user', '1'), CarbonImmutable::now('UTC'), false);
+    }
+
+    /**
+     * Fail, as an evaluation that throws does.
+     *
+     * @return never
+     *
+     * @throws \RuntimeException
+     */
+    private static function failing(): never
+    {
+        throw new \RuntimeException('Failed.');
+    }
+
+    /**
+     * Run the operation, noting when its work runs, and return the reason it is
+     * refused with, or null when it runs.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \ArrayObject<int, true>  $worked
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
+     *
+     * @throws \Throwable
+     */
+    private static function refusalWhileRunning(Operation $operation, \ArrayObject $worked): ?DecisionReason
+    {
+        try {
+            OperationScope::run($operation, static function () use ($worked): bool {
+                $worked[] = true;
+
+                return true;
+            });
+        } catch (AuthorizationException $exception) {
+            return $exception->getReason();
+        }
+
+        return null;
     }
 
     /**

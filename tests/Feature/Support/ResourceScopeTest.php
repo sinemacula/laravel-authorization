@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
@@ -134,6 +135,34 @@ final class ResourceScopeTest extends TestCase
 
         self::assertEquals([[[], 'admin'], [[Reference::of($this->account), Reference::of($this->org)], 'admin']], $seen);
         self::assertEquals([Reference::of($this->account), Reference::of($this->org)], $this->scope()[0]);
+    }
+
+    /**
+     * A preview with no tenant is made at the platform, so its admission is
+     * decided at platform scope, in the request's application; one with a
+     * tenant is decided as any resource of that tenant is, and both are named
+     * by the scope they are decided in.
+     *
+     * @return void
+     */
+    public function testAPreviewWithNoTenantIsDecidedAtPlatformScope(): void
+    {
+        $subject  = $this->request($this->account, 'admin');
+        $platform = (new PreviewResource(new Reference('user', '1'), null, null, null))->toResourceReference();
+        $own      = (new PreviewResource(new Reference('user', '1'), null, Reference::of($this->account), null))->toResourceReference();
+        $seen     = [];
+
+        foreach ([$platform, $own] as $preview) {
+            ResourceScope::decide($subject, PackagePermissions::SUBJECT_PREVIEW, $preview, function () use (&$seen): Decision {
+                $seen[] = $this->scope();
+
+                return Decision::allow(DecisionStage::ALLOW);
+            });
+        }
+
+        self::assertEquals([[[], 'admin'], [[Reference::of($this->account), Reference::of($this->org)], 'admin']], $seen);
+        self::assertSame(ResourceScope::PLATFORM, ResourceScope::scopeOf($platform, Reference::of($this->org)));
+        self::assertSame(ResourceScope::HERE, ResourceScope::scopeOf(ResourceReference::record(PreviewResource::TYPE, 'user:1'), Reference::of($this->org)));
     }
 
     /**

@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 #[CoversClass(PackagePermissions::class)]
 final class PackagePermissionsTest extends TestCase
 {
-    /** @var list<string> Every administration action, in the catalogue's order. */
+    /** @var list<string> Every administration action, and the right to preview, in the catalogue's order. */
     private const array ACTIONS = [
         'authorization:role.grant',
         'authorization:role.revoke',
@@ -56,6 +56,7 @@ final class PackagePermissionsTest extends TestCase
         'authorization:administration.self',
         'authorization:administration.impersonated',
         'authorization:administration.unbounded',
+        'authorization:subject.preview',
     ];
 
     /**
@@ -83,7 +84,8 @@ final class PackagePermissionsTest extends TestCase
 
     /**
      * Each action's constant names it, the right to manage guardrails renamed
-     * to `authorization:guardrail.manage`.
+     * to `authorization:guardrail.manage`, and the right to preview is
+     * `authorization:subject.preview`.
      *
      * @return void
      */
@@ -122,7 +124,9 @@ final class PackagePermissionsTest extends TestCase
             PackagePermissions::ADMINISTRATION_SELF,
             PackagePermissions::ADMINISTRATION_IMPERSONATED,
             PackagePermissions::ADMINISTRATION_UNBOUNDED,
+            PackagePermissions::SUBJECT_PREVIEW,
         ]);
+        self::assertSame('Preview what a subject may do, without acting as it.', (new PackagePermissions)->permissions()[32]->description);
         self::assertSame('Set and remove guardrails from above the scope they cap.', (new PackagePermissions)->permissions()[21]->description);
     }
 

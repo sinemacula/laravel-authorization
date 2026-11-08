@@ -27,6 +27,7 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException;
 use SineMacula\Laravel\Authorization\Query\AuthorizedQuery;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
@@ -47,21 +48,23 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * API (AUTHZ-9.5): `can`, `cannot`, `authorize`, `check`, `any`, `all` and
  * `explain`, over many resources at once (AUTHZ-10.3), `checkMany`, `canEach`
  * and `filterAuthorized`, on the current subject or on a scoped clone from
- * `for()`, `forUser()`, `withPolicies()` or `capped()`, and the actions a
- * subject may take in a scope, `permissionsFor` (AUTHZ-10.4), decided through
- * the same path but recording nothing. `check()` is the one decision entry
- * point (D22) and `checkMany()` the one bulk entry point, `check()` deciding as
- * `checkMany()` decides a batch of one, so a check is decided the same way
- * however it is asked: every other form adapts one of them, and they alone
- * record each decision and report it (see `CheckBatch`). The decision itself is
- * made by the manager's `DecisionPipeline`, which admits the check (the
- * subject, resource and tenant stages) and gathers every source, the session
- * caps included; the policy evaluator runs the rest of the stages in
- * AUTHZ-7.1's order, the denies, the caps, the allows and the implicit deny,
+ * `for()`, `forUser()`, `withPolicies()` or `capped()`, or on a preview from
+ * `previewFor()` (AUTHZ-11.4), which decides about another subject as the
+ * caller, and the actions a subject may take in a scope, `permissionsFor`
+ * (AUTHZ-10.4), decided through the same path but recording nothing. `check()`
+ * is the one decision entry point (D22) and `checkMany()` the one bulk entry
+ * point, `check()` deciding as `checkMany()` decides a batch of one, so a check
+ * is decided the same way however it is asked: every other form adapts one of
+ * them, and they alone record each decision and report it (see `CheckBatch`).
+ * The decision itself is made by the manager's `DecisionPipeline`, which admits
+ * the check (the subject, resource and tenant stages) and gathers every source,
+ * the session caps included; the policy evaluator runs the rest of the stages
+ * in AUTHZ-7.1's order, the denies, the caps, the allows and the implicit deny,
  * each recorded in the decision's trace for audit consumers.
  *
  * `scopedTo()` is called from the `BuildsScopedManagers` trait alone, which an
- * analysis of this file by itself does not see (hence php:S1144).
+ * analysis of this file by itself does not see (hence php:S1144), and so is the
+ * preview the trait's `previewFor()` sets.
  *
  * @SuppressWarnings("php:S1144")
  *
@@ -242,7 +245,7 @@ final class AuthorizationManager
             return;
         }
 
-        $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? DecisionProvenance::of($this->currentSubject());
+        $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? DecisionProvenance::of($this->currentSubject(), $this->preview?->previewer);
 
         $this->events?->dispatch(AuthorizationFailed::of($provenance, $action, ResourceReferences::identifierOf($reference), $decision));
 
@@ -287,7 +290,9 @@ final class AuthorizationManager
      * a batch of one, through the same `CheckBatch`, so a check is decided the
      * same way on its own or in a batch, but reads nothing ahead and holds
      * nothing for later. The decision is recorded as the last decision and
-     * reported with `DecisionEvaluated`.
+     * reported with `DecisionEvaluated`. On a preview from `previewFor()`, the
+     * preview is admitted first, and the decision is about its target, in its
+     * scope, recorded and reported with both parties.
      *
      * The context is what the caller passes, which a policy reads under `input`
      * (`['post' => ['status' => 'draft']]` is `input.post.status`) and never
@@ -311,7 +316,13 @@ final class AuthorizationManager
      */
     public function check(string $action, mixed $resource = null, array $context = []): Decision
     {
-        return $this->batch()->decideOne($this->currentSubject(), new CheckInput($action, $resource, $context));
+        $check = new CheckInput($action, $resource, $context);
+
+        if ($this->preview !== null) {
+            return $this->preview->run(fn (?Subject $target): Decision => $this->batch()->decideOne($target, $check));
+        }
+
+        return $this->batch()->decideOne($this->currentSubject(), $check);
     }
 
     /**
@@ -331,7 +342,8 @@ final class AuthorizationManager
      * completed, and an empty list records nothing. A check that throws, as
      * `check()` would, stops the batch there, the checks before it recorded.
      * Every check is refused with `InvalidCheckArgumentException`, before any
-     * is decided, when one is not a `CheckInput`.
+     * is decided, when one is not a `CheckInput`. On a preview, the preview is
+     * admitted once for the batch, before any check is decided.
      *
      * @template TKey of array-key
      *
@@ -345,6 +357,10 @@ final class AuthorizationManager
      */
     public function checkMany(array $checks): array
     {
+        if ($this->preview !== null) {
+            return $this->preview->run(fn (?Subject $target): array => $this->batch()->decide($target, $checks));
+        }
+
         return $this->batch()->decide($this->currentSubject(), $checks);
     }
 
@@ -411,6 +427,12 @@ final class AuthorizationManager
      * decides no check: no decision is recorded and no decision event is
      * dispatched.
      *
+     * On a preview, each compile, now and at each execution, admits the preview
+     * again, recorded as its admission is, and compiles for its target in its
+     * scope; and the scope is read-only: an update, a delete or an insert from
+     * the query is refused (`preview_write`). The rows it keeps are those the
+     * target may take the action on, which is no proof the caller may see them.
+     *
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @param  string  $action
      * @param  array<string, mixed>  $context
@@ -419,8 +441,14 @@ final class AuthorizationManager
     public function queryScope(Model $model, string $action, array $context = []): AuthorizedQuery
     {
         $authorizer = $this->pipeline->queryAuthorizer();
+        $preview    = $this->preview;
+        $compile    = static fn (?Subject $subject): string => $authorizer->compile($subject, $model, $action, $context);
 
-        return AuthorizedQuery::compiled($model, $action, fn (): string => $authorizer->compile($this->currentSubject(), $model, $action, $context));
+        if ($preview !== null) {
+            return AuthorizedQuery::compiled($model, $action, static fn (): string => $preview->run($compile), true);
+        }
+
+        return AuthorizedQuery::compiled($model, $action, fn (): string => $compile($this->currentSubject()));
     }
 
     /**
@@ -463,7 +491,10 @@ final class AuthorizationManager
      * Decide the supplied action and return the decision's explanation: the
      * verdict, the stage and statements that decided it, each requirement an
      * insufficient authentication names with its unmet parts, and every step of
-     * its trace. A shortcut over `check(...)->explain()`.
+     * its trace. A shortcut over `check(...)->explain()`. On a preview, the
+     * right to preview discloses the target's explanation (N85), which names
+     * statements, conditions, caps and requirements, never a value or a
+     * session; a refused preview explains nothing.
      *
      * @param  string  $action
      * @param  mixed  $resource
@@ -522,6 +553,13 @@ final class AuthorizationManager
      * that cannot be read, such as one declaring a name twice with different
      * metadata, throws `InvalidPermissionCatalogueException`.
      *
+     * On a preview from `previewFor()`, the subject is the preview's target,
+     * named by null alone: naming any subject, or a scope of another tenant or
+     * application than the preview's, throws `InvalidPreviewException`. The
+     * preview is admitted first, and every action it evaluates dispatches its
+     * `DecisionEvaluated`, naming both parties, while the last decision is left
+     * as the admission recorded it (N86).
+     *
      * @param  object|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
      * @param  array<string, mixed>  $context
@@ -534,25 +572,31 @@ final class AuthorizationManager
      */
     public function permissionsFor(?object $subject, AuthorizationScope $scope, array $context = []): array
     {
-        $named = match (true) {
+        $preview = $this->preview;
+        $named   = match (true) {
             $subject === null           => $this->currentSubject(),
+            $preview !== null           => throw InvalidPreviewException::retargeted('permissionsFor'),
             $subject instanceof Subject => $subject,
             default                     => $this->for($subject)->currentSubject(),
         };
+
+        $preview?->refuseOtherScope($scope);
 
         /** @var \SineMacula\Laravel\Authorization\Support\PermissionCatalogue $catalogue */
         $catalogue = Container::getInstance()->make(PermissionCatalogue::class);
         $actions   = \array_unique(\array_map(static fn (PermissionDefinition $definition): string => $definition->name, $catalogue->definitions()));
 
-        return $scope->within(function () use ($named, $scope, $actions, $context): array {
+        $list = fn (?Subject $about): array => $scope->within(function () use ($about, $scope, $actions, $context, $preview): array {
             // Every action is decided on the one reference, so the resource is
             // told, and its attributes read, once for the listing.
             $resource  = ResourceReferences::of($scope->resource);
             $checks    = \array_map(static fn (string $action): CheckInput => new CheckInput($action, $resource, $context), $actions);
-            $decisions = $this->batch(false, false)->decide($scope->subjectIn($named), $checks);
+            $decisions = $this->batch($preview !== null, false)->decide($scope->subjectIn($about), $checks);
 
             return \array_values(\array_filter($actions, static fn (int $key): bool => $decisions[$key]->isAllowed(), \ARRAY_FILTER_USE_KEY));
         });
+
+        return $preview === null ? $list($named) : $preview->run($list);
     }
 
     /**
@@ -602,7 +646,8 @@ final class AuthorizationManager
      * Return the batch that decides this manager's checks, through its
      * pipeline, so `check()`, `checkMany()` and `permissionsFor()` take the one
      * path, dispatching each decision's event and storing it as the last
-     * decision, or, for introspection, neither.
+     * decision, or, for introspection, neither, or, for a preview's listing,
+     * dispatching alone; a preview's decisions name its previewer.
      *
      * @param  bool  $isDispatching
      * @param  bool  $isStoring
@@ -610,6 +655,6 @@ final class AuthorizationManager
      */
     private function batch(bool $isDispatching = true, bool $isStoring = true): CheckBatch
     {
-        return new CheckBatch($this->pipeline, $this->lastDecisionStore, $this->subjectResolver, $this->events, $isDispatching, $isStoring);
+        return new CheckBatch($this->pipeline, $this->lastDecisionStore, $this->subjectResolver, $this->events, $isDispatching, $isStoring, $this->preview?->previewer);
     }
 }

@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
@@ -37,6 +38,12 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * cannot be resolved, or whose principal is not a saved model, refuses with
  * `AuthorizationException`, as `subject_unresolved`, and never falls back to a
  * trusted call.
+ *
+ * A preview confers no authority (AUTHZ-11.4, N87): an acting context built
+ * while a preview is evaluated, by a callback or a listener it runs, or built
+ * from a preview's target, the subject a preview manager's `currentSubject()`
+ * returns, is refused as `administration.previewing`, with no override (see
+ * `Preview\Previewing`).
  *
  * The package never impersonates, so the application says when the acting
  * subject is impersonated, with `impersonatedBy()`. Every delegated change made
@@ -345,7 +352,9 @@ final readonly class ActingContext
 
     /**
      * Return the acting context of the resolved subject, refusing none, and a
-     * subject whose principal is not a saved model with a key.
+     * subject whose principal is not a saved model with a key, and, as
+     * `administration.previewing`, any while a preview is evaluated and a
+     * preview's target.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @return self
@@ -354,6 +363,8 @@ final readonly class ActingContext
      */
     private static function resolved(?Subject $subject): self
     {
+        Previewing::refuseAuthority($subject);
+
         $principal = $subject?->subject;
 
         if (!$principal instanceof Model || !$principal->exists || !\is_scalar($principal->getKey()) || $principal->getKey() === '') {

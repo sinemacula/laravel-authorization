@@ -70,6 +70,11 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
 - `effective-permissions.md`: `permissionsFor()` listing exactly the catalogue's actions `check()` would allow in an
   `AuthorizationScope`, through the one decision path over data read once, the scope applied and restored, the
   subject forms, and why a listing records no decision and dispatches no event.
+- `preview.md`: `previewFor()` and its fixed parties, the sessionless target in the caller's request context, the
+  `authorization:subject.preview` admission on a typed preview resource with the administered-reach rule and its
+  revalidation at every use, the events naming both parties and the listing exception, explanations, what is refused,
+  the read-only queries, why a preview confers no authority (`administration.previewing`), the disclosure point and
+  the limits of a manager clone.
 - `grant-scope.md`: the identity directory contract and its default, the shared reader of grant roots, `forIdentity()`'s
   `within`, `outside` and `unknown` and `hasGrantIn()`'s `present`, `absent` and `unknown`, what counts as a grant, why
   neither answer is membership or authorisation, why it is a trusted service returning only the status, and the grant
