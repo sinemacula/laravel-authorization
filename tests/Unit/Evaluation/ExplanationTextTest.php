@@ -170,7 +170,8 @@ final class ExplanationTextTest extends TestCase
 
     /**
      * bare() and quoted() escape a name as a JSON string does, without and with
-     * its quotes.
+     * its quotes: a control character as its short JSON escape, or as `\uXXXX`
+     * when it has none.
      *
      * @return void
      */
@@ -180,6 +181,7 @@ final class ExplanationTextTest extends TestCase
         self::assertSame('"posts:*"', ExplanationText::quoted('posts:*'));
         self::assertSame('a/b \u003C\"\\\\', ExplanationText::bare('a/b <"\\'));
         self::assertSame('"\ufffd"', ExplanationText::quoted("\xB1"));
+        self::assertSame('a\nb\tc\u0001', ExplanationText::bare("a\nb\tc\x01"));
     }
 
     /**

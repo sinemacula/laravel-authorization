@@ -64,7 +64,7 @@ final class CheckContext
     /** @var list<string> The `${…}` references that could not be resolved since they were last taken, recorded while explaining. */
     private array $unresolved = [];
 
-    /** @var array{list<\SineMacula\Laravel\Authorization\Evaluation\ConditionResult>, list<string>}|null The condition tests of the statement last assessed, with its resource patterns' unresolved references, until they are taken; null for none. */
+    /** @var array{list<\SineMacula\Laravel\Authorization\Evaluation\ConditionResult>|null, list<string>}|null The condition tests of the statement last assessed, null when its target did not match, with its resource patterns' unresolved references, until they are taken; null for none. */
     private ?array $assessment = null;
 
     /**
@@ -123,6 +123,25 @@ final class CheckContext
     }
 
     /**
+     * Note a `${…}` reference by its key when it cannot be resolved, its value
+     * missing or not a scalar, as the interpolator does, while explaining, for
+     * each reference after the first of a string that could not be resolved. A
+     * reference into a namespace no statement has read yet is not looked up, so
+     * noting it never builds a namespace, nor asks its provider.
+     *
+     * @param  string  $reference
+     * @return void
+     */
+    public function noteIfUnresolved(string $reference): void
+    {
+        if (isset($this->builders[\explode('.', $reference)[0]]) || \is_scalar($this->lookup($reference)[1])) {
+            return;
+        }
+
+        $this->unresolved[] = $reference;
+    }
+
+    /**
      * Return each `${…}` reference noted as unresolved since they were last
      * taken, in order, and forget them.
      *
@@ -139,15 +158,16 @@ final class CheckContext
     }
 
     /**
-     * Note the condition tests a statement just made, with what each found, and
-     * the keys of its resource patterns' references that could not be resolved,
-     * for the evaluator to take into the statement's step.
+     * Note the condition tests a statement just made, with what each found, or
+     * none for a statement whose target did not match, and the keys of its
+     * resource patterns' references that could not be resolved, for the
+     * evaluator to take into the statement's step.
      *
-     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\ConditionResult>  $tests
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\ConditionResult>|null  $tests
      * @param  list<string>  $unresolved
      * @return void
      */
-    public function noteAssessment(array $tests, array $unresolved): void
+    public function noteAssessment(?array $tests, array $unresolved): void
     {
         $this->assessment = [$tests, $unresolved];
     }
@@ -155,7 +175,8 @@ final class CheckContext
     /**
      * Return the condition tests the statement last assessed noted, with its
      * unresolved resource pattern references, and forget them: no tests when it
-     * noted none, as a statement whose target does not match notes none.
+     * noted none, as a statement whose target does not match notes none, and no
+     * references when nothing was noted.
      *
      * @return array{list<\SineMacula\Laravel\Authorization\Evaluation\ConditionResult>|null, list<string>}
      *

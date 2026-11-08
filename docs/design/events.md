@@ -106,12 +106,13 @@ carry references, names and ids, never a value the decision read, and are dispat
    `effect` and `reason`; the `statements` that decided it, each a `StatementReference` naming its policy's name, the
    stored policy's key, its index and its sid and, for a statement of a resource policy, the resource that policy is
    attached to (`type:id` or `type:*`); `usedBreakGlass`, false until break-glass grants arrive; and `keys`, the name of
-   each condition key the decision tested, held or failed, never its value. Neither the caller's context nor the
-   decision, with its trace, is carried: the last decision holds the decision, stored before the event is dispatched,
-   with its provenance (`Evaluation\DecisionProvenance`), so a listener that needs it reads
-   `Authorization::lastDecision()` and `lastDecisionProvenance()`. Dispatching the event and storing the last decision
-   are separate switches of `Evaluation\CheckBatch`: `check()` and `checkMany()` do both, `permissionsFor()` neither,
-   and a preview's `permissionsFor()` dispatches alone (N86).
+   each condition key the decision tested, held or failed, and of each `${…}` reference named by a condition operand or
+   resource pattern of a statement it assessed, each once and never its value (see [Explanations](explanations.md)).
+   Neither the caller's context nor the decision, with its trace, is carried: the last decision holds the decision,
+   stored before the event is dispatched, with its provenance (`Evaluation\DecisionProvenance`), so a listener that
+   needs it reads `Authorization::lastDecision()` and `lastDecisionProvenance()`. Dispatching the event and storing the
+   last decision are separate switches of `Evaluation\CheckBatch`: `check()` and `checkMany()` do both,
+   `permissionsFor()` neither, and a preview's `permissionsFor()` dispatches alone (N86).
 
 10. **Digests, not documents.** A policy event carries its document's version and the SHA-256 of its canonical JSON
     (keys sorted at every depth, lists in order, slashes and Unicode unescaped) as a `DocumentDigest`.

@@ -15,10 +15,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * found missing and the request, and, for a decision made without explain mode,
  * that the rest was not recorded.
  *
- * Every name is escaped as a JSON string is, with `<`, `>`, `&`, control and
- * non-ASCII characters written as `\uXXXX`, so no policy, statement, key, role
- * or tenant name can inject markup, control characters or a line of its own.
- * Rendering reads the explanation alone.
+ * Every name is escaped as a JSON string is: `<`, `>`, `&` and non-ASCII
+ * characters as `\uXXXX`, a quote and a backslash with a backslash, and a
+ * control character as its JSON escape, `\b`, `\f`, `\n`, `\r` and `\t` in
+ * short and any other as `\uXXXX` (`\u0001` say), so no policy, statement, key,
+ * role or tenant name can inject markup, control characters or a line of its
+ * own. Rendering reads the explanation alone.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

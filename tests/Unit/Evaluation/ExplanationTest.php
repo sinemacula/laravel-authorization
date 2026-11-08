@@ -177,6 +177,18 @@ final class ExplanationTest extends TestCase
         ]);
 
         self::assertSame(['input.e', 'input.a', 'input.d'], Explanation::of($decision)->missingKeys());
+
+        $repeated = Decision::deny(DecisionReason::CONDITION_FAILED, DecisionStage::IMPLICIT, [], [
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, $statement, [], null, null, [], [
+                new ConditionResult('input.a', 'eq', ConditionOutcome::MISSING, false, true),
+                new ConditionResult('input.a', 'gt', ConditionOutcome::MISSING, false, true),
+                new ConditionResult('input.c', 'eq', ConditionOutcome::UNRESOLVED, false, false, ['input.b']),
+            ]),
+        ])->withEvidence(new DecisionEvidence);
+        $missing = $repeated->explain()->missingKeys();
+
+        self::assertSame(['input.a', 'input.b'], $missing);
+        self::assertSame('["input.a","input.b"]', \json_encode($repeated->explain()->toArray()['missing_keys'], \JSON_THROW_ON_ERROR));
     }
 
     /**
@@ -266,7 +278,7 @@ final class ExplanationTest extends TestCase
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::CONDITION_FAILED, new StatementReference('p', 0), ['authentication' => false]),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, new StatementReference('p', 1)),
         ]);
-        $array = $decision->explain()->toArray();
+        $array = self::withoutWarnings(static fn (): array => $decision->explain()->toArray());
         $steps = $array['stages'][0]['steps'];
 
         self::assertSame(Explanation::NOT_RECORDED, $array['grants']);
@@ -277,6 +289,39 @@ final class ExplanationTest extends TestCase
         self::assertSame(Explanation::NOT_RECORDED, $steps[0]['unresolved']);
         self::assertSame([], $steps[1]['tests']);
         self::assertSame([['names' => ['multifactor'], 'unmet' => ['multifactor']]], $array['requirements']);
+    }
+
+    /**
+     * A stored decision marks the tests and unresolved references of every step
+     * that assessed a statement's conditions as not recorded, whatever it
+     * found, and gives none for a statement whose target did not match and for
+     * a step about no statement, which never record any.
+     *
+     * @return void
+     */
+    public function testAStoredDecisionMarksEveryAssessedStepAsNotRecorded(): void
+    {
+        $assessed = [TraceOutcome::MATCHED, TraceOutcome::CONDITION_FAILED, TraceOutcome::UNDECIDABLE, TraceOutcome::INVALID];
+        $trace    = [];
+
+        foreach ($assessed as $index => $outcome) {
+            $trace[] = new TraceEntry(DecisionStage::ALLOW, $outcome, new StatementReference('p', $index));
+        }
+
+        $trace[] = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, new StatementReference('p', 4));
+        $trace[] = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::MATCHED, null, [], null, 'posts:read');
+
+        $steps = Decision::allow(DecisionStage::ALLOW, [new StatementReference('p', 0)], $trace)->explain()->toArray()['stages'][0]['steps'];
+
+        foreach (\array_keys($assessed) as $index) {
+            self::assertSame(Explanation::NOT_RECORDED, $steps[$index]['tests'], $assessed[$index]->value);
+            self::assertSame(Explanation::NOT_RECORDED, $steps[$index]['unresolved'], $assessed[$index]->value);
+        }
+
+        self::assertSame([], $steps[4]['tests']);
+        self::assertSame([], $steps[4]['unresolved']);
+        self::assertSame([], $steps[5]['tests']);
+        self::assertSame([], $steps[5]['unresolved']);
     }
 
     /**
@@ -315,5 +360,27 @@ final class ExplanationTest extends TestCase
 
         self::assertNotNull($explanation->steps[3]->tests ?? null);
         self::assertStringNotContainsString(self::SECRET, $rendered);
+    }
+
+    /**
+     * Return what the callback returns, any warning or notice it raises thrown
+     * instead, so reading what a stored decision does not carry fails.
+     *
+     * @template TResult
+     *
+     * @param  \Closure(): TResult  $callback
+     * @return TResult
+     */
+    private static function withoutWarnings(\Closure $callback): mixed
+    {
+        \set_error_handler(static function (int $level, string $message): never {
+            throw new \ErrorException($message, 0, $level);
+        });
+
+        try {
+            return $callback();
+        } finally {
+            \restore_error_handler();
+        }
     }
 }

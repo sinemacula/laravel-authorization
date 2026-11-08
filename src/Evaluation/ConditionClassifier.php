@@ -17,8 +17,9 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
  * `_if_exists` and `null: true`, and `null: false` refuses it; a null value the
  * test does not accept is `null`; an undecidable test on a present key is
  * `unresolved` when a `${…}` reference of its operand could not be resolved,
- * `undecidable` when the substituted operand has the wrong type, and
- * `wrong_type` otherwise.
+ * `undecidable` when the substituted operand has the wrong type, or is a string
+ * a string operator cannot test (empty, or holding a NUL byte) while the value
+ * is one it can, and `wrong_type` otherwise.
  *
  * @phpstan-import-type ConditionTest from \SineMacula\Laravel\Authorization\Evaluation\StatementValidator
  *
@@ -29,6 +30,9 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
  */
 final class ConditionClassifier
 {
+    /** @var list<string> The operators that test a string value against a string operand, which cannot be empty or hold a NUL byte. */
+    private const array STRING_OPERATORS = ['starts_with', 'ends_with', 'like'];
+
     /**
      * Return what the test found, as an explanation records it, given the
      * result it was assessed to and the references noted as unresolved while it
@@ -55,7 +59,7 @@ final class ConditionClassifier
         // The assessment read this path already, so its namespace is built.
         [$isPresent, $actual] = $scope->context->find($test['path']);
 
-        $outcome = $isPresent ? self::presentOutcome($part, $actual, $unresolved) : self::missingOutcome($part);
+        $outcome = $isPresent ? self::presentOutcome($test, $part, $actual, $unresolved) : self::missingOutcome($part);
 
         return new ConditionResult($test['key'], $test['operator'], $outcome, $test['isOptional'], !$isPresent, $unresolved);
     }
@@ -96,21 +100,41 @@ final class ConditionClassifier
     /**
      * Return what a test of a key the context carries found.
      *
+     * @param  ConditionTest  $test
      * @param  \SineMacula\Laravel\Authorization\Evaluation\MatchResult  $part
      * @param  mixed  $actual
      * @param  list<string>  $unresolved
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\ConditionOutcome
      */
-    private static function presentOutcome(MatchResult $part, mixed $actual, array $unresolved): ConditionOutcome
+    private static function presentOutcome(array $test, MatchResult $part, mixed $actual, array $unresolved): ConditionOutcome
     {
+        $isUndecidable = $part->outcome === MatchOutcome::UNDECIDABLE;
+
         return match (true) {
-            $part->outcome === MatchOutcome::MATCHES                           => ConditionOutcome::HELD,
-            $part->outcome === MatchOutcome::INVALID                           => ConditionOutcome::INVALID,
-            $part->outcome === MatchOutcome::UNDECIDABLE && $unresolved !== [] => ConditionOutcome::UNRESOLVED,
-            \str_contains($part->detail, Statement::SUBSTITUTED_OPERAND)       => ConditionOutcome::UNDECIDABLE,
-            $actual        === null                                            => ConditionOutcome::NULL,
-            $part->outcome === MatchOutcome::DOES_NOT_MATCH                    => ConditionOutcome::FAILED,
-            default                                                            => ConditionOutcome::WRONG_TYPE,
+            $part->outcome === MatchOutcome::MATCHES                              => ConditionOutcome::HELD,
+            $part->outcome === MatchOutcome::INVALID                              => ConditionOutcome::INVALID,
+            $isUndecidable && $unresolved !== []                                  => ConditionOutcome::UNRESOLVED,
+            \str_contains($part->detail, Statement::SUBSTITUTED_OPERAND)          => ConditionOutcome::UNDECIDABLE,
+            $isUndecidable && self::isSubstitutedStringUntestable($test, $actual) => ConditionOutcome::UNDECIDABLE,
+            $actual        === null                                               => ConditionOutcome::NULL,
+            $part->outcome === MatchOutcome::DOES_NOT_MATCH                       => ConditionOutcome::FAILED,
+            default                                                               => ConditionOutcome::WRONG_TYPE,
         };
+    }
+
+    /**
+     * Determine whether an undecidable test is its substituted operand's doing:
+     * a string operator against a string value without a NUL byte, which it can
+     * test, is left undecidable only by an empty operand or one holding a NUL
+     * byte, and a literal operand of either kind is refused with the condition,
+     * so the operand came from a substituted value.
+     *
+     * @param  ConditionTest  $test
+     * @param  mixed  $actual
+     * @return bool
+     */
+    private static function isSubstitutedStringUntestable(array $test, mixed $actual): bool
+    {
+        return \in_array($test['operator'], self::STRING_OPERATORS, true) && \is_string($actual) && !\str_contains($actual, "\0");
     }
 }

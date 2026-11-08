@@ -232,7 +232,9 @@ final readonly class Statement
      * Through the context of an explained check, each condition test is also
      * recorded with what it found, with the keys of the resource patterns'
      * references that could not be resolved, for the evaluator to take (see
-     * `CheckContext::noteAssessment()`).
+     * `CheckContext::noteAssessment()`); a statement whose target does not
+     * match records no test, and the references its patterns could not resolve
+     * as its own, so none is left for the next statement to claim.
      *
      * A context given as an array is the check's namespaces, already built.
      *
@@ -253,7 +255,13 @@ final readonly class Statement
         $scope  = new InterpolationScope($interpolator, $resource, $context);
         $target = $this->matchesTarget($scope);
 
+        // A statement whose target does not match keeps, as its own, the
+        // references its patterns could not resolve while explaining.
         if ($target->outcome === MatchOutcome::DOES_NOT_MATCH) {
+            if ($scope->context->isExplaining()) {
+                $scope->context->noteAssessment(null, $scope->context->takeUnresolved());
+            }
+
             return $target;
         }
 

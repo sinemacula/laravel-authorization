@@ -2260,9 +2260,10 @@ admitted from outside it and for a delegated change to the platform, a scope put
 `TenantScope::within()` or an `AuthorizationScope`), and otherwise the request's, a guest's decision included. Each
 statement is named by its policy's name, the stored policy's key, its index and its sid and, for a statement of a
 resource policy, the resource that policy is attached to (`type:id` or `type:*`). The keys are the condition keys the
-decision tested, held or failed, each once: a policy that reads `resource.status` puts the key on the event, never the
-status. The decision itself, with its stage and its trace, is not on the event; a listener that needs it for debugging
-reads `Authorization::lastDecision()`, which holds it by the time the event is dispatched, and
+decision tested, held or failed, and every `${…}` reference that an assessed statement's condition operands or resource
+patterns name, each once: a policy that reads `resource.status` or interpolates `${principal.id}` puts that name on the
+event, never the value. The decision itself, with its stage and its trace, is not on the event; a listener that needs it
+for debugging reads `Authorization::lastDecision()`, which holds it by the time the event is dispatched, and
 `Authorization::lastDecisionProvenance()` (see [The programmatic API](#the-programmatic-api)).
 
 ### The programmatic API
@@ -2732,11 +2733,14 @@ ALLOW at the allow stage by permission "posts:publish".
 
 **Explain mode and its cost.** `explain()` runs the check in explain mode, a switch on the one decision path (N89). An
 everyday check (`check()`, `can()`, the Gate, Blade, the middleware, `checkMany()` and the rest) never turns it on: it
-records the trace it always has and costs what it did before explanations. Explain mode records more, from what the
-check reads anyway: the grants a permission or policy came through are read with the rows their resolution reads, in
-no more queries and asking no attribute provider more than the check does, but never from the resolution cache, so an
-explained check reads its grants afresh. A preview's `explain()` is admitted, recorded and reported as any preview
-check (see [Preview](#preview)).
+records the trace it always has and costs what it did before explanations. Explain mode decides from what an everyday
+check decides from, the resolution cache included, and records more besides, asking no attribute provider more than
+the check does. Where each grant came from is read afresh from the grant rows a resolution reads: on a cold cache the
+check decides from those rows, in no more queries than an everyday check, and keeps nothing in the cache; on a warm
+cache, where an everyday check reads no grant row, an explained check still reads them, once a permission is found held
+or the grantee has a policy, in no more queries than a resolution of the names. A grant that the rows no longer give,
+one a stale cache still holds, is `unavailable`, never guessed. A preview's `explain()` is admitted, recorded and
+reported as any preview check (see [Preview](#preview)).
 
 **What an explanation holds.** It is an immutable value of the decision alone:
 
@@ -2751,7 +2755,8 @@ check (see [Preview](#preview)).
 - each authentication requirement that alone kept an allow from applying, by its part names and its unmet parts;
 - for an explained check, each condition test on its own (its key, its operator, whether `_if_exists` lets a missing
   key pass, and its outcome: `held`, `failed`, `missing`, `null`, `wrong_type`, `unresolved`, `undecidable` or
-  `invalid`), the keys found missing and the references that could not be resolved, by key;
+  `invalid`), the keys found missing and every reference that could not be resolved, by key, on the statement that
+  read it;
 - for an explained allow, where each grant came from: a permission granted to the principal or the identity, or
   through a role, with the role held and each ancestor up to the role that carries it, and the tenant and application
   of the grant; a policy attached to the grantee or to one of its roles, the same way; or a policy attached to the
@@ -2761,7 +2766,8 @@ check (see [Preview](#preview)).
   scope it was asked in and the scope it was decided in.
 
 **The renderers.** `toText()` writes it for reading, every name (policy, statement, key, role, tenant) escaped as a JSON
-string is, with markup, control and non-ASCII characters escaped, so no name can inject markup or a line of its own.
+string is (`<`, `>`, `&` and non-ASCII characters as `\uXXXX`, a control character as its JSON escape, such as `\n` or
+`\u0001`), so no name can inject markup or a line of its own.
 `toArray()`, which `jsonSerialize()` returns, writes a stable schema carrying `version: 1`. Rendering reads the
 explanation alone: it queries nothing, dispatches nothing and leaves the last decision as it is.
 

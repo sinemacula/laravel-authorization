@@ -397,6 +397,54 @@ final class CheckContextTest extends TestCase
     }
 
     /**
+     * A reference is noted only when it cannot be resolved, and one into a
+     * namespace not yet built is neither looked up nor noted, so the namespace
+     * is not built; once it is, its references are noted as any other.
+     *
+     * @return void
+     */
+    public function testAReferenceIsNotedOnlyWhenItCannotBeResolved(): void
+    {
+        $built   = new \ArrayObject;
+        $builder = static function () use ($built): array {
+            $built->append('resource');
+
+            return ['resource' => ['owner' => 'u']];
+        };
+        $context = new CheckContext(['input' => ['a' => 'x', 'list' => ['y']]], ['resource' => $builder]);
+
+        foreach (['input.a', 'input.list', 'input.missing', 'resource.owner', 'resource.gone'] as $reference) {
+            $context->noteIfUnresolved($reference);
+        }
+
+        self::assertSame(['input.list', 'input.missing'], $context->takeUnresolved());
+        self::assertCount(0, $built);
+
+        $context->lookup('resource.owner');
+        $context->noteIfUnresolved('resource.owner');
+        $context->noteIfUnresolved('resource.gone');
+
+        self::assertSame(['resource.gone'], $context->takeUnresolved());
+        self::assertCount(1, $built);
+    }
+
+    /**
+     * A statement whose target did not match notes no tests, only its
+     * unresolved references, which are taken as any assessment is.
+     *
+     * @return void
+     */
+    public function testAMismatchIsNotedWithoutTests(): void
+    {
+        $context = new CheckContext;
+
+        $context->noteAssessment(null, ['input.a']);
+
+        self::assertSame([null, ['input.a']], $context->takeAssessment());
+        self::assertSame([null, []], $context->takeAssessment());
+    }
+
+    /**
      * The tests a statement notes are taken once, with its unresolved
      * references; a context noted with none gives none.
      *

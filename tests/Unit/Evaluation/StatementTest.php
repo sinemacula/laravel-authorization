@@ -1589,6 +1589,36 @@ final class StatementTest extends TestCase
     }
 
     /**
+     * Through an explained context, a statement whose target does not match
+     * notes no test and the references its resource patterns could not resolve,
+     * so the next statement assessed notes none of them as its own; an everyday
+     * context is noted with nothing.
+     *
+     * @return void
+     */
+    public function testATargetMismatchNotesItsOwnUnresolvedReferences(): void
+    {
+        $deny     = new Statement(PolicyEffect::DENY, ['posts:read'], null, [], null, null, ['posts:${input.missing}', 'posts:1']);
+        $allow    = new Statement(PolicyEffect::ALLOW, ['posts:read'], ['posts:*'], ['eq' => ['input.a' => 'x']]);
+        $context  = new CheckContext(['input' => ['a' => 'x']]);
+        $everyday = new CheckContext(['input' => ['a' => 'x']]);
+
+        $context->explain();
+
+        self::assertSame(MatchOutcome::DOES_NOT_MATCH, $deny->assess('posts:read', 'posts:1', $context, new ContextInterpolator)->outcome);
+        self::assertSame([null, ['input.missing']], $context->takeAssessment());
+
+        $deny->assess('posts:read', 'posts:1', $context, new ContextInterpolator);
+        $allow->assess('posts:read', 'posts:1', $context, new ContextInterpolator);
+
+        self::assertSame([], $context->takeAssessment()[1]);
+
+        $deny->assess('posts:read', 'posts:1', $everyday, new ContextInterpolator);
+
+        self::assertSame([null, []], $everyday->takeAssessment());
+    }
+
+    /**
      * A substituted operand of the wrong type is undecidable, its detail saying
      * so.
      *

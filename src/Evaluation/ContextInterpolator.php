@@ -143,7 +143,14 @@ final class ContextInterpolator
     }
 
     /**
-     * Render the string, resolving every token.
+     * Render the string, resolving every token, until one cannot be resolved.
+     *
+     * Through the context of an explained check, each later reference that
+     * cannot be resolved either is noted too, so every missing dependency of
+     * the string is named, not only the first; only the first is logged, and a
+     * later reference whose namespace no test has read yet is not looked up, so
+     * explaining builds no namespace the check did not (see
+     * `CheckContext::noteIfUnresolved()`).
      *
      * @param  string  $subject
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
@@ -153,11 +160,16 @@ final class ContextInterpolator
     private static function render(string $subject, CheckContext $context, bool $asPattern): ?string
     {
         $rendered = '';
+        $parts    = self::split($subject);
 
-        foreach (self::split($subject) as $part) {
+        foreach ($parts as $index => $part) {
             $piece = self::renderPart($part, $context, $asPattern);
 
             if ($piece === null) {
+                if ($context->isExplaining()) {
+                    self::noteLaterReferences(\array_slice($parts, $index + 1), $context);
+                }
+
                 return null;
             }
 
@@ -165,6 +177,26 @@ final class ContextInterpolator
         }
 
         return $rendered;
+    }
+
+    /**
+     * Note, with the context of an explained check, each reference among the
+     * parts of a string after one that could not be resolved, that cannot be
+     * resolved either.
+     *
+     * @param  list<string>  $parts
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @return void
+     */
+    private static function noteLaterReferences(array $parts, CheckContext $context): void
+    {
+        foreach ($parts as $part) {
+            if (\preg_match(self::TOKEN_PATTERN, $part) !== 1) {
+                continue;
+            }
+
+            $context->noteIfUnresolved(\substr($part, 2, -1));
+        }
     }
 
     /**

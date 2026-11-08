@@ -24,10 +24,13 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\CustomGrantsIdentity;
+use Tests\Feature\Stubs\HiddenPolicy;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubTenant;
+use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Feature\Stubs\UndeclaredRolesGrantee;
 use Tests\TestCase;
 
 /**
@@ -137,6 +140,13 @@ final class GrantProvenanceResolverTest extends TestCase
 
         self::assertEquals([new GrantProvenance(GrantSource::PERMISSION, 'posts:read', Reference::of($identity), true, [], true)], $grants);
         self::assertSame([null, []], GrantProvenanceResolver::permissionFor(new Subject($principal, $machine), 'posts:read'));
+
+        $suspended = SuspendableIdentity::create(['id' => 'person-2']);
+
+        $suspended->givePermission($read);
+        $suspended->suspended = true;
+
+        self::assertSame([null, []], GrantProvenanceResolver::permissionFor(new Subject($principal, $suspended), 'posts:read'));
     }
 
     /**
@@ -314,6 +324,200 @@ final class GrantProvenanceResolverTest extends TestCase
             [GrantProvenance::unavailable('coded', Reference::of($user), true)],
             $custom->evidenceFor(Decision::allow(DecisionStage::ALLOW, [new StatementReference('coded', 0)]))->grants,
         );
+    }
+
+    /**
+     * A grantee whose roles are not declared through `SupportsRoles` holds its
+     * policies by its own attachments alone, the roles never read, as its
+     * `getPolicies()` reads them.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGranteeWithUndeclaredRoles(): void
+    {
+        $grantee = UndeclaredRolesGrantee::create(['id' => 'grantee-1']);
+        $own     = self::policy('own');
+
+        $grantee->attachPolicy($own);
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $recorder = new EvidenceRecorder;
+        $policies = GrantProvenanceResolver::policiesOf($grantee, $recorder);
+        $queries  = \count(DB::getQueryLog());
+
+        DB::disableQueryLog();
+
+        self::assertSame(['own'], self::names($policies));
+        self::assertSame(2, $queries);
+        self::assertEquals(
+            [new GrantProvenance(GrantSource::POLICY, "own[{$own->id}]", Reference::of($grantee), false, [], true)],
+            $recorder->evidenceFor(Decision::allow(DecisionStage::ALLOW, [new StatementReference('own', 0, $own->id)]))->grants,
+        );
+    }
+
+    /**
+     * A policy reached through a role that the policy model's scope hides is
+     * left out, and the policies after it are still resolved, as the resolution
+     * of the names resolves them.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyTheModelHidesIsLeftOut(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $role   = Role::create(['name' => 'editor']);
+        $hidden = self::policy('hidden');
+        $shown  = self::policy('shown');
+
+        $role->attachPolicy($hidden);
+        $role->attachPolicy($shown);
+        $user->assignRole($role);
+
+        $this->app?->make(ConfigRepository::class)->set('authorization.models.policy', HiddenPolicy::class);
+
+        $recorder = new EvidenceRecorder;
+        $policies = GrantProvenanceResolver::policiesOf($user, $recorder);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        self::assertSame(['shown'], self::names($policies));
+        self::assertSame(self::names($user->getPolicies()), self::names($policies));
+    }
+
+    /**
+     * On a warm cache, what decided is what the cache holds, as an everyday
+     * check decides from it: the grant rows are read afresh only for where a
+     * grant that decided came from, never when no permission is held or the
+     * grantee has no policy, and a grant the cache still holds that the rows no
+     * longer give is `unavailable`, never guessed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAWarmCacheDecidesAndAStaleGrantIsUnavailable(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $bare = StubIdentity::create(['id' => 'user-2']);
+        $own  = self::policy('own');
+        $read = Permission::create(['name' => 'posts:read']);
+
+        $user->givePermission($read);
+        $user->attachPolicy($own);
+        $user->getPermissions();
+        $user->getPolicies();
+        $bare->getPolicies();
+
+        $subject = new Subject($user, $user);
+        $count   = static function (\Closure $read): int {
+            DB::enableQueryLog();
+            DB::flushQueryLog();
+
+            $read();
+
+            $queries = \count(DB::getQueryLog());
+
+            DB::disableQueryLog();
+
+            return $queries;
+        };
+
+        self::assertSame(0, $count(static fn (): array => GrantProvenanceResolver::permissionFor($subject, 'comments:read')));
+        self::assertSame(0, $count(static fn (): array => GrantProvenanceResolver::policiesOf($bare, new EvidenceRecorder)));
+
+        $fresh = new EvidenceRecorder;
+
+        self::assertEquals(
+            ['posts:read', [new GrantProvenance(GrantSource::PERMISSION, 'posts:read', Reference::of($user), false, [], true)]],
+            GrantProvenanceResolver::permissionFor($subject, 'posts:read'),
+        );
+        self::assertSame(['own'], self::names(GrantProvenanceResolver::policiesOf($user, $fresh)));
+        self::assertEquals(
+            [new GrantProvenance(GrantSource::POLICY, "own[{$own->id}]", Reference::of($user), false, [], true)],
+            $fresh->evidenceFor(Decision::allow(DecisionStage::ALLOW, [new StatementReference('own', 0, $own->id)]))->grants,
+        );
+
+        DB::table('authorizable_permissions')->delete();
+        DB::table('authorizable_policies')->delete();
+
+        $recorder = new EvidenceRecorder;
+
+        self::assertEquals(['posts:read', [GrantProvenance::unavailable('posts:read', Reference::of($user))]], GrantProvenanceResolver::permissionFor($subject, 'posts:read'));
+        self::assertSame(['own'], self::names(GrantProvenanceResolver::policiesOf($user, $recorder)));
+        self::assertEquals(
+            [GrantProvenance::unavailable("own[{$own->id}]", Reference::of($user))],
+            $recorder->evidenceFor(Decision::allow(DecisionStage::ALLOW, [new StatementReference('own', 0, $own->id)]))->grants,
+        );
+    }
+
+    /**
+     * Without a resolution cache, the check decides from the rows read for
+     * where each grant came from.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testWithoutACacheTheRowsDecide(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $own  = self::policy('own');
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        $user->attachPolicy($own);
+
+        $this->app?->offsetUnset(ResolutionCache::class);
+
+        $recorder = new EvidenceRecorder;
+
+        self::assertNull(ResolutionCache::instance());
+        self::assertEquals(
+            ['posts:read', [new GrantProvenance(GrantSource::PERMISSION, 'posts:read', Reference::of($user), false, [], true)]],
+            GrantProvenanceResolver::permissionFor(new Subject($user, $user), 'posts:read'),
+        );
+        self::assertSame(['own'], self::names(GrantProvenanceResolver::policiesOf($user, $recorder)));
+        self::assertEquals(
+            [new GrantProvenance(GrantSource::POLICY, "own[{$own->id}]", Reference::of($user), false, [], true)],
+            $recorder->evidenceFor(Decision::allow(DecisionStage::ALLOW, [new StatementReference('own', 0, $own->id)]))->grants,
+        );
+    }
+
+    /**
+     * On a cold cache, the check decides from the rows read for provenance, and
+     * keeps nothing in the cache, so a later everyday check resolves its grants
+     * itself.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAColdCacheKeepsNothing(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        $user->attachPolicy(self::policy('own'));
+
+        GrantProvenanceResolver::permissionFor(new Subject($user, $user), 'posts:read');
+        GrantProvenanceResolver::policiesOf($user, new EvidenceRecorder);
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $user->getPermissions();
+        $user->getPolicies();
+
+        $queries = \count(DB::getQueryLog());
+
+        DB::disableQueryLog();
+
+        self::assertGreaterThan(0, $queries);
     }
 
     /**

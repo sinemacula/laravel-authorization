@@ -98,6 +98,33 @@ final class EvidenceRecorderTest extends TestCase
     }
 
     /**
+     * Policies are told apart by their stored key, or, built in code, by their
+     * name: two built in code under different names, or two stored under one
+     * name, never share their provenance.
+     *
+     * @return void
+     */
+    public function testPoliciesAreToldApartByKeyThenName(): void
+    {
+        $user     = StubIdentity::create(['id' => 'user-1']);
+        $recorder = new EvidenceRecorder;
+        $document = ['statements' => [['effect' => 'allow', 'actions' => ['a']]]];
+        $first    = new GrantProvenance(GrantSource::POLICY, 'k1', Reference::of($user), false, [], true);
+        $second   = new GrantProvenance(GrantSource::ROLE_POLICY, 'k2', Reference::of($user), false, ['editor'], true);
+
+        $recorder->notePolicies([Policy::fromArray(['name' => 'a', ...$document])], null, $user);
+        $recorder->notePolicies([Policy::fromArray(['name' => 'b', ...$document])], null, $user, true);
+        $recorder->notePolicies([Policy::fromArray(['name' => 'same', ...$document])->withId('k1')], ['k1' => [$first]], $user);
+        $recorder->notePolicies([Policy::fromArray(['name' => 'same', ...$document])->withId('k2')], ['k2' => [$second]], $user);
+
+        $grants = static fn (StatementReference $statement): array => $recorder->evidenceFor(Decision::allow(DecisionStage::ALLOW, [$statement]))->grants;
+
+        self::assertEquals([GrantProvenance::unavailable('a', Reference::of($user))], $grants(new StatementReference('a', 0)));
+        self::assertEquals([$first->named('same[k1]')], $grants(new StatementReference('same', 0, 'k1')));
+        self::assertEquals([$second->named('same[k2]')], $grants(new StatementReference('same', 0, 'k2')));
+    }
+
+    /**
      * A grantee that is no saved record is named as none.
      *
      * @return void

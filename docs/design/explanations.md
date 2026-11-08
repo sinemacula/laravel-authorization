@@ -43,22 +43,31 @@ named subject is the second part of BL-68.
    substituted operand of the wrong type, or a requirement that cannot be checked, `undecidable`; a malformed test
    `invalid`. Two tests of one key stay apart. The statement's `MatchOutcome` and its condition keys are the ones an
    everyday assessment gives, so a definite failure still decides a deny's conjunction over an undecidable test. The
-   resource patterns' unresolved references are kept beside the tests. The context notes each unresolved reference as
-   the interpolator meets it, the statement takes them after each test, so telling the outcome reads nothing new, and
-   it notes its tests with the context, which the evaluator takes into the statement's step; `MatchResult` carries
-   none, so an everyday assessment builds no more than it did.
+   resource patterns' unresolved references are kept beside the tests, on the step of the statement whose patterns read
+   them, a statement whose target did not match included, so none is claimed by a later statement. The context notes
+   each unresolved reference as the interpolator meets it, every one of a string, not only the first, though only the
+   first is logged and a later reference into a namespace no test has read is never looked up, so no provider is asked
+   (`CheckContext::noteIfUnresolved()`). The statement takes them after each test, so telling the outcome reads
+   nothing new, and it notes its tests with the context, which the evaluator takes into the statement's step;
+   `MatchResult` carries none, so an everyday assessment builds no more than it did. A string operator's substituted
+   operand that is empty or holds a NUL byte, against a string value it can test, is `undecidable`, the operand's
+   doing, never `wrong_type`.
 
-6. **Grant provenance, read where the grants are (N89).** For an explained check, `Resolvers\GrantProvenanceResolver`
-   resolves the permission held and the policies of the principal and its identity from the rows their resolution
-   reads, with the grant row's tenant and application, the role held and each ancestor up to the role that carries the
-   grant (`RoleGraph::pathsOf()`, `permissionsByRole()`, `RolePolicies::attachedTo()`), in no more queries than the
-   resolution of the names and asking no attribute provider. It never reads the resolution cache, so it never serves a
-   provenance the cache did not hold. The verdict is the same, since the names are the same and `HeldPermissions`
-   matches them the same way. A grantee whose `getPermissions()` or `getPolicies()` is its own, a policy store, a
-   policy resolver bound in place of the default and a `withPolicies()` override cannot say where a grant came from:
-   each is asked as an everyday check asks it, and its grant recorded as `unavailable`. A resource policy is named by
-   the resource it is attached to, its attachment's scope not recorded. A further check the administration stage makes
-   is never explained, so it never overwrites the check's own evidence.
+6. **Grant provenance, matched to what decided (N89).** For an explained check, `Resolvers\GrantProvenanceResolver`
+   decides the permission held and the policies of the principal and its identity from what an everyday check decides
+   from: the grantee's entry in the resolution cache, when the cache holds one. Where each grant came from is read
+   afresh from the rows a resolution reads, with the grant row's tenant and application, the role held and each
+   ancestor up to the role that carries the grant (`RoleGraph::pathsOf()`, `permissionsByRole()`,
+   `RolePolicies::attachedTo()`), in no more queries than the resolution of the names and asking no attribute
+   provider. On a cold cache the check decides from those rows, as a resolution would, and keeps nothing in the cache.
+   A grant is reported only as the rows support what decided: the permission held by its grants of that name, a
+   policy by its attachments to that grantee; one the rows no longer give, a stale cache entry say, is `unavailable`,
+   never guessed. An identity of the other kind gives its deny statements alone, which never allow, so none of its
+   attachments is reported. A grantee whose `getPermissions()` or `getPolicies()` is its own, a policy store, a policy
+   resolver bound in place of the default and a `withPolicies()` override cannot say where a grant came from: each is
+   asked as an everyday check asks it, and its grant recorded as `unavailable`. A resource policy is named by the
+   resource it is attached to, its attachment's scope not recorded. A further check the administration stage makes is
+   never explained, so it never overwrites the check's own evidence.
 
 7. **What it asked.** The batch adds to an explained decision's evidence an `ExplanationRequest`: the action, the
    resource's identifier, the subject, its identity and the previewer, the scope the check was asked in and the scope
@@ -67,11 +76,12 @@ named subject is the second part of BL-68.
 8. **An immutable projection.** `Decision::explain()` returns `Explanation::of($decision)`, built from the decision
    alone. Nothing is evaluated, read, recorded or dispatched to build or render it.
 
-9. **Renderers.** `toText()` (`Evaluation\ExplanationText`) writes every name escaped as a JSON string is, with `<`,
-   `>`, `&`, control and non-ASCII characters as `\uXXXX`, so no name can inject markup, control characters or a line
-   of its own. `toArray()` and `jsonSerialize()` write one stable schema, `version: 1`: the verdict, `decided_by`, the
-   steps grouped by stage, `not_evaluated`, the grants, the requirements by part names and unmet parts, the keys, the
-   missing keys, the request and whether the evidence was recorded.
+9. **Renderers.** `toText()` (`Evaluation\ExplanationText`) writes every name escaped as a JSON string is: `<`, `>`,
+   `&` and non-ASCII characters as `\uXXXX`, a quote and a backslash with a backslash, and a control character as its
+   JSON escape, `\b`, `\f`, `\n`, `\r` and `\t` in short and any other as `\uXXXX` (`\u0001` say), so no name can
+   inject markup, control characters or a line of its own. `toArray()` and `jsonSerialize()` write one stable schema,
+   `version: 1`: the verdict, `decided_by`, the steps grouped by stage, `not_evaluated`, the grants, the requirements
+   by part names and unmet parts, the keys, the missing keys, the request and whether the evidence was recorded.
 
 10. **Never a value (AUTHZ-8.8).** No context or attribute value, operand, interpolated string, model, raw context,
     session, proof or fingerprint reaches an explanation, its text or its schema; a requirement is named by its parts,
@@ -103,8 +113,12 @@ named subject is the second part of BL-68.
   deny stage, with no statement, as it does without explain mode.
 - **A check that throws.** `explain()` throws what `check()` throws, a preview's refusal included, and explains
   nothing.
-- **A warm cache.** An explained check reads its grants afresh, even when an everyday check would have read them from
-  the cache; it reads no more than a resolution of the names does.
+- **A warm cache.** An explained check decides from the cache, as an everyday check does, but still reads the grant
+  rows afresh for where each grant came from, once a permission is found held or the grantee has a policy, where an
+  everyday check reads none; it reads no more than a resolution of the names does. On a cold cache it reads no more
+  than an everyday check, and keeps nothing in the cache.
+- **A stale cache.** A grant the cache still holds that the rows read afresh no longer give is reported as
+  `unavailable`; the verdict is the one an everyday check gets from the same cache.
 
 ## Implementation Anchors
 
@@ -132,7 +146,8 @@ named subject is the second part of BL-68.
 - `Explanations\ParityPropertyTest` (Integration) -- the verdicts, traces and requirements of explain mode are those of
   `check()` over random scenarios.
 - `Resolvers\GrantProvenanceResolverTest` (Feature) -- the provenance of each kind of grant, the same names and
-  policies as the resolution, and no more queries.
+  policies as the resolution, no more queries, a warm cache deciding, a stale grant `unavailable`, and a cold cache
+  keeping nothing.
 - `ExplanationTest`, `ExplanationTextTest`, `ConditionClassifierTest`, `EvidenceRecorderTest` (Unit) -- causes, stages
   not evaluated, the schema, the escaping, each typed outcome, and the sentinels that no value reaches an explanation.
 - `SingleCheckBudgetTest`, `ConditionEvaluationBudgetTest`, `EvaluatorThroughputTest` (Performance) -- the everyday

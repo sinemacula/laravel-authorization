@@ -39,6 +39,7 @@ use Tests\Feature\Stubs\CustomGrantsIdentity;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubTenant;
@@ -174,6 +175,85 @@ final class AuthorizationManagerTest extends TestCase
         self::assertEquals([new GrantProvenance(GrantSource::ROLE_POLICY, "shared[{$shared->id}]", Reference::of($user), false, ['reviewer'], true)], $review->evidence?->grants);
         self::assertEquals([new GrantProvenance(GrantSource::RESOURCE_POLICY, "share[{$share->id}] on posts:*")], $sharing->evidence?->grants);
         self::assertNull($read->cause);
+    }
+
+    /**
+     * A policy the principal and an identity of the other kind both hold is
+     * explained by the principal's attachment alone: the identity gives its
+     * deny statements alone, which never allow a check.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnIdentityOfTheOtherKindNeverExplainsAnAllow(): void
+    {
+        $principal = StubIdentity::create(['id' => 'user-1']);
+        $machine   = StubMachine::create(['id' => 'machine-1']);
+        $editors   = self::policy('editors', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
+
+        $principal->attachPolicy($editors);
+        $machine->attachPolicy($editors);
+
+        $explanation = Authorization::for(new Subject($principal, $machine))->explain('posts:edit');
+
+        self::assertTrue($explanation->isAllowed());
+        self::assertEquals([new GrantProvenance(GrantSource::POLICY, "editors[{$editors->id}]", Reference::of($principal), false, [], true)], $explanation->evidence?->grants);
+    }
+
+    /**
+     * An explained check decides from what an everyday check decides from, the
+     * resolution cache included, so its verdict is the same even when the cache
+     * is stale; a grant the cache holds that the grant rows read afresh no
+     * longer give is explained as `unavailable`, never guessed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAStaleCacheIsExplainedAsUnavailable(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $own  = self::policy('own', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        $user->attachPolicy($own);
+
+        self::assertTrue(Authorization::for($user)->check('posts:read')->isAllowed());
+        self::assertTrue(Authorization::for($user)->check('posts:edit')->isAllowed());
+
+        DB::table('authorizable_permissions')->delete();
+        DB::table('authorizable_policies')->delete();
+
+        $read = Authorization::for($user)->explain('posts:read');
+        $edit = Authorization::for($user)->explain('posts:edit');
+
+        self::assertSame(Authorization::for($user)->check('posts:read')->isAllowed(), $read->isAllowed());
+        self::assertTrue($read->isAllowed());
+        self::assertEquals([GrantProvenance::unavailable('posts:read', Reference::of($user))], $read->evidence?->grants);
+        self::assertTrue($edit->isAllowed());
+        self::assertEquals([GrantProvenance::unavailable("own[{$own->id}]", Reference::of($user))], $edit->evidence?->grants);
+    }
+
+    /**
+     * The last decision of an everyday check explains without the evidence it
+     * never recorded, its request among it, its schema built without reading
+     * anything that is not there.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnEverydayDecisionExplainsWithoutItsRequest(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+
+        $array = Authorization::for($user)->check('posts:read')->explain()->toArray();
+
+        self::assertSame(Explanation::NOT_RECORDED, $array['request']);
+        self::assertSame(Explanation::NOT_RECORDED, $array['grants']);
     }
 
     /**

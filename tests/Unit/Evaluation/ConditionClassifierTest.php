@@ -104,6 +104,46 @@ final class ConditionClassifierTest extends TestCase
     }
 
     /**
+     * A string operator's substituted operand that is empty, or holds a NUL
+     * byte, is `undecidable`, the value being a string it can test; a value it
+     * cannot test is still `wrong_type`, a substituted operand or not, and so
+     * is a value another operator cannot test; a definite failure stays
+     * `failed`.
+     *
+     * @return void
+     */
+    public function testAnUntestableSubstitutedStringOperandIsUndecidable(): void
+    {
+        $operands = ['starts_with' => ['input.path' => '${input.prefix}'], 'ends_with' => ['input.path' => '${input.prefix}'], 'like' => ['input.path' => '${input.prefix}']];
+        $outcomes = static fn (array $conditions, array $input): array => \array_map(
+            static fn (ConditionResult $test): ConditionOutcome => $test->outcome,
+            self::tests($conditions, $input),
+        );
+
+        self::assertSame(\array_fill(0, 3, ConditionOutcome::UNDECIDABLE), $outcomes($operands, ['path' => '/a/b', 'prefix' => '']));
+        self::assertSame(\array_fill(0, 3, ConditionOutcome::UNDECIDABLE), $outcomes($operands, ['path' => '/a/b', 'prefix' => "a\0b"]));
+        self::assertSame(\array_fill(0, 3, ConditionOutcome::WRONG_TYPE), $outcomes($operands, ['path' => "/a\0b", 'prefix' => '/a']));
+        self::assertSame(\array_fill(0, 3, ConditionOutcome::WRONG_TYPE), $outcomes($operands, ['path' => 7, 'prefix' => '/a']));
+        self::assertSame([ConditionOutcome::WRONG_TYPE], $outcomes(['starts_with' => ['input.path' => '/a']], ['path' => "/a\0b"]));
+        self::assertSame([ConditionOutcome::WRONG_TYPE], $outcomes(['ip_in' => ['input.ip' => '${input.range}']], ['ip' => 'not-an-ip', 'range' => '10.0.0.0/8']));
+        self::assertSame(\array_fill(0, 3, ConditionOutcome::FAILED), $outcomes($operands, ['path' => '/a/b', 'prefix' => '/x']));
+    }
+
+    /**
+     * Every reference of an operand that cannot be resolved is named, not only
+     * the first.
+     *
+     * @return void
+     */
+    public function testEveryUnresolvedReferenceOfAnOperandIsNamed(): void
+    {
+        self::assertEquals(
+            [new ConditionResult('input.x', 'eq', ConditionOutcome::UNRESOLVED, false, false, ['input.a', 'input.b'])],
+            self::tests(['eq' => ['input.x' => '${input.a}-${input.b}']], ['x' => 'y']),
+        );
+    }
+
+    /**
      * A malformed test is `invalid`, and its key is never looked up.
      *
      * @return void

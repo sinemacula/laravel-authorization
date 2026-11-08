@@ -2309,6 +2309,40 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
+     * Through an explained context, a reference a resource pattern could not
+     * resolve is named on the step of the statement whose pattern read it, even
+     * when that statement's target does not match, and never on a later
+     * statement's, in this policy or another.
+     *
+     * @return void
+     */
+    public function testAnUnresolvedReferenceIsNamedOnTheStatementThatReadIt(): void
+    {
+        $deny = Policy::fromArray(['name' => 'a', 'statements' => [
+            ['effect' => 'deny', 'actions' => ['posts:read'], 'not_resources' => ['post:${input.mine}', 'post:1']],
+        ]]);
+        $allow = Policy::fromArray(['name' => 'b', 'statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['post:*'], 'conditions' => ['eq' => ['input.x' => 'y']]],
+        ]]);
+        $context = new CheckContext(['input' => ['x' => 'y']]);
+
+        $context->explain();
+
+        $decision = (new PolicyEvaluator)->evaluate([$deny, $allow], 'posts:read', 'post:1', $context);
+        $denied   = $decision->trace[0];
+        $allowed  = $decision->trace[\count($decision->trace) - 1];
+
+        self::assertTrue($decision->isAllowed());
+        self::assertSame(TraceOutcome::NOT_APPLICABLE, $denied->outcome);
+        self::assertNull($denied->tests);
+        self::assertSame(['input.mine'], $denied->unresolved);
+        self::assertSame(TraceOutcome::MATCHED, $allowed->outcome);
+        self::assertSame([], $allowed->unresolved);
+        self::assertSame(['input.mine'], $decision->explain()->missingKeys());
+        self::assertSame([], $context->takeUnresolved());
+    }
+
+    /**
      * Build a check context with `request`, `tenant` and `environment`
      * namespaces, each built on demand, counting each build.
      *
