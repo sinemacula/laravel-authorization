@@ -11,10 +11,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -323,6 +326,30 @@ final class HasPermissionsTest extends TestCase
     }
 
     /**
+     * Each write helper hands the acting context it is given to the service, so
+     * the change is delegated and decided as that actor: an actor allowed
+     * nothing is refused by each, writing nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheWriteHelpersPassTheActorThrough(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-actor']);
+        $actor = ActingContext::for(StubIdentity::create(['id' => 'nobody']));
+
+        Permission::create(['name' => 'posts:edit']);
+
+        self::assertRefusedAsNothingAllowed(static fn () => $user->givePermission('posts:edit', actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->revokePermission('posts:edit', actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->syncPermissions(['posts:edit'], actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->givePermissionTo('posts:edit', $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->revokePermissionTo('posts:edit', $actor));
+        self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', 'user-actor')->count());
+    }
+
+    /**
      * Return the grant table the expiry check reads.
      *
      * @return string
@@ -490,6 +517,23 @@ final class HasPermissionsTest extends TestCase
     protected static function revokedRow(object $event): ?Reference
     {
         return $event instanceof PermissionRevoked ? $event->permission : null;
+    }
+
+    /**
+     * Assert the call is refused as the actor is allowed nothing.
+     *
+     * @param  \Closure(): mixed  $call
+     * @return void
+     */
+    private static function assertRefusedAsNothingAllowed(\Closure $call): void
+    {
+        try {
+            $call();
+
+            self::fail('The helper did not decide the change as the actor.');
+        } catch (AuthorizationException $refusal) {
+            self::assertSame(DecisionReason::NO_MATCH, $refusal->getReason());
+        }
     }
 
     /**

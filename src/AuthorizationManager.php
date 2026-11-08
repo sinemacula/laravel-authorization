@@ -33,6 +33,7 @@ use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\ActionList;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -243,6 +244,32 @@ final class AuthorizationManager
         $denial = $stepUp ? InsufficientAuthenticationException::translated($decision->requirements, $this->translator, $decision) : null;
 
         throw $denial ?? AuthorizationException::translated($reason, $this->translator, $decision);
+    }
+
+    /**
+     * Record and report a decision the pipeline did not make, for the current
+     * subject on the action and the resource, as `check()` records and reports
+     * the one it makes, then report its refusal with `AuthorizationFailed`, as
+     * `authorize()` reports one, and return the `AuthorizationException` that
+     * carries it: what refuses a delegated operation that conflicted on every
+     * try (see `Administration\ConflictRetries`).
+     *
+     * @param  string  $action
+     * @param  mixed  $resource
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
+     * @return \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     *
+     * @internal
+     */
+    public function reportRefusal(string $action, mixed $resource, Decision $decision): AuthorizationException
+    {
+        $reference = ResourceReferences::of($resource);
+        $subject   = $this->currentSubject();
+
+        $this->batch()->recordOne($subject, new CheckInput($action, $reference), $decision);
+        $this->events?->dispatch(new AuthorizationFailed($subject?->subject, $action, ResourceReferences::identifierOf($reference), [], $decision));
+
+        return AuthorizationException::translated($decision->reason ?? DecisionReason::NO_MATCH, $this->translator, $decision);
     }
 
     /**
@@ -514,8 +541,10 @@ final class AuthorizationManager
      *
      * Every resolution built in the tenant or below it is dropped, in every
      * worker, and the current tenant's ancestors are read afresh, so a moved
-     * tenant never keeps grants inherited from its old ancestors. A failure of
-     * the cache store is thrown, so the caller can retry.
+     * tenant never keeps grants inherited from its old ancestors. A delegated
+     * administration call running meanwhile is tried again rather than written
+     * on the chains its decisions read (see `OperationScope::treeChanged()`). A
+     * failure of the cache store is thrown, so the caller can retry.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|\SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @return void
@@ -529,6 +558,8 @@ final class AuthorizationManager
         ResolutionCache::instance()?->treeChanged($reference);
 
         (new TenantScope)->flushResolvedTenant();
+
+        OperationScope::treeChanged();
     }
 
     /**

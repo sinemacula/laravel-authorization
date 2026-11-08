@@ -10,11 +10,14 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\RankComparison;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -282,6 +285,29 @@ final class HasRolesTest extends TestCase
     }
 
     /**
+     * Each write helper hands the acting context it is given to the service, so
+     * the change is delegated and decided as that actor: an actor allowed
+     * nothing is refused by each, writing nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheWriteHelpersPassTheActorThrough(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-actor']);
+        $actor = ActingContext::for(StubIdentity::create(['id' => 'nobody']));
+
+        Role::create(['name' => 'editor']);
+
+        self::assertRefusedAsNothingAllowed(static fn () => $user->assignRole('editor', actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->revokeRole('editor', actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->syncRoles(['editor'], actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->removeRole('editor', $actor));
+        self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', 'user-actor')->count());
+    }
+
+    /**
      * Return the grant table the expiry check reads.
      *
      * @return string
@@ -449,6 +475,23 @@ final class HasRolesTest extends TestCase
     protected static function revokedRow(object $event): ?Reference
     {
         return $event instanceof RoleRevoked ? $event->role : null;
+    }
+
+    /**
+     * Assert the call is refused as the actor is allowed nothing.
+     *
+     * @param  \Closure(): mixed  $call
+     * @return void
+     */
+    private static function assertRefusedAsNothingAllowed(\Closure $call): void
+    {
+        try {
+            $call();
+
+            self::fail('The helper did not decide the change as the actor.');
+        } catch (AuthorizationException $refusal) {
+            self::assertSame(DecisionReason::NO_MATCH, $refusal->getReason());
+        }
     }
 
     /**

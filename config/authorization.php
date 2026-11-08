@@ -598,9 +598,22 @@ return [
     | `administration.unprovable`, never approximated. A whole number of at
     | least 1.
     |
+    | `retries` is how many times a delegated call is tried again when what
+    | its decisions read changed before it wrote, or, when the call opened
+    | the transaction, the database refused it as a concurrency error (a
+    | PostgreSQL serialisation failure or deadlock, a MySQL deadlock or lock
+    | wait timeout, or a busy SQLite database): each try runs in a
+    | transaction of its own and decides everything again. Once the first
+    | try and every retry have conflicted, the call is refused as
+    | `administration.conflict`. Inside a transaction of your own, a
+    | concurrency error is thrown as `TransactionConflictException` for you
+    | to restart it. A whole number of at least 0; 0 refuses on the first
+    | conflict.
+    |
     */
 
     'administration' => [
         'max_impact' => (int) env('AUTHORIZATION_ADMINISTRATION_MAX_IMPACT', 1000),
+        'retries'    => (int) env('AUTHORIZATION_ADMINISTRATION_RETRIES', 2),
     ],
 ];

@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpiryChanged as RolePermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermissionRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -229,7 +230,7 @@ final class RoleService
     public function setParent(Role|string $role, Role|string|null $parent, ?ActingContext $actor = null): Role
     {
         /** @var \SineMacula\Laravel\Authorization\Models\Role */
-        return OperationScope::run(Operation::begin($actor, [PackagePermissions::ROLE_PARENT_SET]), static function (Operation $operation) use ($actor, $role, $parent): Role {
+        $model = OperationScope::run(Operation::begin($actor, [PackagePermissions::ROLE_PARENT_SET]), static function (Operation $operation) use ($actor, $role, $parent): Role {
             $model       = self::resolve($role, null, $actor);
             $parentModel = $parent === null ? null : self::resolve($parent, $model->guard);
 
@@ -246,7 +247,9 @@ final class RoleService
             $model->save();
 
             return $model;
-        });
+        }, $actor);
+
+        return $role instanceof Role ? StoredRecords::adopt($role, $model) : $model;
     }
 
     /**
@@ -268,8 +271,11 @@ final class RoleService
     {
         $operation = Operation::begin($actor, [PackagePermissions::PERMISSION_GRANT]);
 
-        return OperationScope::run($operation, static function (Operation $operation) use ($actor, $role, $permission, $expiresAt): GrantOutcome {
-            $model  = self::resolve($role, null, $actor);
+        $outcome = OperationScope::run($operation, static function (Operation $operation) use ($actor, $role, $permission, $expiresAt): GrantOutcome {
+            $model = self::resolve($role, null, $actor);
+
+            OperationScope::pins()?->lockGrantees($model);
+
             $target = self::permissionFor($model, $permission, $actor);
 
             $actor?->authorizeIn($operation, OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $model, $target, self::scopeOf($model), $expiresAt));
@@ -281,7 +287,13 @@ final class RoleService
             OperationScope::dispatch(...self::changeEvents($operation, $model, $target, $change, $expiresAt));
 
             return $change->outcome;
-        });
+        }, $actor);
+
+        if ($role instanceof Role) {
+            $role->unsetRelation('permissions');
+        }
+
+        return $outcome;
     }
 
     /**
@@ -300,12 +312,17 @@ final class RoleService
      */
     public function revokePermission(Role|string $role, Permission|string $permission, ?ActingContext $actor = null): int
     {
-        return OperationScope::run(Operation::begin($actor, [PackagePermissions::PERMISSION_REVOKE]), static function (Operation $operation) use ($actor, $role, $permission): int {
+        $operation = Operation::begin($actor, [PackagePermissions::PERMISSION_REVOKE]);
+
+        $revoked = OperationScope::run($operation, static function (Operation $operation) use ($actor, $role, $permission): int {
             $model = self::resolve($role, null, $actor);
-            $held  = self::heldPermissionIds($model);
+
+            OperationScope::pins()?->lockGrantees($model);
+
+            $held = self::heldPermissionIds($model);
 
             /** @var non-empty-list<\SineMacula\Laravel\Authorization\Models\Permission> $candidates */
-            $candidates = \is_string($permission) ? GrantTarget::PERMISSION->named($permission, $model->guard) : [self::permissionFor($model, $permission)];
+            $candidates = \is_string($permission) ? GrantTarget::PERMISSION->named($permission, $model->guard) : [self::permissionFor($model, $permission, $actor)];
             $revoked    = \array_values(\array_filter($candidates, static fn (Permission $target): bool => \in_array($target->id, $held, true)));
             $checked    = $revoked === [] ? [$candidates[0]] : $revoked;
 
@@ -321,7 +338,13 @@ final class RoleService
             OperationScope::dispatch(...\array_map(static fn (Permission $target): RolePermissionRevoked => self::revokedEvent($operation, $model, $target), $revoked));
 
             return \count($revoked);
-        });
+        }, $actor);
+
+        if ($role instanceof Role) {
+            $role->unsetRelation('permissions');
+        }
+
+        return $revoked;
     }
 
     /**
@@ -344,8 +367,14 @@ final class RoleService
         $operation = Operation::begin($actor, [PackagePermissions::PERMISSION_GRANT, PackagePermissions::PERMISSION_REVOKE]);
 
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult */
-        return OperationScope::run($operation, static function (Operation $operation) use ($actor, $role, $permissions, $expiresAt): SyncResult {
-            $model   = self::resolve($role, null, $actor);
+        $result = OperationScope::run($operation, static function (Operation $operation) use ($actor, $role, $permissions, $expiresAt): SyncResult {
+            $model = self::resolve($role, null, $actor);
+
+            // The role's chain and what it carries are locked before they are
+            // read, so a permission the sync keeps as carried is carried until
+            // the write, never one revoked meanwhile and written back.
+            OperationScope::pins()?->lockGrantees($model);
+
             $held    = self::heldPermissionIds($model);
             $desired = self::desired($model, $permissions, $held, $actor);
             $revoked = \array_values(\array_diff($held, \array_map(static fn (Permission $target): string => $target->id, $desired)));
@@ -354,7 +383,9 @@ final class RoleService
             $changed = [];
             $events  = [];
 
-            $actor?->authorizeIn($operation, ...self::syncChanges($model, $desired, $revoked, $expiresAt, $now));
+            $live = $actor === null ? [] : self::heldPermissionIds($model, $now);
+
+            $actor?->authorizeIn($operation, ...self::syncChanges($model, $desired, $revoked, $expiresAt, $live));
 
             $model->unsetRelation('permissions');
             $model->permissions()->detach($revoked);
@@ -362,6 +393,12 @@ final class RoleService
             foreach ($desired as $target) {
                 $change = $table->rearm($target->id, $expiresAt, $now);
                 $events = [...$events, ...self::changeEvents($operation, $model, $target, $change, $expiresAt)];
+
+                // A permission decided as carried live is never written back:
+                // one gone by the write was not what was decided.
+                if ($change->outcome !== GrantOutcome::UNCHANGED && \in_array($target->id, $live, true)) {
+                    throw DependencyChangedException::rows('role_permissions');
+                }
 
                 $changed[$change->outcome->value][] = $target->id;
             }
@@ -376,31 +413,36 @@ final class RoleService
             OperationScope::dispatch(...$events);
 
             return new SyncResult($changed[GrantOutcome::GRANTED->value] ?? [], $changed[GrantOutcome::REARMED->value] ?? [], $revoked);
-        });
+        }, $actor);
+
+        if ($role instanceof Role) {
+            $role->unsetRelation('permissions');
+        }
+
+        return $result;
     }
 
     /**
      * Return the changes a sync of the role's permissions makes, each to be
      * decided before any is written: a grant of each listed permission the role
-     * does not carry live at the instant given (a new one, or one whose grant
-     * has expired and is re-armed), the same permission kept unchanged for each
-     * it does carry live then, and a revocation of each it carries and the list
-     * leaves out. The sync re-arms as of the same instant, so a permission
-     * decided as kept unchanged is never re-armed; a sync that changes nothing
-     * at all decides its revocation unchanged, so its action is still decided.
+     * does not carry live (a new one, or one whose grant has expired and is
+     * re-armed), the same permission kept unchanged for each it does carry
+     * live, as read at the sync's instant once the role's rows are locked, and
+     * a revocation of each it carries and the list leaves out. The sync re-arms
+     * as of the same instant, so a permission decided as kept unchanged is
+     * never re-armed; a sync that changes nothing at all decides its revocation
+     * unchanged, so its action is still decided.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  array<array-key, \SineMacula\Laravel\Authorization\Models\Permission>  $desired
      * @param  list<string>  $revoked
      * @param  \DateTimeInterface|null  $expiresAt
-     * @param  \Illuminate\Support\Carbon  $now
+     * @param  list<string>  $live
      * @return non-empty-list<\SineMacula\Laravel\Authorization\Administration\OperationResource>
      */
-    private static function syncChanges(Role $role, array $desired, array $revoked, ?\DateTimeInterface $expiresAt, Carbon $now): array
+    private static function syncChanges(Role $role, array $desired, array $revoked, ?\DateTimeInterface $expiresAt, array $live): array
     {
         $scope   = self::scopeOf($role);
-        $pivot   = LiveGrants::only($role->permissions()->newPivotQuery(), $role->permissions()->getTable(), $now);
-        $live    = \array_map(static fn (mixed $key): string => \is_scalar($key) ? (string) $key : '', $pivot->pluck('permission_id')->all());
         $changes = [];
 
         foreach ($desired as $target) {
@@ -463,14 +505,17 @@ final class RoleService
 
     /**
      * Return the keys of the permissions the role carries, read from the role
-     * permission pivot.
+     * permission pivot: every one, or, at the instant given, those it carries
+     * live then.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  \Illuminate\Support\Carbon|null  $liveAt
      * @return list<string>
      */
-    private static function heldPermissionIds(Role $role): array
+    private static function heldPermissionIds(Role $role, ?Carbon $liveAt = null): array
     {
-        $keys = $role->permissions()->newPivotQuery()->pluck('permission_id')->all();
+        $pivot = $role->permissions()->newPivotQuery();
+        $keys  = ($liveAt === null ? $pivot : LiveGrants::only($pivot, $role->permissions()->getTable(), $liveAt))->pluck('permission_id')->all();
 
         return \array_values(\array_map(static fn (mixed $key): string => \is_scalar($key) ? (string) $key : '', $keys));
     }
@@ -522,9 +567,10 @@ final class RoleService
      * Resolve a role: a name through the configured role class, under the given
      * guard or the package default; a model once it is known to be saved, so a
      * change never creates a role and an unsaved parent never clears one. A
-     * model a delegated change edits is first read again as stored, discarding
-     * changes to it not saved, so the change is weighed on, and writes, the row
-     * as stored.
+     * model a delegated change edits is first read again as stored, a fresh
+     * instance each try, discarding changes to it not saved, so the change is
+     * weighed on, and writes, the row as stored, and a try the concurrency
+     * protocol rolls back never leaves the next one a model it changed.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  string|null  $guard
@@ -542,7 +588,7 @@ final class RoleService
 
         $model = RecordWriter::existing('role', $role);
 
-        return $actor === null ? $model : $model->refresh();
+        return $actor === null ? $model : StoredRecords::of('role', $model);
     }
 
     /**

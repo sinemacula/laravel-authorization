@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Administration;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
@@ -17,6 +18,7 @@ use SineMacula\Laravel\Authorization\Models\Policy as StoredPolicy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
@@ -43,7 +45,11 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * policy found is read in one more, so what is read grows with what applies in
  * the reach, never with the policies, boundaries or guardrails of other
  * tenants. A tree, a row or a document that cannot be read limits the
- * permission.
+ * permission, and so do more resource-policy attachments, or more guardrails,
+ * in the reach than `authorization.administration.max_impact` allows. Inside a
+ * delegated operation, those attachments and guardrails, and the policies read,
+ * are locked and pinned (see `DependencyPins`), so a deny attached meanwhile
+ * has the operation tried again rather than written past it.
  *
  * The permission is limited when any deny statement among them names an action
  * the permission covers, with conditions, resource patterns or none; when a
@@ -181,13 +187,21 @@ final class PossessionLimits
     /**
      * Return the distinct keys in the column of the rows of the table held in a
      * tenant of the reach, or platform-wide: the rows the grantees hold, or
-     * every row for no grantees, in one query.
+     * every row for no grantees, in one query. Every row for no grantees, the
+     * resource policies and the guardrails of the reach, is read only when
+     * there are no more than `authorization.administration.max_impact`, and
+     * inside a delegated operation locked and pinned (see
+     * `DependencyPins::keysWithin()`), so one added meanwhile is noticed before
+     * the write; more throws, so the permission is limited.
      *
      * @param  string  $table
      * @param  string  $column
      * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>|null  $grantees
      * @param  \SineMacula\Laravel\Authorization\Administration\GrantReach  $reach
      * @return list<string>
+     *
+     * @throws \OverflowException
+     * @throws \LogicException
      */
     private static function keys(string $table, string $column, ?array $grantees, GrantReach $reach): array
     {
@@ -199,15 +213,19 @@ final class PossessionLimits
         $name  = config('authorization.tables.' . $table, $table);
         $query = $reach->constrain(AuthorizationConnection::connection()->table($name)->useWritePdo(), $name);
 
-        if ($grantees !== null) {
-            $query->where(static function (QueryBuilder $query) use ($grantees, $name): void {
-                foreach ($grantees as $grantee) {
-                    $query->orWhere(static fn (QueryBuilder $row): QueryBuilder => $row
-                        ->where($name . '.authorizable_type', $grantee->type)
-                        ->where($name . '.authorizable_id', $grantee->id));
-                }
-            });
+        if ($grantees === null) {
+            $keys = DependencyPins::keysWithin($query, $column, AffectedHolders::limit());
+
+            return $keys ?? throw new \OverflowException("More rows of [{$name}] in the reach than the impact limit allows.");
         }
+
+        $query->where(static function (QueryBuilder $query) use ($grantees, $name): void {
+            foreach ($grantees as $grantee) {
+                $query->orWhere(static fn (QueryBuilder $row): QueryBuilder => $row
+                    ->where($name . '.authorizable_type', $grantee->type)
+                    ->where($name . '.authorizable_id', $grantee->id));
+            }
+        });
 
         /** @var list<string> */
         return $query->distinct()->pluck($name . '.' . $column)->all();
@@ -229,6 +247,15 @@ final class PossessionLimits
         $class    = config('authorization.models.policy', StoredPolicy::class);
         $model    = new $class;
         $policies = [];
+
+        /** @var string $table */
+        $table = config('authorization.tables.policies', 'policies');
+
+        $sorted = \array_unique($keys);
+
+        \sort($sorted, \SORT_STRING);
+
+        OperationScope::pins()?->lock(DependencyPhase::HOLDERS, AuthorizationConnection::connection()->table($table)->whereIn('id', $sorted));
 
         foreach ($class::query()->withoutGlobalScopes()->useWritePdo()->whereKey($keys)->get([$model->getKeyName(), 'name', 'owner_type', 'owner_id', 'document']) as $stored) {
             /** @var int|string $key */

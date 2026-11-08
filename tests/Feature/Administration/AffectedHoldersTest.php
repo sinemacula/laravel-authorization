@@ -4,11 +4,14 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Administration;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\AffectedHolders;
 use SineMacula\Laravel\Authorization\Administration\DocumentComparison;
+use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -16,8 +19,11 @@ use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -33,7 +39,7 @@ use Tests\TestCase;
 #[CoversClass(AffectedHolders::class)]
 final class AffectedHoldersTest extends TestCase
 {
-    use CatchesRefusals;
+    use CatchesRefusals, RecordsRowLocks;
 
     /**
      * A role reaches its grantees and those of every role below it, in any
@@ -61,6 +67,194 @@ final class AffectedHoldersTest extends TestCase
 
         self::assertSame(['one'], self::ids(AffectedHolders::none()->ofRoles([$role->id])->holders()));
         self::assertSame(['one', 'two'], self::ids(AffectedHolders::none()->ofRoles([$role->id, $least->id])->holders()));
+    }
+
+    /**
+     * Inside a delegated operation, every set read is locked and pinned as the
+     * operation's holders, the roles below a role with every role whose parent
+     * is one of them, so a holder granted, or a role put below one, before the
+     * write fails validation; outside one, nothing is locked.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testInsideADelegatedOperationTheHoldersArePinned(): void
+    {
+        $role       = Role::query()->create(['name' => 'editor']);
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+        $policy     = Policy::query()->create(['name' => 'shared', 'document' => ['statements' => []]]);
+
+        self::grants()->grantRole(self::user('one'), $role);
+
+        $locks = $this->recordRowLocks();
+
+        AffectedHolders::none()->ofRoles([$role->id]);
+
+        self::assertSame([], $locks->getArrayCopy());
+
+        $operation = new Operation('op', new Reference('user', 'admin'), CarbonImmutable::now('UTC'), false);
+
+        $failures = OperationScope::run($operation, static function () use ($role, $permission, $policy, $locks): array {
+            AffectedHolders::none()->ofRoles([$role->id])->ofPermission($permission)->ofPolicy($policy, []);
+
+            $pins     = OperationScope::pins();
+            $phase    = $pins?->phase();
+            $tables   = \array_values(\array_unique(\array_column($locks->getArrayCopy(), 0)));
+            $failures = [$phase, $tables];
+
+            $pins?->validate();
+
+            Role::query()->create(['name' => 'junior', 'parent_id' => $role->id]);
+
+            try {
+                $pins?->validate();
+            } catch (DependencyChangedException $exception) {
+                $failures[] = $exception->getMessage();
+            }
+
+            return $failures;
+        });
+
+        self::assertSame(DependencyPhase::HOLDERS, $failures[0]);
+        self::assertSame(
+            ['roles', 'authorizable_roles', 'authorizable_permissions', 'role_permissions', 'authorizable_policies', 'authorizable_boundaries', 'resource_policies'],
+            $failures[1],
+        );
+        self::assertSame('The rows of [roles] a delegated decision read changed before the write.', $failures[2] ?? null);
+    }
+
+    /**
+     * Inside a delegated operation, a set of holders over the impact limit is
+     * never locked: the change is refused as it is; a set within it is locked,
+     * a holder's every row with it, and read from the rows as locked, each
+     * holder and each key once, so a holder with rows in several tenants, or a
+     * role a policy is attached to in several, counts once, and nothing it read
+     * changes before the write.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testInsideADelegatedOperationOnlyASetWithinTheLimitIsLocked(): void
+    {
+        config(['authorization.administration.max_impact' => 1]);
+
+        $crowded = Role::query()->create(['name' => 'crowded']);
+        $single  = Role::query()->create(['name' => 'single']);
+        $policy  = Policy::query()->create(['name' => 'shared', 'document' => ['statements' => []]]);
+
+        self::grants()->grantRole(self::user('one'), $crowded);
+        self::grants()->grantRole(self::user('two'), $crowded);
+
+        foreach ([null, new Reference('stub_tenant', 't1'), new Reference('stub_tenant', 't2')] as $tenant) {
+            self::grants()->grantRole(self::user('three'), $single, tenant: $tenant);
+            self::grants()->attachPolicy($single, $policy, tenant: $tenant);
+        }
+
+        $locks     = $this->recordRowLocks();
+        $operation = new Operation('op', new Reference('user', 'admin'), CarbonImmutable::now('UTC'), false);
+
+        [$crowd, $three, $roles] = OperationScope::run($operation, static function () use ($crowded, $single, $policy): array {
+            $outcome = [
+                AffectedHolders::none()->ofRoles([$crowded->id])->holders(),
+                self::ids(AffectedHolders::none()->ofRoles([$single->id])->holders()),
+                AffectedHolders::none()->ofPolicy($policy, [])->holders(),
+            ];
+
+            OperationScope::delegatedPins()->validate();
+
+            return $outcome;
+        });
+
+        $grantees = \array_values(\array_filter($locks->getArrayCopy(), static fn (array $lock): bool => $lock[0] === 'authorizable_roles'));
+
+        self::assertNull($crowd);
+        self::assertSame(['three'], $three);
+        self::assertSame(['three'], self::ids($roles));
+        self::assertNotContains(['authorizable_roles', [$crowded->id]], $grantees);
+        self::assertContains(['authorizable_roles', [$single->id]], $grantees);
+    }
+
+    /**
+     * Inside a delegated operation, whether a policy is attached to a resource
+     * is read from one attachment, locked, never from every one, so the last
+     * attachment detached, or a first one made, before the write is noticed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testInsideADelegatedOperationOneResourceAttachmentIsLocked(): void
+    {
+        $policy = Policy::query()->create(['name' => 'shared', 'document' => ['statements' => []]]);
+
+        foreach (['1', '2', '3'] as $id) {
+            DB::table('resource_policies')->insert(['policy_id' => $policy->getKey(), 'resource_type' => 'post', 'resource_id' => $id]);
+        }
+
+        /** @var \ArrayObject<int, string> $reads */
+        $reads     = new \ArrayObject;
+        $operation = new Operation('op', new Reference('user', 'admin'), CarbonImmutable::now('UTC'), false);
+
+        DB::listen(static fn ($query) => \str_contains($query->sql, 'resource_policies') ? $reads->append(\str_replace(['"', '`'], '', $query->sql)) : null);
+
+        $changed = OperationScope::run($operation, static function () use ($policy): bool {
+            AffectedHolders::none()->ofPolicy($policy, []);
+
+            $pins = OperationScope::delegatedPins();
+
+            DB::table('resource_policies')->where('resource_id', '1')->delete();
+
+            $pins->validate();
+
+            DB::table('resource_policies')->delete();
+
+            try {
+                $pins->validate();
+            } catch (DependencyChangedException) {
+                return true;
+            }
+
+            return false;
+        });
+
+        self::assertTrue($changed);
+        self::assertStringContainsString('select policy_id from resource_policies where policy_id = ? limit 1', $reads[0] ?? '');
+    }
+
+    /**
+     * With the hierarchy disabled, the roles named are locked all the same, so
+     * a grant of one, which locks its row, meets the operation on it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testWithTheHierarchyDisabledTheRolesNamedAreLocked(): void
+    {
+        config(['authorization.hierarchy.enabled' => false]);
+
+        $role      = Role::query()->create(['name' => 'editor']);
+        $locks     = $this->recordRowLocks();
+        $operation = new Operation('op', new Reference('user', 'admin'), CarbonImmutable::now('UTC'), false);
+
+        $changed = OperationScope::run($operation, static function () use ($role): bool {
+            AffectedHolders::none()->ofRoles([$role->id]);
+
+            DB::table('roles')->where('id', $role->id)->update(['rank' => 3]);
+
+            try {
+                OperationScope::delegatedPins()->validate();
+            } catch (DependencyChangedException) {
+                return true;
+            }
+
+            return false;
+        });
+
+        self::assertTrue($changed);
+        self::assertSame(['roles', [$role->id]], $locks[0] ?? null);
     }
 
     /**

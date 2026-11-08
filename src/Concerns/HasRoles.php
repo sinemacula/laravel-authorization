@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\RankComparison;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
@@ -22,6 +23,13 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * roles. Method names mirror the package's canonical API; Spatie consumers can
  * rely on the shipped aliases (`assignRole`, `removeRole`, `syncRoles`,
  * `hasRole`, `getRoleNames`) to migrate without rewriting call sites.
+ *
+ * Each write helper takes an optional `actor:`, an acting context it hands to
+ * the service, so the change is delegated and decided as that actor
+ * (AUTHZ-11.1). Without one it is trusted system work: nothing is decided, so a
+ * helper called without an actor is an integration surface for the
+ * application's own code, never an endpoint for user-controlled administration.
+ * `removeRole()` takes no actor, so it is always trusted.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,6 +84,7 @@ trait HasRoles // @phpstan-ignore trait.unused
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
      * @param  string|null  $application
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
@@ -86,8 +95,9 @@ trait HasRoles // @phpstan-ignore trait.unused
         Model|Reference|null $tenant = null,
         bool $includeSubtree = true,
         ?string $application = null,
+        ?ActingContext $actor = null,
     ): static {
-        self::authorizationGrants()->grantRole($this, $role, $expiresAt, null, $tenant, $includeSubtree, $application);
+        self::authorizationGrants()->grantRole($this, $role, $expiresAt, $actor, $tenant, $includeSubtree, $application);
 
         return $this;
     }
@@ -105,13 +115,14 @@ trait HasRoles // @phpstan-ignore trait.unused
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  string|null  $application
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
      */
-    public function revokeRole(Role|string $role, Model|Reference|null $tenant = null, ?string $application = null): static
+    public function revokeRole(Role|string $role, Model|Reference|null $tenant = null, ?string $application = null, ?ActingContext $actor = null): static
     {
-        self::authorizationGrants()->revokeRole($this, $role, null, $tenant, $application);
+        self::authorizationGrants()->revokeRole($this, $role, $actor, $tenant, $application);
 
         return $this;
     }
@@ -136,13 +147,14 @@ trait HasRoles // @phpstan-ignore trait.unused
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  string|null  $application
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
      */
-    public function syncRoles(array $roles, Model|Reference|null $tenant = null, ?string $application = null): static
+    public function syncRoles(array $roles, Model|Reference|null $tenant = null, ?string $application = null, ?ActingContext $actor = null): static
     {
-        self::authorizationGrants()->syncRoles($this, $roles, tenant: $tenant, application: $application);
+        self::authorizationGrants()->syncRoles($this, $roles, actor: $actor, tenant: $tenant, application: $application);
 
         return $this;
     }
@@ -230,14 +242,18 @@ trait HasRoles // @phpstan-ignore trait.unused
     // ------------------------------------------------------------------
 
     /**
-     * Spatie alias for the canonical `revokeRole()` helper.
+     * Spatie alias for the canonical `revokeRole()` helper, handing the acting
+     * context, when there is one, on.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
+     *
+     * @throws \Throwable
      */
-    public function removeRole(Role|string $role): static
+    public function removeRole(Role|string $role, ?ActingContext $actor = null): static
     {
-        return $this->revokeRole($role);
+        return $this->revokeRole($role, actor: $actor);
     }
 
     /**

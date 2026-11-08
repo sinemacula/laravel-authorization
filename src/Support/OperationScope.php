@@ -6,6 +6,9 @@ namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Administration\ConflictRetries;
+use SineMacula\Laravel\Authorization\Administration\DependencyPins;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
@@ -39,6 +42,18 @@ use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
  * already committed: it is invalidated the same way, and a failure of the first
  * bump is thrown.
  *
+ * A delegated operation runs under the concurrency protocol (AUTHZ-11.1): each
+ * try runs in a transaction of its own and holds `DependencyPins`, which lock
+ * and pin what its decisions read and validate it before the write, and a try
+ * that conflicts is rolled back and tried again, then refused as
+ * `administration.conflict`, recorded and reported as the actor's refusal (see
+ * `ConflictRetries`). The work starts inside the transaction before the service
+ * reads or locks anything, and the protocol takes no lock until the service
+ * first reads what the operation changes, so a grant hook (AUTHZ-11.3) called
+ * first in the work runs before every lock the package takes for the call: that
+ * is the seam scope-widening hooks are run from. A trusted operation runs once,
+ * as it always has, with no pins and no extra lock.
+ *
  * @managed-static
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -51,32 +66,75 @@ final class OperationScope
     /** @var list<\SineMacula\Laravel\Authorization\Support\Operation> The operations whose work is running, innermost last. */
     private static array $operations = [];
 
+    /** @var list<\SineMacula\Laravel\Authorization\Administration\DependencyPins|null> The pins of each operation whose work is running, null for a trusted one, innermost last. */
+    private static array $pins = [];
+
     /** @var \WeakMap<\Illuminate\Database\Eloquent\Model, \SineMacula\Laravel\Authorization\Support\Operation>|null The operation of each model write made outside a call. */
     private static ?\WeakMap $writes = null;
 
     /**
      * Run the call's work as the given operation, in one transaction on the
-     * package's connection.
+     * package's connection: once for a trusted operation, and, for a delegated
+     * one, under the concurrency protocol, again in a fresh transaction for
+     * each try that conflicts, up to `authorization.administration.retries`
+     * times, then refused as `administration.conflict`, recorded and reported
+     * as the refusal of the actor given, the acting context the operation was
+     * begun with.
      *
      * @template TResult
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \Closure(\SineMacula\Laravel\Authorization\Support\Operation): TResult  $work
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return TResult
      *
      * @throws \Throwable
      */
-    public static function run(Operation $operation, \Closure $work): mixed
+    public static function run(Operation $operation, \Closure $work, ?ActingContext $actor = null): mixed
     {
-        return AuthorizationConnection::connection()->transaction(static function () use ($operation, $work): mixed {
-            self::$operations[] = $operation;
+        if ($operation->isTrusted) {
+            return self::attempt($operation, $work, null);
+        }
 
-            try {
-                return $work($operation);
-            } finally {
-                \array_pop(self::$operations);
-            }
-        });
+        return ConflictRetries::run(static fn (): mixed => self::attempt($operation, $work, new DependencyPins($operation)), $actor, $operation);
+    }
+
+    /**
+     * Return the pins of the operation whose work is running, or null when it
+     * is trusted or none is running.
+     *
+     * @return \SineMacula\Laravel\Authorization\Administration\DependencyPins|null
+     */
+    public static function pins(): ?DependencyPins
+    {
+        return self::$pins === [] ? null : self::$pins[\count(self::$pins) - 1];
+    }
+
+    /**
+     * Return the pins of the delegated operation whose work is running, for
+     * work that only ever runs delegated, such as a guardrail change; none
+     * running, or a trusted one, is a mistake, refused with `LogicException`.
+     *
+     * @return \SineMacula\Laravel\Authorization\Administration\DependencyPins
+     *
+     * @throws \LogicException
+     */
+    public static function delegatedPins(): DependencyPins
+    {
+        return self::pins() ?? throw new \LogicException('No delegated operation is running.');
+    }
+
+    /**
+     * Mark every delegated operation whose work is running as having seen the
+     * tenant tree move, so none writes on the chains its decisions read.
+     *
+     * @return void
+     */
+    public static function treeChanged(): void
+    {
+        foreach (self::$pins as $pins) {
+            $pins?->treeChanged();
+        }
     }
 
     /**
@@ -145,5 +203,34 @@ final class OperationScope
         }
 
         $connection->afterCommit($send);
+    }
+
+    /**
+     * Run the work as the operation, with the pins of its try, in one
+     * transaction on the package's connection, the operation current while it
+     * runs.
+     *
+     * @template TResult
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Support\Operation): TResult  $work
+     * @param  \SineMacula\Laravel\Authorization\Administration\DependencyPins|null  $pins
+     * @return TResult
+     *
+     * @throws \Throwable
+     */
+    private static function attempt(Operation $operation, \Closure $work, ?DependencyPins $pins): mixed
+    {
+        return AuthorizationConnection::connection()->transaction(static function () use ($operation, $work, $pins): mixed {
+            self::$operations[] = $operation;
+            self::$pins[]       = $pins;
+
+            try {
+                return $work($operation);
+            } finally {
+                \array_pop(self::$operations);
+                \array_pop(self::$pins);
+            }
+        });
     }
 }

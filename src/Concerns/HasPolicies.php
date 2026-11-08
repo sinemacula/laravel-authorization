@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
@@ -29,6 +30,12 @@ use SineMacula\Laravel\Authorization\Support\RolePolicies;
  * A grantee may own inline policies (`createInlinePolicy()`), attached to it
  * alone. They are deleted once the model is deleted; a model that soft-deletes
  * keeps them until it is force-deleted (AUTHZ-6.9).
+ *
+ * Each write helper takes an optional `actor:`, an acting context it hands to
+ * the service, so the change is delegated and decided as that actor
+ * (AUTHZ-11.1). Without one it is trusted system work: nothing is decided, so a
+ * helper called without an actor is an integration surface for the
+ * application's own code, never an endpoint for user-controlled administration.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -95,6 +102,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
      * @param  string|null  $application
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
@@ -105,8 +113,9 @@ trait HasPolicies // @phpstan-ignore trait.unused
         Model|Reference|null $tenant = null,
         bool $includeSubtree = true,
         ?string $application = null,
+        ?ActingContext $actor = null,
     ): static {
-        self::authorizationGrants()->attachPolicy($this, $policy, $expiresAt, null, $tenant, $includeSubtree, $application);
+        self::authorizationGrants()->attachPolicy($this, $policy, $expiresAt, $actor, $tenant, $includeSubtree, $application);
 
         return $this;
     }
@@ -118,13 +127,14 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  string|null  $application
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
      */
-    public function detachPolicy(Policy $policy, Model|Reference|null $tenant = null, ?string $application = null): static
+    public function detachPolicy(Policy $policy, Model|Reference|null $tenant = null, ?string $application = null, ?ActingContext $actor = null): static
     {
-        self::authorizationGrants()->detachPolicy($this, $policy, null, $tenant, $application);
+        self::authorizationGrants()->detachPolicy($this, $policy, $actor, $tenant, $application);
 
         return $this;
     }
@@ -146,13 +156,14 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy>  $policies
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  string|null  $application
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
      */
-    public function syncPolicies(array $policies, Model|Reference|null $tenant = null, ?string $application = null): static
+    public function syncPolicies(array $policies, Model|Reference|null $tenant = null, ?string $application = null, ?ActingContext $actor = null): static
     {
-        self::authorizationGrants()->syncPolicies($this, $policies, tenant: $tenant, application: $application);
+        self::authorizationGrants()->syncPolicies($this, $policies, actor: $actor, tenant: $tenant, application: $application);
 
         return $this;
     }
@@ -161,18 +172,21 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * Create an inline policy that belongs to this grantee, through the policy
      * service, validated as any policy's document is. The policy is attached to
      * this grantee alone and deleted with it; creating it does not attach it,
-     * so attach it with `attachPolicy()`, in the scope it holds in.
+     * so attach it with `attachPolicy()`, in the scope it holds in. Given
+     * `actor:`, its creation is decided as that actor under
+     * `authorization:policy.create`.
      *
      * @param  string  $name
      * @param  array<array-key, mixed>|string  $document
      * @param  string|null  $description
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Policy
      *
      * @throws \Throwable
      */
-    public function createInlinePolicy(string $name, array|string $document, ?string $description = null): Policy
+    public function createInlinePolicy(string $name, array|string $document, ?string $description = null, ?ActingContext $actor = null): Policy
     {
-        return self::authorizationPolicies()->createInline($this, $name, $document, $description);
+        return self::authorizationPolicies()->createInline($this, $name, $document, $description, $actor);
     }
 
     /**

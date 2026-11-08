@@ -192,7 +192,8 @@ final class GrantTableTest extends TestCase
 
     /**
      * A grant for an application is written for it and is a grant apart from
-     * the one for every application; the grants of every scope report it.
+     * the one for every application; the grants of every scope report it, and a
+     * revocation reports how many rows it deleted.
      *
      * @return void
      */
@@ -209,8 +210,8 @@ final class GrantTableTest extends TestCase
         self::assertSame([], $mobile->held());
         self::assertSame([$role->id], $admin->held());
 
-        $admin->revoke([$role->id]);
-
+        self::assertSame(1, $admin->revoke([$role->id]));
+        self::assertSame(0, $admin->revoke([$role->id]));
         self::assertEquals([[$role->id, new GrantScope]], self::table()->grantsInEveryScope());
         self::assertEqualsCanonicalizing([null], DB::table('authorizable_roles')->pluck('application')->all());
 

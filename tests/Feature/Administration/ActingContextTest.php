@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -26,6 +27,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
@@ -200,6 +202,41 @@ final class ActingContextTest extends TestCase
     }
 
     /**
+     * The refusal of an operation as a whole is recorded and reported as the
+     * acting subject's, on the operation resource and under the operation's
+     * first action, the operation type standing for an operation with none, and
+     * the `AuthorizationException` carrying it is returned.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheRefusalOfAnOperationIsReportedAsTheActors(): void
+    {
+        Event::fake();
+
+        $admin    = StubIdentity::create(['id' => 'admin-1']);
+        $actor    = ActingContext::for($admin);
+        $decision = Decision::deny(DecisionReason::ADMINISTRATION_CONFLICT, DecisionStage::ADMINISTRATION);
+        $named    = Operation::begin($actor, [PackagePermissions::ROLE_GRANT, PackagePermissions::ROLE_REVOKE]);
+        $bare     = Operation::begin($actor);
+
+        self::assertSame($decision, $actor->reportRefusal($named, $decision)->getDecision());
+        self::assertSame($decision, $actor->reportRefusal($bare, $decision)->getDecision());
+
+        $principal = $actor->subject->subject;
+        $failed    = static function (Operation $operation, string $action) use ($principal): \Closure {
+            $resource = OperationResource::TYPE . ':' . $operation->id;
+
+            return static fn (AuthorizationFailed $event): bool => $event->principal === $principal && $event->action === $action && $event->resource === $resource;
+        };
+
+        Event::assertDispatched(AuthorizationFailed::class, $failed($named, PackagePermissions::ROLE_GRANT));
+        Event::assertDispatched(AuthorizationFailed::class, $failed($bare, OperationResource::TYPE));
+        Event::assertDispatchedTimes(DecisionEvaluated::class, 2);
+    }
+
+    /**
      * A machine actor keeps the scopes of its credential, which cap what it may
      * administer as they cap its other checks: none allow nothing, and an
      * administration action they do not cover is refused.
@@ -324,6 +361,52 @@ final class ActingContextTest extends TestCase
 
         self::assertSame(DecisionReason::ADMINISTRATION_IMPERSONATING, $refusal instanceof AuthorizationException ? $refusal->getReason() : null);
         Event::assertDispatchedTimes(DecisionEvaluated::class, 3);
+    }
+
+    /**
+     * Inside a delegated operation's work, the actor's authority and what the
+     * changes change are locked before the first is decided, and validated once
+     * every change is allowed, so a change landing in between is a conflict;
+     * outside every operation, nothing is locked.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheChangesOfADelegatedOperationAreLockedAndValidated(): void
+    {
+        $admin = StubIdentity::create(['id' => 'admin-1']);
+
+        $admin->givePermission(Permission::create(['name' => PackagePermissions::ROLE_REVOKE]));
+
+        $actor     = ActingContext::for($admin);
+        $operation = Operation::begin($actor);
+        $role      = Role::create(['name' => 'editor']);
+        $revoke    = OperationResource::revoke(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), $role, GrantScope::platform());
+
+        $actor->authorizeIn($operation, $revoke);
+
+        $phases = OperationScope::run($operation, static function () use ($actor, $operation, $revoke): ?DependencyPhase {
+            $actor->authorizeIn($operation, $revoke);
+
+            return OperationScope::pins()?->phase();
+        });
+
+        self::assertSame(DependencyPhase::TARGET, $phases);
+
+        Event::listen(DecisionEvaluated::class, static function () use ($role): void {
+            Role::query()->whereKey($role->getKey())->update(['description' => 'changed']);
+        });
+
+        $conflict = null;
+
+        try {
+            OperationScope::run(new Operation($operation->id, $operation->actor, $operation->at, false), static fn () => $actor->authorizeIn($operation, $revoke));
+        } catch (AuthorizationException $refusal) {
+            $conflict = $refusal->getReason();
+        }
+
+        self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $conflict);
     }
 
     /**

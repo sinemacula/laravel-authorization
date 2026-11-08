@@ -44,4 +44,31 @@ final class StoredRecords
 
         return $stored instanceof $model ? $stored : throw new InvalidGrantTargetException($kind, $model);
     }
+
+    /**
+     * Give the model a caller handed a delegated change the state of the record
+     * the change wrote, a fresh instance read or copied for the try that
+     * committed, and return it: its attributes, as the original, and whether it
+     * exists, so the caller's model reads as it would had the change been
+     * written on it. A model that is the record already is returned as it is.
+     *
+     * @template TModel of \Illuminate\Database\Eloquent\Model
+     *
+     * @param  TModel  $given
+     * @param  \Illuminate\Database\Eloquent\Model  $record
+     * @return TModel
+     */
+    public static function adopt(Model $given, Model $record): Model
+    {
+        if ($given === $record) {
+            return $given;
+        }
+
+        $given->setRawAttributes($record->getAttributes(), true);
+
+        $given->exists             = $record->exists;
+        $given->wasRecentlyCreated = $record->wasRecentlyCreated;
+
+        return $given;
+    }
 }

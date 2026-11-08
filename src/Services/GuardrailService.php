@@ -69,6 +69,14 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * A policy in use as a guardrail is neither edited nor deleted until every
  * guardrail it is has been removed.
  *
+ * Every change runs under the concurrency protocol of delegated administration:
+ * the actor's authority, the policy's row and the guardrails of the scope and
+ * of the scopes above it are locked and pinned before the right is decided and
+ * read again once it is allowed, so a right revoked, a policy rewritten or a
+ * tenant moved meanwhile has the change tried again, and refused as
+ * `administration.conflict` once the first try and every one of the
+ * `authorization.administration.retries` retries have conflicted.
+ *
  * Every call runs in one transaction on the package's connection, is one
  * operation for the actor, recorded on the row it writes, and dispatches
  * `GuardrailSet` or `GuardrailRemoved` once it commits, only when it changed
@@ -102,7 +110,7 @@ final class GuardrailService
         $operation = Operation::begin($actor, [PackagePermissions::GUARDRAIL_MANAGE]);
 
         return OperationScope::run($operation, static function (Operation $operation) use ($actor, $policy, $named): GrantOutcome {
-            GuardrailAuthority::assertPermitted($actor, $named);
+            self::assertPermitted($actor, $policy, $named);
 
             // Read under a lock on the policy's row, so the checks below weigh
             // the document as committed, and an edit or a deletion of the
@@ -120,7 +128,7 @@ final class GuardrailService
             }
 
             return $outcome;
-        });
+        }, $actor);
     }
 
     /**
@@ -142,7 +150,7 @@ final class GuardrailService
 
         /** @var bool */
         return OperationScope::run($operation, static function (Operation $operation) use ($actor, $policy, $named): bool {
-            GuardrailAuthority::assertPermitted($actor, $named);
+            self::assertPermitted($actor, $policy, $named);
 
             // A guardrail's policy cannot be deleted from under it, so a policy
             // that is not stored is a guardrail nowhere.
@@ -155,7 +163,36 @@ final class GuardrailService
             OperationScope::dispatch(new GuardrailRemoved($operation, Reference::of($stored), PolicyDocument::nameOf($stored->getAttribute('name')), new GrantScope($named)));
 
             return true;
-        });
+        }, $actor);
+    }
+
+    /**
+     * Refuse the actor unless it may change the guardrails of the scope, under
+     * the concurrency protocol: the actor's authority, the policy's row and the
+     * guardrails of the scope and the scopes above it are locked and pinned
+     * before the right is decided, and read again once it is allowed, so the
+     * change is tried again rather than made on authority that changed
+     * meanwhile.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardrailException
+     * @throws \LogicException
+     */
+    private static function assertPermitted(ActingContext $actor, Policy $policy, ?Reference $tenant): void
+    {
+        $pins = OperationScope::delegatedPins();
+
+        $pins->lockGuardrail($policy, $tenant);
+
+        GuardrailAuthority::assertPermitted($actor, $tenant);
+
+        $pins->validate();
     }
 
     /**

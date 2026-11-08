@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -71,7 +72,12 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * change it makes is decided as the actor, through `check()`, on the change's
  * operation resource, inside the call's transaction before anything is written,
  * and the first refused throws the decision's `AuthorizationException`, leaving
- * nothing written and dispatching no change event. A grant is decided under
+ * nothing written and dispatching no change event. The actor's authority and
+ * then the grantee's rows are locked before the call reads them (see
+ * `Administration\DependencyPins`), so what is decided is what is written:
+ * `revokeAll()` revokes exactly the rows it decided, never one granted
+ * meanwhile, and a sync never writes back a row it decided as held that is gone
+ * by the write; either is tried again instead. A grant is decided under
  * `authorization:role.grant`, `authorization:permission.grant` or
  * `authorization:policy.attach`, a regrant, a changed expiry and a changed
  * reach included, and a revocation under `authorization:role.revoke`,
@@ -391,57 +397,32 @@ final class GrantService
         $operation = Operation::begin($actor, $actions);
 
         $revoked = OperationScope::run($operation, static function (Operation $operation) use ($actor, $reference): int {
-            $unchanged = static fn (string $action): OperationResource => OperationResource::unchanged($action, $reference, null, GrantScope::platform());
+            if ($actor === null) {
+                $events = GrantChanges::revokeEverywhere($reference, $operation);
+            } else {
+                // The grantee's rows are locked before they are read, so what
+                // is revoked is exactly what was decided, never a row granted
+                // meanwhile in a tenant the actor does not administer.
+                OperationScope::pins()?->lockGrantees($reference);
 
-            $actor?->authorizeChanges($operation, GrantChanges::everything($reference), ...\array_map($unchanged, $operation->actions));
+                $unchanged = static fn (string $action): OperationResource => OperationResource::unchanged($action, $reference, null, GrantScope::platform());
+                $changes   = GrantChanges::everything($reference);
 
-            $events = [];
+                $actor->authorizeChanges($operation, $changes, ...\array_map($unchanged, $operation->actions));
 
-            foreach (GrantTarget::cases() as $kind) {
-                $events = [...$events, ...self::revokeEverywhere($kind, $reference, $operation)];
+                $events = GrantChanges::revokeDecided($reference, $operation, $changes);
             }
-
-            $events = [...$events, ...BoundaryService::removeEverywhere($reference, $operation)];
 
             OperationScope::dispatch(...$events);
 
             return \count($events);
-        });
+        }, $actor);
 
         foreach (GrantTarget::cases() as $kind) {
             self::forgetRelation($kind, $grantee);
         }
 
         return $revoked;
-    }
-
-    /**
-     * Revoke every row of the given kind the grantee holds, in every scope, and
-     * return a revoked or detached event for each, in its scope.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
-     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
-     * @return list<\SineMacula\Laravel\Authorization\Contracts\IdentityEvent>
-     */
-    private static function revokeEverywhere(GrantTarget $kind, Reference $grantee, Operation $operation): array
-    {
-        $table  = GrantChanges::table($kind, $grantee, $operation->actor, GrantScope::platform());
-        $grants = $table->grantsInEveryScope();
-        $models = [];
-        $events = [];
-
-        foreach ($kind->find(\array_column($grants, 0)) as $model) {
-            $models[GrantChanges::key($model)] = $model;
-        }
-
-        $table->revokeInEveryScope();
-
-        foreach ($grants as [$id, $scope]) {
-            $events[] = $kind->revokedEvent($operation, $grantee, $models[$id], $scope);
-        }
-
-        return $events;
     }
 
     /**
@@ -465,6 +446,11 @@ final class GrantService
 
         /** @var \SineMacula\Laravel\Authorization\Enums\GrantOutcome $outcome */
         $outcome = OperationScope::run($operation, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $named, $target, $expiresAt): GrantOutcome {
+            // The grantee's rows are locked before they are read, so a grant
+            // weighed as only shortening one held is weighed on the row as it
+            // stays until the write.
+            OperationScope::pins()?->lockGrantees($reference);
+
             $model = $kind->resolve($target, GrantChanges::guard($grantee), $named->tenant);
             $model = \is_string($target) ? $model : self::stored($kind, $model, $actor);
             $scope = self::scope(GrantScopes::of($kind, $model, $named->tenant), $named->includeSubtree, $named->application);
@@ -479,7 +465,7 @@ final class GrantService
             OperationScope::dispatch(...$kind->changeEvents($operation, $reference, $model, $scope, $change, $expiresAt));
 
             return $change->outcome;
-        });
+        }, $actor);
 
         self::forgetRelation($kind, $grantee);
 
@@ -507,7 +493,9 @@ final class GrantService
         $operation = Operation::begin($actor, [$kind->revokeAction()]);
 
         $revoked = OperationScope::run($operation, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $named, $target, $application): int {
-            $candidates = \is_string($target) ? $kind->named($target, GrantChanges::guard($grantee), $named) : [$kind->assertTarget($target)];
+            OperationScope::pins()?->lockGrantees($reference);
+
+            $candidates = \is_string($target) ? $kind->named($target, GrantChanges::guard($grantee), $named) : [self::stored($kind, $kind->assertTarget($target), $actor)];
             $rows       = GrantChanges::revocations($kind, $reference, $operation->actor, $candidates, new GrantScope($named, $application));
             $events     = [];
 
@@ -528,7 +516,7 @@ final class GrantService
             OperationScope::dispatch(...$events);
 
             return \count($events);
-        });
+        }, $actor);
 
         self::forgetRelation($kind, $grantee);
 
@@ -557,6 +545,11 @@ final class GrantService
 
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult $result */
         $result = OperationScope::run($operation, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $named, $targets, $expiresAt): SyncResult {
+            // The grantee's rows are locked before they are read, so a row the
+            // sync keeps as held is held until the write, never one revoked
+            // meanwhile and written back undecided.
+            OperationScope::pins()?->lockGrantees($reference);
+
             $scope   = $named->tenant ?? GrantScopes::commonOwner($kind, GrantChanges::guard($grantee), $targets);
             $written = self::scope($scope, $named->includeSubtree, $named->application);
             $table   = GrantChanges::table($kind, $reference, $operation->actor, $written);
@@ -568,9 +561,9 @@ final class GrantService
 
             $reaches = $table->reaches($revoked);
             $now     = Carbon::now('UTC');
-            $liveAt  = static fn (): array => $table->live(\array_map(\strval(...), \array_keys($keep)), $now);
+            $live    = $actor === null ? [] : $table->live(\array_map(\strval(...), \array_keys($keep)), $now);
 
-            $actor?->authorizeIn($operation, ...GrantChanges::ofSync($kind, $reference, $liveAt(), $keep, $reaches, $written, $expiresAt));
+            $actor?->authorizeIn($operation, ...GrantChanges::ofSync($kind, $reference, $live, $keep, $reaches, $written, $expiresAt));
 
             $table->revoke($revoked);
 
@@ -578,6 +571,12 @@ final class GrantService
                 $id     = GrantChanges::key($model);
                 $change = $table->rearm($id, $expiresAt, $now);
                 $events = [...$events, ...$kind->changeEvents($operation, $reference, $model, $written, $change, $expiresAt)];
+
+                // A row decided as held live is never written back: one gone by
+                // the write was not what was decided.
+                if ($change->outcome !== GrantOutcome::UNCHANGED && \in_array($id, $live, true)) {
+                    throw DependencyChangedException::rows($kind->table());
+                }
 
                 $changed[$change->outcome->value][] = $id;
             }
@@ -589,7 +588,7 @@ final class GrantService
             OperationScope::dispatch(...$events);
 
             return new SyncResult($changed[GrantOutcome::GRANTED->value] ?? [], $changed[GrantOutcome::REARMED->value] ?? [], $revoked);
-        });
+        }, $actor);
 
         self::forgetRelation($kind, $grantee);
 

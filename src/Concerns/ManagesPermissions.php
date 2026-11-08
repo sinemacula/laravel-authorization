@@ -4,9 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Concerns;
 
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use SineMacula\Laravel\Authorization\Database\LiveGrants;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Database\RolePermissionRelation;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Services\RoleService;
@@ -24,10 +24,14 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * `RolePermissionGranted` for each permission really attached and
  * `RolePermissionRevoked` for each really detached, so the cache invalidation
  * listener keeps the resolution cache coherent and audit consumers receive one
- * signal per change. A raw relation write (`$role->permissions()->attach()`,
- * `detach()` or `sync()`) bypasses the service: it fires none of those events
- * and leaves the resolution cache stale, so it is unsupported for any change
- * that must be audited.
+ * signal per change. Each write helper takes an optional `actor:`, an acting
+ * context it hands to the service, so the change is delegated and decided as
+ * that actor (AUTHZ-11.1); without one it is trusted system work, never an
+ * endpoint for user-controlled administration. A raw relation write
+ * (`$role->permissions()->attach()`, `detach()` or `sync()`) bypasses the
+ * service: it fires none of those events, decides nothing and leaves the
+ * resolution cache stale, so it is unsupported for any change that must be
+ * audited.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -62,19 +66,10 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $permissionModel */
         $permissionModel = config('authorization.models.permission', Permission::class);
 
-        /** @var string $pivot */
-        $pivot = config('authorization.tables.role_permissions', 'role_permissions');
-
-        return $this->belongsToMany(
-            related        : $permissionModel,
-            table          : $pivot,
-            foreignPivotKey: 'role_id',
-            relatedPivotKey: 'permission_id',
-        )->using(RolePermission::class)
+        return $this->belongsToMany($permissionModel, RolePermissionRelation::table(), 'role_id', 'permission_id')
+            ->using(RolePermission::class)
             ->withPivot('expires_at')
-            ->where(static function (Builder $query) use ($pivot): void {
-                LiveGrants::only($query, $pivot);
-            });
+            ->where(RolePermissionRelation::live(...));
     }
 
     /**
@@ -84,64 +79,71 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      * carrying the permission the moment the clock passes it, without a sweeper
      * run. A permission the role carries with the same expiry is left as it is,
      * and no event fires; one whose grant has expired is re-armed with the new
-     * expiry.
+     * expiry. Given `actor:`, the grant is decided as that actor.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \DateTimeInterface|null  $expiresAt
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
      */
-    public function givePermission(Permission|string $permission, ?\DateTimeInterface $expiresAt = null): static
+    public function givePermission(Permission|string $permission, ?\DateTimeInterface $expiresAt = null, ?ActingContext $actor = null): static
     {
-        self::authorizationRoles()->grantPermission($this, $permission, $expiresAt);
+        self::authorizationRoles()->grantPermission($this, $permission, $expiresAt, $actor);
 
         return $this;
     }
 
     /**
-     * Spatie alias for the canonical `givePermission()` helper.
+     * Spatie alias for the canonical `givePermission()` helper, handing the
+     * acting context, when there is one, on.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \DateTimeInterface|null  $expiresAt
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
      */
-    public function givePermissionTo(Permission|string $permission, ?\DateTimeInterface $expiresAt = null): static
+    public function givePermissionTo(Permission|string $permission, ?\DateTimeInterface $expiresAt = null, ?ActingContext $actor = null): static
     {
-        return $this->givePermission($permission, $expiresAt);
+        return $this->givePermission($permission, $expiresAt, $actor);
     }
 
     /**
      * Detach the given permission from this role, through the role service.
      * `RolePermissionRevoked` fires only when the role carried it. A name
      * detaches every permission of that name the role carries, the current
-     * tenant's and the platform's alike.
+     * tenant's and the platform's alike. Given `actor:`, the revocation is
+     * decided as that actor.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
      */
-    public function revokePermission(Permission|string $permission): static
+    public function revokePermission(Permission|string $permission, ?ActingContext $actor = null): static
     {
-        self::authorizationRoles()->revokePermission($this, $permission);
+        self::authorizationRoles()->revokePermission($this, $permission, $actor);
 
         return $this;
     }
 
     /**
-     * Spatie alias for the canonical `revokePermission()` helper.
+     * Spatie alias for the canonical `revokePermission()` helper, handing the
+     * acting context, when there is one, on.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
      */
-    public function revokePermissionTo(Permission|string $permission): static
+    public function revokePermissionTo(Permission|string $permission, ?ActingContext $actor = null): static
     {
-        return $this->revokePermission($permission);
+        return $this->revokePermission($permission, $actor);
     }
 
     /**
@@ -154,17 +156,19 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      * calls and the cache invalidation listener wired to those events keeps the
      * resolution cache coherent. A permission the role carries is kept as it
      * is; one whose grant has expired is re-armed with `$expiresAt`, and a new
-     * one is granted until it, or forever.
+     * one is granted until it, or forever. Given `actor:`, each change is
+     * decided as that actor.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
      * @param  \DateTimeInterface|null  $expiresAt
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
      */
-    public function syncPermissions(array $permissions, ?\DateTimeInterface $expiresAt = null): static
+    public function syncPermissions(array $permissions, ?\DateTimeInterface $expiresAt = null, ?ActingContext $actor = null): static
     {
-        self::authorizationRoles()->syncPermissions($this, $permissions, $expiresAt);
+        self::authorizationRoles()->syncPermissions($this, $permissions, $expiresAt, $actor);
 
         return $this;
     }

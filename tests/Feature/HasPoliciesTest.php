@@ -10,18 +10,24 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use Psr\Log\AbstractLogger;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Feature\Stubs\NonMorphRolesGrantee;
@@ -468,6 +474,56 @@ final class HasPoliciesTest extends TestCase
     }
 
     /**
+     * Each write helper hands the acting context it is given to the service, so
+     * the change is delegated and decided as that actor: an actor allowed
+     * nothing is refused by each, writing nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheWriteHelpersPassTheActorThrough(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-actor']);
+        $actor  = ActingContext::for(StubIdentity::create(['id' => 'nobody']));
+        $policy = Policy::create(['name' => 'readers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+
+        self::assertRefusedAsNothingAllowed(static fn () => $user->attachPolicy($policy, actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->detachPolicy($policy, actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->syncPolicies([$policy], actor: $actor));
+        self::assertRefusedAsNothingAllowed(static fn () => $user->createInlinePolicy('own', ['statements' => []], actor: $actor));
+        self::assertSame(0, DB::table('authorizable_policies')->where('authorizable_id', 'user-actor')->count());
+        self::assertSame(0, DB::table('policies')->where('name', 'own')->count());
+    }
+
+    /**
+     * An inline policy created with an actor is decided as that actor under
+     * `authorization:policy.create`, and made when it is allowed, as a
+     * delegated operation.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnInlinePolicyCreatedWithAnActorIsDecidedAsTheActor(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-actor']);
+        $admin = StubIdentity::create(['id' => 'admin']);
+
+        $admin->givePermission(Permission::create(['name' => PackagePermissions::POLICY_CREATE]));
+
+        /** @var \ArrayObject<int, bool> $trusted */
+        $trusted = new \ArrayObject;
+
+        Event::listen(PolicyCreated::class, static fn (PolicyCreated $event) => $trusted->append($event->operation->isTrusted));
+
+        $policy = $user->createInlinePolicy('own', ['statements' => []], actor: ActingContext::for($admin));
+
+        self::assertTrue($policy->exists);
+        self::assertSame([false], $trusted->getArrayCopy());
+    }
+
+    /**
      * Return the grant table the expiry check reads.
      *
      * @return string
@@ -524,6 +580,23 @@ final class HasPoliciesTest extends TestCase
     {
         /** @var list<string> */
         return $identity->policies->pluck('name')->all();
+    }
+
+    /**
+     * Assert the call is refused as the actor is allowed nothing.
+     *
+     * @param  \Closure(): mixed  $call
+     * @return void
+     */
+    private static function assertRefusedAsNothingAllowed(\Closure $call): void
+    {
+        try {
+            $call();
+
+            self::fail('The helper did not decide the change as the actor.');
+        } catch (AuthorizationException $refusal) {
+            self::assertSame(DecisionReason::NO_MATCH, $refusal->getReason());
+        }
     }
 
     /**

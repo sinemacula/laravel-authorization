@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundarySet;
 use SineMacula\Laravel\Authorization\Exceptions\BoundaryException;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
@@ -82,15 +83,17 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * `authorization:boundary.remove`, as the actor, through `check()`, on the
  * change's operation resource, inside the transaction once the boundary is read
  * and before anything is written; the first refused throws the decision's
- * `AuthorizationException`, leaving nothing written. A removal that finds no
- * boundary decides nothing. Once the rank rule passes (see
- * `OperationConstraints`), setting a boundary where the grantee has none, or
- * replacing one with the same policy or one that can only narrow it, reaching
- * no fewer tenants, only narrows, and is allowed (see `Narrowing`). Replacing
- * one with a wider boundary, and removing one, lift a cap whose release cannot
- * be bounded, so each is refused as `administration.unprovable` unless the
- * actor is also allowed `authorization:administration.unbounded` on the same
- * operation.
+ * `AuthorizationException`, leaving nothing written. The actor's authority and
+ * then the grantee's rows are locked before its boundaries are read (see
+ * `Administration\DependencyPins`), and exactly the boundaries decided are
+ * removed, never one set meanwhile. A removal that finds no boundary decides
+ * nothing. Once the rank rule passes (see `OperationConstraints`), setting a
+ * boundary where the grantee has none, or replacing one with the same policy or
+ * one that can only narrow it, reaching no fewer tenants, only narrows, and is
+ * allowed (see `Narrowing`). Replacing one with a wider boundary, and removing
+ * one, lift a cap whose release cannot be bounded, so each is refused as
+ * `administration.unprovable` unless the actor is also allowed
+ * `authorization:administration.unbounded` on the same operation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -122,6 +125,8 @@ final class BoundaryService
 
         /** @var \SineMacula\Laravel\Authorization\Enums\GrantOutcome */
         return OperationScope::run($operation, static function (Operation $operation) use ($actor, $reference, $policy, $named, $includeSubtree): GrantOutcome {
+            OperationScope::pins()?->lockGrantees($reference);
+
             $stored = self::stored($policy);
             $name   = PolicyDocument::nameOf($stored->getAttribute('name'));
 
@@ -141,7 +146,7 @@ final class BoundaryService
             }
 
             return $outcome;
-        });
+        }, $actor);
     }
 
     /**
@@ -166,9 +171,25 @@ final class BoundaryService
         return OperationScope::run(Operation::begin($actor, [PackagePermissions::BOUNDARY_REMOVE]), static function (Operation $operation) use ($actor, $reference, $named): bool {
             $scope = new GrantScope($named);
             $table = self::table($reference, $operation, $scope);
-            $held  = static fn (): array => self::removals($reference, self::heldIn($table, $named));
 
-            $actor?->authorizeChanges($operation, $held(), OperationResource::unchanged(PackagePermissions::BOUNDARY_REMOVE, $reference, null, $scope));
+            if ($actor !== null) {
+                // The actor's authority, then the grantee's rows, are locked
+                // before the boundary is read, so what is removed is exactly
+                // what was decided.
+                OperationScope::pins()?->lockGrantees($reference);
+
+                $held = self::heldIn($table, $named);
+
+                $unchanged = OperationResource::unchanged(PackagePermissions::BOUNDARY_REMOVE, $reference, null, $scope);
+
+                $actor->authorizeChanges($operation, self::removals($reference, $held), $unchanged);
+
+                $events = self::removeDecided($reference, $operation, $held === [] ? [[null, $scope]] : $held);
+
+                OperationScope::dispatch(...$events);
+
+                return $events !== [];
+            }
 
             $removed = $table->remove();
 
@@ -177,7 +198,7 @@ final class BoundaryService
             }
 
             return $removed !== null;
-        });
+        }, $actor);
     }
 
     /**
@@ -200,17 +221,65 @@ final class BoundaryService
 
         /** @var int<0, max> */
         return OperationScope::run(Operation::begin($actor, [PackagePermissions::BOUNDARY_REMOVE]), static function (Operation $operation) use ($actor, $reference): int {
-            $boundaries = self::table($reference, $operation, GrantScope::platform());
-            $unchanged  = OperationResource::unchanged(PackagePermissions::BOUNDARY_REMOVE, $reference, null, GrantScope::platform());
+            if ($actor === null) {
+                $events = self::removeEverywhere($reference, $operation);
+            } else {
+                // The actor's authority, then the grantee's rows, are locked
+                // before the boundaries are read, so what is removed is exactly
+                // what was decided, never a boundary set meanwhile.
+                OperationScope::pins()?->lockGrantees($reference);
 
-            $actor?->authorizeChanges($operation, self::removals($reference, $boundaries->everywhere()), $unchanged);
+                $boundaries = self::table($reference, $operation, GrantScope::platform())->everywhere();
+                $unchanged  = OperationResource::unchanged(PackagePermissions::BOUNDARY_REMOVE, $reference, null, GrantScope::platform());
 
-            $events = self::removeEverywhere($reference, $operation);
+                $actor->authorizeChanges($operation, self::removals($reference, $boundaries), $unchanged);
+
+                $events = self::removeDecided($reference, $operation, $boundaries);
+            }
 
             OperationScope::dispatch(...$events);
 
             return \count($events);
-        });
+        }, $actor);
+    }
+
+    /**
+     * Remove exactly the boundaries decided, each given by the key of its
+     * policy and its scope, inside the caller's delegated operation, and return
+     * a `BoundaryRemoved` for each, for the caller to dispatch: a scope decided
+     * with no boundary, its key null, removes nothing. A scope whose boundary
+     * is not the one decided when it is removed throws
+     * `DependencyChangedException` and removes nothing, so the operation is
+     * tried again.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  list<array{string|null, \SineMacula\Laravel\Authorization\Support\GrantScope}>  $boundaries
+     * @return list<\SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException
+     *
+     * @internal
+     */
+    public static function removeDecided(Reference $grantee, Operation $operation, array $boundaries): array
+    {
+        $events = [];
+
+        foreach ($boundaries as [$policy, $scope]) {
+            $removed = self::table($grantee, $operation, $scope)->remove();
+
+            if (($removed[0] ?? null) !== $policy) {
+                throw DependencyChangedException::rows('authorizable_boundaries');
+            }
+
+            if ($removed === null) {
+                continue;
+            }
+
+            $events[] = self::removedEvent($operation, $grantee, ...$removed);
+        }
+
+        return $events;
     }
 
     /**

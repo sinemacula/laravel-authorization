@@ -4,15 +4,23 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Administration\DependencyPins;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -21,6 +29,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\FailingCacheStore;
 use Tests\Feature\Stubs\RecordingLogger;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -345,6 +354,235 @@ final class OperationScopeTest extends TestCase
         $this->expectExceptionObject(new \RuntimeException('cache unavailable'));
 
         OperationScope::dispatch(new RoleAssigned(Operation::begin(), new Reference('user', 'user-1'), new Reference('role', 'role-1'), 'editor', GrantScope::platform(), null));
+    }
+
+    /**
+     * A delegated operation holds pins of its own while its work runs, a
+     * trusted one none, and none is held outside every call; a trusted call
+     * inside a delegated one holds none, and the delegated one's are current
+     * again once it ends.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedOperationHoldsPinsWhileItsWorkRuns(): void
+    {
+        self::assertNull(OperationScope::pins());
+
+        $seen = [];
+
+        OperationScope::run(self::delegated(), static function () use (&$seen): void {
+            $seen[] = OperationScope::pins();
+
+            OperationScope::run(Operation::begin(), static function () use (&$seen): void {
+                $seen[] = OperationScope::pins();
+            });
+
+            $seen[] = OperationScope::pins();
+        });
+
+        OperationScope::run(Operation::begin(), static function () use (&$seen): void {
+            $seen[] = OperationScope::pins();
+        });
+
+        self::assertInstanceOf(DependencyPins::class, $seen[0]);
+        self::assertNull($seen[1]);
+        self::assertSame($seen[0], $seen[2]);
+        self::assertNull($seen[3]);
+        self::assertNull(OperationScope::pins());
+    }
+
+    /**
+     * A delegated operation that conflicts is tried again, each try in a
+     * transaction of its own, rolled back before the next, with fresh pins;
+     * once every try has conflicted it is refused as `administration.conflict`.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedOperationThatConflictsIsTriedAgain(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $pins   = [];
+        $result = OperationScope::run(self::delegated(), static function () use (&$pins): int {
+            $pins[] = OperationScope::pins();
+
+            self::authorizationConnection()->table('roles')->insert(['id' => (string) \count($pins), 'name' => 'try-' . \count($pins)]);
+
+            return \count($pins) < 3 ? self::conflict() : \count($pins);
+        });
+
+        self::assertSame(3, $result);
+        self::assertCount(3, \array_unique(\array_map(\spl_object_id(...), \array_filter($pins))));
+        self::assertSame(['try-3'], self::authorizationConnection()->table('roles')->pluck('name')->all());
+
+        $refusal = null;
+
+        try {
+            OperationScope::run(self::delegated(), self::conflict(...));
+        } catch (AuthorizationException $exception) {
+            $refusal = $exception;
+        }
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $refusal->getReason());
+    }
+
+    /**
+     * A trusted operation runs once, as it always has: a conflict it throws is
+     * thrown, never tried again.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATrustedOperationRunsOnce(): void
+    {
+        $tries = 0;
+
+        try {
+            OperationScope::run(Operation::begin(), static function () use (&$tries): never {
+                $tries++;
+
+                throw DependencyChangedException::tree();
+            });
+        } catch (DependencyChangedException) {
+            self::assertSame(1, $tries);
+        }
+
+        self::assertSame(1, $tries);
+    }
+
+    /**
+     * A tree change reported while delegated operations run marks each one's
+     * pins moved, so none validates; with none running, it does nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATreeChangeMarksEveryRunningDelegatedOperation(): void
+    {
+        OperationScope::treeChanged();
+
+        config(['authorization.administration.retries' => 0]);
+
+        $failures = \array_map(self::reasonOfAMove(...), [true, false]);
+
+        self::assertSame([DecisionReason::ADMINISTRATION_CONFLICT, DecisionReason::ADMINISTRATION_CONFLICT], $failures);
+    }
+
+    /**
+     * The pins of a delegated operation are returned to work that only ever
+     * runs delegated; none running, or a trusted one, is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testOnlyADelegatedOperationHasPinsToReturn(): void
+    {
+        self::assertTrue(OperationScope::run(self::delegated(), static fn (): bool => OperationScope::delegatedPins() === OperationScope::pins()));
+
+        $none    = static fn (): DependencyPins => OperationScope::delegatedPins();
+        $trusted = static fn (): DependencyPins => OperationScope::run(Operation::begin(), $none);
+
+        foreach ([$none, $trusted] as $call) {
+            $refusal = null;
+
+            try {
+                $call();
+            } catch (\LogicException $exception) {
+                $refusal = $exception;
+            }
+
+            self::assertSame('No delegated operation is running.', $refusal?->getMessage());
+        }
+    }
+
+    /**
+     * Once every try has conflicted, the refusal is recorded and reported as
+     * the refusal of the actor the operation was run for.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheConflictRefusalIsReportedForTheActorGiven(): void
+    {
+        config(['authorization.administration.retries' => 0]);
+
+        $actor     = ActingContext::for(StubIdentity::query()->create(['id' => 'admin']));
+        $operation = Operation::begin($actor, ['authorization:role.grant']);
+
+        /** @var \ArrayObject<int, string|null> $failed */
+        $failed = new \ArrayObject;
+
+        Event::listen(AuthorizationFailed::class, static fn (AuthorizationFailed $event) => $failed->append($event->resource));
+
+        try {
+            OperationScope::run($operation, self::conflict(...), $actor);
+        } catch (AuthorizationException) {
+            // Asserted below.
+        }
+
+        self::assertSame(['authorization:operation:' . $operation->id], $failed->getArrayCopy());
+    }
+
+    /**
+     * Run a delegated operation that reports a tree change, itself or from a
+     * trusted call inside it, then validates its pins, and return the reason it
+     * was refused with, or null.
+     *
+     * @param  bool  $isItself
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
+     *
+     * @throws \Throwable
+     */
+    private static function reasonOfAMove(bool $isItself): ?DecisionReason
+    {
+        $report = static function (): void {
+            OperationScope::treeChanged();
+        };
+
+        try {
+            OperationScope::run(self::delegated(), static function () use ($isItself, $report): void {
+                $outer = OperationScope::pins();
+
+                $isItself ? $report() : OperationScope::run(Operation::begin(), $report);
+
+                $outer?->validate();
+            });
+        } catch (AuthorizationException $refusal) {
+            return $refusal->getReason();
+        }
+
+        return null;
+    }
+
+    /**
+     * Throw the conflict of a tree that moved.
+     *
+     * @return never
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException
+     */
+    private static function conflict(): never
+    {
+        throw DependencyChangedException::tree();
+    }
+
+    /**
+     * Return a new delegated operation, as an acting context begins one.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\Operation
+     */
+    private static function delegated(): Operation
+    {
+        return new Operation((string) Str::uuid(), new Reference('user', '1'), CarbonImmutable::now('UTC'), false);
     }
 
     /**

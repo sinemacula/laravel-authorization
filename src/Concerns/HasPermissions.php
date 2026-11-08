@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Collection;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
@@ -30,6 +31,14 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * decide the model's checks over many resources through the authorization
  * manager, and `permissionsFor` lists the actions the model may take in a
  * scope.
+ *
+ * Each write helper takes an optional `actor:`, an acting context it hands to
+ * the service, so the change is delegated and decided as that actor
+ * (AUTHZ-11.1). Without one it is trusted system work: nothing is decided, so a
+ * helper called without an actor is an integration surface for the
+ * application's own code, never an endpoint for user-controlled administration.
+ * `givePermissionTo()` and `revokePermissionTo()` take no actor, so they are
+ * always trusted.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -93,6 +102,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
      * @param  string|null  $application
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
@@ -103,8 +113,9 @@ trait HasPermissions // @phpstan-ignore trait.unused
         Model|Reference|null $tenant = null,
         bool $includeSubtree = true,
         ?string $application = null,
+        ?ActingContext $actor = null,
     ): static {
-        self::authorizationGrants()->grantPermission($this, $permission, $expiresAt, null, $tenant, $includeSubtree, $application);
+        self::authorizationGrants()->grantPermission($this, $permission, $expiresAt, $actor, $tenant, $includeSubtree, $application);
 
         return $this;
     }
@@ -123,13 +134,14 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  string|null  $application
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
      */
-    public function revokePermission(Permission|string $permission, Model|Reference|null $tenant = null, ?string $application = null): static
+    public function revokePermission(Permission|string $permission, Model|Reference|null $tenant = null, ?string $application = null, ?ActingContext $actor = null): static
     {
-        self::authorizationGrants()->revokePermission($this, $permission, null, $tenant, $application);
+        self::authorizationGrants()->revokePermission($this, $permission, $actor, $tenant, $application);
 
         return $this;
     }
@@ -155,13 +167,14 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  string|null  $application
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
      *
      * @throws \Throwable
      */
-    public function syncPermissions(array $permissions, Model|Reference|null $tenant = null, ?string $application = null): static
+    public function syncPermissions(array $permissions, Model|Reference|null $tenant = null, ?string $application = null, ?ActingContext $actor = null): static
     {
-        self::authorizationGrants()->syncPermissions($this, $permissions, tenant: $tenant, application: $application);
+        self::authorizationGrants()->syncPermissions($this, $permissions, actor: $actor, tenant: $tenant, application: $application);
 
         return $this;
     }
@@ -281,25 +294,33 @@ trait HasPermissions // @phpstan-ignore trait.unused
     // ------------------------------------------------------------------
 
     /**
-     * Spatie alias for the canonical `givePermission()` helper.
+     * Spatie alias for the canonical `givePermission()` helper, handing the
+     * acting context, when there is one, on.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
+     *
+     * @throws \Throwable
      */
-    public function givePermissionTo(Permission|string $permission): static
+    public function givePermissionTo(Permission|string $permission, ?ActingContext $actor = null): static
     {
-        return $this->givePermission($permission);
+        return $this->givePermission($permission, actor: $actor);
     }
 
     /**
-     * Spatie alias for the canonical `revokePermission()` helper.
+     * Spatie alias for the canonical `revokePermission()` helper, handing the
+     * acting context, when there is one, on.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return static
+     *
+     * @throws \Throwable
      */
-    public function revokePermissionTo(Permission|string $permission): static
+    public function revokePermissionTo(Permission|string $permission, ?ActingContext $actor = null): static
     {
-        return $this->revokePermission($permission);
+        return $this->revokePermission($permission, actor: $actor);
     }
 
     /**
