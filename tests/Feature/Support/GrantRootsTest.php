@@ -16,7 +16,9 @@ use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Support\GrantRoots;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
+use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\SubtreeQueryTree;
 use Tests\TestCase;
@@ -35,6 +37,8 @@ use Tests\TestCase;
 #[CoversClass(GrantRoots::class)]
 final class GrantRootsTest extends TestCase
 {
+    use UsesAnAuthorizationConnection;
+
     /**
      * Roots are classified against a tenant: within at the tenant, outside at
      * another tenant or the platform, and, without a condition for a tree that
@@ -128,6 +132,29 @@ final class GrantRootsTest extends TestCase
         foreach ($queries as $bindings) {
             self::assertCount(3, \array_keys($bindings, 'user-key', true));
             self::assertCount(3, \array_keys($bindings, 'other-key', true));
+        }
+    }
+
+    /**
+     * Two grantees sharing a key under different types are two grantees, each
+     * read, in whichever order they are given.
+     *
+     * @return void
+     */
+    public function testGranteesSharingAKeyUnderTwoTypesAreBothRead(): void
+    {
+        $first  = StubIdentity::create(['id' => 'shared-key']);
+        $second = new StubSecondIdentity(['id' => 'shared-key']);
+        $tenant = new Reference('tenant', 'a');
+        $within = GrantRoots::within($tenant, new FlatTenantTree);
+
+        $second->save();
+
+        $first->givePermission(Permission::create(['name' => 'posts:read']), null, $tenant);
+        $second->givePermission(Permission::create(['name' => 'posts:edit']), null, new Reference('tenant', 'b'));
+
+        foreach (['first first' => [$first, $second], 'second first' => [$second, $first]] as $order => $grantees) {
+            self::assertSame(GrantScopeStatus::OUTSIDE, (new GrantRoots(\array_map(Reference::of(...), $grantees)))->against($within), $order);
         }
     }
 
@@ -243,7 +270,9 @@ final class GrantRootsTest extends TestCase
 
     /**
      * The grants are read on the write connection, so a replica that lags never
-     * hides one.
+     * hides one. The package's tables are on a connection outside the test's
+     * transaction, where Laravel would read on the read connection, and that
+     * connection throws when it is used.
      *
      * @return void
      *
@@ -251,21 +280,18 @@ final class GrantRootsTest extends TestCase
      */
     public function testTheGrantsAreReadOnTheWriteConnection(): void
     {
-        $user = StubIdentity::create(['id' => 'user']);
+        $this->useAnAuthorizationConnection();
+
+        $user       = StubIdentity::create(['id' => 'user']);
+        $connection = self::authorizationConnection();
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
 
-        /** @var \Illuminate\Database\Connection $connection */
-        $connection = DB::connection();
-
         $connection->setReadPdo(static fn (): never => throw new \LogicException('The read connection was used.'));
 
-        try {
-            self::assertSame(GrantScopeStatus::OUTSIDE, (new GrantRoots([Reference::of($user)]))->against(null));
-            self::assertTrue((new GrantRoots([Reference::of($user)]))->appliesIn(new TenantChain));
-        } finally {
-            $connection->setReadPdo(null);
-        }
+        self::assertSame(0, $connection->transactionLevel());
+        self::assertSame(GrantScopeStatus::OUTSIDE, (new GrantRoots([Reference::of($user)]))->against(null));
+        self::assertTrue((new GrantRoots([Reference::of($user)]))->appliesIn(new TenantChain));
     }
 
     /**

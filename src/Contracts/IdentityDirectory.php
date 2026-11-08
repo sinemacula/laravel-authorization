@@ -13,9 +13,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * Principals and their identities live in the application (AUTHZ-13.9), so the
  * package learns which principals an identity owns only through this seam. The
  * grant scope query counts the grants of the identity and of every principal
- * the directory lists, and answers `unknown` unless the directory says its list
- * is complete: a principal left out could hold a grant outside the tenant, so
- * an incomplete list is never read as a complete one.
+ * the directory lists, and never answers `within` unless the directory says its
+ * list is complete: with an incomplete list it answers `unknown`, unless a
+ * grant already proves the identity reaches `outside` the tenant. A principal
+ * left out could hold a grant outside the tenant, so an incomplete list is
+ * never read as a complete one.
  *
  * The package never infers the principals of an identity, from
  * `AuthorizableIdentity` or from anything else: that contract says a model may

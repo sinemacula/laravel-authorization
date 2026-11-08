@@ -6,9 +6,11 @@ namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantPresence;
 use SineMacula\Laravel\Authorization\Enums\GrantScopeStatus;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -39,7 +41,8 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  *
  * Each answer reads the grants in one query on the write connection, however
  * many grants and principals there are and however deep the tree, plus the
- * tree's own reads and the identity directory's.
+ * tree's own reads and the identity directory's; only when the tree's subtree
+ * query fails as it runs is a second read, for the platform-wide grants, made.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,23 +71,23 @@ final readonly class GrantScopeQuery
      * not the principals are all known. It is `WITHIN` only when the identity
      * directory lists the principals completely and every grant is within, or
      * there is none (N82). Otherwise it is `UNKNOWN`: an incomplete list of
-     * principals, a tree that cannot be read, or a grant row naming half a
-     * tenant.
+     * principals, a tree that cannot be read (its subtree query failing as it
+     * runs included, written to the log), or a grant row naming half a tenant.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $identity
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|\SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @return \SineMacula\Laravel\Authorization\Enums\GrantScopeStatus
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     * @throws \Throwable
      */
     public function forIdentity(Reference $identity, AuthorizableTenant|Model|Reference $tenant): GrantScopeStatus
     {
         $scope      = self::referenceTo($tenant);
         $principals = $this->directory()->principalsOf($identity);
-        $within     = self::withinOf($scope);
-        $status     = (new GrantRoots([$identity, ...$principals->principals]))->against($within);
+        $status     = self::placed(new GrantRoots([$identity, ...$principals->principals]), $scope);
 
-        return $status === GrantScopeStatus::OUTSIDE || ($principals->isComplete && $within !== null) ? $status : GrantScopeStatus::UNKNOWN;
+        return $status === GrantScopeStatus::OUTSIDE || $principals->isComplete ? $status : GrantScopeStatus::UNKNOWN;
     }
 
     /**
@@ -143,11 +146,7 @@ final readonly class GrantScopeQuery
         $grantees     = [];
         $isEveryNamed = true;
 
-        foreach ([$subject->subject, SubjectGrants::grantingIdentity($subject)] as $grantee) {
-            if ($grantee === null) {
-                continue;
-            }
-
+        foreach (\array_filter([$subject->subject, SubjectGrants::grantingIdentity($subject)]) as $grantee) {
             if ($grantee instanceof Model || $grantee instanceof Reference) {
                 $grantees[] = Reference::of($grantee);
 
@@ -158,6 +157,58 @@ final readonly class GrantScopeQuery
         }
 
         return [$grantees, $isEveryNamed];
+    }
+
+    /**
+     * Return where the roots lie against the tenant in the bound tree. When the
+     * tree cannot be read, its subtree query failing as the grant query runs
+     * included, only a root at the platform is proven outside, and the answer
+     * is otherwise `UNKNOWN`, never `WITHIN`. A grant table that cannot be read
+     * fails that second read too, and is thrown.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantRoots  $roots
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @return \SineMacula\Laravel\Authorization\Enums\GrantScopeStatus
+     *
+     * @throws \Throwable
+     */
+    private static function placed(GrantRoots $roots, Reference $tenant): GrantScopeStatus
+    {
+        $status = self::nested($roots, self::withinOf($tenant));
+
+        return $status ?? ($roots->against(null) === GrantScopeStatus::OUTSIDE ? GrantScopeStatus::OUTSIDE : GrantScopeStatus::UNKNOWN);
+    }
+
+    /**
+     * Return where the roots lie against the condition, or null without one or
+     * when the tree's subtree query, nested in the grant query, fails as it
+     * runs: a closure table missing, say, or a column of another type.
+     *
+     * The grant query runs in a transaction of its own, a savepoint inside the
+     * caller's, so a failure rolls back only that query and leaves the caller's
+     * transaction usable, as PostgreSQL otherwise would not. Only a failure of
+     * the query is caught, and written to the log as a tree that cannot be
+     * read; whatever else goes wrong is thrown.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantRoots  $roots
+     * @param  (\Closure(\Illuminate\Database\Query\Builder, string): void)|null  $within
+     * @return \SineMacula\Laravel\Authorization\Enums\GrantScopeStatus|null
+     *
+     * @throws \Throwable
+     */
+    private static function nested(GrantRoots $roots, ?\Closure $within): ?GrantScopeStatus
+    {
+        if ($within === null) {
+            return null;
+        }
+
+        try {
+            return AuthorizationConnection::connection()->transaction(static fn (): GrantScopeStatus => $roots->against($within));
+        } catch (QueryException $exception) {
+            self::unreadable($exception);
+
+            return null;
+        }
     }
 
     /**

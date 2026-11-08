@@ -54,7 +54,7 @@ final readonly class GrantRoots
     /** @var string The column of a grant row, and of a subtree row, naming its tenant's key. */
     private const string TENANT_ID = 'tenant_id';
 
-    /** @var list<\SineMacula\Laravel\Authorization\Support\Reference> The grantees, each once. */
+    /** @var array<string, \SineMacula\Laravel\Authorization\Support\Reference> The grantees, each once, by their type and key. */
     private array $grantees;
 
     /**
@@ -70,14 +70,16 @@ final readonly class GrantRoots
             $unique[\serialize([$grantee->type, $grantee->id])] = $grantee;
         }
 
-        $this->grantees = \array_values($unique);
+        $this->grantees = $unique;
     }
 
     /**
      * Return the condition a grant row meets when its root is the tenant or
      * below it in the tree: the tenant's own pair for a flat tree, else the
      * tree's subtree query nested whole. The subtree must be a query on the
-     * package's connection, since it runs inside the grant query.
+     * package's connection, since it runs inside the grant query; it is
+     * compiled each time it is nested, never changed, so the one query serves
+     * every grant table.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
@@ -98,7 +100,7 @@ final readonly class GrantRoots
         return static function (Builder $row, string $table) use ($subtree): void {
             $row->whereExists(static function (Builder $exists) use ($subtree, $table): void {
                 $exists->selectRaw('1')
-                    ->fromSub(clone $subtree, self::SUBTREE)
+                    ->fromSub($subtree, self::SUBTREE)
                     ->whereColumn(self::SUBTREE . '.' . self::TENANT_TYPE, $table . '.' . self::TENANT_TYPE)
                     ->whereColumn(self::SUBTREE . '.' . self::TENANT_ID, $table . '.' . self::TENANT_ID);
             });

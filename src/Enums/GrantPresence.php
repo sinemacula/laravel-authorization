@@ -15,10 +15,10 @@ namespace SineMacula\Laravel\Authorization\Enums;
  */
 enum GrantPresence: string
 {
-    /** The principal, or its identity, holds a live grant that applies in the tenant. */
+    /** A live grant of the principal, or of its identity when that identity's grants reach it, applies in the tenant (see `SubjectGrants::grantingIdentity()`). */
     case PRESENT = 'present';
 
-    /** Neither the principal nor its identity holds a live grant that applies in the tenant. */
+    /** No live grant of the principal, or of its identity when that identity's grants reach it, applies in the tenant, and none could have been missed. */
     case ABSENT = 'absent';
 
     /** No grant was found, but one could not be ruled out: the tree or a grantee cannot be read. */

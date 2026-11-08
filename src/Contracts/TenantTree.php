@@ -52,8 +52,17 @@ interface TenantTree
      *
      * `subtree(T)` selects exactly the string forms (`tenant_type`,
      * `tenant_id`) of every R with `isWithin(R, T)`, and does not depend on
-     * `TenantScope`. `whereAuthorized()` nests it whole to tell the rows of a
-     * subtree, so it must run on the connection of the models it scopes.
+     * `TenantScope`. Two readers nest it whole in a query of their own, so each
+     * needs it on that query's connection. `whereAuthorized()` nests it to tell
+     * the rows of a subtree, so there it must be a query on the connection of
+     * the models it scopes, and one on any other is refused as
+     * `subtree_connection`. The grant scope query
+     * (`GrantScopeQuery::forIdentity()`) nests it in its query of the grant
+     * tables, so there it must be a query on the package's connection
+     * (`authorization.connection`), and one on any other is a tree that cannot
+     * be read, answered `unknown` unless a platform-wide grant proves
+     * `outside`. A tree kept on the connection of both the scoped models and
+     * the package's tables serves both.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @return \Illuminate\Contracts\Database\Query\Builder

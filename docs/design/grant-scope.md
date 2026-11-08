@@ -61,8 +61,9 @@ identity directory that says whose grants count, the shared reader of grant root
    or rows.
 
 9. **Bounded cost.** Each answer is one grant query, plus the tree's own reads and the directory's, whatever the number
-   of grants, grantees or tenants and the depth of the tree. Nothing is cached: completeness across an identity's
-   principals would need invalidation the resolution cache does not have.
+   of grants, grantees or tenants and the depth of the tree; only a subtree query that fails as it runs costs a second
+   query, of the platform-wide grants. Nothing is cached: completeness across an identity's principals would need
+   invalidation the resolution cache does not have.
 
 ## Success Path
 
@@ -80,6 +81,11 @@ of the user, or of its identity, applies in the child; an ancestor's subtree gra
 - **A tree that throws, or a subtree on another connection.** The failure is written to the log; `forIdentity()` is
   `OUTSIDE` on a platform-wide grant, else `UNKNOWN`; `hasGrantIn()` looks only in the tenant and the platform, and is
   `UNKNOWN` when it finds nothing.
+- **A subtree query that fails as it runs.** A closure table that is missing, or a column of another type, fails only
+  inside the grant query. That query runs in a savepoint of its own, so the failure rolls back only that query and the
+  caller's transaction stays usable, as PostgreSQL otherwise would not leave it. Only the `QueryException` is caught:
+  it is written to the log, and `forIdentity()` reads the platform-wide grants alone, answering as for a tree that
+  throws. `hasGrantIn()` never runs the subtree query, so it is unaffected.
 - **A row naming half a tenant.** `UNKNOWN` for `forIdentity()`, unless another root is outside.
 - **The same key under two types.** Never confused: grantees are matched by type and key together.
 - **Expired grants, boundaries, guardrails and policies attached to roles.** Never read as the grantees' grants.
@@ -100,10 +106,12 @@ of the user, or of its identity, applies in the child; an ancestor's subtree gra
 - `Feature\Services\GrantScopeQueryTest` -- the containment matrix (the tenant, descendants, ancestors, siblings, the
   platform, no grants, an incomplete directory, every application, morph collisions, expiry, several principals,
   deny-only policies, boundaries and guardrails ignored) and presence against containment (ancestor subtree grants,
-  node-only grants, principal isolation, identity inheritance, machines, applications, unreadable trees and
-  grantees), under the closure-table and flat trees, and the status carrying nothing else.
+  node-only grants, principal isolation, identity inheritance, machines, applications, unreadable trees, subtree
+  queries that fail as they run, and grantees), under the closure-table and flat trees, and the status carrying nothing
+  else.
 - `Feature\Support\GrantRootsTest` -- the classification, half-tenant rows, one query naming each grantee once,
-  applicability, inline policies, nested subtrees, refused subtrees and the write connection.
+  grantees sharing a key under two types, applicability, inline policies, nested subtrees, refused subtrees and the
+  write connection, on a connection outside the test's transaction.
 - `Performance\GrantScopeQueryBudgetTest` -- the query count is the same for one grant and ten of each kind, and at
   depth one and depth eight.
 - `Feature\Resolvers\GuardUserIdentityDirectoryTest`, `Feature\ConfigValidatorTest` and

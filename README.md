@@ -467,13 +467,15 @@ created (`OwnerChangedException`): to move one, create it in the new tenant and 
 Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class
 implementing `SineMacula\Laravel\Authorization\Contracts\TenantTree` as `tenant_tree` in `config/authorization.php`,
 answering a tenant's ancestors, whether one tenant is within another, and a tenant's subtree as a query. The subtree
-query selects exactly the `tenant_type` and `tenant_id` of every tenant within, whatever the tenant scope, and
-[query scoping](#query-scoping) nests it whole, so it runs on the connection of the models it scopes. The default is
-a flat set of tenants. With a tree, a grant in a tenant also applies in every tenant below it, unless it is limited to
-that tenant, and a tenant sees the roles, permissions and policies its ancestors own as well as its own and the
-platform's; the nearest owner's wins a lookup by name. Granting again with the other reach changes it, reported as
-`GrantOutcome::REACH_CHANGED`. When the tree changes (a tenant moved under another parent, or deleted), report it so
-cached answers below it are dropped and the move takes effect at once:
+query selects exactly the `tenant_type` and `tenant_id` of every tenant within, whatever the tenant scope. Two readers
+nest it whole in a query of their own, so each needs it on that query's connection: [query scoping](#query-scoping)
+needs it on the connection of the models it scopes, and the [grant scope query](#grant-scope-query) needs it on the
+package's connection (`authorization.connection`). A tree kept on the connection of both the scoped models and the
+package's tables serves both. The default is a flat set of tenants. With a tree, a grant in a tenant also applies in
+every tenant below it, unless it is limited to that tenant, and a tenant sees the roles, permissions and policies its
+ancestors own as well as its own and the platform's; the nearest owner's wins a lookup by name. Granting again with the
+other reach changes it, reported as `GrantOutcome::REACH_CHANGED`. When the tree changes (a tenant moved under another
+parent, or deleted), report it so cached answers below it are dropped and the move takes effect at once:
 
 ```php
 $user->assignRole('admin', tenant: $organisation);                          // the organisation and its accounts
@@ -2571,7 +2573,10 @@ the platform for a row naming none) against the tenant, in the bound tenant tree
   `OUTSIDE` without it.
 
 A tenant tree other than the flat one is read through its `subtree()` query, nested whole in the grant query, so it
-must be a query on the package's connection; anything else is a tree that cannot be read.
+must be a query on the package's connection; anything else is a tree that cannot be read. So is a subtree query that
+fails as the grant query runs (a closure table that is missing, say, or a column of another type): the grant query
+runs in a savepoint of its own, so the failure rolls back only that query and leaves your transaction usable, and the
+platform-wide grants are then read alone.
 
 **`hasGrantIn()`.** `hasGrantIn($principal, $tenant, $application = null)` answers whether the principal holds a live
 grant that applies in the tenant, as a check there reads it: one made in the tenant, one made in an ancestor that
@@ -2607,7 +2612,8 @@ alone, never the tenants, grants, names, counts or rows behind it.
 
 **What it costs.** Each answer reads the grants in one query on the write connection, so a replica's lag never hides a
 grant, however many grants and principals there are and however deep the tree, plus the tree's own reads and the
-directory's. Nothing is cached. See [Grant scope](docs/design/grant-scope.md) for the design.
+directory's; only a subtree query that fails as it runs costs a second read, of the platform-wide grants. Nothing is
+cached. See [Grant scope](docs/design/grant-scope.md) for the design.
 
 ### Query scoping
 
@@ -2730,12 +2736,13 @@ The scope compiles every statement it can compare with each row's key in SQL exa
   and, when a statement matches a pattern against the identifier, rows whose identifier is too long for `fnmatch()`,
   are left out, as `check()` denies or throws on them.
 
-A tree other than the flat one is read through `TenantTree::subtree()`, nested in the condition whole, so it must run
-on the model's connection; its contract is that `subtree(T)` selects exactly the string forms (`tenant_type`,
-`tenant_id`) of every tenant within `T`, whatever the tenant scope. The rows are split into classes at the tenants the
-decision's sources sit at: the subject's grants, policies and boundaries, its roles', the guardrails and the type's
-attached policies. Each class is decided once, every time the query runs, so the number of tenants and classes is
-bounded:
+A tree other than the flat one is read through `TenantTree::subtree()`, nested in the condition whole, so it must run on
+the model's connection, and one on another is refused as `subtree_connection` (the [grant scope
+query](#grant-scope-query) needs it on the package's connection instead); its contract is that `subtree(T)` selects
+exactly the string forms (`tenant_type`, `tenant_id`) of every tenant within `T`, whatever the tenant scope. The rows
+are split into classes at the tenants the decision's sources sit at: the subject's grants, policies and boundaries, its
+roles', the guardrails and the type's attached policies. Each class is decided once, every time the query runs, so the
+number of tenants and classes is bounded:
 
 ```php
 // config/authorization.php

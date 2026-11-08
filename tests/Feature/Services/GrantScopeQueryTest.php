@@ -4,7 +4,9 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -32,6 +34,7 @@ use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\Fixtures\GrantScope\UnreadableTenantTree;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
+use Tests\Fixtures\QueryScoping\SubtreeQueryTree;
 use Tests\TestCase;
 
 /**
@@ -52,6 +55,9 @@ final class GrantScopeQueryTest extends TestCase
 {
     /** @var string The tenants' morph type. */
     private const string TENANT = 'tenant';
+
+    /** @var string What the log line of a tree that cannot be read starts with. */
+    private const string UNREADABLE = 'Authorization: the tenant tree could not be read for a grant scope query: ';
 
     /**
      * Provide each kind of grant: a role, a permission granted directly and a
@@ -350,7 +356,52 @@ final class GrantScopeQueryTest extends TestCase
         self::grant($identity, 'role', self::tenant('acct1'));
 
         self::assertSame(GrantScopeStatus::UNKNOWN, self::scopes()->forIdentity(Reference::of($identity), self::tenant('acct1')));
-        self::assertStringContainsString(UnreadableTenantTree::MESSAGE, $logger->messages()[0] ?? '');
+        self::assertSame([[
+            'level'   => 'warning',
+            'message' => self::UNREADABLE . UnreadableTenantTree::MESSAGE,
+            'context' => ['exception' => \RuntimeException::class],
+        ]], $logger->records);
+
+        self::grant($identity, 'permission', null);
+
+        self::assertSame(GrantScopeStatus::OUTSIDE, self::scopes()->forIdentity(Reference::of($identity), self::tenant('acct1')));
+    }
+
+    /**
+     * A subtree query that builds but fails as the grant query runs, over a
+     * closure table that is missing, is a tree that cannot be read: written to
+     * the log and unknown, unless a platform-wide grant is found. The failure
+     * rolls back only the grant query, so the transaction the test runs in
+     * stays usable, and the presence helper, which never runs the subtree
+     * query, answers from the tree's ancestors as ever.
+     *
+     * @return void
+     */
+    public function testASubtreeQueryThatFailsAsItRunsIsUnknown(): void
+    {
+        $logger = new RecordingLogger;
+
+        $this->tree();
+
+        $this->app?->instance('log', $logger);
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static fn (Reference $tenant): Builder => DB::table('grant_scope_missing_closure')
+            ->select(['descendant_type as tenant_type', 'descendant_id as tenant_id'])
+            ->where('ancestor_type', $tenant->type)
+            ->where('ancestor_id', $tenant->id)));
+
+        $identity = self::identity('identity');
+
+        self::grant($identity, 'role', self::tenant('org1'));
+
+        self::assertSame(GrantScopeStatus::UNKNOWN, self::scopes()->forIdentity(Reference::of($identity), self::tenant('acct1')));
+        self::assertSame(GrantPresence::PRESENT, self::scopes()->hasGrantIn($identity, self::tenant('acct1')));
+        self::assertSame(GrantPresence::ABSENT, self::scopes()->hasGrantIn($identity, self::tenant('org2')));
+
+        self::assertCount(1, $logger->records);
+        self::assertSame('warning', $logger->records[0]['level']);
+        self::assertStringStartsWith(self::UNREADABLE, $logger->records[0]['message']);
+        self::assertStringContainsString('grant_scope_missing_closure', $logger->records[0]['message']);
+        self::assertSame(['exception' => QueryException::class], $logger->records[0]['context']);
 
         self::grant($identity, 'permission', null);
 
