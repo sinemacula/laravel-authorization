@@ -32,6 +32,8 @@ final class ImplementationConfigValidator
      * @param  string  $required
      * @return void
      *
+     * @phpstan-assert class-string $value
+     *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function validate(string $key, mixed $value, string $contract, string $required): void

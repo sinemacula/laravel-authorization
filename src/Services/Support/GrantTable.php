@@ -120,15 +120,20 @@ final readonly class GrantTable extends ExpiringGrants
 
     /**
      * Return the keys of the rows the grantee holds in the scope, among the
-     * given ones, whose grant has not expired at the instant given, else now.
+     * given ones, whose grant has not expired at the instant given, else now:
+     * the table holds at most one row of a key in a scope, so each once. Asked
+     * to lock, the rows are read under a row lock, which sees the latest
+     * committed rows, whatever snapshot the transaction reads otherwise, and
+     * holds them until it ends.
      *
      * @param  list<string>  $ids
      * @param  \Illuminate\Support\Carbon|null  $now
+     * @param  bool  $isLocked
      * @return list<string>
      */
-    public function live(array $ids, ?Carbon $now = null): array
+    public function live(array $ids, ?Carbon $now = null, bool $isLocked = false): array
     {
-        return self::keys(LiveGrants::only($this->inScope(), $this->table, $now)->distinct(), $this->column, $ids);
+        return self::keys(self::lockedIf(LiveGrants::only($this->inScope(), $this->table, $now), $isLocked), $this->column, $ids);
     }
 
     /**
@@ -136,14 +141,17 @@ final readonly class GrantTable extends ExpiringGrants
      * scope for the key, at the instant given, else now, read on the write
      * connection: when it expires, null for never, and whether it reaches the
      * tenants below its tenant; null when the grantee holds no live row of it.
+     * Asked to lock, the row is read under a row lock, as `live()` reads.
      *
      * @param  string  $id
      * @param  \Illuminate\Support\Carbon|null  $now
+     * @param  bool  $isLocked
      * @return array{\Illuminate\Support\Carbon|null, bool}|null
      */
-    public function liveRow(string $id, ?Carbon $now = null): ?array
+    public function liveRow(string $id, ?Carbon $now = null, bool $isLocked = false): ?array
     {
-        $row = LiveGrants::only($this->inScope()->useWritePdo(), $this->table, $now)->where($this->column, $id)->first(['expires_at', 'include_subtree']);
+        $query = LiveGrants::only($this->inScope()->useWritePdo(), $this->table, $now)->where($this->column, $id);
+        $row   = self::lockedIf($query, $isLocked)->first(['expires_at', 'include_subtree']);
 
         if ($row === null) {
             return null;
@@ -331,6 +339,18 @@ final readonly class GrantTable extends ExpiringGrants
         }
 
         return \array_values(\array_map(static fn (mixed $key): string => \is_scalar($key) ? (string) $key : '', $query->pluck($column)->all()));
+    }
+
+    /**
+     * Return the query, under a row lock when asked.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  bool  $isLocked
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private static function lockedIf(Builder $query, bool $isLocked): Builder
+    {
+        return $isLocked ? $query->lockForUpdate() : $query;
     }
 
     /**

@@ -223,7 +223,12 @@ administration never grants anything it cannot justify.
       reach, with the policies among them, that a role grant's authority (`RoleAuthority`) and a possession check
       (`PossessionLimits`) read. Each such set is locked only when it holds no more than
       `authorization.administration.max_impact` holders or rows (`DependencyPins::lockWithin()`); a larger one is
-      refused as `administration.unprovable` without being locked, so one change never locks more than that.
+      refused as `administration.unprovable` without being locked, so one change never locks more than that;
+    - **the coverage check**, last, once every change is decided and before the write, in a grant whose hooks run
+      (AUTHZ-11.3): the grantee's own rows and the grants of the identity, the grantee and every principal the
+      directory lists that apply in a tenant the grant is written in, read table by table, at most one row of each
+      (`DependencyPins::lockCoverage()`, `Support\GrantRoots::appliesUnderLock()`). A trusted grant, which has no pins,
+      reads them under the lock directly.
 
     Within a part, the rows are locked in `AuthorityRows`' fixed order, each query's keys sorted, and a part never
     locks before an earlier one (a `LogicException`). Every lock is `lockForUpdate()` on the write connection, outside
@@ -263,10 +268,22 @@ administration never grants anything it cannot justify.
     a change; the tests reach that path by making the change between a read and the write from a listener.
 
     The protocol takes no lock until the service first reads what the operation changes, and a service's work starts
-    inside the call's transaction before it reads or locks anything, so a scope-widening grant hook (AUTHZ-11.3, BL-66)
-    called first in the work of `OperationScope::run()` runs before every lock the package takes for the call; that is
-    the seam BL-66 runs its hooks from. A trusted call keeps today's behaviour and cost: it runs once, with no pins, no
-    extra lock and no retry.
+    inside the call's transaction before it reads or locks anything. The grant hooks (AUTHZ-11.3, N80) run there:
+    `Hooks\WideningPhase::before()`, first in the work of a grant or sync, classifies a non-locking preliminary proposal
+    and calls the bound hook with every widening grant before the first lock and any write, for trusted and delegated
+    calls alike. The call then locks, rebuilds and decides its grants, and `assertCovers()` classifies them again
+    before the write, after every other lock, reading the grantee's rows and the grants the classification relied on
+    under a lock, the last part of the order (`DependencyPhase::COVERAGE`): a grant that now widens with no hook run
+    for it is a `DependencyChangedException`, and the whole call is tried again from the proposal, so the hook may run
+    on each try and is never called under the package's locks. Inside the application's transaction a try is rolled
+    back only to its savepoint, whose row locks MySQL keeps, so a grant is never tried again there with its hook: that
+    conflict, and a retry after any other conflict whose grant would call its hook, is thrown as
+    `TransactionConflictException`. A hook only vetoes and never replaces a decision here: a call it lets go on is
+    still decided, and refused when it should be. While a hook runs every service refuses
+    (`GrantHookRecursionException`), and a widening grant made inside another operation's work is refused
+    (`NestedGrantException`). See [Grant scope](grant-scope.md). A trusted call keeps today's cost: with no hook
+    configured it runs once, with no pins, no extra lock and no retry; with one, it is tried again only for that
+    coverage conflict, and only when it opened the transaction.
 
 14. **Guardrails (part 4, in this release).** Guardrail changes always take an acting context and run under the
     concurrency protocol: the actor's authority, the policy's row and the guardrails of the scope and of the scopes
@@ -281,7 +298,8 @@ administration never grants anything it cannot justify.
 15. **Trusted surfaces (part 4, in this release).** Each of these is trusted system work, an integration surface for
     the application's own code and never an endpoint for user-controlled administration:
     - a management service called without an acting context;
-    - a raw Eloquent write on the package's models, pivots or tables, which never takes an actor;
+    - a raw Eloquent write on the package's models, pivots or tables, which never takes an actor and runs no grant
+      hook;
     - the trait helpers called without `actor:`: every write helper of `HasRoles`, `HasPermissions`, `HasPolicies`
       (`createInlinePolicy()` included) and a role's `ManagesPermissions`, the Spatie aliases included, takes an
       optional `actor:` and hands it to its service;

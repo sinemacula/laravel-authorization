@@ -33,6 +33,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
+use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
@@ -48,6 +49,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
@@ -90,6 +92,8 @@ use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Feature\Stubs\SwitchableSubjectResolver;
+use Tests\Fixtures\GrantHooks\RecordingGrantHook;
+use Tests\Fixtures\GrantHooks\RefusingGrantHook;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\TestCase;
 
@@ -565,6 +569,43 @@ final class AuthorizationServiceProviderTest extends TestCase
         $configured = $app->make(IdentityDirectory::class);
 
         self::assertInstanceOf(ListedIdentityDirectory::class, $configured);
+    }
+
+    /**
+     * The grant hook is the composite of the configured hooks, holding none by
+     * default and each configured class in order once configured, rebuilt for
+     * each job; a hook the application binds on the contract replaces it and is
+     * kept.
+     *
+     * @return void
+     */
+    public function testTheConfiguredGrantHooksAreBound(): void
+    {
+        $app = $this->application();
+
+        $default = $app->make(GrantHook::class);
+
+        self::assertInstanceOf(GrantHooks::class, $default);
+        self::assertTrue($default->isEmpty());
+        self::assertSame($default, $app->make(GrantHook::class));
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $app->make(ConfigRepository::class);
+        $config->set('authorization.grant_hooks', [RefusingGrantHook::class, RecordingGrantHook::class]);
+
+        $app->forgetScopedInstances();
+
+        $configured = $app->make(GrantHook::class);
+
+        self::assertInstanceOf(GrantHooks::class, $configured);
+        self::assertSame([RefusingGrantHook::class, RecordingGrantHook::class], \array_map(static fn (object $hook): string => $hook::class, $configured->hooks()));
+
+        $own = new RecordingGrantHook;
+
+        $app->instance(GrantHook::class, $own);
+        $app->forgetScopedInstances();
+
+        self::assertSame($own, $app->make(GrantHook::class));
     }
 
     /**

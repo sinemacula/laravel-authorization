@@ -11,8 +11,8 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
 
 /**
- * Unit tests for `TransactionConflictException`, the concurrency error of a
- * delegated call inside a transaction the application opened, for the
+ * Unit tests for `TransactionConflictException`, the concurrency error of an
+ * administration call inside a transaction the application opened, for the
  * application to restart.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -39,7 +39,7 @@ final class TransactionConflictExceptionTest extends TestCase
         self::assertSame($error, $exception->getPrevious());
         self::assertSame(40001, $exception->getCode());
         self::assertSame(
-            'A delegated administration call conflicted with a concurrent transaction inside a transaction the application opened; '
+            'An administration call conflicted with a concurrent transaction inside a transaction the application opened; '
                 . 'restart that transaction from the start. SQLSTATE[40P01]: deadlock detected',
             $exception->getMessage(),
         );

@@ -788,6 +788,38 @@ final class GrantTableTest extends TestCase
     }
 
     /**
+     * Asked to lock, the live rows and a live row are read under a row lock of
+     * the grantee's rows, and read as they are read without one; unasked, they
+     * are read with no lock.
+     *
+     * @return void
+     */
+    public function testTheLiveRowsAreReadUnderALockWhenAsked(): void
+    {
+        $forever = Role::create(['name' => 'forever']);
+        $expired = Role::create(['name' => 'expired']);
+        $table   = self::table();
+
+        $table->grant($forever->id, null);
+        $table->grant($expired->id, Carbon::parse(self::NOW)->subDay());
+
+        $locks = $this->recordRowLocks();
+
+        self::assertSame([$forever->id], $table->live([$forever->id, $expired->id]));
+        self::assertSame([null, true], $table->liveRow($forever->id));
+        self::assertCount(0, $locks);
+
+        self::assertSame([$forever->id], $table->live([$forever->id, $expired->id], isLocked: true));
+        self::assertSame([null, true], $table->liveRow($forever->id, isLocked: true));
+        self::assertNull($table->liveRow($expired->id, isLocked: true));
+        self::assertSame(['authorizable_roles', 'authorizable_roles', 'authorizable_roles'], \array_column($locks->getArrayCopy(), 0));
+
+        foreach ($locks as [, $bindings]) {
+            self::assertContains('user-1', $bindings);
+        }
+    }
+
+    /**
      * Return a grant table writer for a stub identity's roles, recording the
      * given actor on the rows it writes.
      *

@@ -123,6 +123,51 @@ final class DependencyPinsTest extends TestCase
     }
 
     /**
+     * The coverage check's rows are locked as the last part: inside a delegated
+     * operation through its pins, so no earlier part may follow them, and with
+     * no pins, inside a trusted operation or none, under a lock directly, read
+     * afresh each time.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheCoverageRowsAreLockedLast(): void
+    {
+        $read  = Permission::query()->create(['name' => 'posts:read']);
+        $locks = $this->recordRowLocks();
+
+        self::assertSame([$read->getKey()], \array_column(DependencyPins::lockCoverage(self::permissions('posts:read')), 'id'));
+        self::assertSame([], OperationScope::run(Operation::begin(), static fn (): array => DependencyPins::lockCoverage(self::permissions('posts:edit'))));
+
+        $edit = Permission::query()->create(['name' => 'posts:edit']);
+
+        self::assertSame([$edit->getKey()], \array_column(DependencyPins::lockCoverage(self::permissions('posts:edit')), 'id'));
+        self::assertSame([['permissions', ['posts:read']], ['permissions', ['posts:edit']], ['permissions', ['posts:edit']]], $locks->getArrayCopy());
+
+        $operation = new Operation('op', new Reference(StubIdentity::class, 'admin'), CarbonImmutable::now('UTC'), false);
+
+        $refusal = OperationScope::run($operation, static function (): ?string {
+            $pins = OperationScope::delegatedPins();
+
+            $pins->lock(DependencyPhase::HOLDERS);
+
+            self::assertSame([], DependencyPins::lockCoverage(self::permissions('posts:delete')));
+            self::assertSame(DependencyPhase::COVERAGE, $pins->phase());
+
+            try {
+                $pins->lock(DependencyPhase::HOLDERS);
+            } catch (\LogicException $exception) {
+                return $exception->getMessage();
+            }
+
+            return null;
+        });
+
+        self::assertSame('The HOLDERS dependencies of a delegated operation are locked after its COVERAGE ones.', $refusal);
+    }
+
+    /**
      * Chains cannot go back a part either.
      *
      * @return void
