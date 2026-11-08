@@ -326,27 +326,28 @@ final class StatementValidator
      */
     public static function dependenciesOf(array $tests, array $patterns): array
     {
-        $operands = [];
+        // Every statement is built through here when a policy is parsed, and
+        // most name no reference at all, so only the strings that hold one are
+        // kept and handed to the interpolator.
+        $strings = [];
 
         foreach ($tests as $test) {
-            if ($test['error'] !== null || !\is_string($test['operand'])) {
+            if ($test['error'] !== null || !\is_string($test['operand']) || !\str_contains($test['operand'], '${')) {
                 continue;
             }
 
-            $operands[] = $test['operand'];
+            $strings[] = $test['operand'];
         }
 
-        $references = [];
-
-        foreach ([...$operands, ...$patterns] as $string) {
-            if (!\str_contains($string, '${')) {
+        foreach ($patterns as $pattern) {
+            if (!\str_contains($pattern, '${')) {
                 continue;
             }
 
-            $references = [...$references, ...ContextInterpolator::references($string)];
+            $strings[] = $pattern;
         }
 
-        return \array_values(\array_unique($references));
+        return \array_values(\array_unique(\array_merge(...\array_map(ContextInterpolator::references(...), $strings))));
     }
 
     /**
