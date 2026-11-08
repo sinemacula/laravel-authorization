@@ -118,6 +118,11 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   scope (a tenant or the platform, an application and a resource, named with `AuthorizationScope`), exactly those
   `check()` would allow there, for a UI to show or hide its controls. The actions share one read of the subject's
   grants and policies, and listing them records no decision and dispatches no event.
+- **Grant scope query**: `GrantScopeQuery` tells a trusted integration whether every grant of an identity and of the
+  principals an application-bound identity directory lists lies within a tenant (`within`), any lies outside it
+  (`outside`), or that cannot be told (`unknown`), and whether a principal holds a grant that applies in a tenant. It
+  returns only the answer, in one query whatever the number of grants or the depth of the tree, and is neither
+  membership nor authorisation.
 - **A permission catalogue in code**: enums and providers declare each permission with a description, a category and
   its guards, and `authorization:sync` writes them to the database on deploy, reporting stale rows rather than
   deleting them. Booting never touches the database.
@@ -232,8 +237,8 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
 Gate switch, the policy store, the policy limits, the context keys and sources, the attribute providers, the subject
-resolver, the authentication requirement checker, the session policy source and the scope map, the cache, the bulk
-checks' chunk size, and the role hierarchy and rank.
+resolver, the identity directory, the authentication requirement checker, the session policy source and the scope map,
+the cache, the bulk checks' chunk size, and the role hierarchy and rank.
 
 ## Usage
 
@@ -2215,6 +2220,7 @@ or about the subject of the scoped manager it is called on:
 | `capped($actions)`                                | Returns a scoped manager whose checks are capped by the actions given                                                     |
 | `withPolicies($policies)`                         | Returns a scoped manager that evaluates only the policies given                                                           |
 | `queryScope($model, $action, $context)`           | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))                               |
+| `GrantScopeQuery::forIdentity()`, `hasGrantIn()`  | Not on the manager: grant scope and presence in a tenant (see [Grant scope query](#grant-scope-query))                    |
 
 `check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` deciding as `checkMany()`
 decides a batch of one: every other method but `queryScope()` and `permissionsFor()` adapts one of them, and each
@@ -2494,6 +2500,114 @@ is read from code on each call and touches no database. A scope already in place
 again, so a listing in it reads what the request's checks have already resolved, and a check after it still does. A
 listing in another scope keeps what the request has resolved and puts it back once it returns, unless a write emptied
 the cache meanwhile. See [Effective permissions](docs/design/effective-permissions.md) for the design.
+
+### Grant scope query
+
+`GrantScopeQuery` answers two factual questions about grants for a trusted integration, such as `laravel-iam`
+composing SSO's principal scope or a tenant's admission: where the grants of an identity lie against a tenant, and
+whether a principal holds a grant that applies in one. Resolve it from the container, where it is a singleton:
+
+```php
+use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
+use SineMacula\Laravel\Authorization\Support\Reference;
+
+$grants = app(GrantScopeQuery::class);
+
+$grants->forIdentity(Reference::of($person), $account);       // GrantScopeStatus::WITHIN, OUTSIDE or UNKNOWN
+$grants->hasGrantIn($user, $account);                         // GrantPresence::PRESENT, ABSENT or UNKNOWN
+$grants->hasGrantIn($user, $account, application: 'admin');   // only the grants that hold in the admin app
+```
+
+**The identity directory.** Principals and their identities live in the application, so the package learns which
+principals an identity owns only from the identity directory, a class implementing
+`SineMacula\Laravel\Authorization\Contracts\IdentityDirectory`. Its `principalsOf($identity)` returns an
+`IdentityPrincipals`: the references to the principals the identity owns, the identity itself left out, and whether
+that list is complete. A directory that cannot tell, for an identity it does not know or a store it cannot read,
+returns an incomplete list with whatever principals it does know. The package never infers an identity's principals,
+from `AuthorizableIdentity` or from anything else.
+
+The shipped default, `GuardUserIdentityDirectory`, knows the answer only under the shipped subject resolver, where
+every user is its own identity and owns no other principal, so its list is complete and empty. Under any other
+resolver its list is incomplete, so `forIdentity()` never answers `WITHIN`. An application with principals names its
+own directory in `config/authorization.php`, or binds the contract itself; like the subject resolver, a class named
+there is built per request or job, and null or a class that does not implement the contract is refused at boot:
+
+```php
+'identity_directory' => App\Authorization\PrincipalDirectory::class,
+```
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
+use SineMacula\Laravel\Authorization\Support\IdentityPrincipals;
+use SineMacula\Laravel\Authorization\Support\Reference;
+
+final class PrincipalDirectory implements IdentityDirectory
+{
+    public function principalsOf(Reference $identity): IdentityPrincipals
+    {
+        $person = $identity->type === (new Person)->getMorphClass() ? Person::find($identity->id) : null;
+
+        if ($person === null) {
+            return IdentityPrincipals::incomplete();
+        }
+
+        return IdentityPrincipals::complete($person->principals->map(Reference::of(...))->values()->all());
+    }
+}
+```
+
+**`forIdentity()`.** `forIdentity($identity, $tenant)` takes a `Reference` to the identity and the tenant as a model,
+an `AuthorizableTenant` or a `Reference`. It reads the grants of the identity and of every principal the directory
+lists, in every application and under every guard, and classifies each grant by its root (the tenant its row names, or
+the platform for a row naming none) against the tenant, in the bound tenant tree:
+
+- `GrantScopeStatus::OUTSIDE` when any grant is rooted outside the tenant: at an ancestor, a grant reaching the
+  ancestor's subtree included, at a sibling or any other tenant, or at the platform. One grant proven outside is
+  enough, whether or not the directory's list is complete;
+- `GrantScopeStatus::WITHIN` when the directory's list is complete and every grant is rooted at the tenant or below
+  it, or when there is no grant at all, since nothing then lies outside;
+- `GrantScopeStatus::UNKNOWN` otherwise: the directory's list is incomplete, the tenant tree cannot be read, or a grant
+  row names half a tenant. A tree that cannot be read is written to the log, and a platform-wide grant still proves
+  `OUTSIDE` without it.
+
+A tenant tree other than the flat one is read through its `subtree()` query, nested whole in the grant query, so it
+must be a query on the package's connection; anything else is a tree that cannot be read.
+
+**`hasGrantIn()`.** `hasGrantIn($principal, $tenant, $application = null)` answers whether the principal holds a live
+grant that applies in the tenant, as a check there reads it: one made in the tenant, one made in an ancestor that
+reaches its subtree, or a platform-wide one. The principal's own grants count, and its identity's when they reach it,
+as they do for a check, so a person's grants never count for a machine; a grant held by another principal of the same
+identity never counts. A `Subject` is taken as it is, and any other object becomes one as the subject resolver's
+`forUser()` makes it. Given an application, only the grants that hold in it count, those made for every application
+included; without one, a grant counts whichever application it holds in. The answer is:
+
+- `GrantPresence::PRESENT` when such a grant is found;
+- `GrantPresence::ABSENT` when none is found and none could have been missed;
+- `GrantPresence::UNKNOWN` when none is found but one could have been missed: the tenant tree cannot be read, so only
+  the grants made in the tenant itself and the platform-wide ones are looked for, or a grantee is neither a model nor a
+  `Reference` and its grants cannot be read. Uncertainty is never `PRESENT`.
+
+The two questions differ on purpose. A grant made in an ancestor that reaches its subtree applies in a child tenant,
+so `hasGrantIn($user, $child)` is `PRESENT`; it is rooted outside the child, so `forIdentity($identity, $child)` is
+`OUTSIDE`.
+
+**What counts as a grant.** A live role granted, permission granted directly or policy attached, a policy that only
+denies included. Roles are not expanded into their permissions, since a role's root is where it was granted. An
+expired grant counts for nothing, and neither does an inline policy attached to a grantee it does not belong to, which
+no check applies. Permission boundaries and guardrails cap grants; they are not grants and are never read.
+
+**Neither membership nor authorisation.** Neither answer says whether a principal is a member of a tenant, which is
+the application's to know, nor whether it may act there or use an application. `PRESENT` means a grant applies in the
+tenant, not that any check there would allow. `check()` stays the one decision path, and
+`ApplicationAccess::mayUse()` answers application access.
+
+**A trusted service.** Even a bare answer tells the caller something about grants in other tenants, so call it from
+trusted integration code, never from an endpoint a user reaches without the right to know. It returns the status
+alone, never the tenants, grants, names, counts or rows behind it.
+
+**What it costs.** Each answer reads the grants in one query on the write connection, so a replica's lag never hides a
+grant, however many grants and principals there are and however deep the tree, plus the tree's own reads and the
+directory's. Nothing is cached. See [Grant scope](docs/design/grant-scope.md) for the design.
 
 ### Query scoping
 
@@ -3066,6 +3180,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Query scoping](docs/design/query-scoping.md)                                               | `whereAuthorized()`, what it compiles and what it refuses     |
 | [Bulk checks](docs/design/bulk-checks.md)                                                   | `checkMany()`, what it reads once and in bulk, and its events |
 | [Effective permissions](docs/design/effective-permissions.md)                               | `permissionsFor()`, its scope, exactness and introspection    |
+| [Grant scope](docs/design/grant-scope.md)                                                   | The identity directory, `forIdentity()` and `hasGrantIn()`    |
 
 ## Requirements
 

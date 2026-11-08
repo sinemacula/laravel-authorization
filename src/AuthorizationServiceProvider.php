@@ -28,6 +28,7 @@ use SineMacula\Laravel\Authorization\Context\ContextBindings;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
@@ -48,6 +49,7 @@ use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
+use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
@@ -56,6 +58,7 @@ use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
+use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
@@ -88,19 +91,20 @@ use SineMacula\Laravel\Authorization\Support\SessionScopes;
  * request's sandbox. They are scoped together: a singleton holding a scoped
  * instance would keep the old instance alive.
  *
- * The management services (roles, permissions, policies and grants) hold no
- * state and are bound as singletons.
+ * The management services (roles, permissions, policies and grants), the
+ * application access service and the grant scope query hold no state and are
+ * bound as singletons.
  *
  * The context key catalogue is one per application, so the keys a service
  * provider registers on it are kept for every request and job.
  *
  * The contracts an application may bind itself (the subject resolver, the
- * policy store, the policy resolver, the action catalogue, the authentication
- * requirement checker, the session policy source and the trusted context
- * sources) resolve through a package-owned key that holds the scoped default.
- * An application's own binding of the contract therefore replaces the default
- * without being scoped itself, and an instance it binds survives the reset
- * between jobs.
+ * tenant tree, the identity directory, the policy store, the policy resolver,
+ * the action catalogue, the authentication requirement checker, the session
+ * policy source and the trusted context sources) resolve through a
+ * package-owned key that holds the scoped default. An application's own binding
+ * of the contract therefore replaces the default without being scoped itself,
+ * and an instance it binds survives the reset between jobs.
  *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
@@ -131,8 +135,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/authorization.php', 'authorization');
 
-        $this->registerSubjectResolver();
-        $this->registerTenantTree();
+        $this->registerConfiguredDefaults();
         $this->registerResourceTenantResolver();
         $this->registerResolvedTenant();
         $this->registerPolicyStore();
@@ -212,33 +215,30 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the configured subject resolver as the default, scoped to the
-     * request or job so any state it keeps does not reach the next one.
+     * Bind the configured subject resolver, tenant tree and identity directory
+     * as the defaults, each scoped to the request or job so any state it keeps
+     * does not reach the next one. Rebinding the subject resolver or the tenant
+     * tree forgets the resolutions read through it.
      *
      * @return void
      */
-    protected function registerSubjectResolver(): void
+    protected function registerConfiguredDefaults(): void
     {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\SubjectResolver> $class */
-        $class = $this->app['config']->get('authorization.subject_resolver', AuthGuardSubjectResolver::class);
+        $defaults = [
+            SubjectResolver::class   => ['authorization.subject_resolver', AuthGuardSubjectResolver::class],
+            TenantTree::class        => ['authorization.tenant_tree', FlatTenantTree::class],
+            IdentityDirectory::class => ['authorization.identity_directory', GuardUserIdentityDirectory::class],
+        ];
 
         $this->forgetResolutionsOnRebinding(SubjectResolver::class);
-        $this->bindScopedDefault(SubjectResolver::class, $class);
-    }
-
-    /**
-     * Bind the configured tenant tree as the default, scoped to the request or
-     * job like the subject resolver.
-     *
-     * @return void
-     */
-    protected function registerTenantTree(): void
-    {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\TenantTree> $class */
-        $class = $this->app['config']->get('authorization.tenant_tree', FlatTenantTree::class);
-
         $this->forgetResolutionsOnRebinding(TenantTree::class);
-        $this->bindScopedDefault(TenantTree::class, $class);
+
+        foreach ($defaults as $contract => [$key, $default]) {
+            /** @var class-string $class */
+            $class = $this->app['config']->get($key, $default);
+
+            $this->bindScopedDefault($contract, $class);
+        }
     }
 
     /**
@@ -513,7 +513,9 @@ final class AuthorizationServiceProvider extends ServiceProvider
     /**
      * Bind the management services that own every write of a role, permission,
      * policy, grant, resource policy attachment, permission boundary or
-     * guardrail. They hold no state, so each is a singleton.
+     * guardrail, and the services that answer factual questions about grants:
+     * application access and the grant scope query. They hold no state, so each
+     * is a singleton.
      *
      * @return void
      */
@@ -528,6 +530,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             BoundaryService::class,
             GuardrailService::class,
             ApplicationAccess::class,
+            GrantScopeQuery::class,
         ];
 
         foreach ($services as $service) {

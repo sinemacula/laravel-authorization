@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Config;
 
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 
 /**
@@ -37,21 +36,8 @@ final class RequirementCheckerConfigValidator
      */
     public static function validate(mixed $value): void
     {
-        if ($value === null) {
-            $reason = 'a requirement checker class is required; set it to \\' . RefusingRequirementChecker::class . ' to meet no requirement.';
+        $required = 'a requirement checker class is required; set it to \\' . RefusingRequirementChecker::class . ' to meet no requirement.';
 
-            throw new InvalidAuthorizationConfigException(self::KEY, $reason);
-        }
-
-        $reason = match (true) {
-            !\is_string($value) || $value === ''                          => 'expected a class-string, got ' . \get_debug_type($value) . '.',
-            !\class_exists($value)                                        => "class '{$value}' does not exist.",
-            !\is_a($value, AuthenticationRequirementChecker::class, true) => "class '{$value}' does not implement " . AuthenticationRequirementChecker::class . '.',
-            default                                                       => null,
-        };
-
-        if ($reason !== null) {
-            throw new InvalidAuthorizationConfigException(self::KEY, $reason);
-        }
+        ImplementationConfigValidator::validate(self::KEY, $value, AuthenticationRequirementChecker::class, $required);
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Config;
 
 use Illuminate\Contracts\Container\Container;
+use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
@@ -18,6 +19,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 
@@ -65,6 +67,12 @@ final class ConfigValidator
         self::validateGate(\array_key_exists('gate', $config) ? $config['gate'] : []);
         self::validateSubjectResolver($config['subject_resolver'] ?? null);
         self::validateTenantTree($config['tenant_tree'] ?? null);
+        ImplementationConfigValidator::validate(
+            'authorization.identity_directory',
+            \array_key_exists('identity_directory', $config) ? $config['identity_directory'] : GuardUserIdentityDirectory::class,
+            IdentityDirectory::class,
+            'an identity directory class is required; set it to \\' . GuardUserIdentityDirectory::class . ' for the default.',
+        );
         self::validateApplicationAccess($config['application_access'] ?? []);
         self::validateResourceTenantResolver($config['resource_tenant_resolver'] ?? null);
         RequirementCheckerConfigValidator::validate(\array_key_exists('requirement_checker', $config) ? $config['requirement_checker'] : RefusingRequirementChecker::class);

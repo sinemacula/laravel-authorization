@@ -70,6 +70,10 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
 - `effective-permissions.md`: `permissionsFor()` listing exactly the catalogue's actions `check()` would allow in an
   `AuthorizationScope`, through the one decision path over data read once, the scope applied and restored, the
   subject forms, and why a listing records no decision and dispatches no event.
+- `grant-scope.md`: the identity directory contract and its default, the shared reader of grant roots, `forIdentity()`'s
+  `within`, `outside` and `unknown` and `hasGrantIn()`'s `present`, `absent` and `unknown`, what counts as a grant, why
+  neither answer is membership or authorisation, why it is a trusted service returning only the status, and the widening
+  hooks still to come.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.
