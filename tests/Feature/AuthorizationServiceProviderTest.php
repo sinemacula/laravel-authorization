@@ -68,6 +68,7 @@ use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Resolvers\ReferenceSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
+use SineMacula\Laravel\Authorization\Reviews\AccessReview;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
@@ -398,6 +399,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             GuardrailService::class,
             ApplicationAccess::class,
             GrantScopeQuery::class,
+            AccessReview::class,
         ];
 
         foreach ($services as $service) {

@@ -181,6 +181,43 @@ final class AdministeredScopeTest extends TestCase
     }
 
     /**
+     * Any action is weighed across a reach by the same rule, on the resource
+     * given, as an access review is admitted: decided just below the reach's
+     * tenant, with its sources read there; allowed with nothing to limit it,
+     * refused as out of scope when it is denied or limited; a node alone is
+     * decided there.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnyActionIsWeighedAcrossItsReachOnTheResourceGiven(): void
+    {
+        $resource = ResourceReference::record('authorization:review', 'holders');
+        $reach    = new GrantScope(new Reference('tenant', 'a'), 'admin');
+        $actor    = StubIdentity::query()->firstOrCreate(['id' => 'admin']);
+        $asked    = [];
+
+        $checks = static function (bool $allowed, ?CheckSources $sources) use ($actor, $resource, &$asked): FurtherChecks {
+            $decide = static function (string $action, ?ResourceReference $on) use ($allowed, $resource, &$asked): Decision {
+                $asked[] = [$action, $on === $resource, TenantScope::currentApplication(), TenantScope::isBelowTenant(), TenantScope::currentTenant()];
+
+                return $allowed ? Decision::allow(DecisionStage::ALLOW) : Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
+            };
+
+            return new FurtherChecks(new Subject($actor, $actor), $decide, static fn (string $action): ?CheckSources => $sources);
+        };
+
+        $denying = self::sources(policies: [['effect' => 'deny', 'actions' => ['authorization:review.*']]]);
+
+        self::assertNull(AdministeredScope::refusalOf(PackagePermissions::REVIEW_READ, $resource, $reach, $checks(true, self::sources())));
+        self::assertSame([[PackagePermissions::REVIEW_READ, true, 'admin', true, ['tenant', 'a']]], $asked);
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, AdministeredScope::refusalOf(PackagePermissions::REVIEW_READ, $resource, $reach, $checks(false, self::sources())));
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, AdministeredScope::refusalOf(PackagePermissions::REVIEW_READ, $resource, $reach, $checks(true, $denying)));
+        self::assertNull(AdministeredScope::refusalOf(PackagePermissions::REVIEW_READ, $resource, new GrantScope(new Reference('tenant', 'a'), null, false), $checks(true, null)));
+    }
+
+    /**
      * Return why the role grant, decided across the reach through the checks,
      * is refused.
      *

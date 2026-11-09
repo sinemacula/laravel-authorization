@@ -124,6 +124,10 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   decision is made in, admitted as a check about the caller at every use; the subject is evaluated with no session,
   every decision is reported with both the previewer and the previewed subject, and nothing a preview evaluates may
   change anything. The package never impersonates.
+- **Access reviews**: `AccessReview` lists who holds a role, permission or policy in a scope, what a subject holds and
+  where, what expires within a window and what an actor last granted, one row for each grant route, by reference alone,
+  in one order on every database and bounded by a limit. A review is admitted through `check()` as the reviewer under
+  `authorization:review.read`, across the whole of a broad reach, or run as trusted work.
 - **Grant scope query**: `GrantScopeQuery` tells a trusted integration whether every grant of an identity and of the
   principals an application-bound identity directory lists lies within a tenant (`within`), any lies outside it
   (`outside`), or that cannot be told (`unknown`), and whether a principal holds a grant that applies in a tenant. It
@@ -2294,6 +2298,7 @@ or about the subject of the scoped manager it is called on:
 | `withPolicies($policies)`                         | Returns a scoped manager that evaluates only the policies given                                                           |
 | `queryScope($model, $action, $context)`           | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))                               |
 | `GrantScopeQuery::forIdentity()`, `hasGrantIn()`  | Not on the manager: grant scope and presence in a tenant (see [Grant scope query](#grant-scope-query))                    |
+| `AccessReview::review()`, `trusted()`             | Not on the manager: grant routes held, holdings, expiries and grants by actor (see [Access reviews](#access-reviews))     |
 
 `check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` deciding as `checkMany()`
 decides a batch of one: every other method but `queryScope()` and `permissionsFor()` adapts one of them, and each
@@ -2785,6 +2790,142 @@ the request, is marked `not recorded (explain mode off)`; nothing is evaluated a
 options name, without the subject's browser session (see
 [Explaining a check from the console](#explaining-a-check-from-the-console)). See
 [Explanations](docs/design/explanations.md) for the design.
+
+### Access reviews
+
+`AccessReview` lists, for periodic reviews and their sign-off (AUTHZ-11.6), who holds a role, a permission or a policy
+in a scope, what a subject holds and where, which grants expire within a window, and which grants an actor last granted
+or changed. Resolve it from the container, where it is a singleton, and run a typed `ReviewQuery`:
+
+```php
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Reviews\AccessReview;
+use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
+use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
+use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
+
+$reviews = app(AccessReview::class);
+$scope   = ReviewScope::appliesIn($account, ApplicationSelector::named('admin'));
+
+$result = $reviews->review(ReviewQuery::holders($editor, $scope), ActingContext::current());
+
+$result->rows;        // list<ReviewRow>, in one deterministic order
+$result->isTruncated; // true only when a row was left out by the limit
+$result->isComplete;  // false only when an identity's principals could not all be listed
+$result->toArray();   // each row in its versioned shape
+
+$reviews->trusted(ReviewQuery::expiring(ReviewScope::everywhere(), now(), now()->addMonth())); // a scheduled job
+```
+
+**What "holds" means.** A review lists grant routes, never effective access: one row for each route by which a subject
+holds a target through the stored grants. A route is a direct grant; a role grant reaching a permission or a policy
+through the role or a role above it, and a role held through a role below it; a grant to an identity reaching its
+principal; and a grant made at the platform, in an ancestor tenant or at a subtree's root that applies in the reviewed
+tenant. Every row a route rests on must be live at the review's instant (an expiry equal to the instant has passed), and
+a role's policy reaches its holder only where the role's grant and the attachment hold together, in the same tenant and
+application, as a check reads them. Alternative routes through different roles are separate rows, each with its own
+`route_expires_at`, so the earliest is not when the holding ends. A policy that only denies is held. A review reads
+structure alone, with the same tenant chain, application matching, live-grant and definition-visibility rules a check
+reads, and never evaluates a statement, condition, deny or cap, so a holder may well be denied what it holds: for what a
+subject may actually do, use `check()`, [`permissionsFor()`](#effective-permissions) or a [preview](#preview). A
+suspended or inactive subject keeps its live grants in a review, marked `inactive`, or `unknown` when its record is
+gone.
+
+**The queries.**
+
+| Query                                            | Lists                                                                                                  |
+|--------------------------------------------------|--------------------------------------------------------------------------------------------------------|
+| `ReviewQuery::holders($target, $scope, $direct)` | Every route to a role, permission or policy (a model or reference), or its direct grants alone         |
+| `ReviewQuery::holdings($subject, $scope)`        | A `Subject`'s own grants and its identity's that reach it; or an identity's and its listed principals' |
+| `ReviewQuery::expiring($scope, $from, $until)`   | Grants, attachments and role permission edges expiring within `[from, until)`, in UTC                  |
+| `ReviewQuery::grantedBy($actor, $scope)`         | Grants whose `granted_by` pair is exactly the actor's                                                  |
+| `withLimit($limit)`                              | The same review returning at most that many rows                                                       |
+
+A permission target means that definition, never a policy statement or wildcard grant that might authorise its action,
+and a definition is named by its key, so two sharing a name under another guard or owner are never confused. Holders are
+the grantees the grants name: a grant to an identity lists the identity, not its principals. In principal mode
+(`holdings()` given a resolved `Subject`) the identity's grants are listed only when they reach the principal (both
+machines or neither), each naming the identity as `via_identity`, and a sibling principal's never are. In identity mode
+(`holdings()` given an identity's model or reference) the identity's grants and those of every principal the identity
+directory lists are read, each row keeping its actual grantee, and `isComplete` is false when the directory says its
+list may leave one out. Expiring rows are stored rows, not routes, each marked `live` or `expired` at the review's
+instant; a role's permission edge and its policy attachment are kinds of their own. "Granted by" means the last writer:
+a regrant, a changed expiry or a changed reach overwrites it, a trusted write names no actor, and a revoked grant is
+gone, so the history stays with the audit log the grant events feed.
+
+**The scope.** Each selection is a value of its own, never a null that could mean two things:
+
+| Scope                                      | Reads                                                                                                                     |
+|--------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
+| `ReviewScope::appliesIn($tenant, $app)`    | What a check in the tenant reads: the platform's, the tenant's own and an ancestor's reaching below; null is the platform |
+| `ReviewScope::rootedWithin($tenant, $app)` | The grants made in the tenant or below it, wherever else they reach                                                       |
+| `ReviewScope::everywhere($app)`            | Every stored grant                                                                                                        |
+| `ApplicationSelector::none()`              | The grants for every application, as a check with no application reads them                                               |
+| `ApplicationSelector::named($app)`         | Those and the grants for the application named                                                                            |
+| `ApplicationSelector::any()`               | Every grant, whatever its application (the default for `rootedWithin()` and `everywhere()`)                               |
+
+Applicability is not containment: a review applying in a tenant includes the platform's grants and an ancestor's that
+reach below, never a child's, which is the opposite of what the [grant scope query](#grant-scope-query) counts as
+within. In a review applying in a tenant, only the roles and permissions the tenant sees count, and a role it does not
+see ends a hierarchy chain, as in a check. A review admitted in a tenant shows the inherited grants that apply there,
+such as a platform grant, but never the holders in other tenants those grants also reach.
+
+**The rows.** A row names references alone, each a morph type and a string key, never a name, email, description,
+document or value. Its shape is versioned (`version: 1`):
+
+| Field                                    | Holds                                                                                        |
+|------------------------------------------|----------------------------------------------------------------------------------------------|
+| `row_key`                                | A key of the route, the same every time                                                      |
+| `subject`, `grantee`, `target`           | Who holds it, whom the stored grant names, and the role, permission or policy held           |
+| `source_kind`, `source_key`              | The kind of stored row the route starts from, and its key                                    |
+| `origin_scope`                           | That row's tenant (null for the platform), application (null for every one) and reach below  |
+| `via_identity`, `role_path`              | The identity a grant reaches the subject through, and the roles from the one granted upwards |
+| `supporting_grants`                      | Every stored row the route rests on, each with its key, scope and expiry                     |
+| `created_at`, `updated_at`, `expires_at` | The starting row's times, in UTC                                                             |
+| `route_expires_at`                       | The earliest expiry of every row the route rests on                                          |
+| `granted_by`                             | The last actor to grant or change the starting row; null for a trusted write                 |
+| `grant_state`, `subject_state`           | `live` or `expired`; `active`, `inactive` or `unknown`                                       |
+
+The rows come in one total order, the same on SQLite, PostgreSQL and MySQL: by source kind, target, grantee, origin
+scope (the platform before a tenant, every application before a named one) and route, every string compared byte for
+byte. A review returns at most `authorization.reviews.limit` rows (1000 by default), or the limit `withLimit()` sets,
+and reads one more to say exactly whether any was left out. Every grant is read on the write connection, and the queries
+never grow with the holders: the roles a review involves are read in a fixed number of queries, then the grants of all
+of them together, a page at a time.
+
+**The review rights.** The package declares `authorization:review.read`, the right to run a review, and
+`authorization:review.export`, the right to export one, which needs both. `review()` admits the review before anything
+is read, through `check()` as the reviewer, with its real session, denies, boundaries, guardrails and caps, on a review
+resource `authorization:review:{query}` in the reviewed tenant and application. No rank rule applies, and policies read
+these keys of it to restrict who may review what:
+
+| Key                                                      | Value                                                                               |
+|----------------------------------------------------------|-------------------------------------------------------------------------------------|
+| `resource.id`, `resource.type`                           | The query (`holders`, `holdings`, `expiring`, `granted_by`), `authorization:review` |
+| `resource.tenant.type`, `resource.tenant.id`             | The reviewed tenant; missing for the platform and everywhere                        |
+| `resource.query`, `resource.scope`                       | The query, and `applies_in`, `rooted_within` or `everywhere`                        |
+| `resource.application_selection`, `resource.application` | `none`, `named` or `any`, and the application named                                 |
+| `resource.target_type`, `resource.target_id`             | The role, permission or policy whose holders are listed                             |
+| `resource.subject_type`, `resource.subject_id`           | The principal or identity whose holdings are listed                                 |
+| `resource.actor_type`, `resource.actor_id`               | The actor whose last grants are listed                                              |
+
+A review of one tenant is decided at that tenant. A review across a reach, rooted within a tenant, applying at the
+platform or of everywhere, is decided again across the reach by the rule delegated administration uses: just below the
+reach's tenant, where only a right that reaches below counts, or at platform scope, and refused as
+`administration.scope` when anything that denies or caps the reviewer anywhere in the reach could limit the right, a
+conditional deny included. So a deny the reviewer holds in one child tenant refuses a review of its parent's subtree. A
+refused review throws `AuthorizationException` with the one generic line, carrying the reviewer's own decision (a
+step-up the right needs included), after recording and reporting it as any refused check, and discloses no row, count,
+truncation or completeness.
+
+**The trusted path.** `trusted()` runs a review as trusted system work, for a scheduled job or a command, with no
+reviewer and no admission. Nothing falls back to it: `review()` always takes an acting context, and one that cannot be
+resolved is refused before the review is reached.
+
+**What is left out.** Boundaries, guardrails and resource-policy attachments restrict or extend what a check decides,
+but are not held, so no review lists them. Keyset cursors, streaming exports in JSON Lines and their indexes come in the
+next part of the reviews, and the unused-grant report after it. See [Access reviews](docs/design/access-reviews.md) for
+the design.
 
 ### Grant scope query
 
@@ -3748,6 +3889,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Preview](docs/design/preview.md)                                                           | `previewFor()`, its admission, recording and what it refuses  |
 | [Grant scope](docs/design/grant-scope.md)                                                   | The identity directory, the scope query and the grant hooks   |
 | [Explanations](docs/design/explanations.md)                                                 | Explain mode, the `Explanation` and `authorization:why`       |
+| [Access reviews](docs/design/access-reviews.md)                                             | Grant routes, the queries, scopes, rows, order and admission  |
 
 ## Requirements
 

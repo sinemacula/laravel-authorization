@@ -1,0 +1,223 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace SineMacula\Laravel\Authorization\Reviews\Support;
+
+use Illuminate\Database\Query\Builder;
+use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Reviews\Enums\ReviewKind;
+use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
+use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
+use SineMacula\Laravel\Authorization\Support\InlinePolicies;
+use SineMacula\Laravel\Authorization\Support\Reference;
+
+/**
+ * The stored rows a review of expiries or of an actor lists, one row for each,
+ * never expanded into routes: the roles and permissions granted, the policies
+ * attached to grantees and to roles, and, for expiries, the permission edges of
+ * roles, a kind of their own. Each is listed whether or not it still counts at
+ * the review's instant, its `grant_state` saying which.
+ *
+ * - Expiring: the rows whose expiry is at or after the start of the UTC window
+ *   and before its end, so a row expiring exactly at the end falls in the next
+ *   window. An expiring row does not by itself mean access is lost: another
+ *   route may keep the target held.
+ * - Granted by: the rows whose `granted_by` pair is exactly the actor's: the
+ *   last actor to grant or change each (N95), since a regrant, a changed expiry
+ *   or a changed reach overwrites it. A trusted write names no actor, so no
+ *   actor's review lists it; a revoked row is gone.
+ *
+ * A role edge holds no scope of its own: in a review of what applies in a
+ * tenant, it is listed when the tenant sees both its role and its permission;
+ * in a review rooted within a tenant, when its role is owned there or below. A
+ * role's policy attachment, in a review of what applies in a tenant, is listed
+ * only when the tenant sees its role too, as a check reaches it only through
+ * that role.
+ *
+ * Each kind is read in the review's order, one query of at most the room left.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ */
+final class StoredRows
+{
+    /**
+     * Collect the rows the query lists: for expiries, those of every kind,
+     * edges included, whose expiry falls within its window; for an actor, those
+     * of every kind of grant whose `granted_by` pair is the actor's. Every
+     * grantee is known, so the review is complete.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
+     * @return bool
+     *
+     * @throws \UnexpectedValueException
+     */
+    public static function read(ReviewRun $run, ReviewQuery $query, RowCollector $rows): bool
+    {
+        $isExpiring = $query->kind === ReviewKind::EXPIRING;
+
+        self::collectAll($run, $rows, $isExpiring ? self::window($query) : self::grantedBy($query), $isExpiring);
+
+        return true;
+    }
+
+    /**
+     * Return the condition a row expiring within the query's window meets: its
+     * expiry at or after the window's start and before its end.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
+     * @return \Closure(\Illuminate\Database\Query\Builder, string): void
+     */
+    private static function window(ReviewQuery $query): \Closure
+    {
+        return static function (Builder $stored, string $table) use ($query): void {
+            $stored->where($table . '.expires_at', '>=', $query->from)->where($table . '.expires_at', '<', $query->until);
+        };
+    }
+
+    /**
+     * Return the condition a row the query's actor last granted or changed
+     * meets: its `granted_by` pair is exactly the actor's.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
+     * @return \Closure(\Illuminate\Database\Query\Builder, string): void
+     *
+     * @throws \UnexpectedValueException
+     */
+    private static function grantedBy(ReviewQuery $query): \Closure
+    {
+        $actor = $query->actor ?? throw new \UnexpectedValueException('A review of an actor\'s grants names the actor.');
+
+        return static function (Builder $stored, string $table) use ($actor): void {
+            $stored->where($table . '.granted_by_type', $actor->type)->where($table . '.granted_by_id', $actor->id);
+        };
+    }
+
+    /**
+     * Collect the rows of each kind, in the order of the kinds, that meet the
+     * condition, until the rows are full.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
+     * @param  \Closure(\Illuminate\Database\Query\Builder, string): void  $condition
+     * @param  bool  $withEdges
+     * @return void
+     */
+    private static function collectAll(ReviewRun $run, RowCollector $rows, \Closure $condition, bool $withEdges): void
+    {
+        $role = Definitions::morph(GrantTarget::ROLE);
+
+        $kinds = [
+            [SourceKind::ROLE_GRANT, GrantTarget::ROLE, null],
+            [SourceKind::PERMISSION_GRANT, GrantTarget::PERMISSION, null],
+            [SourceKind::POLICY_ATTACHMENT, GrantTarget::POLICY, false],
+            [SourceKind::ROLE_PERMISSION_EDGE, GrantTarget::PERMISSION, null],
+            [SourceKind::ROLE_POLICY_ATTACHMENT, GrantTarget::POLICY, true],
+        ];
+
+        foreach ($kinds as [$source, $kind, $isToRole]) {
+            if ($source !== SourceKind::ROLE_PERMISSION_EDGE) {
+                self::collect($rows, $source, $kind, self::grants($run, $kind, $isToRole, $role, $condition));
+            } elseif ($withEdges) {
+                self::collect($rows, $source, $kind, self::edges($run, $condition), $role);
+            }
+        }
+    }
+
+    /**
+     * Collect at most the room left of the query's rows, in the review's order,
+     * each the row of the source, its target of the kind.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind  $source
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  string|null  $roleType
+     * @return void
+     */
+    private static function collect(RowCollector $rows, SourceKind $source, GrantTarget $kind, Builder $query, ?string $roleType = null): void
+    {
+        if ($rows->isFull()) {
+            return;
+        }
+
+        $type   = Definitions::morph($kind);
+        $stored = $roleType === null ? $kind->value : GrantRow::EDGE;
+
+        foreach (GrantRows::page($query, $stored, 0, $rows->room(), $roleType) as $row) {
+            $isRoleRow = $source === SourceKind::ROLE_POLICY_ATTACHMENT || $source === SourceKind::ROLE_PERMISSION_EDGE;
+            $chain     = match (true) {
+                $source === SourceKind::ROLE_GRANT => [$row->targetId],
+                $isRoleRow                         => [$row->grantee->id],
+                default                            => [],
+            };
+
+            $rows->route($source, $row->grantee, $row, new Reference($type, $row->targetId), $chain);
+        }
+    }
+
+    /**
+     * Return the ordered query of the grants of the kind in the review's scope
+     * that meet the condition, of definitions the reviewed tenant sees; for a
+     * policy, only its attachments to roles, of roles the tenant sees, or only
+     * those to grantees, as asked, an inline policy's to another grantee left
+     * out.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  bool|null  $isToRole
+     * @param  string  $role
+     * @param  \Closure(\Illuminate\Database\Query\Builder, string): void  $condition
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private static function grants(ReviewRun $run, GrantTarget $kind, ?bool $isToRole, string $role, \Closure $condition): Builder
+    {
+        $table = $kind->table();
+        $query = $run->visible($run->constrain(GrantRows::of($kind), $table), $kind, $table . '.' . $kind->column());
+
+        $condition($query, $table);
+
+        if ($isToRole !== null) {
+            InlinePolicies::attachedToTheirGrantee($query, $table)->where($table . '.authorizable_type', $isToRole ? '=' : '!=', $role);
+        }
+
+        if ($isToRole === true) {
+            $run->visibleRoles($query, $table);
+        }
+
+        return GrantRows::ordered($query, $table, $kind->column());
+    }
+
+    /**
+     * Return the ordered query of the role permission edges the review's scope
+     * selects that meet the condition: those whose role the scope selects by
+     * its owner, and, in a review of what applies in a tenant, whose permission
+     * the tenant sees.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
+     * @param  \Closure(\Illuminate\Database\Query\Builder, string): void  $condition
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private static function edges(ReviewRun $run, \Closure $condition): Builder
+    {
+        $table         = Definitions::edges();
+        [$roles, $key] = Definitions::tableOf(GrantTarget::ROLE);
+
+        $owned = static function (Builder $owner) use ($run, $roles, $key, $table): void {
+            $run->owned($owner->selectRaw('1')->from($roles)->whereColumn($roles . '.' . $key, $table . '.role_id'), $roles);
+        };
+
+        $query = $run->visible(GrantRows::edges(), GrantTarget::PERMISSION, $table . '.permission_id')->whereExists($owned);
+
+        $condition($query, $table);
+
+        ReviewOrder::by($query, $table . '.permission_id');
+
+        return ReviewOrder::by($query, $table . '.role_id');
+    }
+}

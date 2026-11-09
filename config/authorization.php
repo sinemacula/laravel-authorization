@@ -646,6 +646,25 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Access reviews
+    |---------------------------------------------------------------------------
+    |
+    | An access review (`Reviews\AccessReview`) lists who holds a role,
+    | permission or policy, what a subject holds, what expires, and what an
+    | actor last granted, one row for each grant route. Every review returns
+    | at most a bounded number of rows and says whether more were left out:
+    | `limit` is that number unless the review sets its own with
+    | `withLimit()`. A whole number of at least 1; anything else falls back
+    | to 1000.
+    |
+    */
+
+    'reviews' => [
+        'limit' => (int) env('AUTHORIZATION_REVIEWS_LIMIT', 1000),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
     | Grant hooks
     |---------------------------------------------------------------------------
     |

@@ -23,6 +23,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
 use SineMacula\Laravel\Authorization\Preview\PreviewAttributes;
 use SineMacula\Laravel\Authorization\Preview\PreviewResource;
+use SineMacula\Laravel\Authorization\Reviews\Enums\ReviewKind;
+use SineMacula\Laravel\Authorization\Reviews\ReviewAttributes;
+use SineMacula\Laravel\Authorization\Reviews\ReviewResource;
+use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\ConflictingResourceAttributes;
@@ -316,8 +320,8 @@ final class AttributeProvidersTest extends TestCase
     /**
      * The providers of `authorization.attributes` are those the configuration
      * registers, with the package's own providers of the administration
-     * operation resources and of the preview resources, which a provider
-     * configured for their type never replaces.
+     * operation resources, of the preview resources and of the review
+     * resources, which a provider configured for their type never replaces.
      *
      * @return void
      */
@@ -328,6 +332,7 @@ final class AttributeProvidersTest extends TestCase
                 'post'                  => RecordingResourceAttributes::class,
                 OperationResource::TYPE => RecordingResourceAttributes::class,
                 PreviewResource::TYPE   => RecordingResourceAttributes::class,
+                ReviewResource::TYPE    => RecordingResourceAttributes::class,
             ],
             'subjects' => ['user' => RecordingSubjectAttributes::class],
         ]]]));
@@ -339,9 +344,11 @@ final class AttributeProvidersTest extends TestCase
 
         $declared = \array_diff_key($providers->declarations()['resource'], [RecordingResourceAttributes::class => true]);
         $preview  = (new PreviewResource(new Reference('user', '7'), null, null, null))->toResourceReference();
+        $review   = (new ReviewResource(ReviewKind::EXPIRING, ReviewScope::everywhere()))->toResourceReference();
 
-        self::assertSame([OperationAttributes::class, PreviewAttributes::class], \array_keys($declared));
+        self::assertSame([OperationAttributes::class, PreviewAttributes::class, ReviewAttributes::class], \array_keys($declared));
         self::assertSame(['target_type' => 'user', 'target_id' => '7'], $providers->resourceValues($preview));
+        self::assertSame(['query' => 'expiring', 'scope' => 'everywhere', 'application_selection' => 'any'], $providers->resourceValues($review));
 
         $this->container->instance('config', new Repository);
 
@@ -474,13 +481,17 @@ final class AttributeProvidersTest extends TestCase
     }
 
     /**
-     * Return what the package's own providers declare, the operation resources'
-     * and the preview resources'.
+     * Return what the package's own providers declare, the operation
+     * resources', the preview resources' and the review resources'.
      *
      * @return array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType>>
      */
     private static function packageDeclarations(): array
     {
-        return [OperationAttributes::class => (new OperationAttributes)->attributes(), PreviewAttributes::class => (new PreviewAttributes)->attributes()];
+        return [
+            OperationAttributes::class => (new OperationAttributes)->attributes(),
+            PreviewAttributes::class   => (new PreviewAttributes)->attributes(),
+            ReviewAttributes::class    => (new ReviewAttributes)->attributes(),
+        ];
     }
 }
