@@ -91,7 +91,13 @@ the hook runs in a grant call.
     target, tenant, application, reach, expiry and reasons, the reasons of the call once each, and when the proposal
     was observed. Exactly one hook is bound: by default `Hooks\GrantHooks`, the ordered composite of the classes
     `authorization.grant_hooks` lists, validated at boot (`Config\GrantHookConfigValidator`), run in order and stopped
-    by the first that throws. With none listed nothing is classified. There is no runtime registrar.
+    by the first that throws. With none listed nothing is classified. There is no runtime registrar. When hooks are
+    listed and a sibling package or the application bound a hook on the contract before the package registered, the
+    composite holds that hook too, after the listed ones (N107): hooks only refuse, so every one runs and none is
+    dropped. `Support\EarlierBinding` keeps the earlier binding under a package-owned key as it was made, an instance as
+    that instance and a binding with its lifetime, resolving nothing while the package registers; the composite
+    resolves it when it is built, once per request or job. With none listed the earlier hook stands alone, and a hook
+    bound after the package registered replaces the composite.
 
 13. **Veto only.** A hook refuses by throwing, `Exceptions\GrantRefusedException` or anything else: the call rolls back
     with nothing written and no event, and is not tried again, unless what it threw is a concurrency error
@@ -224,6 +230,9 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
   lock, and the coverage check's locks last in the lock order.
 - `Feature\Hooks\GrantHooksTest`, `Unit\Config\GrantHookConfigValidatorTest` and `Feature\OperationScopeTest` -- the
   composite's order and stop, its validation, the guard and the trusted retry.
+- `Feature\Hooks\ComposedGrantHooksTest` -- a hook bound before the package registered composed after the listed ones
+  (N107): both run and either refuses, for every way of binding it, alone with none listed, replaced by a later
+  binding, its lifetime kept in a queue worker and each Octane sandbox, and nothing resolved while registering.
 
 ## Done
 

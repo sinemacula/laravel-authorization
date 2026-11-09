@@ -28,15 +28,25 @@ and `forUser()` scopes, and how the Gate, middleware, Blade directives and tenan
    `scoped()`, so the queue worker and Octane build them afresh for each job or request (AUTHZ-12.5). A resolver the
    application binds itself, with `instance()`, `singleton()`, `scoped()` or `bind()`, is kept across that reset.
 
-6. **A binding made first stands (N103).** The contract is bound to the package's default only when nothing is bound
-   to it yet (`bindIf()`), so a resolver a sibling package or the application binds before the package registers
-   stands, `instance()` included, and one bound afterwards with `bind()`, `singleton()`, `scoped()` or `instance()`
-   replaces the default; the default stays reachable under its package-owned key. The same holds for every seam the
-   package gives a default for. Provider order still decides between bindings made outside the package: the later of
-   two wins, and a `bindIf()` made after the package registers is skipped. Rebinding the resolver still empties the
-   resolution cache's memo: one bound before the package registered, `instance()` included, is watched from its first
-   resolution in each container that resolves it, an Octane sandbox included, since watching it sooner would resolve it
-   while providers register.
+6. **A binding made first stands (N103), unless the application configured a class (N106).** The contract is bound
+   to the package's default only when nothing is bound to it yet (`bindIf()`), so a resolver a sibling package binds
+   before the package registers stands, `instance()` included, and one bound afterwards with `bind()`, `singleton()`,
+   `scoped()` or `instance()` replaces the default; the default stays reachable under its package-owned key. When
+   `authorization.subject_resolver` names a class other than the package's default, the contract is bound to it
+   whatever was bound before, since the application's configuration is its explicit choice and a sibling's binding is
+   not; a value equal to the default, or none, binds nothing over an earlier binding. The precedence, highest first,
+   is a binding made after the package registers, then the configured class, then a binding made before the package
+   registers, then the package's default. The same holds for every seam the package gives a default for, and for
+   every seam the configuration names a class for: the tenant tree, the identity directory, the resource tenant
+   resolver, the authentication requirement checker, the session policy source and the policy store, which has no
+   default, so a configured store always replaces an earlier binding. The grant hook is the one exception (N107):
+   hooks only refuse, so when `authorization.grant_hooks` lists any, a hook bound before the package registered is
+   composed with them, running after them, rather than replaced; a binding made afterwards still replaces both. Provider
+   order still decides between bindings made outside the package: the later of two wins, and a `bindIf()` made after
+   the package registers is skipped. Rebinding the resolver still empties the resolution cache's memo: one bound
+   before the package registered, `instance()` included, is watched from its first resolution in each container that
+   resolves it, an Octane sandbox included, whether that binding stands or the configured class replaced it, since
+   watching it sooner would resolve it while providers register.
 
 7. **Configuration fails closed.** `authorization.subject_resolver` must name a class implementing the contract. Null,
    a missing class or a class that does not implement it is refused at boot (AUTHZ-17.2).

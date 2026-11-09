@@ -225,14 +225,23 @@ tenant resolver, the policy store, the policy resolver, the action catalogue, th
 authentication requirement checker, the session policy source and the authentication, request and environment
 contexts. The package binds its default only when nothing is bound to the contract yet, so a binding made before it
 registers, by a sibling package or by your application, `instance()` included, stands, and a binding made afterwards
-with `bind()`, `singleton()`, `scoped()` or `instance()` replaces the default. The order your providers register in
-therefore never lets the package's default replace a binding of yours. It still decides between other bindings of the
-same contract: of two bindings made outside the package, by a sibling package and your application for example, the
-later one wins as usual, and a `bindIf()`, `singletonIf()` or `scopedIf()` only fills a contract nothing has bound yet,
-so one made after the package registers is skipped and the package's default stands. To replace a seam whatever order
-providers register in, bind it unconditionally. A binding of your own is kept as you bound it across the reset between
-queue jobs and Octane requests, while the package's defaults, the context key catalogue aside, are built afresh for
-each.
+with `bind()`, `singleton()`, `scoped()` or `instance()` replaces the default. A class you name in
+`config/authorization.php` is different: when `subject_resolver`, `tenant_tree`, `identity_directory`,
+`resource_tenant_resolver`, `requirement_checker` or `session.source` names a class other than the package's default,
+or when `policy_store` names any class, the package binds the contract to it even over a binding a sibling package made
+before it registered, since your configuration is the explicit choice. A value equal to the package's default, or no
+value, binds nothing over an earlier binding. From the highest precedence down, a contract resolves to a binding made
+after the package registers, then the class your configuration names, then a binding made before the package
+registers, then the package's default. The grant hook is the one exception: hooks only refuse, so when `grant_hooks`
+lists any, a hook bound before the package registered is composed with them rather than replaced, and runs after them
+(see [Grant hooks](#grant-hooks)). The order your providers register in therefore
+never lets the package's default replace a binding of yours. It still decides between other bindings of the same
+contract: of two bindings made outside the package, by a sibling package and your application for example, the later
+one wins as usual, and a `bindIf()`, `singletonIf()` or `scopedIf()` only fills a contract nothing has bound yet, so one
+made after the package registers is skipped and the package's default, or your configured class, stands. To replace a
+seam whatever order providers register in, bind it unconditionally. A binding of your own is kept as you bound it
+across the reset between queue jobs and Octane requests, while the package's defaults and configured classes, the
+context key catalogue aside, are built afresh for each.
 
 List the enums whose cases are the application's permissions, and any permission providers; the Gate asks the package
 about every permission either declares:
@@ -3280,6 +3289,14 @@ the classes `grant_hooks` lists in `config/authorization.php`, each built from t
 listed; the first that throws stops the rest. The list is validated at boot: each entry must name a class implementing
 the contract, once. With none listed the composite does nothing, and then nothing is classified at all. An application
 may bind its own hook on the contract instead. There is no way to add a hook at run time.
+
+**A hook bound before the package registers runs too.** When a sibling package or your application binds a hook on the
+contract before the package registers, and `grant_hooks` lists hooks, the package composes them: the listed hooks run
+first, in the order listed, and the hook bound earlier runs after them. Any of them may refuse, so nothing either would
+refuse gets through. The earlier hook is kept as it was bound, without being resolved while the package registers: an
+instance stays that instance, and a `bind()`, `singleton()` or `scoped()` binding keeps its lifetime across queue jobs
+and Octane requests. With no hook listed, the earlier hook stands alone; with nothing bound earlier, the listed hooks
+run alone. A hook bound after the package registers replaces the composite, listed hooks and earlier hook alike.
 
 ```php
 'grant_hooks' => [

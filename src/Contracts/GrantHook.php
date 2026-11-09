@@ -36,7 +36,9 @@ use SineMacula\Laravel\Authorization\Hooks\GrantWidening;
  *
  * Exactly one hook is bound. The default is `Hooks\GrantHooks`, the ordered
  * composite of the classes `authorization.grant_hooks` lists, which with none
- * listed does nothing; an application binds its own on the contract instead.
+ * listed does nothing; an application binds its own on the contract instead. A
+ * hook bound on the contract before the package registers runs after the listed
+ * ones when any is listed, rather than being replaced (N107).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
