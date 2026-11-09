@@ -66,6 +66,18 @@ final readonly class GuardAuthenticationContext implements AuthenticationContext
     }
 
     /**
+     * Return no assurance key names of its own: the package's fixed names are
+     * the only assurance keys of `authentication`.
+     *
+     * @return list<string>
+     */
+    #[\Override]
+    public function assuranceKeys(): array
+    {
+        return [];
+    }
+
+    /**
      * Return the guard's name and the signed-in user's key and morph type,
      * under `authentication`. With no guard named no user is read, and the
      * namespace is absent.

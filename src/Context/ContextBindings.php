@@ -38,8 +38,13 @@ final class ContextBindings
     /**
      * Build the context key catalogue from the package's keys, those of
      * `authorization.context.keys` and those the attribute providers declare,
-     * with the namespaces the bound authentication context contributes, whose
-     * assurance keys it never lets a condition test.
+     * with the assurance keys of the bound authentication context, which it
+     * never lets a condition test.
+     *
+     * The authentication context is resolved, and its namespaces and assurance
+     * keys read, at the catalogue's first use that needs them rather than here
+     * (N104): a sibling package may resolve the catalogue while providers
+     * register, before the provider binding its context has registered.
      *
      * @param  \Illuminate\Contracts\Foundation\Application  $app
      * @return \SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue
@@ -52,9 +57,9 @@ final class ContextBindings
         /** @var array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>> $keys */
         $keys = (array) $app['config']->get('authorization.context.keys', []);
 
-        $namespaces = $app->bound(AuthenticationContext::class) ? $app->make(AuthenticationContext::class)->namespaces() : [];
+        $assurance = static fn (): AssuranceKeys => AssuranceKeys::of($app->bound(AuthenticationContext::class) ? $app->make(AuthenticationContext::class) : null);
 
-        return new DeclaredContextKeyCatalogue($keys, AttributeProviders::fromConfig($app)->declarations(), $namespaces);
+        return new DeclaredContextKeyCatalogue($keys, AttributeProviders::fromConfig($app)->declarations(), $assurance);
     }
 
     /**

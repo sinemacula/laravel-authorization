@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Subject;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
@@ -88,5 +89,28 @@ final class BuildsScopedManagersTest extends TestCase
         self::assertSame(DecisionReason::SESSION_POLICY, $capped->check('posts:read')->reason);
         self::assertTrue($manager->can('posts:read'));
         self::assertSame(DecisionReason::SESSION_POLICY, $capped->capped(['posts:read'])->check('posts:edit')->reason);
+    }
+
+    /**
+     * `withoutSessionCaps()` decides every check of a new manager without the
+     * credential's scopes, the one it is called on still capped by them, and
+     * keeps the explicit caps.
+     *
+     * @return void
+     */
+    public function testWithoutSessionCapsChangesOnlyTheClone(): void
+    {
+        $machine = StubMachine::create(['id' => 'scoped-4']);
+
+        $machine->givePermission(Permission::create(['name' => 'posts:read']));
+
+        $manager = Authorization::for($machine);
+        $without = $manager->withoutSessionCaps();
+
+        self::assertNotSame($manager, $without);
+        self::assertTrue($without->can('posts:read'));
+        self::assertSame(DecisionReason::SESSION_POLICY, $manager->check('posts:read')->reason);
+        self::assertSame(DecisionReason::SESSION_POLICY, $without->capped(['posts:edit'])->check('posts:read')->reason);
+        self::assertSame(DecisionReason::SESSION_POLICY, $manager->capped(['posts:read'])->check('posts:read')->reason);
     }
 }

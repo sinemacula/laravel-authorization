@@ -44,8 +44,8 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
  * `checkMany()` the same over many checks, and `CheckBatch` owns the recording
  * for both, so every decision the pipeline makes reaches the caller through it.
  *
- * A pipeline is immutable: `withPolicies()`, `capped()` and `explaining()`
- * return a new one, as the manager's scoped clones do.
+ * A pipeline is immutable: `withPolicies()`, `capped()`, `withoutSessionCaps()`
+ * and `explaining()` return a new one, as the manager's scoped clones do.
  *
  * A pipeline `explaining()` returns decides its one check in explain mode
  * (N89): exactly as any other, through the same stages and the same sources,
@@ -83,6 +83,9 @@ final class DecisionPipeline
 
     /** @var list<list<string>> The explicit session caps supplied via `capped()`, outermost first, every one of which must cover the action. */
     private array $caps = [];
+
+    /** @var bool Whether checks are decided as for a principal holding no session yet: no credential's scopes are read, and a machine is not capped for lacking them. */
+    private bool $isSessionless = false;
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder|null Records the evidence of the one check an `explaining()` pipeline decides; null for every other pipeline. */
     private ?EvidenceRecorder $evidence = null;
@@ -163,6 +166,35 @@ final class DecisionPipeline
         $pipeline->caps[] = $actions;
 
         return $pipeline;
+    }
+
+    /**
+     * Return a pipeline whose checks are decided as for a principal that holds
+     * no session yet (N105): the session policy source is not asked for the
+     * subject's credential scopes, so neither a credential's scopes nor a
+     * machine's missing ones cap a check, while the explicit caps of `capped()`
+     * still do. Every other stage, the denies, guardrails and boundaries among
+     * them, decides as for any check.
+     *
+     * @return self
+     */
+    public function withoutSessionCaps(): self
+    {
+        $pipeline                = clone $this;
+        $pipeline->isSessionless = true;
+
+        return $pipeline;
+    }
+
+    /**
+     * Determine whether the pipeline decides its checks as for a principal that
+     * holds no session yet, as `withoutSessionCaps()` returned it.
+     *
+     * @return bool
+     */
+    public function isSessionless(): bool
+    {
+        return $this->isSessionless;
     }
 
     /**
@@ -334,7 +366,9 @@ final class DecisionPipeline
         $permission = $evidence === null
             ? static fn (): ?string => SubjectGrants::permissionFor($subject, $action)
             : static fn (): ?string => $evidence->notePermission(GrantProvenanceResolver::permissionFor($subject, $action));
-        $session = ($this->sessionCaps ?? new SessionCapResolver)->capsFor($subject, $this->caps);
+        $session = $this->isSessionless
+            ? SessionCaps::of(null, $this->caps)
+            : ($this->sessionCaps ?? new SessionCapResolver)->capsFor($subject, $this->caps);
 
         if ($evidence !== null) {
             $checkContext->explain();

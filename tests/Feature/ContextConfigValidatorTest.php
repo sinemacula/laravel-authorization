@@ -235,6 +235,61 @@ final class ContextConfigValidatorTest extends TestCase
     }
 
     /**
+     * Provide assurance key declarations an authentication context may not
+     * make, with the entry each refusal names.
+     *
+     * @return iterable<string, array{array<array-key, mixed>, string}>
+     */
+    public static function malformedAssuranceKeys(): iterable
+    {
+        yield 'not a string' => [['level', 2], 'int'];
+        yield 'an empty name' => [[''], '\'\''];
+        yield 'a star alone' => [['*'], '\'*\''];
+        yield 'a dot' => [['mfa.level'], '\'mfa.level\''];
+        yield 'a star inside' => [['provider_*_id'], '\'provider_*_id\''];
+    }
+
+    /**
+     * An authentication context declaring a malformed assurance key is refused
+     * at boot, naming it, so the declaration fails closed.
+     *
+     * @param  array<array-key, mixed>  $declared
+     * @param  string  $given
+     * @return void
+     */
+    #[DataProvider('malformedAssuranceKeys')]
+    public function testRefusesAMalformedAssuranceKeyDeclaration(array $declared, string $given): void
+    {
+        $this->container()->instance(AuthenticationContext::class, new ContributingAuthenticationContext(['mfa'], $declared));
+
+        try {
+            ContextConfigValidator::validate([], $this->container());
+            self::fail('InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame('authorization.context', $exception->getConfigKey());
+            self::assertSame(
+                'Authentication context \'' . ContributingAuthenticationContext::class . "' declares the assurance key {$given}, "
+                    . 'which must be a name with no \'.\', or a name followed by one trailing \'*\'.',
+                $exception->getReason(),
+            );
+        }
+    }
+
+    /**
+     * Exact names and trailing-`*` prefixes are accepted.
+     *
+     * @return void
+     */
+    public function testAcceptsExactAndPrefixedAssuranceKeys(): void
+    {
+        $this->container()->instance(AuthenticationContext::class, new ContributingAuthenticationContext(['mfa', 'sso'], ['recovery_code', 'level', 'provider_*']));
+
+        ContextConfigValidator::validate([], $this->container());
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
      * Return the application container.
      *
      * @return \Illuminate\Foundation\Application

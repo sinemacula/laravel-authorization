@@ -18,6 +18,13 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * made for another does not. An application the configuration does not name is
  * open to every principal, as `laravel-authentication`'s default admits.
  *
+ * Admission is decided without session caps, for people and machines alike
+ * (N105): a principal being admitted holds no session yet, so the request's
+ * credential scopes, which belong to whoever made the request, never cap it,
+ * and a machine is not refused for lacking scopes it has yet to be given. The
+ * denies, guardrails and boundaries still decide, through the one decision path
+ * (D22). Once the session exists, its caps apply to every check.
+ *
  * It only builds the check and asks the decision; it decides nothing itself.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -33,7 +40,8 @@ final class ApplicationAccess
      * `forUser()` makes it, and the check is decided on the application asked
      * about and in the tenant given, rather than the request's, since sign-in,
      * a switch and a refresh ask about a principal that is not yet, or no
-     * longer, the request's.
+     * longer, the request's. It is decided without session caps, so neither the
+     * request's credential scopes nor a machine's missing ones refuse it.
      *
      * @param  string  $application
      * @param  object  $principal
@@ -48,7 +56,7 @@ final class ApplicationAccess
             return true;
         }
 
-        $manager = self::manager()->forUser($principal);
+        $manager = self::manager()->forUser($principal)->withoutSessionCaps();
 
         return TenantScope::within($tenant, $application, static fn (): bool => $manager->can($permission));
     }

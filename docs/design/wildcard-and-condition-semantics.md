@@ -302,8 +302,9 @@ A key's type decides the operators a condition may test it with. The `_if_exists
 The type is a write-time rule only: at evaluation a value is checked exactly as the operator table below says, so a
 value of the wrong type is undecidable whatever the key was declared as. An untestable key may be read by a `${…}`
 reference but not tested by a condition. An assurance key is always untestable, and not even a reference may read it
-(see [Assurance keys](#assurance-keys)). The catalogue is given the namespaces the authentication context contributes,
-so it knows them.
+(see [Assurance keys](#assurance-keys)). The catalogue is given how to read the authentication context's namespaces and
+assurance keys, and reads them at its first use that needs them, never when it is built, so a context bound by a
+provider that registers after another resolved the catalogue is still the one it reads.
 
 ## Condition Operators
 
@@ -431,10 +432,25 @@ N37). A key is an assurance key when its namespace is `authentication`, or one t
 contributes beside it (such as `mfa`), and any segment of its path after the namespace is one of
 `AssuranceKeys::NAMES`: `assurance_level`, `auth_time`, `seconds_since_step_up`, `last_verified_at`,
 `verification_age`, `multifactor` and `amr`. So `authentication.amr`, `mfa.multifactor` and `mfa.multifactor.enabled`
-are assurance keys, and `request.amr` and `authentication.guard` are not. The package declares none of them;
-`DeclaredContextKeyCatalogue` declares any of them untestable whatever the declaring context, provider or configuration
-says, and `PolicyValidator` refuses a condition on one, and a `${…}` reference to one in an operand or a resource
-pattern, whatever the catalogue says, with a reason that names the key and points at `authentication_requirement`.
+are assurance keys, and `request.amr` and `authentication.guard` are not.
+
+The context also declares names of its own in `assuranceKeys()` (N104), merged with the fixed ones under the same
+rule: an exact name, or a name followed by one trailing `*` that matches every segment starting with what comes before
+it, so `provider_*` makes `sso.provider_name` an assurance key. A declared name that is not a string, is empty, holds
+a `.` or has a `*` anywhere but at its end is refused at boot by `ContextConfigValidator`; elsewhere it fails closed,
+`DeclaredContextKeyCatalogue` throwing and `PolicyValidator` refusing every document with the reason. The fixed names
+never move into the context, and no sibling's names are added to `NAMES`. `namespaces()` and `assuranceKeys()` must be
+fixed for the life of the process, and should be cheap and free of side effects, since they are read more than once,
+though never while providers register: at boot by the validation, at its first use by the catalogue, which keeps what
+they said, and each time `PolicyValidator` checks a document; `namespaces()` is read too each time the check context
+factory is built, once per request or job. A key the catalogue is asked to declare again with another testability is
+judged at its first use, since which keys are assurance keys is not known before then; a refusal there is the one the
+declaration would have thrown, and every later use throws it too.
+
+The package declares no assurance key; `DeclaredContextKeyCatalogue` declares any of them untestable whatever the
+declaring context, provider or configuration says, and `PolicyValidator` refuses a condition on one, and a `${…}`
+reference to one in an operand or a resource pattern, whatever the catalogue says, with a reason that names the key and
+points at `authentication_requirement`.
 
 ### `_if_exists`
 
@@ -607,8 +623,10 @@ document, then a summary, and exits 1 when any is invalid.
   `StatementValidator` -- the operator on `authentication` alone and no `_if_exists` form; `RequirementCheck` -- one
   check's requirements put to the bound `AuthenticationRequirementChecker` (default `RefusingRequirementChecker`) and
   the `RequirementResult` read; `MatchResult::unmet()` -- the unmet outcome with its parts.
-- `AssuranceKeys` -- the names and `isAssuranceKey()`; `DeclaredContextKeyCatalogue` and `PolicyValidator` -- where
-  they are made untestable and refused.
+- `AssuranceKeys` -- the fixed names, the context's declared names and prefixes, their validation and `matches()`;
+  `AuthenticationContext::assuranceKeys()` -- the declaration; `DeclaredContextKeyCatalogue` and `PolicyValidator` --
+  where they are made untestable and refused; `ContextConfigValidator` -- where a malformed declaration is refused at
+  boot.
 - The `ContextKeyCatalogue` contract, `DeclaredContextKeyCatalogue`, `ContextKey` and `ContextKeyType::suits()` -- the
   declared keys and the type and operator rules; `ContextConfigValidator` -- `authorization.context` at boot.
 - The `AuthenticationContext`, `RequestContext`, `EnvironmentContext` and `ContextSource` contracts and their defaults,
@@ -668,8 +686,8 @@ document, then a summary, and exits 1 when any is invalid.
   `ContextKeyType`, and a new row in the operator catalogue above, including which operands are invalid and which
   context values are undecidable.
 - Adding a part to an authentication requirement requires a new entry in `AuthenticationRequirement::PARTS`, its
-  options in `partError()`, and a row in the requirement table above; adding an assurance key name requires a new entry
-  in `AssuranceKeys::NAMES`.
+  options in `partError()`, and a row in the requirement table above; adding an assurance key name of the package's own
+  requires a new entry in `AssuranceKeys::NAMES`, while a sibling's names belong in its context's `assuranceKeys()`.
 - Letting a condition test an assurance key, or splitting an authentication requirement into separate tests, would let
   a fresh weak proof and a stale strong one meet a requirement together, and requires a design decision before
   implementation.

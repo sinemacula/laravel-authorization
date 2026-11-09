@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization;
 
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernelContract;
@@ -118,12 +119,17 @@ use SineMacula\Laravel\Authorization\Usage\UsageTracking;
  * runs.
  *
  * The contracts an application may bind itself (the subject resolver, the
- * tenant tree, the identity directory, the grant hook, the policy store, the
- * policy resolver, the action catalogue, the authentication requirement
- * checker, the session policy source and the trusted context sources) resolve
- * through a package-owned key that holds the scoped default. An application's
- * own binding of the contract therefore replaces the default without being
- * scoped itself, and an instance it binds survives the reset between jobs.
+ * tenant tree, the identity directory, the grant hook, the console subject
+ * resolver, the resource tenant resolver, the policy store, the policy
+ * resolver, the action catalogue, the authentication requirement checker, the
+ * session policy source and the trusted context sources) resolve through a
+ * package-owned key that holds the scoped default. Each contract is bound to
+ * that key only when nothing is bound to it yet (N103), so a binding a sibling
+ * package or the application made before this provider registers stands,
+ * `instance()` included, and one made afterwards replaces the default. Either
+ * way the binding is not scoped by the package, so an instance it binds
+ * survives the reset between jobs. The context key catalogue is bound the same
+ * way, only when nothing is bound to it yet.
  *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
@@ -245,9 +251,10 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * hook, and `ReferenceSubjectResolver` as the console subject resolver
      * `authorization:why` resolves its subject through, each scoped to the
      * request or job so any state it keeps does not reach the next one, and
-     * each replaced by a binding the application makes on its contract.
-     * Rebinding the subject resolver or the tenant tree forgets the resolutions
-     * read through it.
+     * each giving way to a binding a sibling package or the application makes
+     * on its contract, before the package registers or after. Rebinding the
+     * subject resolver or the tenant tree forgets the resolutions read through
+     * it.
      *
      * @return void
      */
@@ -401,7 +408,10 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * checker `authorization.requirement_checker` names, the session policy
      * source `authorization.session.source` names and the scope map of
      * `authorization.session.scopes`. Each contract is bound as a default an
-     * application may replace.
+     * application may replace, and the context key catalogue only when nothing
+     * is bound to it yet. The catalogue reads the authentication context's
+     * namespaces and assurance keys at its first use, never here, so a context
+     * a later provider binds is the one it reads.
      *
      * @return void
      */
@@ -425,7 +435,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             $this->bindScopedDefault($contract, $concrete);
         }
 
-        $this->app->singleton(ContextKeyCatalogue::class, ContextBindings::catalogue(...));
+        $this->app->singletonIf(ContextKeyCatalogue::class, ContextBindings::catalogue(...));
         $this->app->scoped(CheckContextFactory::class, ContextBindings::factory(...));
     }
 
@@ -581,22 +591,54 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * replacing the subject resolver or the held tenant changes the tenant the
      * memo's entries were resolved under.
      *
-     * Registered once, before the abstract is first bound: `rebinding()`
-     * resolves an abstract that is already bound, and nothing may be resolved
-     * while the provider registers.
+     * `rebinding()` resolves an abstract that is already bound, and nothing may
+     * be resolved while the provider registers. An abstract not bound yet is
+     * watched at once, on the application, and every Octane sandbox cloned from
+     * it keeps the watch. One already bound, by a sibling package or the
+     * application before the package registered, `instance()` included, is
+     * watched from its first resolution in each container that resolves it, the
+     * earliest a rebinding could change anything that container's memo holds:
+     * the watch is added before the resolution, on the container resolving it,
+     * so a sandbox is watched in its own right and nothing is built on the
+     * application it was cloned from. Only the abstract itself starts the
+     * watch, never a class that implements it, and only when resolved without
+     * parameters, since starting it resolves the abstract again without them.
+     *
+     * The memo emptied is the one of the container rebinding the abstract, and
+     * only once that container has resolved it, so a rebinding never builds a
+     * memo.
      *
      * @param  string  $abstract
      * @return void
      */
     private function forgetResolutionsOnRebinding(string $abstract): void
     {
-        if ($this->app->bound($abstract)) {
+        $forget = static function (Container $container): void {
+            if (!$container->resolved(ResolutionCache::class)) {
+                return;
+            }
+
+            $container->make(ResolutionCache::class)->tenantChanged();
+        };
+
+        if (!$this->app->bound($abstract)) {
+            // @phpstan-ignore staticMethod.dynamicCall
+            $this->app->rebinding($abstract, $forget);
+
             return;
         }
 
-        // @phpstan-ignore staticMethod.dynamicCall
-        $this->app->rebinding($abstract, static function (): void {
-            ResolutionCache::instance()?->tenantChanged();
+        /** @var \WeakMap<\Illuminate\Container\Container, true> $watched */
+        $watched = new \WeakMap;
+
+        $this->app->beforeResolving($abstract, static function (string $resolving, array $parameters, Container $container) use ($abstract, $forget, $watched): void {
+            if ($resolving !== $abstract || $parameters !== [] || isset($watched[$container])) {
+                return;
+            }
+
+            $watched[$container] = true;
+
+            $container->rebinding($abstract, $forget);
         });
     }
 
@@ -607,9 +649,14 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * The default is held under a package-owned key bound with `scoped()`, and
      * the contract resolves through that key. Only the package-owned key is
      * scoped, so an application that binds the contract itself (with
-     * `instance()`, `singleton()` or `bind()`) keeps its binding across the
-     * reset between jobs, while the package's default is still rebuilt for each
-     * one.
+     * `instance()`, `singleton()`, `scoped()` or `bind()`) keeps its binding
+     * across the reset between jobs, while the package's default is still
+     * rebuilt for each one.
+     *
+     * The contract is bound to the key only when nothing is bound to it yet
+     * (N103): a binding a sibling package or the application made before the
+     * package registers stands, and one made afterwards replaces the default.
+     * The key itself is always bound, so the default stays reachable under it.
      *
      * @param  class-string  $contract
      * @param  class-string|\Closure(\Illuminate\Contracts\Foundation\Application): object  $concrete
@@ -620,6 +667,6 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $default = self::DEFAULT_BINDING_PREFIX . $contract;
 
         $this->app->scoped($default, $concrete);
-        $this->app->bind($contract, static fn (Application $app): mixed => $app->make($default));
+        $this->app->bindIf($contract, static fn (Application $app): mixed => $app->make($default));
     }
 }

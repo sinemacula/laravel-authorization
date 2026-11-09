@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepositoryImplementation;
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Http\Kernel as HttpKernelContract;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
@@ -19,6 +20,7 @@ use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Translation\Translator;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
@@ -43,12 +45,14 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
@@ -86,10 +90,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\CatalogueReadingProvider;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
 use Tests\Feature\Stubs\FixedConsoleSubjectResolver;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\InjectedRequirementChecker;
+use Tests\Feature\Stubs\LateAuthenticationContextProvider;
 use Tests\Feature\Stubs\PermissiveActionCatalogue;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubPolicyStore;
@@ -284,6 +290,467 @@ final class AuthorizationServiceProviderTest extends TestCase
         self::assertInstanceOf(DecisionPipeline::class, $pipeline);
         self::assertSame($bound[SubjectResolver::class], (new \ReflectionProperty($manager, 'subjectResolver'))->getValue($manager));
         self::assertSame($bound[PolicyResolver::class], (new \ReflectionProperty($pipeline, 'policyResolver'))->getValue($pipeline));
+    }
+
+    /**
+     * Provide every seam, the context key catalogue included, with each way of
+     * binding it.
+     *
+     * @return iterable<string, array{class-string, string}>
+     */
+    public static function seamBindingProvider(): iterable
+    {
+        $seams = [...\array_column(\iterator_to_array(self::seamProvider()), 0), ContextKeyCatalogue::class];
+
+        foreach ($seams as $seam) {
+            foreach (['bind', 'singleton', 'scoped', 'instance'] as $method) {
+                yield "{$seam} by {$method}" => [$seam, $method];
+            }
+        }
+    }
+
+    /**
+     * A binding a sibling package or the application makes before the package
+     * registers stands, however it was made (N103).
+     *
+     * @param  class-string  $contract
+     * @param  string  $method
+     * @return void
+     */
+    #[DataProvider('seamBindingProvider')]
+    public function testABindingMadeBeforeRegistrationStands(string $contract, string $method): void
+    {
+        $app   = $this->unboundSeam($contract);
+        $bound = self::createStub($contract);
+
+        self::bindBy($app, $method, $contract, $bound);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        self::assertSame($bound, $app->make($contract));
+    }
+
+    /**
+     * A binding made after the package registered replaces its default, however
+     * it was made.
+     *
+     * @param  class-string  $contract
+     * @param  string  $method
+     * @return void
+     */
+    #[DataProvider('seamBindingProvider')]
+    public function testABindingMadeAfterRegistrationReplacesTheDefault(string $contract, string $method): void
+    {
+        $app   = $this->unboundSeam($contract);
+        $bound = self::createStub($contract);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        self::bindBy($app, $method, $contract, $bound);
+
+        self::assertSame($bound, $app->make($contract));
+    }
+
+    /**
+     * Provide every contract the package binds as a default an application or
+     * sibling package may own, by its scoped default.
+     *
+     * @return iterable<string, array{class-string}>
+     */
+    public static function seamProvider(): iterable
+    {
+        $seams = [
+            SubjectResolver::class,
+            TenantTree::class,
+            IdentityDirectory::class,
+            GrantHook::class,
+            ConsoleSubjectResolver::class,
+            ResourceTenantResolver::class,
+            PolicyStore::class,
+            PolicyResolver::class,
+            ActionCatalogue::class,
+            AuthenticationRequirementChecker::class,
+            SessionPolicySource::class,
+            AuthenticationContext::class,
+            RequestContext::class,
+            EnvironmentContext::class,
+        ];
+
+        foreach ($seams as $seam) {
+            yield $seam => [$seam];
+        }
+    }
+
+    /**
+     * A seam nothing else binds resolves the package's default, through the
+     * package-owned key that holds it.
+     *
+     * @param  class-string  $contract
+     * @return void
+     */
+    #[DataProvider('seamProvider')]
+    public function testAnUnboundSeamGetsTheDefault(string $contract): void
+    {
+        $app = $this->unboundSeam($contract);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        $resolved = $app->make($contract);
+
+        self::assertInstanceOf($contract, $resolved);
+        self::assertSame($app->make("authorization.default:{$contract}"), $resolved);
+    }
+
+    /**
+     * The default stays reachable under the package-owned key when a binding
+     * made before registration stands on the contract.
+     *
+     * @param  class-string  $contract
+     * @return void
+     */
+    #[DataProvider('seamProvider')]
+    public function testTheDefaultStaysReachableBesideABindingThatStands(string $contract): void
+    {
+        $app   = $this->unboundSeam($contract);
+        $bound = self::createStub($contract);
+
+        $app->instance($contract, $bound);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        self::assertSame($bound, $app->make($contract));
+        self::assertInstanceOf($contract, $app->make("authorization.default:{$contract}"));
+        self::assertNotSame($bound, $app->make("authorization.default:{$contract}"));
+    }
+
+    /**
+     * With nothing else bound, the context key catalogue is the package's
+     * declared catalogue.
+     *
+     * @return void
+     */
+    public function testAnUnboundContextKeyCatalogueGetsTheDeclaredOne(): void
+    {
+        $app = $this->unboundSeam(ContextKeyCatalogue::class);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        self::assertInstanceOf(DeclaredContextKeyCatalogue::class, $app->make(ContextKeyCatalogue::class));
+    }
+
+    /**
+     * Provide the seams whose rebinding empties the resolution cache's memo,
+     * with each way of binding them.
+     *
+     * @return iterable<string, array{class-string, string}>
+     */
+    public static function watchedSeamBindingProvider(): iterable
+    {
+        foreach ([SubjectResolver::class, TenantTree::class] as $seam) {
+            foreach (['bind', 'singleton', 'scoped', 'instance'] as $method) {
+                yield "{$seam} by {$method}" => [$seam, $method];
+            }
+        }
+    }
+
+    /**
+     * A subject resolver or tenant tree a sibling package bound before the
+     * package registered, however it was bound, is not resolved while it
+     * registers, and rebinding it once it has been resolved still empties the
+     * resolution cache's memo.
+     *
+     * @param  class-string  $contract
+     * @param  string  $method
+     * @return void
+     */
+    #[DataProvider('watchedSeamBindingProvider')]
+    public function testRebindingASeamBoundBeforeRegistrationEmptiesTheMemo(string $contract, string $method): void
+    {
+        $app = self::freshApplication();
+
+        try {
+            self::bindBy($app, $method, $contract, self::createStub($contract));
+
+            (new AuthorizationServiceProvider($app))->register();
+
+            self::assertSame($method === 'instance', $app->resolved($contract));
+            self::assertSame(2, self::resolutionsAcrossARebinding($app, $contract));
+        } finally {
+            Container::setInstance($this->application());
+        }
+    }
+
+    /**
+     * Each Octane sandbox cloned from the application watches a seam a sibling
+     * package bound before the package registered in its own right, so a
+     * rebinding in the first request it is resolved in empties that request's
+     * memo, and the seam is never resolved on the application itself.
+     *
+     * @param  class-string  $contract
+     * @param  string  $method
+     * @return void
+     */
+    #[DataProvider('watchedSeamBindingProvider')]
+    public function testRebindingInAnOctaneSandboxEmptiesItsMemo(string $contract, string $method): void
+    {
+        $app = self::freshApplication();
+
+        try {
+            self::bindBy($app, $method, $contract, self::createStub($contract));
+
+            (new AuthorizationServiceProvider($app))->register();
+
+            foreach (['first', 'second'] as $request) {
+                $sandbox = clone $app;
+
+                Container::setInstance($sandbox);
+
+                self::assertSame(2, self::resolutionsAcrossARebinding($sandbox, $contract), "The {$request} request's memo was kept.");
+            }
+
+            self::assertSame($method === 'instance', $app->resolved($contract));
+        } finally {
+            Container::setInstance($this->application());
+        }
+    }
+
+    /**
+     * Provide the seams whose rebinding empties the resolution cache's memo.
+     *
+     * @return iterable<string, array{class-string}>
+     */
+    public static function watchedSeamProvider(): iterable
+    {
+        yield SubjectResolver::class => [SubjectResolver::class];
+        yield TenantTree::class => [TenantTree::class];
+    }
+
+    /**
+     * A seam nothing bound before the package registered is watched as it
+     * registers, so its first resolution resolves it once, through the
+     * package-owned key and the contract, and rebinding it empties the memo.
+     *
+     * @param  class-string  $contract
+     * @return void
+     */
+    #[DataProvider('watchedSeamProvider')]
+    public function testAnUnboundSeamIsWatchedWithoutResolvingItAgain(string $contract): void
+    {
+        $app = self::freshApplication();
+
+        try {
+            (new AuthorizationServiceProvider($app))->register();
+
+            $resolutions = new \ArrayObject;
+
+            $app->resolving($contract, static function () use ($resolutions): void {
+                $resolutions->append(true);
+            });
+
+            $app->make($contract);
+
+            self::assertCount(2, $resolutions);
+            self::assertSame(2, self::resolutionsAcrossARebinding($app, $contract));
+        } finally {
+            Container::setInstance($this->application());
+        }
+    }
+
+    /**
+     * Resolving a class that implements a seam a sibling package bound before
+     * the package registered starts no watch, so the seam itself is not
+     * resolved.
+     *
+     * @return void
+     */
+    public function testResolvingAnImplementationDoesNotResolveTheSeam(): void
+    {
+        $app = self::freshApplication();
+
+        try {
+            $builds = new \ArrayObject;
+
+            $app->bind(SubjectResolver::class, static function () use ($builds): StubSubjectResolver {
+                $builds->append(true);
+
+                return new StubSubjectResolver;
+            });
+
+            (new AuthorizationServiceProvider($app))->register();
+
+            $app->make(StubSubjectResolver::class);
+
+            self::assertCount(0, $builds);
+            self::assertFalse($app->resolved(SubjectResolver::class));
+        } finally {
+            Container::setInstance($this->application());
+        }
+    }
+
+    /**
+     * A seam a sibling package bound before the package registered and resolved
+     * with parameters starts no watch, since the watch would resolve it again
+     * without them, and the next resolution without parameters starts it.
+     *
+     * @return void
+     */
+    public function testAResolutionWithParametersStartsNoWatch(): void
+    {
+        $app = self::freshApplication();
+
+        try {
+            $app->bind(SubjectResolver::class, static fn (Application $app, array $parameters): StubSubjectResolver => new StubSubjectResolver(
+                $parameters['subject'] ?? self::fail('The resolver was resolved without its subject.'),
+            ));
+
+            (new AuthorizationServiceProvider($app))->register();
+
+            self::assertInstanceOf(StubSubjectResolver::class, $app->make(SubjectResolver::class, ['subject' => new \stdClass]));
+
+            $app->instance(SubjectResolver::class, new StubSubjectResolver);
+
+            self::assertSame(2, self::resolutionsAcrossARebinding($app, SubjectResolver::class));
+        } finally {
+            Container::setInstance($this->application());
+        }
+    }
+
+    /**
+     * Rebinding a seam before anything resolved the resolution cache builds no
+     * cache to empty, whether the seam was bound before the package registered
+     * or not.
+     *
+     * @return void
+     */
+    public function testRebindingBeforeTheCacheIsResolvedBuildsNoCache(): void
+    {
+        $app = self::freshApplication();
+
+        try {
+            $app->instance(TenantTree::class, self::createStub(TenantTree::class));
+
+            (new AuthorizationServiceProvider($app))->register();
+
+            $app->make(SubjectResolver::class);
+            $app->make(TenantTree::class);
+            $app->instance(SubjectResolver::class, new StubSubjectResolver);
+            $app->instance(TenantTree::class, self::createStub(TenantTree::class));
+
+            self::assertFalse($app->resolved(ResolutionCache::class));
+        } finally {
+            Container::setInstance($this->application());
+        }
+    }
+
+    /**
+     * The authentication context a provider registering after the package binds
+     * is the one whose namespaces and assurance keys the catalogue reads, even
+     * when another provider resolved the catalogue before it registered (N104).
+     *
+     * @return void
+     */
+    public function testTheCatalogueReadsTheContextOfAProviderRegisteringLater(): void
+    {
+        $app = new Application(\dirname(__DIR__, 2));
+
+        try {
+            $app->instance('config', new ConfigRepositoryImplementation(['authorization' => ['context' => ['keys' => [
+                'mfa' => ['level' => 'number'],
+                'sso' => ['provider_name' => 'string', 'tenant' => 'string'],
+            ]]]]));
+
+            $app->register(new AuthorizationServiceProvider($app));
+            $app->register(new CatalogueReadingProvider($app));
+            $app->register(new LateAuthenticationContextProvider($app, ['level', 'provider_*']));
+
+            $catalogue = $app->make(ContextKeyCatalogue::class);
+
+            self::assertFalse($catalogue->permits('mfa.level', 'eq'));
+            self::assertFalse($catalogue->permits('sso.provider_name', 'eq'));
+            self::assertTrue($catalogue->permits('sso.tenant', 'eq'));
+            self::assertTrue($catalogue->permits('mfa.enrolled', 'bool'));
+        } finally {
+            Container::setInstance($this->application());
+        }
+    }
+
+    /**
+     * Provide keys a provider declares again as untestable while providers
+     * register: an assurance key of `authentication`, and one of a namespace
+     * only the context a later provider binds contributes.
+     *
+     * @return iterable<string, array{array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType>}>
+     */
+    public static function redeclarationProvider(): iterable
+    {
+        yield 'an authentication key' => [['authentication.amr' => ContextKeyType::LIST]];
+        yield 'a key of a later namespace' => [['mfa.level' => ContextKeyType::NUMBER]];
+    }
+
+    /**
+     * A key a provider declares again with another testability while providers
+     * register reads no authentication context, so the catalogue reads the one
+     * a provider registering later binds: an assurance key of a namespace it
+     * contributes stays untestable, and one declared again before it was bound
+     * is accepted (N104).
+     *
+     * @param  array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType>  $untestable
+     * @return void
+     */
+    #[DataProvider('redeclarationProvider')]
+    public function testRedeclaringAKeyWhileProvidersRegisterReadsTheLaterContext(array $untestable): void
+    {
+        $app = new Application(\dirname(__DIR__, 2));
+
+        try {
+            $config = new ConfigRepositoryImplementation(['authorization' => ['context' => ['keys' => [
+                'authentication' => ['amr' => 'list'],
+                'mfa'            => ['factor_types' => 'list', 'level' => 'number'],
+            ]]]]);
+
+            $app->instance('config', $config);
+            $app->instance(ConfigRepository::class, $config);
+            $app->instance(AuthFactory::class, self::createStub(AuthFactory::class));
+
+            $app->register(new AuthorizationServiceProvider($app));
+            $app->register(new CatalogueReadingProvider($app, $untestable));
+            $app->register(new LateAuthenticationContextProvider($app, ['factor_types', 'level']));
+
+            $catalogue = $app->make(ContextKeyCatalogue::class);
+
+            self::assertFalse($catalogue->find('mfa.factor_types')?->isTestable);
+            self::assertFalse($catalogue->find('mfa.level')?->isTestable);
+            self::assertFalse($catalogue->find('authentication.amr')?->isTestable);
+            self::assertTrue($catalogue->permits('mfa.enrolled', 'eq'));
+        } finally {
+            Container::setInstance($this->application());
+        }
+    }
+
+    /**
+     * The boot-time validation reads the authentication context a provider
+     * registering after the package binds, so its malformed assurance keys are
+     * refused at boot (N104).
+     *
+     * @return void
+     */
+    public function testBootValidatesTheContextOfAProviderRegisteringLater(): void
+    {
+        $app = new Application(\dirname(__DIR__, 2));
+
+        try {
+            $app->instance('config', new ConfigRepositoryImplementation(['authorization' => []]));
+
+            $app->register(new AuthorizationServiceProvider($app));
+            $app->register(new LateAuthenticationContextProvider($app, ['provider.*']));
+
+            $this->expectException(InvalidAuthorizationConfigException::class);
+            $this->expectExceptionMessage('declares the assurance key \'provider.*\'');
+
+            $app->boot();
+        } finally {
+            Container::setInstance($this->application());
+        }
     }
 
     /**
@@ -1144,6 +1611,95 @@ final class AuthorizationServiceProviderTest extends TestCase
         $this->startNextJob();
 
         return [$tenantA, $tenantB, 'user-1'];
+    }
+
+    /**
+     * Return a new application holding the configuration alone, its subject
+     * resolver the stub, set as the container's instance.
+     *
+     * @return \Illuminate\Foundation\Application
+     */
+    private static function freshApplication(): Application
+    {
+        $app = new Application(\dirname(__DIR__, 2));
+
+        $app->instance('config', new ConfigRepositoryImplementation(['authorization' => ['subject_resolver' => StubSubjectResolver::class]]));
+
+        return $app;
+    }
+
+    /**
+     * Resolve the contract, remember a grantee's permissions twice, rebind the
+     * contract and remember them again, returning how many times they were
+     * resolved: two when the rebinding emptied the memo, one when it did not.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @param  class-string  $contract
+     * @return int
+     */
+    private static function resolutionsAcrossARebinding(Application $app, string $contract): int
+    {
+        $resolutions = new \ArrayObject;
+        $resolve     = static function () use ($resolutions): Resolution {
+            $resolutions->append(true);
+
+            return new Resolution(['posts:read']);
+        };
+
+        $cache   = $app->make(ResolutionCache::class);
+        $grantee = new Reference('user', 'user-1');
+
+        $app->make($contract);
+        $cache->rememberPermissions($grantee, $resolve);
+        $cache->rememberPermissions($grantee, $resolve);
+        $app->instance($contract, self::createStub($contract));
+        $cache->rememberPermissions($grantee, $resolve);
+
+        return \count($resolutions);
+    }
+
+    /**
+     * Bind the object on the contract the way the method names.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @param  string  $method
+     * @param  class-string  $contract
+     * @param  object  $bound
+     * @return void
+     */
+    private static function bindBy(Application $app, string $method, string $contract, object $bound): void
+    {
+        $binders = [
+            'bind'      => static fn () => $app->bind($contract, static fn (): object => $bound),
+            'singleton' => static fn () => $app->singleton($contract, static fn (): object => $bound),
+            'scoped'    => static fn () => $app->scoped($contract, static fn (): object => $bound),
+            'instance'  => static fn () => $app->instance($contract, $bound),
+        ];
+
+        $binders[$method]();
+    }
+
+    /**
+     * Return the booted application with nothing bound on the contract, the
+     * test suite's extensions of it forgotten, and a policy store configured,
+     * so the provider registers a default for every seam.
+     *
+     * @param  class-string  $contract
+     * @return \Illuminate\Foundation\Application
+     */
+    private function unboundSeam(string $contract): Application
+    {
+        $app = $this->application();
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $app->make(ConfigRepository::class);
+        $config->set('authorization.policy_store', StubPolicyStore::class);
+
+        $app->forgetExtenders($contract);
+
+        unset($app[$contract]);
+
+        return $app;
     }
 
     /**
