@@ -11,16 +11,37 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
  * cannot be the subject of a check, the subject resolver maps it to a subject
  * that is not about it, or resolving it failed.
  *
- * It is an invalid invocation, which `authorization:why` reports and exits 2
- * for, rather than a denial. The message names the reference as it was given,
- * which the command escapes before it is written, and no other value; when
- * resolving failed, it names neither the reference nor the failure.
+ * It is an invalid invocation, which `authorization:why` and
+ * `authorization:review` report and exit 2 for, rather than a denial. Each
+ * refusal's code says which it is (see the constants). Its message names the
+ * reference as it was given, and no other value; when resolving failed, it
+ * names neither the reference nor the failure. A command never writes that
+ * message: it writes the refusal `namingOnly()` its argument gives, which says
+ * what is wrong by the argument's name alone, never the value given.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 final class UnresolvedSubjectException extends \InvalidArgumentException
 {
+    /** @var int The code of a reference that is not in the `{morphType}:{key}` format. */
+    public const int MALFORMED = 1;
+
+    /** @var int The code of a morph type that names no Eloquent model. */
+    public const int UNKNOWN_TYPE = 2;
+
+    /** @var int The code of a reference no row has the key of. */
+    public const int NOT_FOUND = 3;
+
+    /** @var int The code of a model that cannot be the subject of a check. */
+    public const int UNSUPPORTED = 4;
+
+    /** @var int The code of a model mapped to a subject that is not about it. */
+    public const int AMBIGUOUS = 5;
+
+    /** @var int The code of a subject that something failed while resolving. */
+    public const int UNRESOLVABLE = 6;
+
     /**
      * Refuse a reference that is not in the `{morphType}:{key}` format.
      *
@@ -28,7 +49,7 @@ final class UnresolvedSubjectException extends \InvalidArgumentException
      */
     public static function malformed(): self
     {
-        return new self('The subject must be in the format {morphType}:{key} (e.g. user:1).');
+        return new self('The subject must be in the format {morphType}:{key} (e.g. user:1).', self::MALFORMED);
     }
 
     /**
@@ -40,7 +61,7 @@ final class UnresolvedSubjectException extends \InvalidArgumentException
      */
     public static function unknownType(string $type): self
     {
-        return new self("The subject type '{$type}' is not an Eloquent model.");
+        return new self("The subject type '{$type}' is not an Eloquent model.", self::UNKNOWN_TYPE);
     }
 
     /**
@@ -51,7 +72,7 @@ final class UnresolvedSubjectException extends \InvalidArgumentException
      */
     public static function notFound(string $reference): self
     {
-        return new self("No subject '{$reference}' was found.");
+        return new self("No subject '{$reference}' was found.", self::NOT_FOUND);
     }
 
     /**
@@ -63,7 +84,7 @@ final class UnresolvedSubjectException extends \InvalidArgumentException
      */
     public static function unsupported(string $reference): self
     {
-        return new self("The subject '{$reference}' cannot be checked: its principal is not a saved authorizable identity.");
+        return new self("The subject '{$reference}' cannot be checked: its principal is not a saved authorizable identity.", self::UNSUPPORTED);
     }
 
     /**
@@ -76,7 +97,7 @@ final class UnresolvedSubjectException extends \InvalidArgumentException
      */
     public static function ambiguous(string $reference): self
     {
-        return new self("The subject '{$reference}' is ambiguous: the subject resolver maps it to a subject that is not about it.");
+        return new self("The subject '{$reference}' is ambiguous: the subject resolver maps it to a subject that is not about it.", self::AMBIGUOUS);
     }
 
     /**
@@ -90,6 +111,30 @@ final class UnresolvedSubjectException extends \InvalidArgumentException
      */
     public static function unresolvable(\Throwable $previous): self
     {
-        return new self('The subject could not be resolved.', 0, $previous);
+        return new self('The subject could not be resolved.', self::UNRESOLVABLE, $previous);
+    }
+
+    /**
+     * Return the refusal as a command writes it: what is wrong, by the name of
+     * the argument the reference was given as alone, never the reference or its
+     * type; a refusal of any other code, as a resolver of the application's own
+     * may throw, as one that could not be resolved. The refusal keeps its code
+     * and is kept as the previous exception.
+     *
+     * @param  string  $argument
+     * @return self
+     */
+    public function namingOnly(string $argument): self
+    {
+        $message = match ($this->getCode()) {
+            self::MALFORMED    => "The {$argument} must be in the format {morphType}:{key} (e.g. user:1).",
+            self::UNKNOWN_TYPE => "The {$argument}'s type is not an Eloquent model.",
+            self::NOT_FOUND    => "The {$argument} names no saved row.",
+            self::UNSUPPORTED  => "The {$argument} cannot be checked: its principal is not a saved authorizable identity.",
+            self::AMBIGUOUS    => "The {$argument} is ambiguous: the subject resolver maps it to a subject that is not about it.",
+            default            => "The {$argument} could not be resolved.",
+        };
+
+        return new self($message, $this->getCode(), $this);
     }
 }

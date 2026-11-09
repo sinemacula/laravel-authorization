@@ -308,6 +308,46 @@ final class ReviewAdmissionTest extends TestCase
     }
 
     /**
+     * Several rights are decided together, each in turn, and the first one not
+     * allowed refuses the review: an export needs both the read right and the
+     * export right; naming none decides the read right alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testSeveralRightsAreDecidedTogether(): void
+    {
+        $resource = ReviewResource::of(ReviewQuery::holders(self::role('reviewed'), ReviewScope::everywhere()));
+        $reader   = self::reviewer('reader', null);
+
+        $this->signIn($reader);
+
+        ReviewAdmission::admit(ActingContext::current(), $resource);
+        ReviewAdmission::admit(ActingContext::current(), $resource, PackagePermissions::REVIEW_READ);
+
+        self::assertRefusedAs(DecisionReason::NO_MATCH, static function () use ($resource): void {
+            ReviewAdmission::admit(ActingContext::current(), $resource, PackagePermissions::REVIEW_READ, PackagePermissions::REVIEW_EXPORT);
+        });
+
+        $exporter = StubIdentity::query()->create(['id' => 'exporter']);
+
+        self::grants()->grantPermission($exporter, self::permission(PackagePermissions::REVIEW_EXPORT));
+
+        $manager = $this->signIn($exporter);
+
+        self::assertRefusedAs(DecisionReason::NO_MATCH, static function () use ($resource): void {
+            ReviewAdmission::admit(ActingContext::current(), $resource, PackagePermissions::REVIEW_READ, PackagePermissions::REVIEW_EXPORT);
+        });
+
+        self::grants()->grantPermission($exporter, self::right());
+
+        ReviewAdmission::admit(ActingContext::current(), $resource, PackagePermissions::REVIEW_READ, PackagePermissions::REVIEW_EXPORT);
+
+        self::assertTrue($manager->lastDecision()?->isAllowed());
+    }
+
+    /**
      * A review of any application in one tenant is weighed across every
      * application there: a deny held for one application refuses it, though a
      * decision with no application never reads that deny, while a review of

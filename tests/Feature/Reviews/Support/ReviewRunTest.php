@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Reviews\Support;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -111,6 +112,37 @@ final class ReviewRunTest extends TestCase
             self::assertSame($now->toIso8601ZuluString(), $run->now->toIso8601ZuluString());
             self::assertSame(['later', 'never', 'now'], self::live($run));
             self::assertSame(['later', 'never'], self::live(ReviewRun::of(ReviewScope::everywhere())));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    /**
+     * A run of a later page is made at the review's frozen instant, given in
+     * any zone and read in UTC, so a row live when the review began is still
+     * live, however much later the page is read.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARunMayBeMadeAtTheReviewsFrozenInstant(): void
+    {
+        $now = new Carbon('2030-01-01 00:00:00', 'UTC');
+
+        Carbon::setTestNow($now->copy()->addYear());
+
+        try {
+            $role = self::role('role');
+
+            self::grants()->grantRole(new Reference('u', 'soon'), $role, $now->copy()->addSecond());
+
+            $run = ReviewRun::of(ReviewScope::everywhere(), CarbonImmutable::parse('2029-12-31 19:00:00.5', 'America/New_York'));
+
+            self::assertSame('2030-01-01 00:00:00.500000', $run->now->format('Y-m-d H:i:s.u'));
+            self::assertSame('UTC', $run->now->getTimezone()->getName());
+            self::assertSame(['soon'], self::live($run));
+            self::assertSame([], self::live(ReviewRun::of(ReviewScope::everywhere())));
         } finally {
             Carbon::setTestNow();
         }

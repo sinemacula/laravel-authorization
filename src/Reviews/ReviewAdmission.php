@@ -28,7 +28,8 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * application named, or none otherwise, so a review of every application needs
  * authority held for every application. No rank rule applies: a review hands
  * out nothing, and a policy on the resource's attributes restricts who may
- * review what.
+ * review what. An export is admitted to both review rights, decided together,
+ * and every page, chunk and export is admitted again before it is read.
  *
  * A review of one tenant's node is decided at that tenant. A review across a
  * reach (rooted within a tenant, so the tenant and every tenant below it, or of
@@ -71,24 +72,29 @@ final class ReviewAdmission
     public const array ACTIONS = [PackagePermissions::REVIEW_READ, PackagePermissions::REVIEW_EXPORT];
 
     /**
-     * Admit the review as the reviewer, deciding the right on the resource with
-     * the reviewed scope in place, and throw `AuthorizationException`, carrying
-     * the decision, when it is not allowed.
+     * Admit the review as the reviewer, deciding each right on the resource
+     * with the reviewed scope in place, the read right when none is named, and
+     * throw `AuthorizationException`, carrying the decision, at the first that
+     * is not allowed. An export names both rights, decided together here, so it
+     * is admitted only when the reviewer holds both.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $reviewer
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewResource  $resource
-     * @param  string  $action
+     * @param  string  ...$actions
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
-    public static function admit(ActingContext $reviewer, ReviewResource $resource, string $action = PackagePermissions::REVIEW_READ): void
+    public static function admit(ActingContext $reviewer, ReviewResource $resource, string ...$actions): void
     {
         $manager  = self::manager($reviewer);
         $resource = $resource->actedBy($reviewer->impersonator);
+        $actions  = $actions === [] ? [PackagePermissions::REVIEW_READ] : $actions;
 
-        TenantScope::within($resource->scope->tenant, $resource->reach()->application, static function () use ($manager, $action, $resource): void {
-            self::authorize($manager, $action, $resource);
+        TenantScope::within($resource->scope->tenant, $resource->reach()->application, static function () use ($manager, $actions, $resource): void {
+            foreach ($actions as $action) {
+                self::authorize($manager, $action, $resource);
+            }
         });
     }
 
