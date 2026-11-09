@@ -229,6 +229,35 @@ final class RowCollectorTest extends TestCase
     }
 
     /**
+     * A route is keyed among those of its stored row by the first role of its
+     * chain and how many roles the chain runs through, then the keys of the
+     * rows it rests on, so its key, and a row's sort key, stays the same size
+     * however deep the chain runs; a route with no chain is keyed by its rows
+     * alone.
+     *
+     * @return void
+     */
+    public function testARouteIsKeyedByItsFirstRoleAndItsLength(): void
+    {
+        $edge  = self::grant('r', 'p', null);
+        $chain = \array_map(static fn (int $level): string => 'role-' . $level, \range(1, 300));
+
+        self::assertSame([], RowCollector::routeKey([], []));
+        self::assertSame([$edge->key()], RowCollector::routeKey([], [$edge]));
+        self::assertSame(['a', 1], RowCollector::routeKey(['a'], []));
+        self::assertSame(['a', 3, $edge->key()], RowCollector::routeKey(['a', 'b', 'c'], [$edge]));
+        self::assertSame(['role-1', 300], RowCollector::routeKey($chain, []));
+
+        $rows = new RowCollector(ReviewRun::of(ReviewScope::everywhere()), 2);
+
+        $rows->route(SourceKind::ROLE_INHERITED, new Reference('u', 'a'), self::grant('a', 'role-1', null), new Reference('role', 'role-300'), $chain);
+        $rows->route(SourceKind::ROLE_INHERITED, new Reference('u', 'b'), self::grant('b', 'role-1', null), new Reference('role', 'role-300'), $chain);
+        $rows->route(SourceKind::ROLE_INHERITED, new Reference('u', 'c'), self::grant('c', 'role-1', null), new Reference('role', 'role-300'), $chain);
+
+        self::assertSame([1, 'role', 'role-300', 'u', 'b', 0, '', 0, '', 0, '', true, 'role-1', 300], $rows->next());
+    }
+
+    /**
      * The next page starts after the last row returned, in the order the rows
      * were last returned in, and there is none when no row was left out.
      *
@@ -248,7 +277,7 @@ final class RowCollectorTest extends TestCase
 
         $rows->rows(true);
 
-        self::assertSame([0, 'role', 'r', 'u', 'b', 0, '', 0, '', 0, '', true, 'r'], $rows->next());
+        self::assertSame([0, 'role', 'r', 'u', 'b', 0, '', 0, '', 0, '', true, 'r', 1], $rows->next());
 
         $short = new RowCollector(ReviewRun::of(ReviewScope::everywhere()), 2);
 
@@ -268,7 +297,7 @@ final class RowCollectorTest extends TestCase
     {
         $row = $rows->rows()[0];
 
-        return [SourceKind::ROLE_INHERITED->position(), $row->target->type, $row->target->id, 'u', $row->subject->id, 0, '', 0, '', 0, '', true, 'r'];
+        return [SourceKind::ROLE_INHERITED->position(), $row->target->type, $row->target->id, 'u', $row->subject->id, 0, '', 0, '', 0, '', true, 'r', 1];
     }
 
     /**

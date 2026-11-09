@@ -146,15 +146,16 @@ final class WhyCommand extends Command
 
     /**
      * Return the refusal of a subject the console subject resolver failed to
-     * resolve: the resolver's own refusal, or one naming neither the reference
-     * nor the failure.
+     * resolve, naming the subject argument alone, never the reference given:
+     * what the resolver's own refusal says is wrong, or, for any other failure,
+     * that it could not be resolved, never naming the failure.
      *
      * @param  \Throwable  $failure
      * @return \SineMacula\Laravel\Authorization\Exceptions\UnresolvedSubjectException
      */
     private static function refusal(\Throwable $failure): UnresolvedSubjectException
     {
-        return $failure instanceof UnresolvedSubjectException ? $failure : UnresolvedSubjectException::unresolvable($failure);
+        return ($failure instanceof UnresolvedSubjectException ? $failure : UnresolvedSubjectException::unresolvable($failure))->namingOnly('subject');
     }
 
     /**

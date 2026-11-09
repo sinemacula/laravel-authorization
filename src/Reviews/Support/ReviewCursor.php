@@ -17,20 +17,29 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * The cursors of a paged access review: opaque, tamper-evident tokens that
  * carry a review's position (see `ReviewPosition`) from one page to the next.
  *
- * A cursor is its payload and its signature, each base64url-encoded and joined
- * by a dot. The payload holds the row schema version, the review's instant and
- * the sort key of the last row returned, whose parts are the references and
- * scope values that row already shows, so a cursor discloses nothing a page did
- * not. The signature is an HMAC-SHA256, keyed from the application key, of the
- * payload and of what the cursor is bound to: the query (its kind, target or
- * subject, scope selection, tenant, application selector, window, actor and
- * whether it lists direct grants alone), the reviewer (its principal and any
- * impersonator) or the trusted path, and the row schema version.
+ * A cursor is its payload and its signature, each base64url-encoded, unpadded,
+ * and joined by a dot. The payload holds the row schema version, the review's
+ * instant and the sort key of the last row returned, whose parts are the
+ * references and scope values that row already shows, so a cursor discloses
+ * nothing a page did not. The signature is an HMAC-SHA256, keyed from the
+ * application key, of the payload, the schema version included, and of what the
+ * cursor is bound to: the query (its kind, target or subject, scope selection,
+ * tenant, application selector, window, actor and whether it lists direct
+ * grants alone) and the reviewer (its principal and any impersonator) or the
+ * trusted path.
+ *
+ * A sort key holds a fixed number of parts however deep the role hierarchy runs
+ * (see `RowCollector`), each a morph type, a key, a scope value or a stored
+ * row's key, which the grant tables bound to 191 characters a column, so a
+ * cursor stays a few kilobytes, well under the longest one read (`MAX_LENGTH`).
  *
  * A cursor is read only once its signature is verified, in constant time, for
- * the query and reviewer it is presented with; a cursor changed in any byte,
- * issued for another query, another reviewer or the trusted path, of another
- * schema version, or that is not a cursor at all is refused with the one
+ * the query and reviewer it is presented with, and only in the one text that
+ * encodes it: each part must be exactly the canonical base64url of its bytes,
+ * so no other text, with padding, a line break, another alphabet or other spare
+ * bits, reads as the same cursor. A cursor changed in any byte, issued for
+ * another query, another reviewer or the trusted path, of another schema
+ * version, or that is not a cursor at all is refused with the one
  * `InvalidReviewCursorException`, which says nothing of why.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -46,7 +55,7 @@ final readonly class ReviewCursor
     /** @var string The format of the review's instant in a cursor, to the microsecond, in UTC. */
     private const string INSTANT = 'Y-m-d\TH:i:s.u\Z';
 
-    /** @var int The longest cursor read; a longer one is refused unread. */
+    /** @var int The longest cursor read, many times the longest one issued; a longer one is refused unread. */
     private const int MAX_LENGTH = 16384;
 
     /**
@@ -143,10 +152,10 @@ final readonly class ReviewCursor
     }
 
     /**
-     * Return what a cursor is bound to: the row schema version, the query's
-     * kind, scope, application selector, target, subject, window, actor and
-     * reach, and the reviewer or the trusted path, each part length-prefixed so
-     * no two bindings share one.
+     * Return what a cursor is bound to: the query's kind, scope, application
+     * selector, target, subject, window, actor and reach, and the reviewer or
+     * the trusted path, each part length-prefixed so no two bindings share one;
+     * the row schema version is bound by the payload, which holds it.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $reviewer
@@ -159,7 +168,6 @@ final readonly class ReviewCursor
         $identity = $identity instanceof Model || $identity instanceof Reference ? Reference::of($identity) : null;
 
         return ReviewOrder::key([
-            (string) $this->version,
             $query->kind->value,
             $scope->selection->value,
             ...self::parts($scope->tenant),
@@ -209,12 +217,10 @@ final readonly class ReviewCursor
     private static function instantOf(string $text): ?CarbonImmutable
     {
         try {
-            $at = CarbonImmutable::createFromFormat(self::INSTANT, $text, 'UTC');
+            return CarbonImmutable::createFromFormat(self::INSTANT, $text, 'UTC');
         } catch (\Throwable) {
-            $at = null;
+            return null;
         }
-
-        return $at instanceof CarbonImmutable ? $at : null;
     }
 
     /**
@@ -279,15 +285,18 @@ final readonly class ReviewCursor
     }
 
     /**
-     * Return the bytes a base64url text encodes, or null when it encodes none.
+     * Return the bytes a base64url text encodes, or null when the text is not
+     * exactly their canonical encoding: whatever the decoding passes over, a
+     * character outside the alphabet, padding or spare bits that are not zero,
+     * the text is refused unless encoding the bytes again gives it back.
      *
      * @param  string  $text
      * @return string|null
      */
     private static function decoded(string $text): ?string
     {
-        $bytes = \preg_match('/^[A-Za-z0-9_-]+$/', $text) === 1 ? \base64_decode(\strtr($text, '-_', '+/'), true) : false;
+        $bytes = \base64_decode(\strtr($text, '-_', '+/'), true);
 
-        return $bytes === false ? null : $bytes;
+        return \is_string($bytes) && self::encoded($bytes) === $text ? $bytes : null;
     }
 }

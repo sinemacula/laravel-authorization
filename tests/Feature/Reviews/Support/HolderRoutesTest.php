@@ -558,6 +558,89 @@ final class HolderRoutesTest extends TestCase
     }
 
     /**
+     * A target held only directly, with no role below it or carrying it, is
+     * paged to its end however small the page: a later page reads again the
+     * grant the page before ended at, which adds no row, and one more, so no
+     * holder after it is left out.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDirectHoldersAlonePageToTheEnd(): void
+    {
+        self::keyCursors();
+
+        $role       = self::role('alone');
+        $permission = self::permission('posts:edit');
+        $policy     = self::policy('deny-delete');
+
+        foreach (['a', 'b', 'c', 'd'] as $holder) {
+            self::grants()->grantRole(new Reference('u', $holder), $role);
+            self::grants()->grantPermission(new Reference('u', $holder), $permission);
+            self::grants()->attachPolicy(new Reference('u', $holder), $policy);
+        }
+
+        foreach ([$role, $permission, $policy] as $target) {
+            $query = ReviewQuery::holders($target, ReviewScope::everywhere());
+            $whole = self::described(self::trusted($query));
+
+            self::assertCount(4, $whole, $target::class);
+
+            foreach ([1, 2, 3] as $size) {
+                self::assertSame($whole, \array_map(self::describe(...), self::pagedThrough($query, $size)['rows']), $target::class . " by {$size}");
+            }
+        }
+    }
+
+    /**
+     * The grants of the roles below or carrying a target are read only while a
+     * page has room and grants are left: a page that ends among them with room
+     * to spare reads them once, and a target no role carries reads none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRoleGrantsAreReadOnlyWhileAnyAreLeft(): void
+    {
+        self::keyCursors();
+
+        $top        = self::role('top');
+        $leaf       = self::role('leaf', $top);
+        $permission = self::permission('posts:edit');
+        $policy     = self::policy('deny-delete');
+
+        foreach (['a', 'b', 'c'] as $holder) {
+            self::grants()->grantRole(new Reference('u', $holder), $leaf);
+            self::grants()->grantPermission(new Reference('u', $holder), $permission);
+            self::grants()->attachPolicy(new Reference('u', $holder), $policy);
+        }
+
+        $roleGrants = static fn (array $pages): array => \array_map(
+            static fn (array $page): int => \count(\array_filter($page, static function (string $sql): bool {
+                $sql = \str_replace(['"', '`'], '', $sql);
+
+                return \str_contains($sql, 'from authorizable_roles') && !\str_contains($sql, 'authorizable_roles.role_id = ?');
+            })),
+            $pages,
+        );
+
+        $holders = ReviewQuery::holders($top, ReviewScope::everywhere());
+
+        self::assertSame([1], $roleGrants(self::pagedThrough($holders, 10)['queries']));
+        self::assertSame([1, 1], $roleGrants(self::pagedThrough($holders, 2)['queries']));
+        self::assertCount(3, self::pagedThrough($holders, 2)['rows']);
+
+        foreach ([$permission, $policy] as $target) {
+            $paged = self::pagedThrough(ReviewQuery::holders($target, ReviewScope::everywhere()), 2);
+
+            self::assertSame([0, 0], $roleGrants($paged['queries']), $target::class);
+            self::assertCount(3, $paged['rows'], $target::class);
+        }
+    }
+
+    /**
      * Return the reference to the permission with the name.
      *
      * @param  string  $name

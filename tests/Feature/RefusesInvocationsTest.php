@@ -71,11 +71,28 @@ final class RefusesInvocationsTest extends TestCase
             self::assertSame(2, $kernel->handle(new StringInput($line), $output), $line);
             self::assertStringContainsString("The --{$option} option must be given a value.", $output->fetch(), $line);
         }
+
+        // After the end of the options, `--`, an option's name is an argument,
+        // never an option given without its value.
+        $arguments = [
+            'authorization:why user:1 a -- --tenant'   => 'tenant',
+            'authorization:review holders -- --from'   => 'from',
+            'authorization:review holders -- --output' => 'output',
+        ];
+
+        foreach ($arguments as $line => $option) {
+            $output = new BufferedOutput;
+
+            $kernel->handle(new StringInput($line), $output);
+
+            self::assertStringNotContainsString("The --{$option} option must be given a value.", $output->fetch(), $line);
+        }
     }
 
     /**
      * Markup and control characters in an error are escaped, so neither styles
-     * nor moves the terminal.
+     * nor moves the terminal: an unknown option is named as given, escaped, and
+     * a reference is never named at all.
      *
      * @return void
      */
@@ -83,15 +100,20 @@ final class RefusesInvocationsTest extends TestCase
     {
         $tester = $this->tester('authorization:review');
 
-        $tester->execute(['query' => 'holdings', 'reference' => "<fg=red>evil\e[2J\u{85}</>:1"], ['capture_stderr_separately' => true, 'decorated' => true]);
+        $tester->execute(['query' => 'holdings', "--<fg=red>evil\e[2J\u{85}</>" => 'x'], ['capture_stderr_separately' => true, 'decorated' => true]);
 
         $errors = $tester->getErrorOutput();
 
-        self::assertStringContainsString('\'<fg=red>evil\u001b[2J\u0085</>\'', $errors);
+        self::assertStringContainsString('"--<fg=red>evil\u001b[2J\u0085</>"', $errors);
         self::assertStringNotContainsString("\e[31m", $errors);
         self::assertStringNotContainsString("\e[2J", $errors);
         self::assertStringNotContainsString("\u{85}", $errors);
         self::assertStringStartsWith("\e[37;41m", $errors);
+
+        $tester->execute(['query' => 'holdings', 'reference' => "<fg=red>evil\e[2J\u{85}</>:1"], ['capture_stderr_separately' => true, 'decorated' => true]);
+
+        self::assertStringContainsString('The reference\'s type is not an Eloquent model.', $tester->getErrorOutput());
+        self::assertStringNotContainsString('evil', $tester->getErrorOutput());
     }
 
     /**

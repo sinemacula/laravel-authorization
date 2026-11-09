@@ -195,7 +195,7 @@ final class WhyInvocationTest extends TestCase
         self::assertEquals(new Reference('team', 'tenant-1'), self::of(['action' => 'a'], ['tenant' => StubTenant::class . ':tenant-1'])->scope->tenant);
         self::assertEquals(new Reference('team', 'tenant-1'), self::of(['action' => 'a'], ['tenant' => 'team:tenant-1'])->scope->tenant);
 
-        $this->assertRefused(['action' => 'a'], ['tenant' => 'team:missing'], 'No tenant \'team:missing\' was found.');
+        $this->assertRefused(['action' => 'a'], ['tenant' => 'team:missing'], 'The --tenant option names no saved row.');
     }
 
     /**
@@ -223,7 +223,7 @@ final class WhyInvocationTest extends TestCase
             $this->assertRefused(['action' => 'a'], ['tenant' => $tenant], $format);
         }
 
-        $this->assertRefused(['action' => 'a'], ['tenant' => StubTenant::class . ':missing'], 'No tenant \'Tests\Feature\Stubs\StubTenant:missing\' was found.');
+        $this->assertRefused(['action' => 'a'], ['tenant' => StubTenant::class . ':missing'], 'The --tenant option names no saved row.');
     }
 
     /**

@@ -89,9 +89,10 @@ final class GrantRowsTest extends TestCase
     }
 
     /**
-     * Rows are ordered by their target first, or by it last, then by grantee
-     * and scope, and read a page at a time by keyset: each page after the row
-     * the page before ended at, or from it too when asked, never at an offset.
+     * Rows are ordered by their target first, or by it last, or, for one
+     * target, not by it, then by grantee and scope, and read a page at a time
+     * by keyset: each page after the row the page before ended at, or from it
+     * too when asked, never at an offset.
      *
      * @return void
      *
@@ -114,26 +115,23 @@ final class GrantRowsTest extends TestCase
             $rows,
         );
 
-        $ordered = static fn (bool $isTargetFirst): Builder => GrantRows::ordered(GrantRows::of(GrantTarget::ROLE), $table, 'role_id', $isTargetFirst);
+        // A query of one target is ordered, and resumed, by the grantee and the
+        // scope alone.
+        $ordered = static fn (?bool $isTargetFirst): Builder => GrantRows::ordered(
+            $isTargetFirst === null ? GrantRows::of(GrantTarget::ROLE)->where($table . '.role_id', $roles[0]->getKey()) : GrantRows::of(GrantTarget::ROLE),
+            $table,
+            'role_id',
+            $isTargetFirst,
+        );
 
         self::assertSame(['r0 a -', 'r0 a t', 'r0 b -', 'r1 a -'], $describe(GrantRows::page($ordered(true), 'role', 10)));
         self::assertSame(['r0 a -', 'r1 a -', 'r0 a t', 'r0 b -'], $describe(GrantRows::page($ordered(false), 'role', 10)));
+        self::assertSame(['r0 a -', 'r0 a t', 'r0 b -'], $describe(GrantRows::page($ordered(null), 'role', 10)));
 
-        foreach ([true, false] as $isTargetFirst) {
-            $all  = GrantRows::page($ordered($isTargetFirst), 'role', 10);
-            $read = [];
-            $last = null;
+        foreach ([true, false, null] as $isTargetFirst) {
+            $all = GrantRows::page($ordered($isTargetFirst), 'role', 10);
 
-            do {
-                $query = $ordered($isTargetFirst);
-                $query = $last === null ? $query : GrantRows::after($query, $table, 'role_id', $isTargetFirst, GrantRows::positionOf($last, $isTargetFirst));
-                $page  = GrantRows::page($query, 'role', 1);
-                $last  = $page[0] ?? null;
-
-                \array_push($read, ...$page);
-            } while ($last !== null);
-
-            self::assertSame($describe($all), $describe($read));
+            self::assertSame($describe($all), $describe(self::pagedByOne(static fn (): Builder => $ordered($isTargetFirst), $isTargetFirst)));
 
             $from = GrantRows::after($ordered($isTargetFirst), $table, 'role_id', $isTargetFirst, GrantRows::positionOf($all[1], $isTargetFirst), true);
 
@@ -144,8 +142,8 @@ final class GrantRowsTest extends TestCase
     /**
      * The position of the stored row a review's row starts from is read from
      * the row's sort key: its target around its grantee and scope, or the role
-     * granted, the first of its route, last; an edge's is its permission, then
-     * its role.
+     * granted, the first of its route, last, or its grantee and scope alone for
+     * a query of one target; an edge's is its permission, then its role.
      *
      * @return void
      */
@@ -155,6 +153,7 @@ final class GrantRowsTest extends TestCase
 
         self::assertSame(['p', 'u', 'a', 1, 'tenant', 1, 't', 0, '', true], GrantRows::positionAt($key, true));
         self::assertSame(['u', 'a', 1, 'tenant', 1, 't', 0, '', true, 'r'], GrantRows::positionAt($key, false));
+        self::assertSame(['u', 'a', 1, 'tenant', 1, 't', 0, '', true], GrantRows::positionAt($key, null));
         self::assertSame(['p', 'a'], GrantRows::edgeAt($key));
         self::assertSame([null, null], GrantRows::edgeAt([6]));
         self::assertSame([null], \array_slice(GrantRows::positionAt([0], true), 0, 1));
@@ -224,7 +223,10 @@ final class GrantRowsTest extends TestCase
      * The order compiles, on each driver's grammar, to the target, the
      * grantee's type and key, then the tenant's type and key and the
      * application, each of those three tagged for a null first, then the reach;
-     * the target last when asked.
+     * the target last when asked, and not at all for a query of one target. A
+     * reference column is left as it is stored where it compares its bytes
+     * already, as on MySQL, or only collated, as on PostgreSQL; the target, a
+     * UUID, is cast.
      *
      * @return void
      */
@@ -232,10 +234,12 @@ final class GrantRowsTest extends TestCase
     {
         foreach (self::drivers() as $driver) {
             $column = static fn (string $name): string => self::wrappedOn($driver, 'authorizable_roles.' . $name);
-            $bytes  = static fn (string $name): string => match ($driver) {
-                'sqlite' => $column($name) . ' collate binary',
-                'pgsql'  => 'cast(' . $column($name) . ' as text) collate "C"',
-                default  => 'cast(' . $column($name) . ' as binary)',
+            $bytes  = static fn (string $name): string => match (true) {
+                $driver === 'sqlite'                       => $column($name) . ' collate binary',
+                $driver === 'pgsql' && $name !== 'role_id' => $column($name) . ' collate "C"',
+                $driver === 'pgsql'                        => 'cast(' . $column($name) . ' as text) collate "C"',
+                $driver === 'mysql' && $name !== 'role_id' => $column($name),
+                default                                    => 'cast(' . $column($name) . ' as binary)',
             };
             $tagged = static fn (string $name): string => 'case when ' . $column($name) . ' is null then 0 else 1 end, ' . $bytes($name);
             $scope  = [
@@ -249,9 +253,38 @@ final class GrantRowsTest extends TestCase
 
             $first = GrantRows::ordered(self::queryOn($driver, 'authorizable_roles'), 'authorizable_roles', 'role_id')->toSql();
             $last  = GrantRows::ordered(self::queryOn($driver, 'authorizable_roles'), 'authorizable_roles', 'role_id', false)->toSql();
+            $one   = GrantRows::ordered(self::queryOn($driver, 'authorizable_roles'), 'authorizable_roles', 'role_id', null)->toSql();
 
             self::assertStringEndsWith(' order by ' . \implode(', ', [$bytes('role_id'), ...$scope]), $first, $driver);
             self::assertStringEndsWith(' order by ' . \implode(', ', [...$scope, $bytes('role_id')]), $last, $driver);
+            self::assertStringEndsWith(' order by ' . \implode(', ', $scope), $one, $driver);
         }
+    }
+
+    /**
+     * Read the ordered grants of the role table one at a time, each page by
+     * keyset after the grant the page before read, until none is left.
+     *
+     * @param  \Closure(): \Illuminate\Database\Query\Builder  $ordered
+     * @param  bool|null  $isTargetFirst
+     * @return list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>
+     *
+     * @throws \UnexpectedValueException
+     */
+    private static function pagedByOne(\Closure $ordered, ?bool $isTargetFirst): array
+    {
+        $table = GrantTarget::ROLE->table();
+        $read  = [];
+        $last  = null;
+
+        do {
+            $query = $last === null ? $ordered() : GrantRows::after($ordered(), $table, 'role_id', $isTargetFirst, GrantRows::positionOf($last, $isTargetFirst));
+            $page  = GrantRows::page($query, 'role', 1);
+            $last  = $page[0] ?? null;
+
+            \array_push($read, ...$page);
+        } while ($last !== null);
+
+        return $read;
     }
 }

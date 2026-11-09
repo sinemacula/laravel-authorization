@@ -113,18 +113,20 @@ final class GrantRows
     /**
      * Order a grant query in the review's order: by its target first when
      * asked, then by its grantee's type and key, its tenant's, its application
-     * and its reach, then by its target when not first, so the order is total
-     * over the rows a grant table can hold.
+     * and its reach, then by its target when asked to be last, so the order is
+     * total over the rows a grant table can hold; a query of one target, which
+     * it matches exactly, is not ordered by the target at all (null), so an
+     * index leading with the target and the grantee serves the order.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $table
      * @param  string  $target
-     * @param  bool  $isTargetFirst
+     * @param  bool|null  $isTargetFirst
      * @return \Illuminate\Database\Query\Builder
      */
-    public static function ordered(Builder $query, string $table, string $target, bool $isTargetFirst = true): Builder
+    public static function ordered(Builder $query, string $table, string $target, ?bool $isTargetFirst = true): Builder
     {
-        if ($isTargetFirst) {
+        if ($isTargetFirst === true) {
             ReviewOrder::by($query, $table . '.' . $target);
         }
 
@@ -136,7 +138,7 @@ final class GrantRows
 
         $query->orderBy($table . '.include_subtree');
 
-        return $isTargetFirst ? $query : ReviewOrder::by($query, $table . '.' . $target);
+        return $isTargetFirst === false ? ReviewOrder::by($query, $table . '.' . $target) : $query;
     }
 
     /**
@@ -202,19 +204,20 @@ final class GrantRows
 
     /**
      * Limit a grant query ordered as `ordered()` orders it to the rows after
-     * the position, or at it too when asked (see `Keyset`).
+     * the position, or at it too when asked (see `Keyset`), the target first,
+     * last or, for a query of one target, left out, as the query is ordered.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $table
      * @param  string  $target
-     * @param  bool  $isTargetFirst
+     * @param  bool|null  $isTargetFirst
      * @param  list<bool|int|string|null>  $position
      * @param  bool  $isInclusive
      * @return \Illuminate\Database\Query\Builder
      *
      * @throws \UnexpectedValueException
      */
-    public static function after(Builder $query, string $table, string $target, bool $isTargetFirst, array $position, bool $isInclusive = false): Builder
+    public static function after(Builder $query, string $table, string $target, ?bool $isTargetFirst, array $position, bool $isInclusive = false): Builder
     {
         $columns = [
             [$table . self::GRANTEE_TYPE, Keyset::TEXT],
@@ -225,7 +228,12 @@ final class GrantRows
             [$table . '.include_subtree', Keyset::FLAG],
         ];
 
-        $columns = $isTargetFirst ? [[$table . '.' . $target, Keyset::TEXT], ...$columns] : [...$columns, [$table . '.' . $target, Keyset::TEXT]];
+        $column  = [$table . '.' . $target, Keyset::TEXT];
+        $columns = match ($isTargetFirst) {
+            true  => [$column, ...$columns],
+            false => [...$columns, $column],
+            null  => $columns,
+        };
 
         return Keyset::after($query, $columns, $position, $isInclusive);
     }
@@ -251,32 +259,42 @@ final class GrantRows
     /**
      * Return the position of a stored row in a grant query ordered as
      * `ordered()` orders it: its target first or last, as asked, around its
-     * grantee and scope.
+     * grantee and scope, or none for a query of one target.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\GrantRow  $row
-     * @param  bool  $isTargetFirst
+     * @param  bool|null  $isTargetFirst
      * @return list<bool|int|string|null>
      */
-    public static function positionOf(GrantRow $row, bool $isTargetFirst): array
+    public static function positionOf(GrantRow $row, ?bool $isTargetFirst): array
     {
-        return $isTargetFirst ? [$row->targetId, ...$row->orderKey()] : [...$row->orderKey(), $row->targetId];
+        return match ($isTargetFirst) {
+            true  => [$row->targetId, ...$row->orderKey()],
+            false => [...$row->orderKey(), $row->targetId],
+            null  => $row->orderKey(),
+        };
     }
 
     /**
      * Return the position, in a grant query ordered as `ordered()` orders it,
      * of the stored row a review's row starts from, read from the row's sort
      * key (see `RowCollector`): its target, or for a route through roles the
-     * role granted, the first of its route, around its grantee and scope.
+     * role granted, the first of its route, around its grantee and scope; its
+     * grantee and scope alone for a query of one target, so the stored row's
+     * own key, never the target as a query spells it, says where to resume.
      *
      * @param  list<bool|int|string|null>  $key
-     * @param  bool  $isTargetFirst
+     * @param  bool|null  $isTargetFirst
      * @return list<bool|int|string|null>
      */
-    public static function positionAt(array $key, bool $isTargetFirst): array
+    public static function positionAt(array $key, ?bool $isTargetFirst): array
     {
         $stored = \array_slice($key, RowCollector::STORED, RowCollector::ROUTE - RowCollector::STORED);
 
-        return $isTargetFirst ? [$key[RowCollector::TARGET] ?? null, ...$stored] : [...$stored, $key[RowCollector::ROUTE] ?? null];
+        return match ($isTargetFirst) {
+            true  => [$key[RowCollector::TARGET] ?? null, ...$stored],
+            false => [...$stored, $key[RowCollector::ROUTE] ?? null],
+            null  => $stored,
+        };
     }
 
     /**

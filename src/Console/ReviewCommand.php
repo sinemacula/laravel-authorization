@@ -89,8 +89,10 @@ final class ReviewCommand extends Command
     }
 
     /**
-     * Export the review to the file, or to the standard output for none, and
-     * close the file, or refuse with the class of what the review threw.
+     * Export the review to the file, or to the standard output for none, or
+     * refuse with the class of what the review threw. The file is closed when
+     * its handle is released, as the command returns, whether or not the export
+     * was written.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\AccessReview  $reviews
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
@@ -107,10 +109,6 @@ final class ReviewCommand extends Command
             $reviews->trustedExport($query, $sink);
         } catch (\Throwable $exception) {
             return $this->refuse('The review could not be exported (' . $exception::class . ').', self::FAILURE);
-        } finally {
-            if (\is_resource($file)) {
-                \fclose($file);
-            }
         }
 
         return self::SUCCESS;

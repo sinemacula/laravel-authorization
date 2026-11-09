@@ -29,8 +29,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * be limited to those that reach one of the attachments read (see
  * `reaching()`), so a grant that would add no route is never read.
  *
- * The routes of one grant are collected in the review's order: by the roles of
- * the chain to the carrying role, then by the row each rests on.
+ * The routes of one grant are collected in the review's order: by the chain to
+ * the carrying role, its first role and its length, then by the row each rests
+ * on (see `RowCollector::routeKey()`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -219,7 +220,7 @@ final class RoleCarriers
             $path = \array_slice($chain, 0, $depth + 1);
 
             foreach ($carried[$role] ?? [] as $row) {
-                $routes[] = ['key' => [...$path, $row->key()], 'path' => $path, 'row' => $row];
+                $routes[] = ['key' => RowCollector::routeKey($path, [$row]), 'path' => $path, 'row' => $row];
             }
         }
 

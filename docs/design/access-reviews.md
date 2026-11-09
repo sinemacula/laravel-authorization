@@ -96,10 +96,14 @@ N97, N98), and what is still left out.
    The same holds for holders, holdings, expiries and an actor's grants, each following its scope selection.
 
 8. **One total order (`Reviews\Support\ReviewOrder`).** By source kind (in `SourceKind`'s declared order), target,
-   grantee, origin scope and route, each nullable component tagged so the platform comes before a tenant and every
-   application before a named one, every string compared byte for byte: SQLite through its binary collation,
-   PostgreSQL through `C`, MySQL as binary strings, PHP through `strcmp()`. The same rows come in the same order on
-   every supported database.
+   grantee, origin scope and route (the first role of its chain, how many roles the chain runs through, then the keys
+   of the rows it rests on: a chain runs up through one parent at a time, so these name a route among those of its
+   stored row), each nullable component tagged so the platform comes before a tenant and every application before a
+   named one, every string compared byte for byte: SQLite through its binary collation, PostgreSQL through `C`, MySQL
+   as binary strings, PHP through `strcmp()`. A reference column is compared as it is stored wherever that is already
+   byte for byte (bare on MySQL, whose reference columns are `utf8mb4_0900_bin`; only collated `C` on PostgreSQL), so
+   an index on it serves the order; any other column is cast. The same rows come in the same order on every supported
+   database.
 
 9. **Bounded, on the writer, no query per holder.** A review returns at most its limit (`authorization.reviews.limit`,
    1000 by default and validated at boot as a whole number of at least 1, or `withLimit()`), reading at least one more
@@ -153,7 +157,11 @@ N97, N98), and what is still left out.
     grantee and scope (each nullable part tagged), then the route. A later page passes over every source whose kind
     comes before that row's without reading it; the source of that row's kind resumes from the stored row the row
     starts from, by a condition written column by column (greater, or equal and the rest after), each comparison byte
-    for byte as the order sorts (`ReviewOrder::compared()`), a null before any value and false before true. A grant
+    for byte as the order sorts (`ReviewOrder::compared()`), a null before any value and false before true; on
+    PostgreSQL the leading text columns are bounded together as a row too (`ReviewOrder::atLeast()`), which an index
+    seeks by. A target's direct grants are all of the one target, so they are ordered and resumed by grantee and scope
+    alone, from the stored row's own key, never the target as the query spells it; a target's key is read in its
+    canonical lowercase form, so a key in capitals finds the same holders on every database. A grant
     through roles is read again from that row, one more than the room left, since it may carry routes still to come,
     and every route at or before the position is passed over; a stored row, one row of the review, resumes after itself.
     One subject's holdings are read whole for each page and the rows after the position kept, by design. `review()`
@@ -162,16 +170,20 @@ N97, N98), and what is still left out.
 
 16. **Signed cursors bound to their review (`Reviews\Support\ReviewCursor`).** A page's cursor carries its position
     between pages: its payload (the row schema version, the review's instant to the microsecond, and the sort key, each
-    string part base64-encoded so any bytes survive) and an HMAC-SHA256 signature, keyed by a key derived from
-    `app.key` for cursors alone, over the payload and over what the cursor is bound to: the schema version, the query's
-    kind, scope selection, tenant, application selector and name, target, subject (its principal and identity, and
-    which mode), window, actor and `directOnly`, and the reviewer (its principal and impersonator) or the trusted path,
-    each part length-prefixed. A cursor is read only once its signature verifies, in constant time, for the query and
-    reviewer it is presented with; anything else, a changed byte, another query, scope, reviewer or path, another schema
-    version, a payload of another shape or no cursor at all, is refused with `InvalidReviewCursorException`, whose one
-    message says nothing of why. The cursor discloses nothing a page did not: the parts of its sort key are references
-    and scope values its last row shows. The limit is not bound. No key refuses to sign or read one
-    (`MissingAppKeyException`); a review that fits on its first page issues none.
+    string part base64-encoded so any bytes survive) and an HMAC-SHA256 signature, keyed by a key derived from `app.key`
+    for cursors alone, over the payload, the schema version with it, and over what the cursor is bound to: the query's
+    kind, scope selection, tenant, application selector and name, target, subject (its principal and identity, and which
+    mode), window, actor and `directOnly`, and the reviewer (its principal and impersonator) or the trusted path, each
+    part length-prefixed. A sort key holds a fixed number of parts however deep the hierarchy runs (invariant 8), each a
+    reference, scope value or stored row's key of at most 191 characters a part, so a cursor stays a few kilobytes, well
+    under the 16384 characters read. A cursor is read only once its signature verifies, in constant time, for the query
+    and reviewer it is presented with, and only in the one text that encodes it: each part must be exactly the
+    canonical, unpadded base64url of its bytes, so a line break, padding, the standard alphabet or spare bits that are
+    not zero are refused even where they decode to the same bytes. Anything else, a changed byte, another query, scope,
+    reviewer or path, another schema version, a payload of another shape or no cursor at all, is refused with
+    `InvalidReviewCursorException`, whose one message says nothing of why. The cursor discloses nothing a page did not:
+    the parts of its sort key are references and scope values its last row shows. The limit is not bound. No key refuses
+    to sign or read one (`MissingAppKeyException`); a review that fits on its first page issues none.
 
 17. **Readmission and the frozen instant: a live scan.** Every page is admitted again before anything, its cursor
     included, is read, and a stream or an export is admitted before each chunk, so a right revoked, a step-up no longer
@@ -183,7 +195,8 @@ N97, N98), and what is still left out.
     scan is returned exactly once, in its place.
 
 18. **Streams and JSON Lines exports (N97).** `stream()` returns a lazy iterable: nothing is read until it is iterated,
-    then each chunk is read through the same pages, so memory is bounded by the chunk, not the tenant. `export()`
+    then each chunk is read through the same pages, so memory is bounded by the chunk, not the tenant (the paging
+    budget measures it against what was held before the stream began). `export()`
     writes versioned JSON Lines (`Reviews\Support\JsonLinesExport`) to a writable stream, each line written whole, or
     to a callback: a header (`record` `header`, `version`, the `query` kind, the `scope`, `reviewed_at`,
     `scan_started_at`, `consistency` `live`), one line a row (`record` `row` and the row's shape), and a footer
@@ -199,16 +212,26 @@ N97, N98), and what is still left out.
     `--actor` and `--direct-only` taken by their own queries alone; a holdings subject is resolved by the console
     subject resolver. It writes nothing but the JSON Lines to the standard output, or to `--output`, created only when
     it does not exist unless `--force` is given, and exits as `authorization:why` does: 0 written, 2 for an invalid
-    invocation, 1 when the review fails.
+    invocation, 1 when the review fails. Its errors name the argument or option alone, never a value given: a subject
+    or tenant that is malformed, names no model or no saved row, or cannot be resolved included
+    (`UnresolvedSubjectException::namingOnly()`).
 
-20. **Indexes (N95).** A new migration, `2026_11_08_000001_add_access_review_indexes`, adds `{table}_granted_by_index`
-    on the `granted_by` pair of each grant table, and `{table}_permission_id_index` on the role permission edges, whose
-    primary key leads with the role; MySQL already indexes that column for its foreign key and keeps that index. Checked
-    against the review queries with `EXPLAIN`: an actor's grants are matched on the new index on PostgreSQL and MySQL; a
-    target's grants, through roles or direct, on each grant table's unique index, which leads with the target; an expiry
-    window on each table's `expires_at` index; a grantee's on its morph index. The order is byte for byte, which no
-    index on a collated column gives, so the database sorts what a page selects, bounded by the page. The migration
-    honours the configured table names and connection.
+20. **Indexes and what a page reads (N95).** A new migration, `2026_11_08_000001_add_access_review_indexes`, adds
+    `{table}_granted_by_index` on the `granted_by` pair of each grant table, `{table}_permission_id_index` on the role
+    permission edges, whose primary key leads with the role (MySQL already indexes that column for its foreign key and
+    keeps that index), and, on PostgreSQL, `{table}_review_order_index` on each grant table's target and its grantee's
+    type and key collated `C`. Checked against the review queries with `EXPLAIN` and measured by the paging budget. A
+    page of a target's direct holders matches the target exactly and orders by grantee and scope, so it seeks to its
+    keyset and reads no grant before it. On PostgreSQL the planner can walk the order index, sorting only each grantee's
+    grants of the target (an incremental sort), and read about the rows it returns, or, for a target with few grants
+    left, read those from the keyset on and sort them. On MySQL the unique index leads with the target and the grantee,
+    whose columns compare their bytes, but holds digests of the tenant and application, not their values, so a page
+    reads the target's grants from its keyset on and sorts them: its work grows with the target's grants after the page,
+    never with those before it or with the tenant's. A page of routes through the roles below a target, of an expiry
+    window (each table's `expires_at` index) or of an actor's grants (the new `granted_by` index) reads the rows its
+    filter matches from its keyset on and sorts them, so its work grows with the rows those roles, that window or that
+    actor match; only the sort's top rows are bounded by the page. A grantee's holdings are read on its morph index. The
+    migration honours the configured table names and connection.
 
 ## Success Path
 
@@ -254,9 +277,11 @@ rights.
   review of everywhere too, never in one rooted within a tenant; either is marked `malformed`, its origin scope as
   stored.
 - A window whose bounds fall within one second holds no stored expiry, since every expiry is a whole second.
-- A cursor changed in any byte, issued for another query, scope, reviewer or the trusted path, or of another schema
-  version is refused with `InvalidReviewCursorException`; a page of a reviewer who lost the right is refused with
-  `AuthorizationException` before its cursor is read.
+- A cursor changed in any byte, written in any text but its canonical one, issued for another query, scope, reviewer
+  or the trusted path, or of another schema version is refused with `InvalidReviewCursorException`; a page of a
+  reviewer who lost the right is refused with `AuthorizationException` before its cursor is read.
+- A review through a hierarchy hundreds of roles deep pages to its end with cursors of a few kilobytes, since a route
+  is keyed by its first role and its length, not by every role it runs through.
 - An export without `authorization:review.export` beside the read right is refused before its header is written; one
   refused at a later chunk, or failing, ends with no footer; a sink that is neither a stream nor a callback is refused
   with `InvalidArgumentException`, a stream that takes none of a line with `RuntimeException`, and a row holding

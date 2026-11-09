@@ -101,7 +101,9 @@ final class JsonLinesExport
     /**
      * Write the export of the query from its pages, as each is read: the header
      * once the first page is read, its rows, every later page's, then the
-     * footer; and return how many rows were written.
+     * footer; and return how many rows were written. What reading a page
+     * throws, such as a refused admission, and a stream sink's
+     * `ReviewExportException` are thrown on, with no footer.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
      * @param  iterable<\SineMacula\Laravel\Authorization\Reviews\Support\PageRead>  $pages

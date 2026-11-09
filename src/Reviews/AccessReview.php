@@ -143,6 +143,7 @@ final readonly class AccessReview
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidReviewCursorException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     * @throws \Illuminate\Encryption\MissingAppKeyException
      * @throws \InvalidArgumentException
      * @throws \JsonException
      */
@@ -164,6 +165,7 @@ final readonly class AccessReview
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidReviewCursorException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     * @throws \Illuminate\Encryption\MissingAppKeyException
      * @throws \InvalidArgumentException
      * @throws \JsonException
      */
@@ -213,7 +215,9 @@ final readonly class AccessReview
      * written and again before every chunk; return how many rows were written.
      * A refusal at any chunk throws `AuthorizationException`, and a stream that
      * takes none of a line `ReviewExportException`, so an export that stops
-     * part way has no footer.
+     * part way has no footer. Both are thrown from within the pages and the
+     * sink, which static analysis does not follow, so they are named here
+     * rather than as `@throws`.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $reviewer
@@ -221,6 +225,7 @@ final readonly class AccessReview
      * @param  int  $chunk
      * @return int
      *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      * @throws \InvalidArgumentException
      * @throws \JsonException
      */
@@ -231,13 +236,16 @@ final readonly class AccessReview
 
     /**
      * Export the review as trusted system work, with no reviewer and no
-     * admission, as JSON Lines.
+     * admission, as JSON Lines; a stream that takes none of a line throws
+     * `ReviewExportException` (named here, as static analysis does not follow
+     * the sink), and an export that stops part way has no footer.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
      * @param  (callable(string): mixed)|resource  $sink
      * @param  int  $chunk
      * @return int
      *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      * @throws \InvalidArgumentException
      * @throws \JsonException
      */
@@ -259,6 +267,7 @@ final readonly class AccessReview
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidReviewCursorException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     * @throws \Illuminate\Encryption\MissingAppKeyException
      * @throws \InvalidArgumentException
      * @throws \JsonException
      */
@@ -282,6 +291,7 @@ final readonly class AccessReview
      * @param  (\Closure(): void)|null  $admit
      * @return int
      *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      * @throws \InvalidArgumentException
      * @throws \JsonException
      */

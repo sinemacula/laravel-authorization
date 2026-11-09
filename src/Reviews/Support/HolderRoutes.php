@@ -55,7 +55,10 @@ final class HolderRoutes
     /**
      * Collect the rows of the holders of the query's target: none for a key no
      * definition could have, or for a definition the reviewed tenant does not
-     * see.
+     * see. A definition's key is a UUID, read in its canonical lowercase form
+     * however the query spells it, as every database stores and returns it, so
+     * a key in capitals finds the same holders, through the same routes, on
+     * every database.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
@@ -66,7 +69,7 @@ final class HolderRoutes
      */
     public static function read(ReviewRun $run, ReviewQuery $query, RowCollector $rows): bool
     {
-        $target = $query->target;
+        $target = $query->target === null ? null : new Reference($query->target->type, \strtolower($query->target->id));
         $kind   = $query->targetKind();
 
         if ($target !== null && $kind !== null && Definitions::isKey($target->id) && $run->seesDefinition($kind, $target->id)) {
@@ -186,7 +189,10 @@ final class HolderRoutes
      * Collect the target's direct grants in the scope, each one route, a
      * policy's attachments to roles left to the routes through roles: none when
      * every one comes before the page before ended, and on a later page those
-     * from its last row's on.
+     * from its last row's on. Every grant read is of the one target, so they
+     * are ordered, and resumed, by their grantee and scope alone, which the
+     * index leading with the target and the grantee serves, and each row names
+     * the target by the key its grant stores.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
@@ -209,17 +215,16 @@ final class HolderRoutes
         }
 
         $table = $kind->table();
-        $query = GrantRows::ordered(self::scoped($run, $kind)->where($table . '.' . $kind->column(), $target->id), $table, $kind->column());
+        $query = GrantRows::ordered(self::scoped($run, $kind)->where($table . '.' . $kind->column(), $target->id), $table, $kind->column(), null);
 
         if ($kind === GrantTarget::POLICY) {
             InlinePolicies::attachedToTheirGrantee($query, $table)->where($table . '.authorizable_type', '!=', Definitions::morph(GrantTarget::ROLE));
         }
 
-        $chain  = $kind === GrantTarget::ROLE ? [$target->id] : [];
         $resume = $rows->resumeAt($source);
 
-        foreach (GrantRows::page(self::resumed($query, $table, $kind->column(), true, $resume), $kind->value, self::sizeOf($rows, $resume)) as $grant) {
-            $rows->route($source, $grant->grantee, $grant, $target, $chain);
+        foreach (GrantRows::page(self::resumed($query, $table, $kind->column(), null, $resume), $kind->value, self::sizeOf($rows, $resume)) as $grant) {
+            $rows->route($source, $grant->grantee, $grant, new Reference($target->type, $grant->targetId), $kind === GrantTarget::ROLE ? [$grant->targetId] : []);
         }
     }
 
@@ -227,14 +232,15 @@ final class HolderRoutes
      * Collect the routes of the source's kind the callback expands each grant
      * of one of the roles into, given the role's chain, reading the grants a
      * page at a time in the review's order until the rows are full or none is
-     * left: none when every route of the kind comes before the page before
-     * ended; a page is the room left, the query narrowed first when asked, and
-     * each page handed to the reader given before it is expanded. Each page
-     * after the first starts after the last grant read, never at an offset; on
-     * a later page of the review, the first starts at the grant its last row
-     * starts from, read again for its remaining routes, so it reads one grant
-     * more. Every grant read expands into at least one route, so the first page
-     * fills the rows or is the last.
+     * left: none for no role; a page is the room left, the query narrowed first
+     * when asked, and each page handed to the reader given before it is
+     * expanded. The routes through roles are the last kind of a review of
+     * holders, so no page before can have ended past them. Each page after the
+     * first starts after the last grant read, never at an offset; on a later
+     * page of the review, the first starts at the grant its last row starts
+     * from, read again for its remaining routes, so it reads one grant more.
+     * Every grant read expands into at least one route, so the first page fills
+     * the rows or is the last.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  array<string, list<string>>  $chains
@@ -260,7 +266,7 @@ final class HolderRoutes
         $query  = self::scoped($run, GrantTarget::ROLE)->whereIn($table . '.role_id', \array_map(strval(...), \array_keys($chains)));
         $query  = GrantRows::ordered($narrow === null ? $query : $narrow($query, $table), $table, 'role_id', false);
         $resume = $rows->resumeAt($source);
-        $isLeft = $chains !== [] && !$rows->isPast($source);
+        $isLeft = $chains !== [];
 
         while ($isLeft && !$rows->isFull()) {
             $size = self::sizeOf($rows, $resume);
@@ -268,9 +274,8 @@ final class HolderRoutes
 
             self::expand($page, $chains, $expand, $read);
 
-            $last   = \end($page);
-            $isLeft = \count($page) === $size && $last !== false;
-            $resume = $last         === false ? null : $last;
+            $isLeft = \count($page) === $size;
+            $resume = $page[$size - 1] ?? null;
         }
     }
 
@@ -305,13 +310,13 @@ final class HolderRoutes
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $table
      * @param  string  $target
-     * @param  bool  $isTargetFirst
+     * @param  bool|null  $isTargetFirst
      * @param  list<bool|int|string|null>|\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow|null  $from
      * @return \Illuminate\Database\Query\Builder
      *
      * @throws \UnexpectedValueException
      */
-    private static function resumed(Builder $query, string $table, string $target, bool $isTargetFirst, array|GrantRow|null $from): Builder
+    private static function resumed(Builder $query, string $table, string $target, ?bool $isTargetFirst, array|GrantRow|null $from): Builder
     {
         return match (true) {
             $from === null            => $query,

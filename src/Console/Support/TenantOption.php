@@ -15,9 +15,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * A type the morph map or a class name resolves to an Eloquent model names that
  * model's row, which must exist, by its morph class; any other type is the
  * tenant reference as given. Anything else is refused with
- * `InvalidArgumentException`, whose message names the option: a value not in
- * the format, or a lookup that fails, as one whose key the key column cannot
- * hold does on some databases, without naming the failure.
+ * `InvalidArgumentException`, whose message names the option alone, never the
+ * value given: a value not in the format, a row that does not exist, or a
+ * lookup that fails, as one whose key the key column cannot hold does on some
+ * databases, without naming the failure.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -72,6 +73,6 @@ final class TenantOption
             throw new \InvalidArgumentException("The --{$option} option could not be resolved.");
         }
 
-        return Reference::of($model ?? throw new \InvalidArgumentException("No tenant '{$type}:{$key}' was found."));
+        return Reference::of($model ?? throw new \InvalidArgumentException("The --{$option} option names no saved row."));
     }
 }

@@ -10,6 +10,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Database\ExactReferences;
 use SineMacula\Laravel\Authorization\Reviews\Support\ReviewOrder;
 use Tests\Concerns\CompilesQueries;
 use Tests\TestCase;
@@ -166,11 +167,107 @@ final class ReviewOrderTest extends TestCase
     {
         $method = new \ReflectionMethod(ReviewOrder::class, 'bytes');
 
-        self::assertSame('"value"', $method->invoke(null, 'sqlsrv', '"value"'));
-        self::assertSame('cast("value" as text) collate "C"', $method->invoke(null, 'pgsql', '"value"'));
-        self::assertSame('cast(`value` as binary)', $method->invoke(null, 'mysql', '`value`'));
-        self::assertSame('cast(`value` as binary)', $method->invoke(null, 'mariadb', '`value`'));
-        self::assertSame('"value" collate binary', $method->invoke(null, 'sqlite', '"value"'));
+        self::assertSame('"value"', $method->invoke(null, 'sqlsrv', 'value', '"value"'));
+        self::assertSame('cast("value" as text) collate "C"', $method->invoke(null, 'pgsql', 'value', '"value"'));
+        self::assertSame('cast(`value` as binary)', $method->invoke(null, 'mysql', 'value', '`value`'));
+        self::assertSame('cast(`value` as binary)', $method->invoke(null, 'mariadb', 'value', '`value`'));
+        self::assertSame('"value" collate binary', $method->invoke(null, 'sqlite', 'value', '"value"'));
+
+        // A reference column is left as it is stored where it compares its
+        // bytes already, and only collated where it is text; MariaDB's
+        // reference columns keep their collation, so they are cast.
+        self::assertSame('"tenant_id"', $method->invoke(null, 'sqlsrv', 'grants.tenant_id', '"tenant_id"'));
+        self::assertSame('"tenant_id" collate "C"', $method->invoke(null, 'pgsql', 'grants.tenant_id', '"tenant_id"'));
+        self::assertSame('`tenant_id`', $method->invoke(null, 'mysql', 'grants.tenant_id', '`tenant_id`'));
+        self::assertSame('`tenant_id`', $method->invoke(null, 'mysql', 'tenant_id', '`tenant_id`'));
+        self::assertSame('cast(`tenant_id` as binary)', $method->invoke(null, 'mariadb', 'tenant_id', '`tenant_id`'));
+        self::assertSame('"tenant_id" collate binary', $method->invoke(null, 'sqlite', 'tenant_id', '"tenant_id"'));
+        self::assertSame('cast(`tenant_ids` as binary)', $method->invoke(null, 'mysql', 'grants.tenant_ids', '`tenant_ids`'));
+        self::assertSame('cast(`tenant_id.x` as binary)', $method->invoke(null, 'mysql', 'tenant_id.x', '`tenant_id.x`'));
+    }
+
+    /**
+     * A reference column, which the package collates `utf8mb4_0900_bin` on
+     * MySQL, is ordered and compared as it is stored there, and only collated
+     * `C` on PostgreSQL, yet still byte for byte, as `strcmp()` orders it, on
+     * every database: so an index on the column serves the order.
+     *
+     * @return void
+     */
+    public function testAReferenceColumnOrdersByteForByteAsItIsStored(): void
+    {
+        $exact = new ExactReferences(DB::connection());
+
+        Schema::create('review_order_references', static function (Blueprint $table) use ($exact): void {
+            $table->increments('id');
+            $table->string('tenant_id', 191)->nullable();
+
+            $exact->apply($table);
+        });
+
+        $values = ['b', 'B', 'a ', 'a', "\u{e4}", "\u{1f600}", 'Z', '_', '%', '10', '9', ''];
+
+        foreach ($values as $value) {
+            DB::table('review_order_references')->insert(['tenant_id' => $value]);
+        }
+
+        \usort($values, static fn (string $one, string $other): int => \strcmp($one, $other));
+
+        self::assertSame($values, ReviewOrder::by(DB::table('review_order_references'), 'review_order_references.tenant_id')->pluck('tenant_id')->all());
+
+        foreach ($values as $index => $value) {
+            $after = ReviewOrder::by(ReviewOrder::compared(DB::table('review_order_references'), 'tenant_id', '>', $value), 'tenant_id')->pluck('tenant_id')->all();
+            $equal = ReviewOrder::compared(DB::table('review_order_references'), 'tenant_id', '=', $value)->pluck('tenant_id')->all();
+
+            self::assertSame(\array_slice($values, $index + 1), $after, "after '{$value}'");
+            self::assertSame([$value], $equal, "equal to '{$value}'");
+        }
+    }
+
+    /**
+     * On PostgreSQL the leading columns of a keyset are bounded together, as a
+     * row, through each column's byte-for-byte expression, so an index leading
+     * with them seeks to the bound; on every other database, and with no
+     * column, the query is left as it is.
+     *
+     * @return void
+     */
+    public function testLeadingColumnsAreBoundedAsARowOnPostgreSql(): void
+    {
+        $query = ReviewOrder::atLeast(self::queryOn('pgsql', 'grants'), ['grants.authorizable_type' => 'u', 'grants.role_id' => 'r']);
+
+        self::assertSame('select * from "grants" where ("grants"."authorizable_type" collate "C", cast("grants"."role_id" as text) collate "C") >= (?, ?)', $query->toSql());
+        self::assertSame(['u', 'r'], $query->getBindings());
+
+        foreach (['sqlite', 'mysql', 'mariadb'] as $driver) {
+            $bounded = ReviewOrder::atLeast(self::queryOn($driver, 'grants'), ['grants.authorizable_type' => 'u']);
+
+            self::assertSame('select * from ' . self::wrappedOn($driver, 'grants'), $bounded->toSql(), $driver);
+        }
+
+        self::assertSame('select * from "grants"', ReviewOrder::atLeast(self::queryOn('pgsql', 'grants'), [])->toSql());
+
+        // The bound keeps the rows at and after it, byte for byte, and no
+        // other, on the database the tests run on, whose reference columns are
+        // made as the package makes them.
+        $exact = new ExactReferences(DB::connection());
+
+        Schema::create('review_order_pairs', static function (Blueprint $table) use ($exact): void {
+            $table->increments('id');
+            $table->string('authorizable_type', 191);
+            $table->string('authorizable_id', 191);
+
+            $exact->apply($table);
+        });
+
+        foreach ([['a', 'b'], ['a', 'c'], ['b', 'a'], ['B', 'z']] as [$type, $id]) {
+            DB::table('review_order_pairs')->insert(['authorizable_type' => $type, 'authorizable_id' => $id]);
+        }
+
+        $bounded = ReviewOrder::atLeast(DB::table('review_order_pairs'), ['review_order_pairs.authorizable_type' => 'a', 'review_order_pairs.authorizable_id' => 'c']);
+        $kept    = ReviewOrder::by($bounded, 'review_order_pairs.authorizable_type')->pluck('authorizable_type')->all();
+
+        self::assertSame(DB::connection()->getDriverName() === 'pgsql' ? ['a', 'b'] : ['B', 'a', 'a', 'b'], $kept);
     }
 
     /**

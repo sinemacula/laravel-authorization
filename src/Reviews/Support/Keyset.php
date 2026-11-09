@@ -19,7 +19,10 @@ use Illuminate\Database\Query\Builder;
  * before true. The condition is written as the order is read, column by column:
  * a row is after the position when its first column is greater, or equal and
  * the rest are after, and, when asked, a row at the position itself is kept
- * too.
+ * too. The leading text columns are bounded together as well (see
+ * `ReviewOrder::atLeast()`), a bound the condition already implies, so where an
+ * index leads with them it seeks to the position instead of reading every row
+ * before it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,9 +57,33 @@ final class Keyset
     {
         $terms = self::terms($columns, $position);
 
-        return $query->where(static function (Builder $after) use ($terms, $isInclusive): void {
+        $query->where(static function (Builder $after) use ($terms, $isInclusive): void {
             self::from($after, $terms, $isInclusive);
         });
+
+        return ReviewOrder::atLeast($query, self::leading($terms));
+    }
+
+    /**
+     * Return the value of each of the terms' leading text columns, by column,
+     * up to the first column of any other kind.
+     *
+     * @param  list<array{string, string, bool|string|null}>  $terms
+     * @return array<string, string>
+     */
+    private static function leading(array $terms): array
+    {
+        $values = [];
+
+        foreach ($terms as [$column, $kind, $value]) {
+            if ($kind !== self::TEXT) {
+                break;
+            }
+
+            $values[$column] = (string) $value;
+        }
+
+        return $values;
     }
 
     /**

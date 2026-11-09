@@ -175,6 +175,9 @@ final class ReviewCommandTest extends TestCase
 
         self::assertSame([0, ''], [$code, $output]);
         self::assertSame(['header', 'row', 'row', 'row', 'footer'], \array_column(self::lines((string) \file_get_contents($file)), 'record'));
+        $open = \array_filter(\get_resources('stream'), static fn ($stream): bool => (\stream_get_meta_data($stream)['uri'] ?? null) === $file);
+
+        self::assertSame([], $open, 'The file was left open.');
 
         \file_put_contents($file, 'kept');
 
@@ -198,7 +201,9 @@ final class ReviewCommandTest extends TestCase
      * Each invalid invocation exits 2, its error on the standard error alone,
      * naming no value given: an unknown option, a missing query, an unknown
      * query, an option given without its value, an option the query does not
-     * take, two scopes, and a target that is no definition.
+     * take, two scopes, a target that is no definition, and a subject or tenant
+     * that is malformed, of no model or not saved, named by its argument or
+     * option alone.
      *
      * @return void
      *
@@ -219,7 +224,11 @@ final class ReviewCommandTest extends TestCase
                 ['query' => 'holders', 'reference' => 'sentinel:value'],
                 'An access review lists the holders of a role, a permission or a policy, named by its model or a reference to it.',
             ],
-            [['query' => 'holdings', 'reference' => 'sentinel-value'], 'The subject must be in the format {morphType}:{key} (e.g. user:1).'],
+            [['query' => 'holdings', 'reference' => 'sentinel-value'], 'The reference must be in the format {morphType}:{key} (e.g. user:1).'],
+            [['query' => 'holdings', 'reference' => 'sentinel-value:1'], 'The reference\'s type is not an Eloquent model.'],
+            [['query' => 'holdings', 'reference' => StubIdentity::class . ':sentinel-value'], 'The reference names no saved row.'],
+            [['query' => 'holders', 'reference' => 'role:x', '--tenant' => StubIdentity::class . ':sentinel-value'], 'The --tenant option names no saved row.'],
+            [['query' => 'holders', 'reference' => 'role:x', '--rooted-within' => StubIdentity::class . ':sentinel-value'], 'The --rooted-within option names no saved row.'],
         ];
 
         foreach ($refusals as [$parameters, $message]) {

@@ -170,7 +170,9 @@ final class ReviewInvocationTest extends TestCase
     /**
      * A holdings reference is resolved by the console subject resolver to its
      * principal and identity; a resolver that fails other than by refusing it
-     * is reported as the subject being unresolvable, naming no failure.
+     * is reported as the reference being unresolvable, naming no failure, and
+     * one that refuses it as its refusal says, naming the argument alone, never
+     * the reference given.
      *
      * @return void
      */
@@ -189,12 +191,19 @@ final class ReviewInvocationTest extends TestCase
             ReviewInvocation::of(['query' => 'holdings', 'reference' => 'user:ann'], [])->query($failing);
             self::fail('A failing resolver resolved a subject.');
         } catch (UnresolvedSubjectException $exception) {
-            self::assertSame('The subject could not be resolved.', $exception->getMessage());
+            self::assertSame('The reference could not be resolved.', $exception->getMessage());
+            self::assertSame(UnresolvedSubjectException::UNRESOLVABLE, $exception->getCode());
         }
 
-        $this->expectExceptionObject($refused = UnresolvedSubjectException::malformed());
+        // The resolver's own refusal is given by the argument's name alone.
+        $refused = UnresolvedSubjectException::notFound('user:sentinel-value');
 
-        ReviewInvocation::of(['query' => 'holdings', 'reference' => 'user:ann'], [])->query(new FixedConsoleSubjectResolver(new Subject($ann, $ann), $refused));
+        try {
+            ReviewInvocation::of(['query' => 'holdings', 'reference' => 'user:sentinel-value'], [])->query(new FixedConsoleSubjectResolver(new Subject($ann, $ann), $refused));
+            self::fail('A refusing resolver resolved a subject.');
+        } catch (UnresolvedSubjectException $exception) {
+            self::assertSame(['The reference names no saved row.', $refused], [$exception->getMessage(), $exception->getPrevious()]);
+        }
     }
 
     /**

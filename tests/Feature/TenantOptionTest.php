@@ -43,6 +43,10 @@ final class TenantOptionTest extends TestCase
         try {
             self::assertEquals(new Reference('stub-tenant', 'tenant-1'), TenantOption::reference('rooted-within', StubTenant::class . ':tenant-1'));
             self::assertEquals(new Reference('stub-tenant', 'tenant-1'), TenantOption::reference('rooted-within', 'stub-tenant:tenant-1'));
+
+            // An alias the morph map resolves names the model's row, which must
+            // exist, as its class does.
+            self::assertRefused(static fn (): mixed => TenantOption::reference('tenant', 'stub-tenant:missing'), 'The --tenant option names no saved row.');
         } finally {
             Relation::morphMap([], false);
         }
@@ -50,7 +54,7 @@ final class TenantOptionTest extends TestCase
 
     /**
      * A value not in the format, a row that is missing, and a lookup that fails
-     * are each refused, naming the option given.
+     * are each refused, naming the option given and never its value.
      *
      * @return void
      */
@@ -62,7 +66,7 @@ final class TenantOptionTest extends TestCase
             self::assertRefused(static fn (): mixed => TenantOption::reference('rooted-within', $value), $format);
         }
 
-        self::assertRefused(static fn (): mixed => TenantOption::reference('tenant', StubTenant::class . ':missing'), 'No tenant \'' . StubTenant::class . ':missing\' was found.');
+        self::assertRefused(static fn (): mixed => TenantOption::reference('tenant', StubTenant::class . ':missing'), 'The --tenant option names no saved row.');
 
         StubTenant::query()->create(['id' => 'tenant-2']);
 

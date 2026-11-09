@@ -28,8 +28,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * row (see `resumeAt()`). A sort key holds, in this order, the kind's position
  * (index 0), the target's type and key (1 and 2, `TARGET`), the stored row's
  * grantee and scope as `GrantRow::orderKey()` gives them (3 to 11, `STORED`),
- * then the route (12 on, `ROUTE`): the roles of its chain and the rows it rests
- * on.
+ * then the route (12 on, `ROUTE`, see `routeKey()`): the first role of its
+ * chain and how many roles the chain runs through, then the keys of the rows it
+ * rests on. A chain runs from one role up through its parents, so its first
+ * role and its length name it among the routes of one stored row, and a sort
+ * key, and the cursor that carries one (see `ReviewCursor`), stays the same
+ * size however deep the hierarchy runs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -132,8 +136,7 @@ final class RowCollector
      */
     public function route(SourceKind $kind, Reference $subject, GrantRow $start, Reference $target, array $chain = [], array $rests = [], ?Reference $via = null): void
     {
-        $route = [...$chain, ...\array_map(static fn (GrantRow $row): string => $row->key(), $rests)];
-        $key   = [$kind->position(), $target->type, $target->id, ...$start->orderKey(), ...$route];
+        $key = [$kind->position(), $target->type, $target->id, ...$start->orderKey(), ...self::routeKey($chain, $rests)];
 
         if ($this->after !== null && ReviewOrder::compare($key, $this->after) <= 0) {
             return;
@@ -163,6 +166,22 @@ final class RowCollector
         );
 
         $this->entries[] = ['key' => $key, 'row' => $row];
+    }
+
+    /**
+     * Return the part of a sort key that orders a route among the routes of one
+     * stored row: the first role of its chain and how many roles the chain runs
+     * through, none for no chain, then the key of each row it rests on.
+     *
+     * @param  list<string>  $chain
+     * @param  list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>  $rests
+     * @return list<int|string>
+     */
+    public static function routeKey(array $chain, array $rests): array
+    {
+        $roles = $chain === [] ? [] : [$chain[0], \count($chain)];
+
+        return [...$roles, ...\array_map(static fn (GrantRow $row): string => $row->key(), $rests)];
     }
 
     /**

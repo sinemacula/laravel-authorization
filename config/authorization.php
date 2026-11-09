@@ -655,8 +655,11 @@ return [
     | at most a bounded number of rows and says whether more were left out:
     | `limit` is that number unless the review sets its own with
     | `withLimit()`. A whole number of at least 1; anything else is refused
-    | at boot. A paged review is the same limit a page, unless a page sets
-    | its own, and signs its cursors with a key derived from `app.key`.
+    | at boot. A page (`page()`) holds up to this many rows unless the call
+    | gives its own limit, and its cursors are signed with a key derived
+    | from `app.key`. Streams, exports and `authorization:review` read in
+    | chunks of their own (`AccessReview::CHUNK`, 1000 by default), not this
+    | limit.
     |
     */
 

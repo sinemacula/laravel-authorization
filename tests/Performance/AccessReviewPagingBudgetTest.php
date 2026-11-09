@@ -22,7 +22,8 @@ use Tests\TestCase;
  * Paging budget of access reviews over a large tenant (AUTHZ-11.6, N98): five
  * thousand holders granted roles of a deep hierarchy across fifty tenants, each
  * nested below the one before, are read a page at a time by keyset, each page
- * costing the same queries whatever its number, and streamed a chunk at a time
+ * costing the same queries whatever its number and seeking to where it starts,
+ * as the database measures the rows it reads, and streamed a chunk at a time
  * with the memory held bounded by the chunk, not by the tenant.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -48,6 +49,9 @@ final class AccessReviewPagingBudgetTest extends TestCase
 
     /** @var int How many rows a page or a chunk holds. */
     private const int PAGE = 250;
+
+    /** @var int How many rows a page may read beyond those after its keyset: the one beyond its last, and the index entries it seeks by. */
+    private const int SEEK = 6;
 
     /**
      * Every page of the holders of the top role and of the permission it
@@ -81,9 +85,61 @@ final class AccessReviewPagingBudgetTest extends TestCase
     }
 
     /**
-     * Streaming the holders a chunk at a time holds memory bounded by the
-     * chunk: what is held after the last chunk is no more than after the first
-     * few, whatever the tenant holds.
+     * Each page of a role's direct holders seeks to where it starts, through
+     * the index leading with the target and the grantee: it reads the role's
+     * grants from its keyset on, never one before it, nor any other role's, so
+     * each page reads fewer rows than the one before and the last little more
+     * than a page, whatever the tenant holds. The rows read are measured by the
+     * database itself, so a page that scans from the start, or the whole table,
+     * fails however few queries it runs.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEachPageReadsFromWhereItStarts(): void
+    {
+        $driver = DB::connection()->getDriverName();
+
+        if ($driver !== 'pgsql' && $driver !== 'mysql') {
+            self::markTestSkipped('The rows a page reads are measured on PostgreSQL and MySQL.');
+        }
+
+        self::keyCursors();
+
+        [$top] = $this->seedTheTenant();
+
+        DB::statement($driver === 'pgsql' ? 'analyze authorizable_roles' : 'analyze table authorizable_roles');
+
+        $query = ReviewQuery::holders($top, ReviewScope::everywhere(), true);
+        $held  = \intdiv(self::HOLDERS + self::DEPTH - 1, self::DEPTH);
+        $reads = [];
+        $rows  = 0;
+
+        foreach (self::directReadsOf($query) as [$sql, $bindings, $count]) {
+            $reads[] = self::rowsRead($driver, $sql, $bindings);
+            $rows += $count;
+        }
+
+        $read = \implode(', ', $reads);
+
+        self::assertSame($held, $rows);
+        self::assertCount((int) \ceil($held / self::PAGE), $reads);
+        // A page reads the rows it returns, the one beyond to know whether more
+        // are left, and a few index entries to seek to its keyset.
+        self::assertLessThanOrEqual(2 * self::PAGE + self::SEEK, \end($reads), "The last page read from before where it starts: {$read}.");
+
+        foreach ($reads as $page => $count) {
+            self::assertLessThanOrEqual($held - $page * self::PAGE + self::SEEK, $count, "Page {$page} read rows before where it starts: {$read}.");
+        }
+    }
+
+    /**
+     * Streaming the holders a chunk at a time reads nothing until the rows are
+     * taken, then a page of the chunk at a time, and holds memory bounded by
+     * the chunk: the most it holds above what was held before the stream began
+     * stays within a few chunks' worth, whatever the tenant holds, so a stream
+     * that read the whole review at once would fail.
      *
      * @return void
      *
@@ -95,26 +151,37 @@ final class AccessReviewPagingBudgetTest extends TestCase
 
         DB::connection()->disableQueryLog();
 
+        $queries = 0;
+
+        DB::listen(static function () use (&$queries): void {
+            $queries++;
+        });
+
         $query = ReviewQuery::holders($top, ReviewScope::everywhere());
-        $read  = 0;
-        $held  = [];
 
-        foreach (self::reviews()->trustedStream($query, self::PAGE) as $row) {
+        \gc_collect_cycles();
+
+        $baseline = \memory_get_usage();
+
+        \memory_reset_peak_usage();
+
+        $stream = self::reviews()->trustedStream($query, self::PAGE);
+
+        self::assertSame(0, $queries, 'The stream read before its rows were taken.');
+
+        $read = 0;
+
+        foreach ($stream as $row) {
             $read++;
-
-            if ($read % self::PAGE === 0) {
-                $held[] = \memory_get_usage();
-            }
 
             unset($row);
         }
 
+        $held = \memory_get_peak_usage() - $baseline;
+
         self::assertSame(self::HOLDERS, $read);
-        self::assertCount(\intdiv(self::HOLDERS, self::PAGE), $held);
-
-        $settled = \array_slice($held, 2);
-
-        self::assertLessThan(4 * 1024 * 1024, \max([0, ...$settled]) - \min([\PHP_INT_MAX, ...$settled]), 'The stream held more as it read more: ' . \implode(', ', $held));
+        self::assertGreaterThanOrEqual(\intdiv(self::HOLDERS, self::PAGE), $queries, 'The stream was not read a chunk at a time.');
+        self::assertLessThan(8 * 1024 * 1024, $held, 'The stream held more than a few chunks at once: ' . $held . ' bytes.');
     }
 
     /**
@@ -178,6 +245,116 @@ final class AccessReviewPagingBudgetTest extends TestCase
         }
 
         return [$roles[0], $permission];
+    }
+
+    /**
+     * Read every page of the review as trusted work, a page of the page size at
+     * a time, and return, for each, the query that read its direct grants, with
+     * its bindings, and how many rows the page returned.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
+     * @return list<array{string, array<array-key, mixed>, int}>
+     *
+     * @throws \Throwable
+     */
+    private static function directReadsOf(ReviewQuery $query): array
+    {
+        $connection = DB::connection();
+        $reads      = [];
+        $cursor     = null;
+
+        $connection->enableQueryLog();
+
+        do {
+            $connection->flushQueryLog();
+
+            $page   = self::reviews()->trustedPage($query, $cursor, self::PAGE);
+            $cursor = $page->nextCursor;
+            $direct = \array_values(\array_filter(
+                $connection->getQueryLog(),
+                static fn (array $logged): bool => \str_contains(\str_replace(['"', '`'], '', $logged['query']), 'authorizable_roles.role_id = ?'),
+            ));
+
+            self::assertCount(1, $direct, 'A page read its direct grants other than once.');
+
+            $reads[] = [$direct[0]['query'], $direct[0]['bindings'], \count($page->rows)];
+        } while ($cursor !== null);
+
+        $connection->disableQueryLog();
+
+        return $reads;
+    }
+
+    /**
+     * Return how many rows the database reads to run the query with the
+     * bindings: on PostgreSQL, the rows every scan of its plan read, those its
+     * filters removed included; on MySQL, the index entries its handler read.
+     *
+     * @param  string  $driver
+     * @param  string  $sql
+     * @param  array<array-key, mixed>  $bindings
+     * @return int
+     *
+     * @throws \JsonException
+     */
+    private static function rowsRead(string $driver, string $sql, array $bindings): int
+    {
+        if ($driver === 'pgsql') {
+            $plan = ((array) DB::selectOne('explain (analyze, format json) ' . $sql, $bindings))['QUERY PLAN'] ?? null;
+
+            /** @var list<array{Plan: array<string, mixed>}> $explained */
+            $explained = \json_decode(\is_string($plan) ? $plan : '[]', true, 512, \JSON_THROW_ON_ERROR);
+
+            return self::scanned($explained[0]['Plan']);
+        }
+
+        DB::statement('flush status');
+        DB::select($sql, $bindings);
+
+        $read     = 0;
+        $handlers = '\'Handler_read_key\', \'Handler_read_next\', \'Handler_read_first\', \'Handler_read_rnd_next\'';
+
+        foreach (DB::select("show session status where Variable_name in ({$handlers})") as $status) {
+            $read += self::wholeNumber((array) $status, 'Value');
+        }
+
+        return $read;
+    }
+
+    /**
+     * Return the rows the plan node and those below it read from the table, the
+     * rows each filter or recheck removed included; a bitmap's index scan reads
+     * no row itself, its heap scan reading them.
+     *
+     * @param  array<string, mixed>  $node
+     * @return int
+     */
+    private static function scanned(array $node): int
+    {
+        $type  = \is_string($node['Node Type'] ?? null) ? $node['Node Type'] : '';
+        $rows  = self::wholeNumber($node, 'Actual Rows') + self::wholeNumber($node, 'Rows Removed by Filter') + self::wholeNumber($node, 'Rows Removed by Index Recheck');
+        $read  = \str_contains($type, 'Scan') && $type !== 'Bitmap Index Scan' ? $rows * \max(1, self::wholeNumber($node, 'Actual Loops')) : 0;
+        $plans = \is_array($node['Plans'] ?? null) ? $node['Plans'] : [];
+
+        foreach ($plans as $child) {
+            $read += \is_array($child) ? self::scanned($child) : 0;
+        }
+
+        return $read;
+    }
+
+    /**
+     * Return the whole number the field holds, or none for anything else.
+     *
+     * @param  array<array-key, mixed>  $fields
+     * @param  string  $name
+     * @return int
+     */
+    private static function wholeNumber(array $fields, string $name): int
+    {
+        $value = $fields[$name] ?? null;
+
+        return \is_int($value) || (\is_string($value) && \ctype_digit($value)) ? (int) $value : 0;
     }
 
     /**

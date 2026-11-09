@@ -6,7 +6,9 @@ namespace Tests\Integration\Reviews;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Reviews\AccessReview;
 use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
@@ -72,6 +74,95 @@ final class ReviewPagingParityTest extends TestCase
 
                 self::assertSame($whole, self::exported($query($scope), 2), "{$label} exported");
             }
+        }
+    }
+
+    /**
+     * A role, permission or policy named by its key in capitals reads the same
+     * holders, through the same routes, whole, paged and streamed, as one named
+     * in the stored lowercase form, on every database: every page resumes from
+     * the key its grant stores, never from the query's spelling.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATargetNamedInCapitalsReadsTheSameHolders(): void
+    {
+        self::keyCursors();
+
+        $top        = self::role('top');
+        $leaf       = self::role('leaf', $top);
+        $permission = self::permission('posts:edit');
+        $policy     = self::policy('deny-delete');
+
+        self::roles()->grantPermission($top, $permission);
+        self::grants()->attachPolicy($top, $policy);
+
+        foreach (['g1', 'g2', 'g3', 'g4', 'g5'] as $key) {
+            self::grants()->grantRole(new Reference('u', $key), $top);
+            self::grants()->grantPermission(new Reference('u', $key), $permission);
+            self::grants()->attachPolicy(new Reference('u', $key), $policy);
+        }
+
+        foreach (['h1', 'h2'] as $key) {
+            self::grants()->grantRole(new Reference('u', $key), $leaf);
+        }
+
+        foreach ([[$top, 7], [$permission, 12], [$policy, 12]] as [$definition, $count]) {
+            $stored  = Reference::of($definition);
+            $capital = ReviewQuery::holders(new Reference($stored->type, \strtoupper($stored->id)), ReviewScope::everywhere());
+            $whole   = self::keys(self::trusted(ReviewQuery::holders($stored, ReviewScope::everywhere()))->rows);
+
+            self::assertCount($count, $whole, $stored->type);
+            self::assertSame($whole, self::keys(self::trusted($capital)->rows), $stored->type);
+
+            foreach ([1, 2, 3] as $size) {
+                self::assertSame($whole, self::paged($capital, $size), "{$stored->type} paged by {$size}");
+                self::assertSame($whole, self::keys([...self::reviews()->trustedStream($capital, $size)]), "{$stored->type} streamed by {$size}");
+            }
+        }
+    }
+
+    /**
+     * A review reached through a hierarchy hundreds of roles deep is paged to
+     * its end, one row a page, every cursor short, however long the routes its
+     * rows run through: the holders of the top role and of a permission carried
+     * along the chain, and what a holder of the lowest role holds.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADeepHierarchyIsPagedToItsEnd(): void
+    {
+        self::keyCursors();
+
+        $roles      = self::chainOf(300);
+        $permission = self::permission('posts:edit');
+
+        foreach ([0, 150, 299] as $level) {
+            self::roles()->grantPermission($roles[$level], $permission);
+        }
+
+        foreach (['a', 'b', 'c'] as $key) {
+            self::grants()->grantRole(new Reference('u', $key), $roles[299]);
+        }
+
+        $queries = [
+            'holders of the top role'   => ReviewQuery::holders($roles[0], ReviewScope::everywhere()),
+            'holders of the permission' => ReviewQuery::holders($permission, ReviewScope::everywhere()),
+            'holdings of a holder'      => ReviewQuery::holdings(new Reference('u', 'a'), ReviewScope::everywhere()),
+        ];
+
+        $counts = ['holders of the top role' => 3, 'holders of the permission' => 9, 'holdings of a holder' => 303];
+
+        foreach ($queries as $label => $query) {
+            $whole = self::keys(self::trusted($query->withLimit(100000))->rows);
+
+            self::assertCount($counts[$label], $whole, $label);
+            self::assertSame($whole, self::paged($query, 1), "{$label} paged by 1");
+            self::assertSame($whole, self::keys([...self::reviews()->trustedStream($query, 2)]), "{$label} streamed by 2");
         }
     }
 
@@ -163,8 +254,41 @@ final class ReviewPagingParityTest extends TestCase
     }
 
     /**
+     * Return a chain of the given number of roles, the first at the top and
+     * each below the one before, written straight to the roles table.
+     *
+     * @param  int  $depth
+     * @return list<\SineMacula\Laravel\Authorization\Models\Role>
+     */
+    private static function chainOf(int $depth): array
+    {
+        $now    = CarbonImmutable::now('UTC')->format('Y-m-d H:i:s');
+        $rows   = [];
+        $parent = null;
+
+        for ($level = 0; $level < $depth; $level++) {
+            $key    = Str::uuid()->toString();
+            $rows[] = ['id' => $key, 'name' => 'level-' . $level, 'parent_id' => $parent, 'is_system' => false, 'created_at' => $now, 'updated_at' => $now];
+            $parent = $key;
+        }
+
+        foreach (\array_chunk($rows, 100) as $chunk) {
+            DB::table('roles')->insert($chunk);
+        }
+
+        $roles = [];
+
+        foreach (\array_column($rows, 'id') as $key) {
+            $roles[] = Role::query()->whereKey($key)->firstOrFail();
+        }
+
+        return $roles;
+    }
+
+    /**
      * Return the row keys of every page of the review read as trusted work, at
-     * most the size of them a page, from its first page to its last.
+     * most the size of them a page, from its first page to its last, every
+     * cursor short.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
      * @param  int  $size
@@ -187,6 +311,8 @@ final class ReviewPagingParityTest extends TestCase
 
             $cursor = $page->nextCursor;
             $pages++;
+
+            self::assertLessThan(2048, \strlen($cursor ?? ''), 'A cursor grew with the review.');
         } while ($cursor !== null && $pages < 10000);
 
         return $keys;

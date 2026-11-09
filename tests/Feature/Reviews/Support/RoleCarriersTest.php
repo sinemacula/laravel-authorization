@@ -197,14 +197,15 @@ final class RoleCarriersTest extends TestCase
         self::assertSame(['role_policy y4 held'], self::routes($platform));
         self::assertSame(GrantState::MALFORMED, $platform->rows()[0]->grantState);
 
-        // The routes come in their own order, not the chain's: a role above
-        // whose key sorts before the row a lower role carries comes first.
+        // The routes come in their own order: by how far up the chain the role
+        // carrying each is, nearest first, whatever the roles' keys, then by
+        // the row each rests on.
         $sorted  = new RowCollector($run, 10);
-        $carried = ['held' => [self::edge('held', 'p1')], '01parent' => [self::edge('01parent', 'p2')]];
+        $carried = ['held' => [self::edge('held', 'p9')], '01parent' => [self::edge('01parent', 'p2')], '00top' => [self::edge('00top', 'p1')]];
 
-        RoleCarriers::throughEdges($sorted, new Reference('u', 'ann'), $grant, ['held', '01parent'], $carried);
+        RoleCarriers::throughEdges($sorted, new Reference('u', 'ann'), $grant, ['held', '01parent', '00top'], $carried);
 
-        self::assertSame(['role_permission p2 held>01parent', 'role_permission p1 held'], self::routes($sorted));
+        self::assertSame(['role_permission p9 held', 'role_permission p2 held>01parent', 'role_permission p1 held>01parent>00top'], self::routes($sorted));
     }
 
     /**

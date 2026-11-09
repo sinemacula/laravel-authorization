@@ -314,8 +314,9 @@ final readonly class ReviewInvocation
 
     /**
      * Resolve the holdings' subject through the console subject resolver,
-     * refusing it, without naming the failure, when the resolver fails other
-     * than by refusing it.
+     * refusing it by the reference argument's name alone, never the reference
+     * given: as the resolver's refusal says, or, without naming the failure,
+     * when the resolver fails other than by refusing it.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver  $subjects
      * @param  string  $reference
@@ -327,10 +328,8 @@ final readonly class ReviewInvocation
     {
         try {
             return $subjects->resolve($reference);
-        } catch (UnresolvedSubjectException $refusal) {
-            throw $refusal;
         } catch (\Throwable $exception) {
-            throw UnresolvedSubjectException::unresolvable($exception);
+            throw ($exception instanceof UnresolvedSubjectException ? $exception : UnresolvedSubjectException::unresolvable($exception))->namingOnly('reference');
         }
     }
 
