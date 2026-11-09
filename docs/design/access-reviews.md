@@ -55,13 +55,13 @@ the rows and their order, how a review is admitted (N96), and what part 1 of BL-
    principal the `IdentityDirectory` lists, each row keeping its actual grantee, and the result incomplete when the
    directory says its list may leave one out (N81). `expiring()` lists the stored grants, attachments and role edges
    whose expiry falls in the UTC half-open window `[from, until)`, a role's permission edge and its policy attachment
-   kinds of their own, each marked `live` or `expired` at the review's instant. The bounds keep their microseconds: an
-   expiry is stored to the whole second, its fraction dropped, so a bound with a fraction is compared as the next whole
-   second, which selects exactly the stored expiries in the window on every database. In a review applying in a
-   tenant, an edge is listed only when the tenant sees its role and permission, and a role's policy attachment only
-   when it sees the role, as a check reaches either only through that role. `grantedBy()` lists the stored grants whose
-   `granted_by` pair is exactly the actor's: the last writer (N95), since a regrant, a changed expiry or reach
-   overwrites it, a trusted write names no actor, and a revoked grant is gone.
+   kinds of their own, each marked `live`, `expired` or `malformed` at the review's instant. The bounds keep their
+   microseconds: an expiry is stored to the whole second, its fraction dropped, so a bound with a fraction is compared
+   as the next whole second, which selects exactly the stored expiries in the window on every database. In a review
+   applying in a tenant, an edge is listed only when the tenant sees its role and permission, and a role's policy
+   attachment only when it sees the role, as a check reaches either only through that role. `grantedBy()` lists the
+   stored grants whose `granted_by` pair is exactly the actor's: the last writer (N95), since a regrant, a changed
+   expiry or reach overwrites it, a trusted write names no actor, and a revoked grant is gone.
 
 7. **Reference-only, versioned rows.** A `ReviewRow` names references alone (a morph type and a string key) and plain
    values, never a name, email, description, document or value. Its shape is `version: 1`: `row_key`, `subject`,
@@ -72,9 +72,27 @@ the rows and their order, how a review is admitted (N96), and what part 1 of BL-
    it, or the identity of a resolved subject, reports itself inactive or is deleted softly, `unknown` when its record
    is gone or its type names no model, read one query for each morph type among the rows returned; a resolved subject
    is weighed as given, its principal and identity models included. `isComplete` says only whether an identity's
-   principals could all be listed, and is true for every other review. A grant row that names half a tenant (a type
-   without a key, or a key without a type), which the package never writes, is left out of every review, so it is never
-   shown as a platform-wide origin nor paired with an attachment as one.
+   principals could all be listed, and is true for every other review.
+
+   A grant or attachment row that names half a tenant (a type without a key, or a key without a type), which the
+   package never writes, is listed and marked as damaged (N99), never presented as a clean platform origin: its
+   `grant_state` is `malformed`, whether or not it has expired, and its `origin_scope` shows the tenant columns as
+   stored (`Reviews\OriginScope`), the missing half null. It is listed exactly where a check reads it today: a check
+   reads a key without a type at the platform, by its missing type alone, so such a row is listed wherever what applies
+   is read, and a type without a key nowhere, so no review of what applies lists it. A review of everywhere, which
+   needs platform-wide admission, lists a type without a key all the same, and so do its expiries and an actor's
+   grants. No review rooted within a tenant lists either: a key without a type is read at the platform, and a type
+   without a key cannot be shown to lie within the tenant, and a scoped review never discloses another tenant's
+   holders (N96). A route resting on such a row is `malformed` too: one without a type meets an attachment, or a
+   grant, as the platform's does, and one without a key meets only a row that holds everywhere. Forward resolution is
+   unchanged; a later backlog item makes checks ignore these rows.
+
+   | Stored tenant    | `appliesIn()` (any tenant, or the platform) | `rootedWithin()` (any tenant) | `everywhere()` |
+   |------------------|---------------------------------------------|-------------------------------|----------------|
+   | Key without type | Listed, read at the platform                | Not listed                    | Listed         |
+   | Type without key | Not listed                                  | Not listed                    | Listed         |
+
+   The same holds for holders, holdings, expiries and an actor's grants, each following its scope selection.
 
 8. **One total order (`Reviews\Support\ReviewOrder`).** By source kind (in `SourceKind`'s declared order), target,
    grantee, origin scope and route, each nullable component tagged so the platform comes before a tenant and every
@@ -157,7 +175,9 @@ across every tenant, as trusted work.
   resolved subject; a grant to a grantee whose record is gone is listed as `unknown`.
 - A target whose key no definition could have (every definition is keyed by a UUID) is held by no one, on every
   database, without a query, rather than reaching a `uuid` column it cannot be compared with.
-- A grant row naming half a tenant is left out of every review, never shown as the platform's.
+- A grant or attachment row naming half a tenant is listed where a check reads it, and a type without a key in a
+  review of everywhere too, never in one rooted within a tenant; either is marked `malformed`, its origin scope as
+  stored.
 - A window whose bounds fall within one second holds no stored expiry, since every expiry is a whole second.
 - A window that does not end after it starts, a limit below one, a target that is no definition, and a subject that
   names no key are refused with `InvalidArgumentException` when the query is built. A configured limit that is not a
@@ -168,7 +188,8 @@ across every tenant, as trusted work.
 
 - `Reviews\AccessReview` -- `review()`, `trusted()` and the run.
 - `Reviews\ReviewQuery`, `Reviews\ReviewScope`, `Reviews\ApplicationSelector` -- the typed, immutable inputs.
-- `Reviews\ReviewRow`, `Reviews\SupportingGrant`, `Reviews\ReviewResult` -- the versioned output.
+- `Reviews\ReviewRow`, `Reviews\SupportingGrant`, `Reviews\OriginScope`, `Reviews\ReviewResult` -- the versioned
+  output.
 - `Reviews\ReviewResource`, `Reviews\ReviewAttributes`, `Reviews\ReviewAdmission` -- the admission, and the
   administration stage `Evaluation\DecisionPipeline::decideGrants()` runs for a review resource.
 - `Administration\AdministeredScope::refusalOf()` -- the reach rule shared with delegated administration.

@@ -78,7 +78,7 @@ final class RowCollectorTest extends TestCase
                 'perm',
                 SourceKind::ROLE_PERMISSION,
                 $start->key(),
-                $start->scope,
+                $start->originScope(),
                 'p',
                 [(new Role)->getMorphClass(), (new Role)->getMorphClass()],
                 ['role-1', 'role-2'],

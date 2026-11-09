@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Reviews\Support;
 use Illuminate\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -23,10 +24,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * applies in a tenant, the attachment must apply there as well; in any other,
  * it must hold in the application the review selects. An attachment of an
  * inline policy to a role it does not belong to is never read, as a check never
- * applies it (see `InlinePolicies`), nor is one naming half a tenant (see
- * `ReviewRun::placed()`). A query of role grants can be limited to those that
- * reach one of the attachments read (see `reaching()`), so a grant that would
- * add no route is never read.
+ * applies it (see `InlinePolicies`). A row naming half a tenant meets another
+ * as a check reads it (see `GrantRow::canMeet()`). A query of role grants can
+ * be limited to those that reach one of the attachments read (see
+ * `reaching()`), so a grant that would add no route is never read.
  *
  * The routes of one grant are collected in the review's order: by the roles of
  * the chain to the carrying role, then by the row each rests on.
@@ -87,7 +88,7 @@ final class RoleCarriers
         $query = InlinePolicies::attachedToTheirGrantee($run->live(GrantRows::of(GrantTarget::POLICY), $table), $table)
             ->where($table . '.authorizable_type', Definitions::morph(GrantTarget::ROLE));
 
-        $run->isApplicability() ? $run->constrain($query, $table) : $run->scope->application->constrain($run->placed($query, $table), $table);
+        $run->isApplicability() ? $run->constrain($query, $table) : $run->scope->application->constrain($query, $table);
 
         if ($roles !== null) {
             $query->whereIn($table . '.authorizable_id', $roles);
@@ -120,8 +121,8 @@ final class RoleCarriers
         return $query->where(static function (Builder $any) use ($run, $table, $reaches): void {
             $any->whereRaw('1 = 0');
 
-            foreach ($reaches as [$roles, $scope]) {
-                $any->orWhere(static fn (Builder $one): Builder => $run->meeting($one->whereIn($table . '.role_id', $roles), $table, $scope));
+            foreach ($reaches as [$roles, $scope, $isPlaced]) {
+                $any->orWhere(static fn (Builder $one): Builder => self::meeting($run, $one->whereIn($table . '.role_id', $roles), $table, $scope, $isPlaced));
             }
         });
     }
@@ -174,8 +175,12 @@ final class RoleCarriers
         $scope = $grant->scope;
         $held  = [];
 
+        if ($scope === null) {
+            return;
+        }
+
         foreach ($attachments as $role => $rowsOfRole) {
-            $holds = static fn (GrantRow $attachment): bool => $scope !== null && $attachment->scope !== null && $run->intersects($scope, $attachment->scope);
+            $holds = static fn (GrantRow $attachment): bool => $attachment->scope !== null && $grant->canMeet($attachment) && $run->intersects($scope, $attachment->scope);
 
             $held[$role] = \array_values(\array_filter($rowsOfRole, $holds));
         }
@@ -228,6 +233,26 @@ final class RoleCarriers
     }
 
     /**
+     * Limit a query of role grants to those that meet the attachment, as
+     * `GrantRow::canMeet()` and `ReviewRun::meeting()` weigh them: an
+     * attachment no check reads anywhere meets only a placed grant that holds
+     * everywhere, one with no tenant type.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  string  $table
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @param  bool  $isPlaced
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private static function meeting(ReviewRun $run, Builder $query, string $table, GrantScope $scope, bool $isPlaced): Builder
+    {
+        $meeting = $run->meeting($query, $table, $scope);
+
+        return $isPlaced ? $meeting : $meeting->whereNull($table . '.tenant_type');
+    }
+
+    /**
      * Return the roles whose chain reaches each carrying role, by the carrying
      * role's key.
      *
@@ -248,12 +273,12 @@ final class RoleCarriers
     }
 
     /**
-     * Return, for each attachment some role's chain reaches, those roles and
-     * the attachment's scope.
+     * Return, for each attachment some role's chain reaches, those roles, the
+     * attachment's scope, and whether a check reads it anywhere.
      *
      * @param  array<string, list<string>>  $carriers
      * @param  array<array-key, list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>>  $attachments
-     * @return list<array{list<string>, \SineMacula\Laravel\Authorization\Support\GrantScope}>
+     * @return list<array{list<string>, \SineMacula\Laravel\Authorization\Support\GrantScope, bool}>
      */
     private static function reaches(array $carriers, array $attachments): array
     {
@@ -267,7 +292,7 @@ final class RoleCarriers
                     continue;
                 }
 
-                $reaches[] = [$roles, $attachment->scope];
+                $reaches[] = [$roles, $attachment->scope, $attachment->isPlaced()];
             }
         }
 

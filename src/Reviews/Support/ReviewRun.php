@@ -31,10 +31,14 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * loaded.
  *
  * A row that names half a tenant, a tenant type without a key or a key without
- * a type, which the package never writes, is left out of every review: a check
- * applies the first nowhere, and reads the second at the platform by its
- * missing type alone, so neither is shown as a platform-wide origin, and
- * neither is paired with an attachment as one (see `placed()`).
+ * a type, which the package never writes (N99), is listed exactly where a check
+ * reads it: a key without a type at the platform, by its missing type alone,
+ * and a type without a key nowhere. A review of everywhere, which needs
+ * platform-wide admission, lists a type without a key too; a review rooted
+ * within a tenant never does, since it cannot be shown to lie within the tenant
+ * and a scoped review never discloses another tenant's holders (N96). Either is
+ * marked `malformed`, its origin scope as stored (see `GrantRow` and
+ * `Enums\GrantState`).
  *
  * A role's policy attachment reaches a holder of the role only where both the
  * role's grant and the attachment hold, as `RolePolicies` reads them in a
@@ -119,7 +123,7 @@ final readonly class ReviewRun
      * Limit a grant query to the rows of the table the scope selects: those
      * that apply in the reviewed tenant, or at the platform, or those rooted
      * within the reviewed tenant, or every row; and of those, the rows that
-     * name a whole tenant or none and hold in the application selected.
+     * hold in the application selected.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $table
@@ -128,32 +132,16 @@ final readonly class ReviewRun
     public function constrain(Builder $query, string $table): Builder
     {
         $this->chain?->grants($query, $table);
-        $this->placed($query, $table);
 
         if ($this->rooted !== null) {
             $rooted = $this->rooted;
 
-            $query->where(static fn (Builder $row) => $rooted($row, $table));
+            $query->where(static function (Builder $row) use ($rooted, $table): void {
+                $rooted($row, $table);
+            });
         }
 
         return $this->scope->application->constrain($query, $table);
-    }
-
-    /**
-     * Limit a query of grant or attachment rows to those of the table that name
-     * a whole tenant, both its type and its key, or none, the platform; a row
-     * naming half a tenant holds at no tenant a review can show.
-     *
-     * @param  \Illuminate\Database\Query\Builder  $query
-     * @param  string  $table
-     * @return \Illuminate\Database\Query\Builder
-     */
-    public function placed(Builder $query, string $table): Builder
-    {
-        return $query->where(static function (Builder $placed) use ($table): void {
-            $placed->where(static fn (Builder $platform): Builder => $platform->whereNull($table . self::TENANT_TYPE)->whereNull($table . self::TENANT_ID))
-                ->orWhere(static fn (Builder $tenant): Builder => $tenant->whereNotNull($table . self::TENANT_TYPE)->whereNotNull($table . self::TENANT_ID));
-        });
     }
 
     /**

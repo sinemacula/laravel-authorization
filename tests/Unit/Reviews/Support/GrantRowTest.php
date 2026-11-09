@@ -62,8 +62,8 @@ final class GrantRowTest extends TestCase
 
     /**
      * A platform-wide row for every application has no tenant, application or
-     * actor; a row naming half a tenant is read as the platform's; a reach
-     * reads as a boolean whatever the driver returns.
+     * actor; a row naming half a tenant is read as the platform's where a check
+     * places it; a reach reads as a boolean whatever the driver returns.
      *
      * @return void
      */
@@ -90,6 +90,60 @@ final class GrantRowTest extends TestCase
                 GrantRow::from((object) ['target_id' => 'p', 'grantee_type' => 'u', 'grantee_id' => 'u', 'include_subtree' => $stored], 'permission')->scope?->includeSubtree,
             );
         }
+    }
+
+    /**
+     * A row naming half a tenant keeps the half it stores as its origin, keyed
+     * and ordered by it as the grant queries order it, and is malformed: a key
+     * without a type is read where a check reads it, at the platform, while a
+     * type without a key is placed nowhere.
+     *
+     * @return void
+     */
+    public function testARowNamingHalfATenantKeepsWhatItStores(): void
+    {
+        $noType = self::half(null, 't1');
+        $noKey  = self::half('tenant', null);
+        $whole  = self::half('tenant', 't1');
+
+        self::assertSame([null, 't1', true, true], [$noType->originScope()?->tenantType, $noType->originScope()?->tenantId, $noType->isMalformed(), $noType->isPlaced()]);
+        self::assertSame(['tenant', null, true, false], [$noKey->originScope()?->tenantType, $noKey->originScope()?->tenantId, $noKey->isMalformed(), $noKey->isPlaced()]);
+        self::assertSame([false, true], [$whole->isMalformed(), $whole->isPlaced()]);
+        self::assertNull($noType->scope?->tenant);
+        self::assertNull($noKey->scope?->tenant);
+
+        self::assertSame(ReviewOrder::key(['permission', 'p', 'user', 'u', null, 't1', null]), $noType->key());
+        self::assertSame(ReviewOrder::key(['permission', 'p', 'user', 'u', 'tenant', null, null]), $noKey->key());
+        self::assertSame(['user', 'u', 0, '', 1, 't1', 0, '', true], $noType->orderKey());
+        self::assertSame(['user', 'u', 1, 'tenant', 0, '', 0, '', true], $noKey->orderKey());
+        self::assertSame(['type' => 'tenant', 'id' => null], $noKey->supporting()->toArray()['scope']['tenant'] ?? null);
+
+        $edge = GrantRow::from((object) ['target_id' => 'p1', 'grantee_id' => 'r1'], GrantRow::EDGE, 'role');
+
+        self::assertSame([false, true, null], [$edge->isMalformed(), $edge->isPlaced(), $edge->originScope()]);
+    }
+
+    /**
+     * A row placed nowhere meets only a placed row that holds everywhere, never
+     * another placed nowhere nor one held in a tenant; any other two can meet.
+     *
+     * @return void
+     */
+    public function testARowPlacedNowhereMeetsOnlyARowHeldEverywhere(): void
+    {
+        $nowhere  = self::half('tenant', null);
+        $platform = self::half(null, null);
+        $noType   = self::half(null, 't1');
+        $tenant   = self::half('tenant', 't1');
+
+        self::assertTrue($nowhere->canMeet($platform));
+        self::assertTrue($platform->canMeet($nowhere));
+        self::assertTrue($nowhere->canMeet($noType));
+        self::assertFalse($nowhere->canMeet($tenant));
+        self::assertFalse($tenant->canMeet($nowhere));
+        self::assertFalse($nowhere->canMeet(self::half('tenant', null)));
+        self::assertTrue($tenant->canMeet($platform));
+        self::assertTrue($tenant->canMeet($noType));
     }
 
     /**
@@ -127,6 +181,20 @@ final class GrantRowTest extends TestCase
         self::assertFalse($expires('2030-01-01 00:00:00')->isLiveAt($now));
         self::assertFalse($expires('2029-12-31 23:59:59')->isLiveAt($now));
         self::assertSame('2030-01-01T00:00:01Z', $expires('2030-01-01 00:00:01')->supporting()->toArray()['expires_at']);
+    }
+
+    /**
+     * Return a permission grant stored with the tenant columns given.
+     *
+     * @param  string|null  $type
+     * @param  string|null  $id
+     * @return \SineMacula\Laravel\Authorization\Reviews\Support\GrantRow
+     */
+    private static function half(?string $type, ?string $id): GrantRow
+    {
+        $columns = ['target_id' => 'p', 'grantee_type' => 'user', 'grantee_id' => 'u', 'tenant_type' => $type, 'tenant_id' => $id, 'include_subtree' => true];
+
+        return GrantRow::from((object) $columns, 'permission');
     }
 
     /**

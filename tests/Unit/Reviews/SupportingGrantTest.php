@@ -7,9 +7,8 @@ namespace Tests\Unit\Reviews;
 use Carbon\CarbonImmutable;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Reviews\OriginScope;
 use SineMacula\Laravel\Authorization\Reviews\SupportingGrant;
-use SineMacula\Laravel\Authorization\Support\GrantScope;
-use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Unit tests for one stored row a review row's route rests on.
@@ -30,7 +29,7 @@ final class SupportingGrantTest extends TestCase
      */
     public function testItsShapeIsItsKeyScopeAndExpiry(): void
     {
-        $grant = new SupportingGrant('k', new GrantScope(new Reference('tenant', 't'), null, true), CarbonImmutable::create(2030, 1, 1, 1, 0, 0, 'Europe/Paris'));
+        $grant = new SupportingGrant('k', new OriginScope('tenant', 't', null, true), CarbonImmutable::create(2030, 1, 1, 1, 0, 0, 'Europe/Paris'));
 
         self::assertSame(
             [
@@ -41,5 +40,9 @@ final class SupportingGrantTest extends TestCase
             $grant->toArray(),
         );
         self::assertSame(['source_key' => 'e', 'scope' => null, 'expires_at' => null], (new SupportingGrant('e', null, null))->toArray());
+        self::assertSame(
+            ['tenant' => ['type' => 'tenant', 'id' => null], 'application' => 'web', 'include_subtree' => false],
+            (new SupportingGrant('h', new OriginScope('tenant', null, 'web', false), null))->toArray()['scope'],
+        );
     }
 }

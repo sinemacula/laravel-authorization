@@ -10,6 +10,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
+use SineMacula\Laravel\Authorization\Reviews\Enums\GrantState;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
 use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
@@ -105,7 +106,8 @@ final class RoleCarriersTest extends TestCase
         self::grants()->attachPolicy($role, $halved = self::policy('halved'), tenant: self::tenant('acct2'));
         self::grants()->attachPolicy(self::identity('ann'), $policy);
 
-        // An attachment naming half a tenant is read by no review.
+        // An attachment naming a type without a key is read wherever what
+        // applies is not, for its routes to weigh, and never where it is.
         DB::table('authorizable_policies')->where('policy_id', $halved->getKey())->update(['tenant_id' => null]);
 
         $inline = Policy::query()->create(
@@ -119,20 +121,23 @@ final class RoleCarriersTest extends TestCase
         $key = Reference::of($role)->id;
         $all = RoleCarriers::attachments(ReviewRun::of(ReviewScope::everywhere()), [$key]);
 
-        self::assertEqualsCanonicalizing([Reference::of($policy)->id, Reference::of($other)->id, Reference::of($offchain)->id], self::targets($all[$key]));
+        self::assertEqualsCanonicalizing(
+            [Reference::of($policy)->id, Reference::of($other)->id, Reference::of($offchain)->id, Reference::of($halved)->id],
+            self::targets($all[$key]),
+        );
         self::assertSame(
             [Reference::of($policy)->id],
             self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::appliesIn(self::tenant('team1'), ApplicationSelector::none())), [$key])[$key]),
         );
         self::assertEqualsCanonicalizing(
-            [Reference::of($policy)->id, Reference::of($offchain)->id],
+            [Reference::of($policy)->id, Reference::of($offchain)->id, Reference::of($halved)->id],
             self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::everywhere(ApplicationSelector::none())), [$key])[$key]),
         );
 
         // Outside a review of what applies in a tenant, an attachment is read
         // whatever its tenant, for the routes to weigh where it holds.
         self::assertEqualsCanonicalizing(
-            [Reference::of($policy)->id, Reference::of($other)->id, Reference::of($offchain)->id],
+            [Reference::of($policy)->id, Reference::of($other)->id, Reference::of($offchain)->id, Reference::of($halved)->id],
             self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::rootedWithin(self::tenant('acct1'))), [$key])[$key]),
         );
         self::assertSame([Reference::of($other)->id], self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::everywhere()), null, Reference::of($other)->id)[$key]));
@@ -178,6 +183,19 @@ final class RoleCarriersTest extends TestCase
 
         self::assertSame(['role_policy y2 held>parent', 'role_policy y3 held>parent'], self::routes($policies));
         self::assertSame([SourceKind::ROLE_POLICY, null], [$policies->rows()[0]->sourceKind, $policies->rows()[0]->viaIdentity]);
+
+        // An attachment no check places reaches a grant held everywhere alone,
+        // and the route through it is malformed.
+        $nowhere  = ['held' => [self::attachment('held', 'y4', null, 'tenant')]];
+        $inTenant = new RowCollector($run, 10);
+        $platform = new RowCollector($run, 10);
+
+        RoleCarriers::throughAttachments($run, $inTenant, new Reference('u', 'ann'), $grant, ['held'], $nowhere);
+        RoleCarriers::throughAttachments($run, $platform, new Reference('u', 'ann'), self::grant('held', null), ['held'], $nowhere);
+
+        self::assertSame([], self::routes($inTenant));
+        self::assertSame(['role_policy y4 held'], self::routes($platform));
+        self::assertSame(GrantState::MALFORMED, $platform->rows()[0]->grantState);
 
         // The routes come in their own order, not the chain's: a role above
         // whose key sorts before the row a lower role carries comes first.
@@ -228,6 +246,16 @@ final class RoleCarriersTest extends TestCase
 
         self::assertEqualsCanonicalizing(['platform', 'here'], $reaching($attachments));
         self::assertSame([], $reaching([]));
+
+        // An attachment naming a type without a key, which no check reads in a
+        // tenant, is reached only by a grant held everywhere.
+        $nowhere = self::policy('nowhere');
+
+        self::grants()->attachPolicy($parent, $nowhere, tenant: self::tenant('acct1'));
+
+        DB::table('authorizable_policies')->where('policy_id', $nowhere->getKey())->update(['tenant_id' => null]);
+
+        self::assertSame(['platform'], $reaching(RoleCarriers::attachments($run, null, Reference::of($nowhere)->id)));
         self::assertSame([], $reaching([Reference::of($other)->id . '-none' => $attachments[Reference::of($parent)->id]]));
     }
 
@@ -260,16 +288,24 @@ final class RoleCarriersTest extends TestCase
     }
 
     /**
-     * Return a grant of the role in the tenant, reaching below it.
+     * Return a grant of the role in the tenant, or platform-wide for none,
+     * reaching below it.
      *
      * @param  string  $role
-     * @param  string  $tenant
+     * @param  string|null  $tenant
      * @return \SineMacula\Laravel\Authorization\Reviews\Support\GrantRow
      */
-    private static function grant(string $role, string $tenant): GrantRow
+    private static function grant(string $role, ?string $tenant): GrantRow
     {
         return GrantRow::from(
-            (object) ['target_id' => $role, 'grantee_type' => 'u', 'grantee_id' => 'ann', 'tenant_type' => 'tenant', 'tenant_id' => $tenant, 'include_subtree' => true],
+            (object) [
+                'target_id'       => $role,
+                'grantee_type'    => 'u',
+                'grantee_id'      => 'ann',
+                'tenant_type'     => $tenant === null ? null : 'tenant',
+                'tenant_id'       => $tenant,
+                'include_subtree' => true,
+            ],
             'role',
         );
     }
@@ -288,21 +324,23 @@ final class RoleCarriersTest extends TestCase
 
     /**
      * Return the attachment of the policy to the role in the tenant, or
-     * platform-wide for none.
+     * platform-wide for none, stored with the tenant type given, the tenant's
+     * own by default.
      *
      * @param  string  $role
      * @param  string  $policy
      * @param  string|null  $tenant
+     * @param  string|null  $type
      * @return \SineMacula\Laravel\Authorization\Reviews\Support\GrantRow
      */
-    private static function attachment(string $role, string $policy, ?string $tenant): GrantRow
+    private static function attachment(string $role, string $policy, ?string $tenant, ?string $type = null): GrantRow
     {
         return GrantRow::from(
             (object) [
                 'target_id'       => $policy,
                 'grantee_type'    => 'role',
                 'grantee_id'      => $role,
-                'tenant_type'     => $tenant === null ? null : 'tenant',
+                'tenant_type'     => $type ?? ($tenant === null ? null : 'tenant'),
                 'tenant_id'       => $tenant,
                 'include_subtree' => true,
             ],

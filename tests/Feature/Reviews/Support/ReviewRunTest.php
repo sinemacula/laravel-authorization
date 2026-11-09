@@ -11,7 +11,6 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
-use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRow;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRows;
@@ -282,16 +281,17 @@ final class ReviewRunTest extends TestCase
     }
 
     /**
-     * A grant naming half a tenant, a type without a key or a key without a
-     * type, is left out of every selection, so no review shows it as the
-     * platform's; a role's policy attachment naming half a tenant is never
-     * paired with a grant as the platform's either.
+     * A grant naming half a tenant is selected exactly where a check reads it:
+     * a key without a type at the platform, so wherever what applies is read,
+     * and a type without a key nowhere; a review of everywhere selects a type
+     * without a key too, and a review rooted within a tenant selects neither,
+     * since neither can be shown to lie within it.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testARowNamingHalfATenantIsLeftOut(): void
+    public function testARowNamingHalfATenantIsSelectedWhereACheckReadsIt(): void
     {
         $this->seedGrants();
 
@@ -304,26 +304,14 @@ final class ReviewRunTest extends TestCase
         DB::table($table)->where('authorizable_id', 'no-key')->update(['tenant_id' => null]);
         DB::table($table)->where('authorizable_id', 'no-type')->update(['tenant_type' => null]);
 
-        $scopes = [
-            ReviewScope::everywhere(),
-            ReviewScope::appliesIn(null, ApplicationSelector::any()),
-            ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none()),
-            ReviewScope::rootedWithin(self::tenant('org1')),
-        ];
+        $halves = static fn (ReviewScope $scope): array => \array_values(\array_intersect(self::selected($scope), ['no-key', 'no-type']));
 
-        foreach ($scopes as $scope) {
-            self::assertSame([], \array_values(\array_intersect(['no-key', 'no-type'], self::selected($scope))));
-        }
-
-        $policy  = self::policy('halved-policy');
-        $carrier = self::role('carrier');
-
-        self::grants()->attachPolicy($carrier, $policy, tenant: self::tenant('acct1'), includeSubtree: false);
-        self::grants()->grantRole(new Reference('u', 'elsewhere'), $carrier, tenant: self::tenant('acct2'), includeSubtree: false);
-
-        DB::table(GrantTarget::POLICY->table())->where('policy_id', $policy->getKey())->update(['tenant_id' => null]);
-
-        self::assertSame([], self::trusted(ReviewQuery::holders($policy, ReviewScope::everywhere()))->rows);
+        self::assertEqualsCanonicalizing(['no-key', 'no-type'], $halves(ReviewScope::everywhere()));
+        self::assertSame(['no-type'], $halves(ReviewScope::appliesIn(null, ApplicationSelector::any())));
+        self::assertSame(['no-type'], $halves(ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none())));
+        self::assertSame([], $halves(ReviewScope::rootedWithin(self::tenant('org1'))));
+        self::assertSame([], $halves(ReviewScope::rootedWithin(self::tenant('org2'))));
+        self::assertEqualsCanonicalizing(['acct1', 'team1'], self::selected(ReviewScope::rootedWithin(self::tenant('acct1'))));
     }
 
     /**

@@ -2829,9 +2829,22 @@ structure alone, with the same tenant chain, application matching, live-grant an
 reads, and never evaluates a statement, condition, deny or cap, so a holder may well be denied what it holds: for what a
 subject may actually do, use `check()`, [`permissionsFor()`](#effective-permissions) or a [preview](#preview). A
 suspended, inactive or soft-deleted subject keeps its live grants in a review, marked `inactive`, whether it is named
-by reference or given as a resolved `Subject`, or `unknown` when its record is gone. A grant row that names half a
-tenant (a type without a key, or the reverse), which the package never writes, is left out, never shown as the
-platform's.
+by reference or given as a resolved `Subject`, or `unknown` when its record is gone.
+
+A grant or attachment row that names half a tenant (a type without a key, or the reverse), which the package never
+writes, is listed as damaged, never as a clean platform origin: its `grant_state` is `malformed` and its `origin_scope`
+shows the tenant columns as stored, the missing half null. It appears exactly where a check reads it today (a check
+reads a key without a type at the platform, by its missing type alone, and a type without a key nowhere), and a type
+without a key is also listed in a review of everywhere, which needs platform-wide admission, never in one rooted
+within a tenant, since it cannot be shown to lie there. A route resting on such a row is `malformed` too. Checks
+themselves still read these rows as before.
+
+| Stored tenant    | `appliesIn()` (any tenant, or the platform) | `rootedWithin()` (any tenant) | `everywhere()` |
+|------------------|---------------------------------------------|-------------------------------|----------------|
+| Key without type | Listed, read at the platform                | Not listed                    | Listed         |
+| Type without key | Not listed                                  | Not listed                    | Listed         |
+
+Holders, holdings, expiries and an actor's grants each follow their scope selection.
 
 **The queries.**
 
@@ -2851,11 +2864,11 @@ machines or neither), each naming the identity as `via_identity`, and a sibling 
 (`holdings()` given an identity's model or reference) the identity's grants and those of every principal the identity
 directory lists are read, each row keeping its actual grantee, and `isComplete` is false when the directory says its
 list may leave one out; `isComplete` says nothing else, and is true for every other review. Expiring rows are stored
-rows, not routes, each marked `live` or `expired` at the review's instant; a role's permission edge and its policy
-attachment are kinds of their own. The window's bounds keep their microseconds: an expiry is stored to the whole second,
-so a bound with a fraction is compared as the next whole second, which lists exactly the expiries within it. "Granted
-by" means the last writer: a regrant, a changed expiry or a changed reach overwrites it, a trusted write names no actor,
-and a revoked grant is gone, so the history stays with the audit log the grant events feed.
+rows, not routes, each marked `live`, `expired` or `malformed` at the review's instant; a role's permission edge and its
+policy attachment are kinds of their own. The window's bounds keep their microseconds: an expiry is stored to the whole
+second, so a bound with a fraction is compared as the next whole second, which lists exactly the expiries within it.
+"Granted by" means the last writer: a regrant, a changed expiry or a changed reach overwrites it, a trusted write names
+no actor, and a revoked grant is gone, so the history stays with the audit log the grant events feed.
 
 **The scope.** Each selection is a value of its own, never a null that could mean two things:
 
@@ -2882,13 +2895,13 @@ document or value. Its shape is versioned (`version: 1`):
 | `row_key`                                | A key of the route, the same every time                                                      |
 | `subject`, `grantee`, `target`           | Who holds it, whom the stored grant names, and the role, permission or policy held           |
 | `source_kind`, `source_key`              | The kind of stored row the route starts from, and its key                                    |
-| `origin_scope`                           | That row's tenant (null for the platform), application (null for every one) and reach below  |
+| `origin_scope`                           | That row's tenant as stored (null for the platform), application (null for every one), reach |
 | `via_identity`, `role_path`              | The identity a grant reaches the subject through, and the roles from the one granted upwards |
 | `supporting_grants`                      | Every stored row the route rests on, each with its key, scope and expiry                     |
 | `created_at`, `updated_at`, `expires_at` | The starting row's times, in UTC                                                             |
 | `route_expires_at`                       | The earliest expiry of every row the route rests on                                          |
 | `granted_by`                             | The last actor to grant or change the starting row; null for a trusted write                 |
-| `grant_state`, `subject_state`           | `live` or `expired`; `active`, `inactive` or `unknown`                                       |
+| `grant_state`, `subject_state`           | `live`, `expired` or `malformed`; `active`, `inactive` or `unknown`                          |
 
 The rows come in one total order, the same on SQLite, PostgreSQL and MySQL: by source kind, target, grantee, origin
 scope (the platform before a tenant, every application before a named one) and route, every string compared byte for

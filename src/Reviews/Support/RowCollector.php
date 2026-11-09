@@ -98,13 +98,13 @@ final class RowCollector
             $target,
             $kind,
             $start->key(),
-            $start->scope,
+            $start->originScope(),
             $via,
             RoleChains::path($chain),
             $supporting,
             $times,
             $start->grantedBy,
-            $start->isLiveAt($this->run->now) ? GrantState::LIVE : GrantState::EXPIRED,
+            $this->stateOf($start, $rows),
         );
 
         $this->entries[] = ['key' => [$kind->position(), $target->type, $target->id, ...$start->orderKey(), ...$route], 'row' => $row];
@@ -136,5 +136,23 @@ final class RowCollector
     public function isTruncated(): bool
     {
         return \count($this->entries) > $this->limit;
+    }
+
+    /**
+     * Return the state of a route: malformed when a row it rests on names half
+     * a tenant, else live while the row it starts from still counts at the
+     * run's instant, and expired once it does not.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\GrantRow  $start
+     * @param  list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>  $rows
+     * @return \SineMacula\Laravel\Authorization\Reviews\Enums\GrantState
+     */
+    private function stateOf(GrantRow $start, array $rows): GrantState
+    {
+        return match (true) {
+            \array_filter($rows, static fn (GrantRow $row): bool => $row->isMalformed()) !== [] => GrantState::MALFORMED,
+            $start->isLiveAt($this->run->now)                                                   => GrantState::LIVE,
+            default                                                                             => GrantState::EXPIRED,
+        };
     }
 }

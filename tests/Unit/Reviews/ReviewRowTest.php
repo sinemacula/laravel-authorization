@@ -10,9 +10,9 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Reviews\Enums\GrantState;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState;
+use SineMacula\Laravel\Authorization\Reviews\OriginScope;
 use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 use SineMacula\Laravel\Authorization\Reviews\SupportingGrant;
-use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -70,15 +70,13 @@ final class ReviewRowTest extends TestCase
     }
 
     /**
-     * A platform-wide scope has no tenant, and no scope, instant or reference
-     * is null.
+     * No scope, instant or reference is null, and a row naming half a tenant
+     * shows the half it stores, marked malformed.
      *
      * @return void
      */
     public function testNoneIsNull(): void
     {
-        self::assertSame(['tenant' => null, 'application' => null, 'include_subtree' => true], ReviewRow::scopeArray(GrantScope::platform()));
-        self::assertNull(ReviewRow::scopeArray(null));
         self::assertNull(ReviewRow::instant(null));
         self::assertSame('2030-01-01T05:00:00Z', ReviewRow::instant(CarbonImmutable::create(2030, 1, 1, 0, 0, 0, 'America/New_York')));
 
@@ -103,6 +101,27 @@ final class ReviewRowTest extends TestCase
             [$bare->toArray()['via_identity'], $bare->toArray()['granted_by'], $bare->toArray()['origin_scope'], $bare->toArray()['grant_state']],
         );
         self::assertNull($bare->routeExpiresAt());
+
+        $half = new ReviewRow(
+            'k',
+            new Reference('user', 'u'),
+            new Reference('user', 'u'),
+            new Reference('role', 'r'),
+            SourceKind::ROLE_GRANT,
+            's',
+            new OriginScope(null, 't1', null, true),
+            null,
+            [],
+            [],
+            ['created_at' => null, 'updated_at' => null, 'expires_at' => null, 'route_expires_at' => null],
+            null,
+            GrantState::MALFORMED,
+        );
+
+        self::assertSame(
+            [['tenant' => ['type' => null, 'id' => 't1'], 'application' => null, 'include_subtree' => true], 'malformed'],
+            [$half->toArray()['origin_scope'], $half->toArray()['grant_state']],
+        );
     }
 
     /**
@@ -128,7 +147,7 @@ final class ReviewRowTest extends TestCase
      */
     private static function row(): ReviewRow
     {
-        $scope   = new GrantScope(new Reference('tenant', 't1'), 'web', false);
+        $scope   = new OriginScope('tenant', 't1', 'web', false);
         $expires = CarbonImmutable::create(2040, 1, 2, 3, 4, 5, 'UTC');
 
         return new ReviewRow(

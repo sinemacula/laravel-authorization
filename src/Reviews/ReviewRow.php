@@ -8,7 +8,6 @@ use Carbon\CarbonImmutable;
 use SineMacula\Laravel\Authorization\Reviews\Enums\GrantState;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState;
-use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -26,9 +25,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * - `source_kind` and `source_key`: the kind of the stored row the route starts
  *   from (see `Enums\SourceKind`) and its key, built from the columns that make
  *   it unique;
- * - `origin_scope`: where that row holds: its tenant, null for the platform,
- *   its application, null for every application, and whether it reaches the
- *   tenants below; null for a role edge;
+ * - `origin_scope`: where that row holds, as stored (see `OriginScope`): its
+ *   tenant's type and key, null for the platform, its application, null for
+ *   every application, and whether it reaches the tenants below; null for a
+ *   role edge. A row naming half a tenant shows the half it stores, the other
+ *   null, and is `malformed`;
  * - `via_identity`: the identity a grant reaches the subject through, else
  *   null;
  * - `role_path`: the roles from the role granted up to the one carrying the
@@ -42,7 +43,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * - `granted_by`: the last actor to grant or change the starting row (N95),
  *   null for a trusted write or a role edge;
  * - `grant_state`: whether the starting row still counts at the review's
- *   instant; `subject_state`: what the review knows of the subject.
+ *   instant, `live` or `expired`, or `malformed` when a row the route rests on
+ *   names half a tenant (see `Enums\GrantState`); `subject_state`: what the
+ *   review knows of the subject.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,7 +68,7 @@ final readonly class ReviewRow
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $target
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind  $sourceKind
      * @param  string  $sourceKey
-     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope|null  $originScope
+     * @param  \SineMacula\Laravel\Authorization\Reviews\OriginScope|null  $originScope
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $viaIdentity
      * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $rolePath
      * @param  list<\SineMacula\Laravel\Authorization\Reviews\SupportingGrant>  $supportingGrants
@@ -98,8 +101,8 @@ final readonly class ReviewRow
         /** The key of the stored row the route starts from. */
         public string $sourceKey,
 
-        /** Where the stored row the route starts from holds; null for a role edge. */
-        public ?GrantScope $originScope,
+        /** Where the stored row the route starts from holds, as stored; null for a role edge. */
+        public ?OriginScope $originScope,
 
         /** The identity a grant reaches the subject through; null for none. */
         public ?Reference $viaIdentity,
@@ -116,7 +119,7 @@ final readonly class ReviewRow
         /** The last actor to grant or change the starting row; null for none. */
         public ?Reference $grantedBy,
 
-        /** Whether the starting row still counts at the review's instant. */
+        /** Whether the starting row still counts at the review's instant, or a row the route rests on names half a tenant. */
         public GrantState $grantState,
 
         /** What the review knows of the subject. */
@@ -175,7 +178,7 @@ final readonly class ReviewRow
             'target'            => self::referenceArray($this->target),
             'source_kind'       => $this->sourceKind->value,
             'source_key'        => $this->sourceKey,
-            'origin_scope'      => self::scopeArray($this->originScope),
+            'origin_scope'      => $this->originScope?->toArray(),
             'via_identity'      => self::referenceArray($this->viaIdentity),
             'role_path'         => \array_map(static fn (Reference $role): array => ['type' => $role->type, 'id' => $role->id], $this->rolePath),
             'supporting_grants' => \array_map(static fn (SupportingGrant $grant): array => $grant->toArray(), $this->supportingGrants),
@@ -187,25 +190,6 @@ final readonly class ReviewRow
             'grant_state'       => $this->grantState->value,
             'subject_state'     => $this->subjectState->value,
         ];
-    }
-
-    /**
-     * Return a scope as plain values: its tenant's reference, null for the
-     * platform, its application, null for every application, and whether it
-     * reaches the tenants below; or null for none.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope|null  $scope
-     * @return array{tenant: array{type: string, id: string}|null, application: string|null, include_subtree: bool}|null
-     *
-     * @internal
-     */
-    public static function scopeArray(?GrantScope $scope): ?array
-    {
-        if ($scope === null) {
-            return null;
-        }
-
-        return ['tenant' => self::referenceArray($scope->tenant), 'application' => $scope->application, 'include_subtree' => $scope->includeSubtree];
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Reviews;
 
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
@@ -168,10 +169,139 @@ final class AccessReviewTest extends TestCase
 
         $last = \array_values(\array_filter($rows, static fn (ReviewRow $row): bool => $row->grantee->id === 'z'));
 
-        $scopes = \array_map(static fn (ReviewRow $row): string => ($row->originScope?->tenant->id ?? '-') . '/' . ($row->originScope->application ?? '-'), $last);
+        $scopes = \array_map(static fn (ReviewRow $row): string => ($row->originScope->tenantId ?? '-') . '/' . ($row->originScope->application ?? '-'), $last);
 
         self::assertSame(['-/-', '-/web', 'T/-', 'T/web'], $scopes);
         self::assertSame(SubjectState::UNKNOWN, $rows[0]->subjectState);
+    }
+
+    /**
+     * A grant naming half a tenant is listed exactly where a check reads it, a
+     * key without a type at the platform and so in every tenant, a type without
+     * a key nowhere; both are listed in a review of everywhere and neither in
+     * one rooted within a tenant, by holders, holdings, expiries and an actor's
+     * grants alike, each marked malformed, its origin scope as stored.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantNamingHalfATenantIsListedWhereACheckReadsIt(): void
+    {
+        $this->tree();
+
+        $role   = self::role('reviewed');
+        $ann    = self::identity('ann');
+        $at     = now('UTC')->addMonth()->startOfSecond();
+        $writer = new Reference('user', 'writer');
+
+        self::grants()->grantRole($ann, $role, $at, tenant: self::tenant('acct1'));
+        self::grants()->grantRole($ann, $role, $at, tenant: self::tenant('acct2'));
+
+        DB::table('authorizable_roles')->where('tenant_id', 'acct1')->update(['tenant_type' => null, 'granted_by_type' => $writer->type, 'granted_by_id' => $writer->id]);
+        DB::table('authorizable_roles')->where('tenant_id', 'acct2')->update(['tenant_id' => null, 'granted_by_type' => $writer->type, 'granted_by_id' => $writer->id]);
+
+        $noType = ['type' => null, 'id' => 'acct1'];
+        $noKey  = ['type' => 'tenant', 'id' => null];
+
+        $expected = [
+            [ReviewScope::everywhere(), [$noType, $noKey]],
+            [ReviewScope::appliesIn(null, ApplicationSelector::none()), [$noType]],
+            [ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none()), [$noType]],
+            [ReviewScope::appliesIn(self::tenant('team1'), ApplicationSelector::any()), [$noType]],
+            [ReviewScope::rootedWithin(self::tenant('org1')), []],
+            [ReviewScope::rootedWithin(self::tenant('acct1')), []],
+            [ReviewScope::rootedWithin(self::tenant('acct2')), []],
+        ];
+
+        foreach ($expected as [$scope, $tenants]) {
+            $queries = [
+                'holders'    => ReviewQuery::holders($role, $scope),
+                'holdings'   => ReviewQuery::holdings(new Subject($ann, $ann), $scope),
+                'expiring'   => ReviewQuery::expiring($scope, $at->copy()->subDay(), $at->copy()->addDay()),
+                'granted_by' => ReviewQuery::grantedBy($writer, $scope),
+            ];
+
+            foreach ($queries as $kind => $query) {
+                $rows = self::trusted($query)->rows;
+
+                self::assertSame(
+                    \array_map(static fn (array $tenant): array => [$tenant, 'malformed'], $tenants),
+                    \array_map(static fn (ReviewRow $row): array => [$row->toArray()['origin_scope']['tenant'] ?? null, $row->toArray()['grant_state']], $rows),
+                    "{$kind} in " . $scope->selection->value,
+                );
+            }
+        }
+    }
+
+    /**
+     * A route resting on a role's policy attachment naming half a tenant is
+     * marked malformed, its supporting row as stored: one with a key and no
+     * type reaches a holder anywhere, as a check reads it at the platform; one
+     * with a type and no key reaches only a holder of a platform-wide grant.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARouteThroughAnAttachmentNamingHalfATenantIsMalformed(): void
+    {
+        $this->tree();
+
+        $role    = self::role('carrier');
+        $noType  = self::policy('no-type');
+        $noKey   = self::policy('no-key');
+        $holders = static fn (Policy $policy): array => \array_map(
+            static fn (ReviewRow $row): array => [$row->subject->id, $row->grantState->value, $row->toArray()['supporting_grants'][1]['scope']['tenant'] ?? null],
+            self::trusted(ReviewQuery::holders($policy, ReviewScope::everywhere()))->rows,
+        );
+
+        self::grants()->attachPolicy($role, $noType, tenant: self::tenant('acct1'), includeSubtree: false);
+        self::grants()->attachPolicy($role, $noKey, tenant: self::tenant('acct1'), includeSubtree: false);
+        self::grants()->grantRole(self::identity('elsewhere'), $role, tenant: self::tenant('acct2'), includeSubtree: false);
+        self::grants()->grantRole(self::identity('platform'), $role);
+
+        DB::table('authorizable_policies')->where('policy_id', $noType->getKey())->update(['tenant_type' => null]);
+        DB::table('authorizable_policies')->where('policy_id', $noKey->getKey())->update(['tenant_id' => null]);
+
+        self::assertEqualsCanonicalizing([
+            ['elsewhere', 'malformed', ['type' => null, 'id' => 'acct1']],
+            ['platform', 'malformed', ['type' => null, 'id' => 'acct1']],
+        ], $holders($noType));
+        self::assertSame([['platform', 'malformed', ['type' => 'tenant', 'id' => null]]], $holders($noKey));
+    }
+
+    /**
+     * Rows naming half a tenant take their place in the one order by their
+     * tenant columns as stored, each null first, the same for holders read in
+     * the database's order as for holdings sorted in PHP, on every database.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRowsNamingHalfATenantAreOrderedByWhatTheyStore(): void
+    {
+        $role    = self::role('reviewed');
+        $grantee = new Reference('odd type', 'z');
+
+        self::grants()->grantRole($grantee, $role, tenant: new Reference('tenant', 'type-only'));
+        self::grants()->grantRole($grantee, $role, tenant: new Reference('tenant', 'key-only'));
+        self::grants()->grantRole($grantee, $role, tenant: new Reference('tenant', 'x'));
+        self::grants()->grantRole($grantee, $role);
+
+        DB::table('authorizable_roles')->where('tenant_id', 'type-only')->update(['tenant_id' => null]);
+        DB::table('authorizable_roles')->where('tenant_id', 'key-only')->update(['tenant_type' => null, 'tenant_id' => 'x']);
+
+        $describe = static fn (array $rows): array => \array_map(
+            static fn (ReviewRow $row): string => ($row->originScope->tenantType ?? '-') . '/' . ($row->originScope->tenantId ?? '-') . ' ' . $row->grantState->value,
+            $rows,
+        );
+
+        $expected = ['-/- live', '-/x malformed', 'tenant/- malformed', 'tenant/x live'];
+
+        self::assertSame($expected, $describe(self::trusted(ReviewQuery::holders($role, ReviewScope::everywhere()))->rows));
+        self::assertSame($expected, $describe(self::trusted(ReviewQuery::holdings($grantee, ReviewScope::everywhere()))->rows));
     }
 
     /**

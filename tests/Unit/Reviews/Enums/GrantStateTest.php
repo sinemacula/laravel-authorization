@@ -30,6 +30,6 @@ final class GrantStateTest extends TestCase
     {
         $values = \array_map(static fn (GrantState $case): string => $case->value, GrantState::cases());
 
-        self::assertSame(['live', 'expired'], $values);
+        self::assertSame(['live', 'expired', 'malformed'], $values);
     }
 }
