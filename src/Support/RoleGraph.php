@@ -69,6 +69,63 @@ final class RoleGraph
     }
 
     /**
+     * Return the path of each role through which its holder gets grants, keyed
+     * by the role's key: the role itself, then, when the hierarchy is enabled,
+     * each ancestor from the immediate parent up to the root, as
+     * `ancestorsOf()` reads them. An explained check reads where a grant came
+     * from through it.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Models\Role>  $roles
+     * @return array<string, list<\SineMacula\Laravel\Authorization\Models\Role>>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     */
+    public static function pathsOf(array $roles): array
+    {
+        $chains = self::isHierarchyEnabled() ? self::ancestorsOf($roles) : [];
+        $paths  = [];
+
+        foreach ($roles as $role) {
+            $paths[$role->id] = [$role, ...\array_reverse($chains[$role->id] ?? [])];
+        }
+
+        return $paths;
+    }
+
+    /**
+     * Return the names of the permissions each of the roles with the given keys
+     * still carries, keyed by the role's key, in one query through the
+     * permission model, as `permissionsHeldBy()` reads them: the grants an
+     * explained check tells apart by the role that carries them.
+     *
+     * @param  list<string>  $roleKeys
+     * @return array<string, list<string>>
+     */
+    public static function permissionsByRole(array $roleKeys): array
+    {
+        if ($roleKeys === []) {
+            return [];
+        }
+
+        [$query, $model, $pivot] = self::permissionQuery($roleKeys);
+
+        /** @var list<array{role_id: string, name: string}> $rows */
+        $rows = $query->toBase()
+            ->distinct()
+            ->get([$pivot . '.role_id as role_id', $model->qualifyColumn('name') . ' as name'])
+            ->map(static fn (object $row): array => (array) $row)
+            ->all();
+
+        $carried = [];
+
+        foreach ($rows as $row) {
+            $carried[$row['role_id']][] = $row['name'];
+        }
+
+        return $carried;
+    }
+
+    /**
      * Return the names of every permission the roles hold, with each role's
      * ancestors' when the hierarchy is enabled.
      *
@@ -207,19 +264,10 @@ final class RoleGraph
             return new InheritedPermissions([], null);
         }
 
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
-        $class = config('authorization.models.permission', Permission::class);
-
-        /** @var string $pivot */
-        $pivot = config('authorization.tables.role_permissions', 'role_permissions');
-        $model = new $class;
-        $query = $class::query()
-            ->useWritePdo()
-            ->join($pivot, $pivot . '.permission_id', '=', $model->getQualifiedKeyName())
-            ->whereIn($pivot . '.role_id', $roleKeys);
+        [$query, $model, $pivot] = self::permissionQuery($roleKeys);
 
         /** @var list<array{name: string, expires_at: string|null}> $rows */
-        $rows = LiveGrants::only($query, $pivot)
+        $rows = $query
             ->toBase()
             ->distinct()
             ->get([$model->qualifyColumn('name') . ' as name', $pivot . '.expires_at as expires_at'])
@@ -241,6 +289,30 @@ final class RoleGraph
         }
 
         return new InheritedPermissions(\array_values($names), $nearest);
+    }
+
+    /**
+     * Return the query for the live grants of permissions to the roles with the
+     * given keys, through the permission model, with the model and the grant
+     * table it joins.
+     *
+     * @param  list<string>  $roleKeys
+     * @return array{\Illuminate\Database\Eloquent\Builder<\SineMacula\Laravel\Authorization\Models\Permission>, \SineMacula\Laravel\Authorization\Models\Permission, string}
+     */
+    private static function permissionQuery(array $roleKeys): array
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
+        $class = config('authorization.models.permission', Permission::class);
+
+        /** @var string $pivot */
+        $pivot = config('authorization.tables.role_permissions', 'role_permissions');
+        $model = new $class;
+        $query = $class::query()
+            ->useWritePdo()
+            ->join($pivot, $pivot . '.permission_id', '=', $model->getQualifiedKeyName())
+            ->whereIn($pivot . '.role_id', $roleKeys);
+
+        return [LiveGrants::only($query, $pivot), $model, $pivot];
     }
 
     /**

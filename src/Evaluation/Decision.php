@@ -29,6 +29,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
  * fingerprint, never the session id, so the decision stays safe to log or
  * store.
  *
+ * A decision made in explain mode (N89), as `Authorization::explain()` makes
+ * it, also carries its evidence: where each grant that allowed it came from,
+ * what the check asked, and, on its trace, each condition test with what it
+ * found (see `DecisionEvidence`). Any other decision carries none, and
+ * `explain()` explains it with what it has, marking the rest as not recorded,
+ * never evaluating anything again.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -44,6 +51,7 @@ final readonly class Decision
      * @param  list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
      * @param  list<\SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement>  $requirements
      * @param  \SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness|null  $freshness
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\DecisionEvidence|null  $evidence
      */
     private function __construct(
 
@@ -67,6 +75,9 @@ final readonly class Decision
 
         /** How long the decision may be reused; null when it read no authentication requirement. */
         public ?RequirementFreshness $freshness = null,
+
+        /** The evidence an explained check recorded; null for a decision made without explain mode. */
+        public ?DecisionEvidence $evidence = null,
     ) {}
 
     /**
@@ -123,10 +134,21 @@ final readonly class Decision
     }
 
     /**
+     * Determine whether the decision carries the evidence of an explained
+     * check.
+     *
+     * @return bool
+     */
+    public function hasEvidence(): bool
+    {
+        return $this->evidence !== null;
+    }
+
+    /**
      * Return the name of each context key the decision depended on: every
-     * condition key a step of its trace tested, each once, in the order first
-     * tested, whether or not its test held. Names alone, never a value
-     * (AUTHZ-15.4).
+     * condition key a step of its trace tested, whether or not its test held,
+     * and every `${…}` reference a statement it assessed names, each once, in
+     * the order first met. Names alone, never a value (AUTHZ-15.4).
      *
      * @return list<string>
      */
@@ -135,7 +157,7 @@ final readonly class Decision
         $keys = [];
 
         foreach ($this->trace as $entry) {
-            $keys = [...$keys, ...\array_map(\strval(...), \array_keys($entry->conditions))];
+            $keys = [...$keys, ...\array_map(\strval(...), \array_keys($entry->conditions)), ...$entry->dependencies];
         }
 
         return \array_values(\array_unique($keys));
@@ -149,7 +171,7 @@ final readonly class Decision
      */
     public function withStep(TraceEntry $entry): self
     {
-        return new self($this->effect, $this->reason, $this->stage, $this->statements, [...$this->trace, $entry], $this->requirements, $this->freshness);
+        return new self($this->effect, $this->reason, $this->stage, $this->statements, [...$this->trace, $entry], $this->requirements, $this->freshness, $this->evidence);
     }
 
     /**
@@ -165,7 +187,18 @@ final readonly class Decision
             return $this;
         }
 
-        return new self($this->effect, $this->reason, $this->stage, $this->statements, $this->trace, $this->requirements, $freshness);
+        return new self($this->effect, $this->reason, $this->stage, $this->statements, $this->trace, $this->requirements, $freshness, $this->evidence);
+    }
+
+    /**
+     * Return the decision with the evidence its explained check recorded.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\DecisionEvidence  $evidence
+     * @return self
+     */
+    public function withEvidence(DecisionEvidence $evidence): self
+    {
+        return new self($this->effect, $this->reason, $this->stage, $this->statements, $this->trace, $this->requirements, $this->freshness, $evidence);
     }
 
     /**
@@ -184,26 +217,17 @@ final readonly class Decision
     }
 
     /**
-     * Return the decision as text: the verdict, the stage and the statements
-     * that decided it, each requirement an insufficient authentication names
-     * with its unmet parts, then each step of the trace.
+     * Return the decision's explanation (AUTHZ-11.5): the verdict, what decided
+     * it, the evidence of every stage it reached and the stages it never
+     * reached, from what the decision carries alone (see `Explanation`). A
+     * decision made without explain mode explains with the evidence it has, the
+     * rest marked as not recorded. Nothing is evaluated, read, recorded or
+     * dispatched.
      *
-     * @return string
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Explanation
      */
-    public function explain(): string
+    public function explain(): Explanation
     {
-        $verdict    = $this->isAllowed() ? 'ALLOW' : "DENY ({$this->reason?->value}: {$this->reason?->label()})";
-        $statements = \implode(', ', \array_map(static fn (StatementReference $statement): string => $statement->toString(), $this->statements));
-        $lines      = ["{$verdict} at the {$this->stage->value} stage" . ($statements === '' ? '.' : " by {$statements}.")];
-
-        foreach ($this->requirements as $requirement) {
-            $lines[] = '  requirement ' . \implode(', ', $requirement->requirement->names()) . ': unmet ' . \implode(', ', $requirement->unmet);
-        }
-
-        foreach ($this->trace as $entry) {
-            $lines[] = '  ' . $entry->toString();
-        }
-
-        return \implode("\n", $lines);
+        return Explanation::of($this);
     }
 }

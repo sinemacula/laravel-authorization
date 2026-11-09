@@ -75,8 +75,10 @@ final class AuthorizationManagerTest extends TestCase
         $scope   = AuthorizationScope::current();
 
         foreach (['posts:create', 'posts:delete', 'posts:read'] as $action) {
-            self::assertSame($named->check($action)->explain(), $preview->check($action)->explain(), $action);
-            self::assertSame($named->explain($action), $preview->explain($action), $action);
+            self::assertSame($named->check($action)->explain()->toText(), $preview->check($action)->explain()->toText(), $action);
+            $unasked = static fn (AuthorizationManager $manager): array => \array_diff_key($manager->explain($action)->toArray(), ['request' => true]);
+
+            self::assertSame($unasked($named), $unasked($preview), $action);
             self::assertSame($named->can($action), $preview->can($action), $action);
             self::assertSame($named->cannot($action), $preview->cannot($action), $action);
         }
@@ -429,7 +431,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     private static function explained(array $decisions): array
     {
-        return \array_map(static fn (Decision $decision): string => $decision->explain(), $decisions);
+        return \array_map(static fn (Decision $decision): string => $decision->explain()->toText(), $decisions);
     }
 
     /**

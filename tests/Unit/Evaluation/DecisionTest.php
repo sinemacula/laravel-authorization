@@ -8,10 +8,13 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionEvidence;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\Explanation;
+use SineMacula\Laravel\Authorization\Evaluation\GrantProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
@@ -165,7 +168,7 @@ final class DecisionTest extends TestCase
     {
         $decision = Decision::allow(DecisionStage::ALLOW, [new StatementReference('p', 0), new StatementReference('q', 1)]);
 
-        self::assertSame('ALLOW at the allow stage by p#0, q#1.', $decision->explain());
+        self::assertSame("ALLOW at the allow stage by p#0, q#1.\n  evidence: not recorded (explain mode off)", $decision->explain()->toText());
     }
 
     /**
@@ -176,7 +179,7 @@ final class DecisionTest extends TestCase
      */
     public function testExplainAllowWithoutStatements(): void
     {
-        self::assertSame('ALLOW at the allow stage.', Decision::allow(DecisionStage::ALLOW)->explain());
+        self::assertSame("ALLOW at the allow stage.\n  evidence: not recorded (explain mode off)", Decision::allow(DecisionStage::ALLOW)->explain()->toText());
     }
 
     /**
@@ -188,8 +191,8 @@ final class DecisionTest extends TestCase
     public function testExplainDenyWithoutStatements(): void
     {
         self::assertSame(
-            'DENY (no_match: no statement or permission names it) at the implicit stage.',
-            Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT)->explain(),
+            "DENY (no_match: no statement or permission names it) at the implicit stage.\n  evidence: not recorded (explain mode off)",
+            Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT)->explain()->toText(),
         );
     }
 
@@ -202,7 +205,11 @@ final class DecisionTest extends TestCase
     {
         $decision = Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, [new StatementReference('p', 2)]);
 
-        self::assertSame('DENY (explicit_deny: an applicable statement denies it) at the deny stage by p#2.', $decision->explain());
+        self::assertSame(
+            "DENY (explicit_deny: an applicable statement denies it) at the deny stage by p#2.\n"
+            . "  not evaluated: guardrail, boundary, session, allow, administration, implicit\n  evidence: not recorded (explain mode off)",
+            $decision->explain()->toText(),
+        );
     }
 
     /**
@@ -214,8 +221,8 @@ final class DecisionTest extends TestCase
     {
         foreach (DecisionReason::cases() as $reason) {
             self::assertSame(
-                "DENY ({$reason->value}: {$reason->label()}) at the implicit stage.",
-                Decision::deny($reason, DecisionStage::IMPLICIT)->explain(),
+                "DENY ({$reason->value}: {$reason->label()}) at the implicit stage.\n  evidence: not recorded (explain mode off)",
+                Decision::deny($reason, DecisionStage::IMPLICIT)->explain()->toText(),
             );
         }
     }
@@ -238,8 +245,8 @@ final class DecisionTest extends TestCase
         self::assertSame(
             "ALLOW at the allow stage by p#1.\n"
             . "  [deny] p#0: not_applicable\n"
-            . '  [allow] p#1: matched (owner held)',
-            $decision->explain(),
+            . "  [allow] p#1: matched (owner held)\n  evidence: not recorded (explain mode off)",
+            $decision->explain()->toText(),
         );
     }
 
@@ -258,8 +265,8 @@ final class DecisionTest extends TestCase
         self::assertSame(
             "DENY (no_match: no statement or permission names it) at the implicit stage.\n"
             . "  [allow] p#0: not_applicable\n"
-            . '  [allow] permission: not_held',
-            $decision->explain(),
+            . "  [allow] permission: not_held\n  evidence: not recorded (explain mode off)",
+            $decision->explain()->toText(),
         );
     }
 
@@ -370,8 +377,8 @@ final class DecisionTest extends TestCase
         self::assertSame(
             "DENY (insufficient_authentication: a statement allows it once further authentication is met) at the implicit stage by p#0, p#1.\n"
             . "  requirement multifactor, phishing_resistant: unmet multifactor\n"
-            . '  requirement assurance_level: unmet assurance_level',
-            $decision->explain(),
+            . "  requirement assurance_level: unmet assurance_level\n  evidence: not recorded (explain mode off)",
+            $decision->explain()->toText(),
         );
     }
 
@@ -393,6 +400,63 @@ final class DecisionTest extends TestCase
 
         self::assertSame(['resource.status', 'input.flag', '7', 'subject.department'], $decision->keys());
         self::assertSame([], Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT)->keys());
+    }
+
+    /**
+     * A decision carries no evidence until it is given some; withEvidence()
+     * adds it and keeps everything else, and withStep() and withFreshness()
+     * keep it.
+     *
+     * @return void
+     */
+    public function testEvidenceIsKeptAcrossTheDecision(): void
+    {
+        $decision  = Decision::insufficientAuthentication(DecisionStage::IMPLICIT, [new StatementReference('p', 0)], self::requirements());
+        $evidence  = new DecisionEvidence([GrantProvenance::unavailable('posts:read')]);
+        $explained = $decision->withEvidence($evidence);
+        $freshness = new RequirementFreshness('session-1');
+
+        self::assertFalse($decision->hasEvidence());
+        self::assertNull($decision->evidence);
+        self::assertTrue($explained->hasEvidence());
+        self::assertSame($evidence, $explained->evidence);
+        self::assertSame($decision->reason, $explained->reason);
+        self::assertSame($decision->stage, $explained->stage);
+        self::assertSame($decision->statements, $explained->statements);
+        self::assertSame($decision->requirements, $explained->requirements);
+        self::assertSame($decision->trace, $explained->trace);
+        self::assertSame($evidence, $explained->withStep(new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD))->evidence);
+        self::assertSame($evidence, $explained->withFreshness($freshness)->evidence);
+        self::assertSame($freshness, $explained->withFreshness($freshness)->freshness);
+    }
+
+    /**
+     * The keys also hold every `${…}` reference a statement it assessed names,
+     * after the condition keys of its step, each once.
+     *
+     * @return void
+     */
+    public function testKeysHoldTheInterpolationDependencies(): void
+    {
+        $statement = new StatementReference('p', 0);
+        $decision  = Decision::allow(DecisionStage::ALLOW, [], [
+            new TraceEntry(DecisionStage::DENY, TraceOutcome::CONDITION_FAILED, $statement, ['input.a' => false], null, null, ['subject.id', 'input.a']),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::MATCHED, $statement, ['input.b' => true], null, null, ['subject.id', 'request.ip']),
+        ]);
+
+        self::assertSame(['input.a', 'subject.id', 'input.b', 'request.ip'], $decision->keys());
+    }
+
+    /**
+     * explain() returns the explanation of the decision, a projection of it.
+     *
+     * @return void
+     */
+    public function testExplainReturnsTheExplanation(): void
+    {
+        $decision = Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, [new StatementReference('p', 0)]);
+
+        self::assertEquals(Explanation::of($decision), $decision->explain());
     }
 
     /**

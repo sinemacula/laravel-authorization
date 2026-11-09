@@ -143,8 +143,11 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   generic line for every denial and the reason code beside it for an application that words its own.
 - **System records**: roles, permissions and policies flagged `is_system` cannot be edited, deleted or have the flag
   cleared unless `forceSystem()` unlocks the next change.
-- **Explanations**: `Authorization::explain()`, the last decision of the request, and `authorization:why-can` on the
-  command line.
+- **Explanations**: `Authorization::explain()` decides a check in explain mode and returns an `Explanation`: the
+  statements, caps or permission that decided it, every condition test with its outcome, the keys found missing, the
+  stages it never reached and where each grant that allowed it came from, as text or versioned JSON, never a value; the
+  last decision of the request explains with what it recorded, and `authorization:why-can` prints a check's trace on
+  the command line.
 - **Delegated administration**: every change a management service makes is an administration action the package
   declares (`authorization:role.grant`, `authorization:policy.update` and the rest), decided through `check()` as the
   acting subject on an operation resource naming the change, inside the change's transaction and before anything is
@@ -1032,15 +1035,17 @@ action when one of its patterns is the action, or matches it as a statement's `a
 scopes and `capped[1]`, `capped[2]` and so on for the explicit caps, outermost first:
 
 ```php
-echo Authorization::for($user)->capped(['posts:edit'])->explain('posts:read');
+echo Authorization::for($user)->capped(['posts:edit'])->explain('posts:read')->toText();
 ```
 
 ```text
-DENY (session_policy: a session cap does not allow it) at the session stage.
+DENY (session_policy: a session cap does not allow it) at the session stage by session "capped[1]".
   [guardrail] guardrails: uncapped
   [boundary] boundaries: uncapped
   [session] credential: covered
   [session] capped[1]: refused
+  not evaluated: allow, administration, implicit
+  request "posts:read" about user:1; asked in platform, decided in platform
 ```
 
 **What they cap.** The session stage runs after every deny, the guardrails and the permission boundaries, and before
@@ -2255,9 +2260,10 @@ admitted from outside it and for a delegated change to the platform, a scope put
 `TenantScope::within()` or an `AuthorizationScope`), and otherwise the request's, a guest's decision included. Each
 statement is named by its policy's name, the stored policy's key, its index and its sid and, for a statement of a
 resource policy, the resource that policy is attached to (`type:id` or `type:*`). The keys are the condition keys the
-decision tested, held or failed, each once: a policy that reads `resource.status` puts the key on the event, never the
-status. The decision itself, with its stage and its trace, is not on the event; a listener that needs it for debugging
-reads `Authorization::lastDecision()`, which holds it by the time the event is dispatched, and
+decision tested, held or failed, and every `${…}` reference that an assessed statement's condition operands or resource
+patterns name, each once: a policy that reads `resource.status` or interpolates `${principal.id}` puts that name on the
+event, never the value. The decision itself, with its stage and its trace, is not on the event; a listener that needs it
+for debugging reads `Authorization::lastDecision()`, which holds it by the time the event is dispatched, and
 `Authorization::lastDecisionProvenance()` (see [The programmatic API](#the-programmatic-api)).
 
 ### The programmatic API
@@ -2277,7 +2283,7 @@ or about the subject of the scoped manager it is called on:
 | `checkMany($checks)`                              | Decides each `CheckInput` and returns its `Decision`, keyed as the checks are (see [Bulk checks](#bulk-checks))           |
 | `canEach($action, $resources, $context)`          | Decides the action on each resource and returns whether each is allowed, keyed as the resources are                       |
 | `filterAuthorized($action, $resources, $context)` | Returns the resources the action is allowed on, with their keys and order, a `Collection` as its own class                |
-| `explain($action, $resource, $context)`           | Decides the action and returns its explanation as text                                                                    |
+| `explain($action, $resource, $context)`           | Decides the action in explain mode and returns its `Explanation` (see [Explanations](#explanations))                      |
 | `lastDecision()`                                  | Returns the latest decision of the request or job, whichever manager made it                                              |
 | `lastDecisionProvenance()`                        | Returns who the latest decision was about, who previewed it and where it was made, or null whenever `lastDecision()` is   |
 | `permissionsFor($subject, $scope, $context)`      | Lists the actions of the permission catalogue the subject may take in the scope                                           |
@@ -2699,6 +2705,82 @@ integration surfaces they always are. A preview query taken into another as SQL 
 it is not admitted again when the outer query runs, and it is not refused as `preview_write` when the outer query
 writes, so `Post::query()->whereIn('id', $previewQuery->select('id'))->delete()` deletes the rows the subject may see.
 Take a preview query in whole, or not into a write at all. See [Preview](docs/design/preview.md) for the design.
+
+### Explanations
+
+`explain()` answers "why can" and "why can't" (AUTHZ-11.5). It decides the check exactly as `check()` does, through the
+same path and the same stages, so its verdict is the same, and records and reports it as any check: it is the last
+decision and dispatches its `DecisionEvaluated`. It returns an `Explanation`:
+
+```php
+$explanation = Authorization::for($user)->explain('posts:publish', $post, ['reason' => 'launch']);
+
+$explanation->isAllowed();
+echo $explanation->toText();
+return response()->json($explanation); // the versioned schema
+```
+
+```text
+ALLOW at the allow stage by permission "posts:publish".
+  [deny] house-rules[01j...]#0: not_applicable
+  [guardrail] guardrails: uncapped
+  [boundary] boundaries: uncapped
+  [session] session caps: uncapped
+  [allow] permission "posts:publish": held
+  grant role permission "posts:publish" to principal user:1 through role "editor" < "author" in tenant team:7
+  request "posts:publish" on "post:42" about user:1; asked in tenant team:7, decided in tenant team:7
+```
+
+**Explain mode and its cost.** `explain()` runs the check in explain mode, a switch on the one decision path (N89). An
+everyday check (`check()`, `can()`, the Gate, Blade, the middleware, `checkMany()` and the rest) never turns it on: it
+records the trace it always has and costs what it did before explanations. Explain mode decides from what an everyday
+check decides from, the resolution cache included, and records more besides, asking no attribute provider more than
+the check does. Where each grant came from is read afresh from the grant rows a resolution reads: on a cold cache the
+check decides from those rows, in no more queries than an everyday check, and keeps nothing in the cache; on a warm
+cache, where an everyday check reads no grant row, an explained check still reads them, once a permission is found held
+or the grantee has a policy, in no more queries than a resolution of the names. A grant that the rows no longer give,
+one a stale cache still holds, is `unavailable`, never guessed. A preview's `explain()` is admitted, recorded and
+reported as any preview check (see [Preview](#preview)).
+
+**What an explanation holds.** It is an immutable value of the decision alone:
+
+- the verdict, the reason and the stage that decided it;
+- the statements that decided it, every one when several did, or the cause that is no statement: the guardrail,
+  boundary, session cap or administration constraint that refused it, the permission held that allowed it, or the
+  reason of an early refusal, such as a check without a subject, whose trace is empty;
+- the steps of every stage the decision reached, in order, each statement's condition keys with whether each held and
+  the `${…}` references it names, which `keys()` and the events now count too;
+- the stages it never reached, marked as not evaluated: after an explicit deny, the caps, the allows and the rest are
+  never weighed, nor guessed at;
+- each authentication requirement that alone kept an allow from applying, by its part names and its unmet parts;
+- for an explained check, each condition test on its own (its key, its operator, whether `_if_exists` lets a missing
+  key pass, and its outcome: `held`, `failed`, `missing`, `null`, `wrong_type`, `unresolved`, `undecidable` or
+  `invalid`), the keys found missing and every reference that could not be resolved, by key, on the statement that
+  read it;
+- for an explained allow, where each grant came from: a permission granted to the principal or the identity, or
+  through a role, with the role held and each ancestor up to the role that carries it, and the tenant and application
+  of the grant; a policy attached to the grantee or to one of its roles, the same way; or a policy attached to the
+  resource, by its resource. A source that cannot say, a grantee whose `getPermissions()` or `getPolicies()` is its
+  own, a policy store or a policy resolver bound in place of the default, is `unavailable`, never guessed;
+- for an explained check, what it asked: the action, the resource, the subject, its identity and any previewer, the
+  scope it was asked in and the scope it was decided in.
+
+**The renderers.** `toText()` writes it for reading, every name (policy, statement, key, role, tenant) escaped as a JSON
+string is (`<`, `>`, `&` and non-ASCII characters as `\uXXXX`, a control character as its JSON escape, such as `\n` or
+`\u0001`), so no name can inject markup or a line of its own.
+`toArray()`, which `jsonSerialize()` returns, writes a stable schema carrying `version: 1`. Rendering reads the
+explanation alone: it queries nothing, dispatches nothing and leaves the last decision as it is.
+
+**What is never shown.** No value: no context or attribute value, operand, interpolated string, model, raw context,
+session, proof or fingerprint, in the text, the schema or the value itself (AUTHZ-8.8). What it shows still discloses
+how the policies are built, the names of policies, statements, keys, roles and tenants, so show it to those allowed to
+see them; another subject's explanation goes through a preview, whose right discloses it.
+
+**A stored decision.** `Decision::explain()` explains any decision, the last decision of an everyday check included,
+with the evidence it has: the verdict, what decided it, the steps of its trace, the stages it never reached and its
+requirements. What only explain mode records, the condition tests, the keys found missing, the grants' provenance and
+the request, is marked `not recorded (explain mode off)`; nothing is evaluated again to fill it in. See
+[Explanations](docs/design/explanations.md) for the design.
 
 ### Grant scope query
 
@@ -3549,6 +3631,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Effective permissions](docs/design/effective-permissions.md)                               | `permissionsFor()`, its scope, exactness and introspection    |
 | [Preview](docs/design/preview.md)                                                           | `previewFor()`, its admission, recording and what it refuses  |
 | [Grant scope](docs/design/grant-scope.md)                                                   | The identity directory, the scope query and the grant hooks   |
+| [Explanations](docs/design/explanations.md)                                                 | Explain mode, the `Explanation`, its evidence and renderers   |
 
 ## Requirements
 

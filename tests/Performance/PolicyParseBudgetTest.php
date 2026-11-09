@@ -20,10 +20,11 @@ use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
  * reflection use in the parse path.
  *
  * Budget is set generously — the PHPBench suite tracks the actual micro-trend,
- * this test is the safety net. Since the policy language checks every operand,
- * address and pattern as it parses, and CI runs the suite under coverage, the
- * budget allows one and a half seconds, which still catches a parse path that
- * has doubled.
+ * this test is the safety net. The policy language checks every operand,
+ * address and pattern as it parses, and each statement notes the `${…}`
+ * references it may read. CI runs the suite under PCOV coverage, where the loop
+ * takes about one and a half seconds, so the budget allows three: about twice
+ * that, which still catches a parse path that has doubled.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,8 +39,8 @@ final class PolicyParseBudgetTest extends TestCase
 {
     /**
      * Parsing a 20-statement policy document (each with 5 actions, 3 resources,
-     * and 2 conditions) 1,000 times must complete in under one and a half
-     * seconds on the reference machine.
+     * and 2 conditions) 1,000 times must complete in under three seconds under
+     * coverage on CI.
      *
      * @return void
      */
@@ -56,7 +57,7 @@ final class PolicyParseBudgetTest extends TestCase
         $elapsed = \microtime(true) - $start;
 
         self::assertLessThan(
-            1.5,
+            3.0,
             $elapsed,
             "Policy::fromArray() parse budget exceeded ({$elapsed}s for 1,000 iterations).",
         );

@@ -36,6 +36,11 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  * (see `PrincipalSelectors`); a context built without it is named by none, so
  * no resource policy's allow applies.
  *
+ * A context an explained check reads through records the evidence the
+ * explanation needs (N89): each `${…}` reference it could not resolve, by key,
+ * which the statement reading it takes once its test is assessed. Any other
+ * context records nothing.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -52,6 +57,15 @@ final class CheckContext
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors|null Tells whether a resource policy's selectors name the check's subject; null names no one. */
     private readonly ?PrincipalSelectors $principals;
+
+    /** @var bool Whether the context records the evidence an explanation needs; false for an everyday check. */
+    private bool $isExplaining = false;
+
+    /** @var list<string> The `${…}` references that could not be resolved since they were last taken, recorded while explaining. */
+    private array $unresolved = [];
+
+    /** @var array{list<\SineMacula\Laravel\Authorization\Evaluation\ConditionResult>|null, list<string>}|null The condition tests of the statement last assessed, null when its target did not match, with its resource patterns' unresolved references, until they are taken; null for none. */
+    private ?array $assessment = null;
 
     /**
      * Create a new check context.
@@ -70,6 +84,110 @@ final class CheckContext
         $this->builders     = \array_diff_key($builders, $namespaces);
         $this->requirements = $requirements ?? new RequirementCheck;
         $this->principals   = $principals;
+    }
+
+    /**
+     * Record, from now on, the evidence an explanation needs.
+     *
+     * @return void
+     */
+    public function explain(): void
+    {
+        $this->isExplaining = true;
+    }
+
+    /**
+     * Determine whether the context records the evidence an explanation needs.
+     *
+     * @return bool
+     */
+    public function isExplaining(): bool
+    {
+        return $this->isExplaining;
+    }
+
+    /**
+     * Note a `${…}` reference that could not be resolved, by its key, when the
+     * context records evidence; otherwise do nothing.
+     *
+     * @param  string  $reference
+     * @return void
+     */
+    public function noteUnresolved(string $reference): void
+    {
+        if (!$this->isExplaining) {
+            return;
+        }
+
+        $this->unresolved[] = $reference;
+    }
+
+    /**
+     * Note a `${…}` reference by its key when it cannot be resolved, its value
+     * missing or not a scalar, as the interpolator does, while explaining, for
+     * each reference after the first of a string that could not be resolved. A
+     * reference into a namespace no statement has read yet is not looked up, so
+     * noting it never builds a namespace, nor asks its provider.
+     *
+     * @param  string  $reference
+     * @return void
+     */
+    public function noteIfUnresolved(string $reference): void
+    {
+        if (isset($this->builders[\explode('.', $reference)[0]]) || \is_scalar($this->lookup($reference)[1])) {
+            return;
+        }
+
+        $this->unresolved[] = $reference;
+    }
+
+    /**
+     * Return each `${…}` reference noted as unresolved since they were last
+     * taken, in order, and forget them.
+     *
+     * @return list<string>
+     *
+     * @phpstan-impure
+     */
+    public function takeUnresolved(): array
+    {
+        $unresolved       = $this->unresolved;
+        $this->unresolved = [];
+
+        return $unresolved;
+    }
+
+    /**
+     * Note the condition tests a statement just made, with what each found, or
+     * none for a statement whose target did not match, and the keys of its
+     * resource patterns' references that could not be resolved, for the
+     * evaluator to take into the statement's step.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\ConditionResult>|null  $tests
+     * @param  list<string>  $unresolved
+     * @return void
+     */
+    public function noteAssessment(?array $tests, array $unresolved): void
+    {
+        $this->assessment = [$tests, $unresolved];
+    }
+
+    /**
+     * Return the condition tests the statement last assessed noted, with its
+     * unresolved resource pattern references, and forget them: no tests when it
+     * noted none, as a statement whose target does not match notes none, and no
+     * references when nothing was noted.
+     *
+     * @return array{list<\SineMacula\Laravel\Authorization\Evaluation\ConditionResult>|null, list<string>}
+     *
+     * @phpstan-impure
+     */
+    public function takeAssessment(): array
+    {
+        $assessment       = $this->assessment ?? [null, []];
+        $this->assessment = null;
+
+        return $assessment;
     }
 
     /**

@@ -8,7 +8,9 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
+use SineMacula\Laravel\Authorization\Evaluation\ConditionResult;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\ConditionOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -641,7 +643,7 @@ final class PolicyEvaluatorTest extends TestCase
         $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', 'tenants/org-1/posts');
 
         self::assertEquals(Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, [self::reference('deny-unresolved', 0)], [
-            self::entry(DecisionStage::DENY, TraceOutcome::UNDECIDABLE, 'deny-unresolved', 0),
+            self::entry(DecisionStage::DENY, TraceOutcome::UNDECIDABLE, 'deny-unresolved', 0, [], null, ['input.tenant']),
         ]), $decision);
     }
 
@@ -665,7 +667,7 @@ final class PolicyEvaluatorTest extends TestCase
         $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', 'tenants/org-1/posts');
 
         self::assertEquals(Decision::deny(DecisionReason::CONDITION_FAILED, DecisionStage::IMPLICIT, [], self::staged([
-            self::entry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, 'allow-unresolved', 0),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, 'allow-unresolved', 0, [], null, ['input.tenant']),
         ])), $decision);
     }
 
@@ -693,7 +695,7 @@ final class PolicyEvaluatorTest extends TestCase
         $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['input' => ['n' => 5, 'limit' => 'abc']]);
 
         self::assertEquals(Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, [self::reference('deny-substituted', 0)], [
-            self::entry(DecisionStage::DENY, TraceOutcome::UNDECIDABLE, 'deny-substituted', 0, ['input.n' => false]),
+            self::entry(DecisionStage::DENY, TraceOutcome::UNDECIDABLE, 'deny-substituted', 0, ['input.n' => false], null, ['input.limit']),
         ]), $decision);
     }
 
@@ -718,7 +720,7 @@ final class PolicyEvaluatorTest extends TestCase
         $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['input' => ['n' => 5, 'limit' => 'abc']]);
 
         self::assertEquals(Decision::deny(DecisionReason::CONDITION_FAILED, DecisionStage::IMPLICIT, [], self::staged([
-            self::entry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, 'allow-substituted', 0, ['input.n' => false]),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, 'allow-substituted', 0, ['input.n' => false], null, ['input.limit']),
         ])), $decision);
     }
 
@@ -1597,7 +1599,7 @@ final class PolicyEvaluatorTest extends TestCase
             self::refused('cap'),
         ], $decision->trace);
         self::assertCount(0, $asked);
-        self::assertStringEndsWith('[boundary] cap: refused', $decision->explain());
+        self::assertStringContainsString("[boundary] cap: refused\n", $decision->explain()->toText());
     }
 
     /**
@@ -1616,7 +1618,7 @@ final class PolicyEvaluatorTest extends TestCase
         self::assertSame(DecisionReason::BOUNDARY, $empty->reason);
         self::assertSame(DecisionStage::BOUNDARY, $empty->stage);
         self::assertEquals([...self::uncapped(DecisionStage::GUARDRAIL), self::refused('empty[9]')], $empty->trace);
-        self::assertStringContainsString('[boundary] empty[9]: refused', $empty->explain());
+        self::assertStringContainsString('[boundary] empty[9]: refused', $empty->explain()->toText());
 
         self::assertSame(DecisionReason::BOUNDARY, $denyOnly->reason);
         self::assertSame(DecisionStage::BOUNDARY, $denyOnly->stage);
@@ -1644,7 +1646,7 @@ final class PolicyEvaluatorTest extends TestCase
         self::assertSame(DecisionReason::EXPLICIT_DENY, $denied->reason);
         self::assertEquals([self::reference('both', 1)], $denied->statements);
         self::assertEquals([self::entry(DecisionStage::DENY, TraceOutcome::MATCHED, 'both', 1)], $denied->trace);
-        self::assertSame('DENY (explicit_deny: an applicable statement denies it) at the deny stage by both#1.', \explode("\n", $denied->explain())[0]);
+        self::assertSame('DENY (explicit_deny: an applicable statement denies it) at the deny stage by both#1.', \explode("\n", $denied->explain()->toText())[0]);
 
         $allowed = (new PolicyEvaluator)->evaluate([$both], 'posts:read', null, [], [$both, $twin]);
 
@@ -1841,7 +1843,7 @@ final class PolicyEvaluatorTest extends TestCase
             new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::REFUSED, null, [], 'rail[4]'),
         ], $decision->trace);
         self::assertCount(0, $asked);
-        self::assertStringEndsWith('[guardrail] rail[4]: refused', $decision->explain());
+        self::assertStringContainsString("[guardrail] rail[4]: refused\n", $decision->explain()->toText());
     }
 
     /**
@@ -1984,7 +1986,7 @@ final class PolicyEvaluatorTest extends TestCase
             ...self::uncapped(DecisionStage::BOUNDARY, DecisionStage::SESSION),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, '*'),
         ], $allowed->trace);
-        self::assertStringContainsString('[guardrail] guardrails: exempt', $allowed->explain());
+        self::assertStringContainsString('[guardrail] guardrails: exempt', $allowed->explain()->toText());
         self::assertSame($allowed->trace[0], $again->trace[0]);
         self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::UNCAPPED), $uncapped->trace[0]);
         self::assertSame(DecisionReason::BOUNDARY, $bounded->reason);
@@ -2104,7 +2106,7 @@ final class PolicyEvaluatorTest extends TestCase
             self::sessionStep(TraceOutcome::REFUSED, 'capped[1]'),
         ], $decision->trace);
         self::assertCount(0, $asked);
-        self::assertStringEndsWith('[session] capped[1]: refused', $decision->explain());
+        self::assertStringContainsString("[session] capped[1]: refused\n", $decision->explain()->toText());
     }
 
     /**
@@ -2261,6 +2263,83 @@ final class PolicyEvaluatorTest extends TestCase
         self::assertFalse(PolicyEvaluator::isForSubject($shared, $plain, $context));
         self::assertTrue(PolicyEvaluator::isForSubject($held, $plain, $context));
         self::assertFalse(PolicyEvaluator::isForSubject($held, $named, $context));
+    }
+
+    /**
+     * Through an explained context, each step of a statement assessed carries
+     * its condition tests and its unresolved resource references, and the
+     * decision is otherwise the one an everyday context gives; every step of a
+     * statement assessed names its references.
+     *
+     * @return void
+     */
+    public function testAnExplainedContextAddsTheTestsToTheTrace(): void
+    {
+        $policy = Policy::fromArray(['name' => 'p', 'statements' => [
+            ['effect' => 'deny', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['input.blocked' => true]]],
+            ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['posts:${input.tenant}', 'posts:*'], 'conditions' => ['eq' => ['input.owner' => '${subject.id}']]],
+            ['effect' => 'allow', 'actions' => ['comments:read']],
+        ]]);
+        $input   = ['input' => ['blocked' => false, 'owner' => 'u1'], 'subject' => ['id' => 'u1']];
+        $context = new CheckContext($input);
+
+        $context->explain();
+
+        $plain     = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', 'posts:1', $input);
+        $explained = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', 'posts:1', $context);
+        $everyday  = static fn (TraceEntry $entry): TraceEntry => new TraceEntry(
+            $entry->stage,
+            $entry->outcome,
+            $entry->statement,
+            $entry->conditions,
+            $entry->cap,
+            $entry->permission,
+            $entry->dependencies,
+        );
+        $strip = static fn (Decision $decision): array => \array_map($everyday, $decision->trace);
+
+        self::assertTrue($explained->isAllowed());
+        self::assertEquals($strip($plain), $strip($explained));
+        self::assertNull($plain->trace[0]->tests);
+        self::assertEquals([new ConditionResult('input.blocked', 'eq', ConditionOutcome::FAILED)], $explained->trace[0]->tests);
+        self::assertEquals([new ConditionResult('input.owner', 'eq', ConditionOutcome::HELD)], $explained->trace[4]->tests);
+        self::assertSame(['input.tenant'], $explained->trace[4]->unresolved);
+        self::assertSame(['subject.id', 'input.tenant'], $plain->trace[4]->dependencies);
+        self::assertSame([], $plain->trace[5]->dependencies);
+    }
+
+    /**
+     * Through an explained context, a reference a resource pattern could not
+     * resolve is named on the step of the statement whose pattern read it, even
+     * when that statement's target does not match, and never on a later
+     * statement's, in this policy or another.
+     *
+     * @return void
+     */
+    public function testAnUnresolvedReferenceIsNamedOnTheStatementThatReadIt(): void
+    {
+        $deny = Policy::fromArray(['name' => 'a', 'statements' => [
+            ['effect' => 'deny', 'actions' => ['posts:read'], 'not_resources' => ['post:${input.mine}', 'post:1']],
+        ]]);
+        $allow = Policy::fromArray(['name' => 'b', 'statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['post:*'], 'conditions' => ['eq' => ['input.x' => 'y']]],
+        ]]);
+        $context = new CheckContext(['input' => ['x' => 'y']]);
+
+        $context->explain();
+
+        $decision = (new PolicyEvaluator)->evaluate([$deny, $allow], 'posts:read', 'post:1', $context);
+        $denied   = $decision->trace[0];
+        $allowed  = $decision->trace[\count($decision->trace) - 1];
+
+        self::assertTrue($decision->isAllowed());
+        self::assertSame(TraceOutcome::NOT_APPLICABLE, $denied->outcome);
+        self::assertNull($denied->tests);
+        self::assertSame(['input.mine'], $denied->unresolved);
+        self::assertSame(TraceOutcome::MATCHED, $allowed->outcome);
+        self::assertSame([], $allowed->unresolved);
+        self::assertSame(['input.mine'], $decision->explain()->missingKeys());
+        self::assertSame([], $context->takeUnresolved());
     }
 
     /**
@@ -2433,11 +2512,19 @@ final class PolicyEvaluatorTest extends TestCase
      * @param  int  $index
      * @param  array<string, bool>  $conditions
      * @param  string|null  $policyId
+     * @param  list<string>  $dependencies
      * @return \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
      */
-    private static function entry(DecisionStage $stage, TraceOutcome $outcome, string $policy, int $index, array $conditions = [], ?string $policyId = null): TraceEntry
-    {
-        return new TraceEntry($stage, $outcome, self::reference($policy, $index, $policyId), $conditions);
+    private static function entry(
+        DecisionStage $stage,
+        TraceOutcome $outcome,
+        string $policy,
+        int $index,
+        array $conditions = [],
+        ?string $policyId = null,
+        array $dependencies = [],
+    ): TraceEntry {
+        return new TraceEntry($stage, $outcome, self::reference($policy, $index, $policyId), $conditions, null, null, $dependencies);
     }
 
     /**

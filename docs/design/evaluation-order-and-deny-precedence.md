@@ -31,7 +31,12 @@ why the decision behaves the way it does -- the code and tests encode the *what*
   capped nothing), the cap it names when it is a guardrail's or a boundary's refusal (`cap`, as `name[key]`) or a
   session cap's step (`cap`, by the session cap's name), the held permission that allowed when it is the permission
   step and found one (`permission`, as it was granted, a pattern such as `posts:*` included), and the condition keys
-  (their dot paths) it tested with whether each held.
+  (their dot paths) it tested with whether each held. A step that assessed a statement also carries the path of every
+  `${…}` reference the statement names in its condition operands and resource patterns (`dependencies`), on every
+  check, and `Decision::keys()` names these beside the condition keys. A step of an explained check also carries each
+  condition test with its outcome (`tests`, a list of `ConditionResult`, null on an everyday check) and the keys of the
+  references its resource patterns could not resolve (`unresolved`), a statement whose target did not match included
+  (see [Explanations](explanations.md)).
 - `requirements` -- for an `insufficient_authentication` denial, one `UnmetRequirement` for each statement in
   `statements`, in the same order: the authentication requirement that alone kept it from applying and its unmet parts.
   They are alternatives: any one of them met would allow the check. Empty for every other decision.

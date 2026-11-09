@@ -73,6 +73,12 @@ final readonly class Statement
     /** @var string Trace detail for a statement whose action or resource patterns do not cover the check. */
     public const string TARGET_MISMATCH = 'action/resource did not match';
 
+    /** @var string What the detail of a test whose substituted operand has the wrong type says. */
+    public const string SUBSTITUTED_OPERAND = 'the substituted operand is an';
+
+    /** @var list<string> The path of every `${…}` reference the statement's condition operands and resource patterns name, each once, worked out once on construction. */
+    public array $dependencies;
+
     /** @var list<string> Why the conditions cannot be evaluated as a whole, worked out once on construction. */
     private array $operatorErrors;
 
@@ -124,6 +130,7 @@ final readonly class Statement
 
         $this->operatorErrors = StatementValidator::operatorErrors($conditions);
         $this->tests          = StatementValidator::conditionTests($conditions);
+        $this->dependencies   = StatementValidator::dependenciesOf($this->tests, [...$resources ?? [], ...$notResources ?? []]);
     }
 
     /**
@@ -222,6 +229,13 @@ final readonly class Statement
      * Assess the statement against a check: whether its patterns and conditions
      * match, definitively do not, cannot be decided, or are malformed.
      *
+     * Through the context of an explained check, each condition test is also
+     * recorded with what it found, with the keys of the resource patterns'
+     * references that could not be resolved, for the evaluator to take (see
+     * `CheckContext::noteAssessment()`); a statement whose target does not
+     * match records no test, and the references its patterns could not resolve
+     * as its own, so none is left for the next statement to claim.
+     *
      * A context given as an array is the check's namespaces, already built.
      *
      * @param  string  $action
@@ -241,7 +255,13 @@ final readonly class Statement
         $scope  = new InterpolationScope($interpolator, $resource, $context);
         $target = $this->matchesTarget($scope);
 
+        // A statement whose target does not match keeps, as its own, the
+        // references its patterns could not resolve while explaining.
         if ($target->outcome === MatchOutcome::DOES_NOT_MATCH) {
+            if ($scope->context->isExplaining()) {
+                $scope->context->noteAssessment(null, $scope->context->takeUnresolved());
+            }
+
             return $target;
         }
 
@@ -307,6 +327,11 @@ final readonly class Statement
      * held, so the result names the requirement exactly when it alone kept the
      * conditions from holding.
      *
+     * Through the context of an explained check, each test is also recorded on
+     * its own, with what it found (see `ConditionClassifier`), with the
+     * references noted as unresolved before the first test, those of the
+     * resource patterns, and noted with the context.
+     *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
      * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
      */
@@ -315,9 +340,15 @@ final readonly class Statement
         $result      = $this->operatorErrors === [] ? MatchResult::matches() : MatchResult::invalid($this->operatorErrors[0]);
         $requirement = MatchResult::matches();
         $held        = [];
+        $tests       = $scope->context->isExplaining() ? [] : null;
+        $unresolved  = $tests === null ? [] : $scope->context->takeUnresolved();
 
         foreach ($this->tests as $test) {
             $part = self::assessTest($test, $scope);
+
+            if ($tests !== null) {
+                $tests[] = ConditionClassifier::classify($test, $part, $scope, $scope->context->takeUnresolved());
+            }
 
             if ($test['operator'] === AuthenticationRequirement::OPERATOR) {
                 $requirement = $part;
@@ -326,6 +357,10 @@ final readonly class Statement
             }
 
             $held[$test['key']] = ($held[$test['key']] ?? true) && $part->outcome === MatchOutcome::MATCHES;
+        }
+
+        if ($tests !== null) {
+            $scope->context->noteAssessment($tests, $unresolved);
         }
 
         $combined = $result->and($requirement)->withConditions($held);
@@ -412,7 +447,7 @@ final readonly class Statement
 
         $result  = ConditionEvaluator::evaluate($operator, $resolved, $actual);
         $outcome = $result->outcome === MatchOutcome::INVALID ? MatchOutcome::UNDECIDABLE : $result->outcome;
-        $detail  = $result->outcome === MatchOutcome::INVALID ? "the substituted operand is an {$result->detail}" : $result->detail;
+        $detail  = $result->outcome === MatchOutcome::INVALID ? self::SUBSTITUTED_OPERAND . " {$result->detail}" : $result->detail;
 
         return $detail === '' ? $result : new MatchResult($outcome, "condition '{$key}': {$detail}");
     }

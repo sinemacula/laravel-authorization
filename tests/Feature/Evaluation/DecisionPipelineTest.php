@@ -14,10 +14,14 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionEvidence;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\GrantSource;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder;
+use SineMacula\Laravel\Authorization\Evaluation\GrantProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
@@ -703,6 +707,123 @@ final class DecisionPipelineTest extends TestCase
         $this->pipeline()->prepare($subject, [ResourceReference::record('posts', '9'), ResourceReference::record('posts', '*')]);
 
         self::assertSame(DecisionReason::INVALID_POLICY, $this->pipeline()->decide($subject, 'posts:read', ResourceReference::record('posts', '9'), [])->reason);
+    }
+
+    /**
+     * A pipeline `explaining()` returns is a new one, and returns each decision
+     * with its evidence, an early refusal's included; the verdict is the one an
+     * everyday pipeline gives, and the everyday pipeline records none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnExplainingPipelineReturnsTheEvidence(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $subject = new Subject($user, $user);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+
+        $pipeline  = $this->pipeline();
+        $explained = $pipeline->explaining()->decide($subject, 'posts:read', null, []);
+        $plain     = $pipeline->decide($subject, 'posts:read', null, []);
+
+        self::assertNotSame($pipeline, $pipeline->explaining());
+        self::assertNull($plain->evidence);
+        self::assertSame($plain->isAllowed(), $explained->isAllowed());
+        self::assertEquals([new GrantProvenance(GrantSource::PERMISSION, 'posts:read', Reference::of($user), false, [], true)], $explained->evidence?->grants);
+        self::assertEquals(new DecisionEvidence, $pipeline->explaining()->decide(null, 'posts:read', null, [])->evidence);
+        self::assertEquals(new DecisionEvidence, $pipeline->explaining()->decide($subject, 'posts:delete', null, [])->evidence);
+    }
+
+    /**
+     * The sources of an explained check are gathered with a context that
+     * records its tests; any other check's are not.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheSourcesOfAnExplainedCheckRecordTheTests(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $subject = new Subject($user, $user);
+
+        self::assertTrue($this->pipeline()->sources($subject, 'posts:read', null, [], null, new EvidenceRecorder)->context->isExplaining());
+        self::assertFalse($this->pipeline()->sources($subject, 'posts:read', null, [])->context->isExplaining());
+    }
+
+    /**
+     * A further check the administration stage makes is never explained: the
+     * grant that allowed the operation is the one recorded.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAFurtherCheckIsNeverExplained(): void
+    {
+        $admin   = StubIdentity::create(['id' => 'admin-1']);
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $subject = new Subject($admin, $admin);
+        $edit    = Permission::create(['name' => 'posts:edit']);
+
+        $admin->givePermission(Permission::create(['name' => PackagePermissions::PERMISSION_GRANT]));
+        $admin->givePermission($edit);
+        $admin->assignRole(Role::create(['name' => 'chief', 'rank' => 0]));
+
+        $grant    = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $user, $edit, GrantScope::platform())->toResourceReference();
+        $decision = $this->pipeline()->explaining()->decide($subject, PackagePermissions::PERMISSION_GRANT, $grant, []);
+
+        self::assertTrue($decision->isAllowed());
+        self::assertSame(DecisionStage::ADMINISTRATION, $decision->trace[\count($decision->trace) - 1]->stage);
+        self::assertSame([PackagePermissions::PERMISSION_GRANT], \array_map(static fn (GrantProvenance $grant): string => $grant->grant, $decision->evidence->grants ?? []));
+    }
+
+    /**
+     * A resolver bound in place of the default cannot say where its policies
+     * came from, nor can an override, so their allows are unavailable.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testACustomResolverAndAnOverrideAreUnavailable(): void
+    {
+        $user     = StubIdentity::create(['id' => 'user-1']);
+        $subject  = new Subject($user, $user);
+        $policy   = EvaluationPolicy::fromArray(['name' => 'coded', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]);
+        $resolver = new class ($policy) implements PolicyResolver {
+            /**
+             * Create a resolver giving the policy to everyone.
+             *
+             * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
+             */
+            public function __construct(
+
+                /** The policy given. */
+                private readonly EvaluationPolicy $policy,
+            ) {}
+
+            /**
+             * Return the policy.
+             *
+             * @param  object  $principal
+             * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+             */
+            #[\Override]
+            public function policiesFor(object $principal): array
+            {
+                return [$this->policy];
+            }
+        };
+
+        $custom   = new DecisionPipeline(new PolicyEvaluator, $resolver, null, new ResourcePolicyResolver, new GuardrailResolver);
+        $override = $this->pipeline()->withPolicies([$policy]);
+
+        self::assertEquals([GrantProvenance::unavailable('coded', Reference::of($user))], $custom->explaining()->decide($subject, 'posts:read', null, [])->evidence?->grants);
+        self::assertEquals([GrantProvenance::unavailable('coded')], $override->explaining()->decide($subject, 'posts:read', null, [])->evidence?->grants);
     }
 
     /**

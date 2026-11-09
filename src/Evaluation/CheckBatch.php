@@ -76,6 +76,15 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * provenance, and so its event and the last decision, names beside the subject
  * (see `DecisionProvenance`); any other batch names none.
  *
+ * A batch may explain its checks (N89), as `Authorization::explain()` decides
+ * its one: each is decided by a pipeline in explain mode, through the same
+ * stages, from the same sources, so its verdict is the one any other check
+ * gets, and its decision carries the evidence an explanation needs, with what
+ * it asked: the action, the resource, who it was about and the scope it was
+ * asked in and decided in (see `ExplanationRequest`). It is recorded and
+ * reported as any other. Every other batch records no evidence, and its checks
+ * cost what they did before explanations.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -96,6 +105,7 @@ final readonly class CheckBatch
      * @param  bool  $isDispatching
      * @param  bool  $isStoring
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $previewer
+     * @param  bool  $isExplaining
      */
     public function __construct(
 
@@ -119,6 +129,9 @@ final readonly class CheckBatch
 
         /** Who previews the subject, for a preview's checks; null for any other. */
         private ?Reference $previewer = null,
+
+        /** Whether each check is decided in explain mode, its decision carrying the evidence an explanation needs; false for every everyday check. */
+        private bool $isExplaining = false,
     ) {}
 
     /**
@@ -266,7 +279,8 @@ final readonly class CheckBatch
      * and record it with its provenance: who it is about, as given, made in the
      * scope it was decided in, which the pipeline's witness reads where the
      * grants are weighed, or, for a check denied before then, in the scope in
-     * place, as the provenance given was read.
+     * place, as the provenance given was read. A batch that explains decides it
+     * in explain mode, and adds to its evidence what it asked.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance  $about
@@ -283,9 +297,15 @@ final readonly class CheckBatch
         ?ResourceAttributeBatch $attributes = null,
     ): Decision {
         $provenance = $about;
-        $decision   = $this->pipeline->decide($subject, $check->action, $reference, $check->context, $attributes, static function () use ($about, &$provenance): void {
+        $pipeline   = $this->isExplaining ? $this->pipeline->explaining() : $this->pipeline;
+        $decision   = $pipeline->decide($subject, $check->action, $reference, $check->context, $attributes, static function () use ($about, &$provenance): void {
             $provenance = $about->inCurrentScope();
         });
+
+        if ($decision->evidence !== null) {
+            $request  = new ExplanationRequest($check->action, ResourceReferences::identifierOf($reference), $about, $provenance);
+            $decision = $decision->withEvidence($decision->evidence->withRequest($request));
+        }
 
         return $this->record($provenance, $check, $reference, $decision);
     }

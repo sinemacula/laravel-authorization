@@ -9,6 +9,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
+use SineMacula\Laravel\Authorization\Evaluation\ConditionResult;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\ConditionOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementCheck;
@@ -367,6 +369,98 @@ final class CheckContextTest extends TestCase
         self::assertTrue($context->isSubjectNamedBy(['user:2', 'user:1']));
         self::assertFalse($context->isSubjectNamedBy(['user:2']));
         self::assertFalse((new CheckContext)->isSubjectNamedBy(['user:1']));
+    }
+
+    /**
+     * A context records nothing until it is explained: it then notes each
+     * reference it could not resolve, which takeUnresolved() returns once, in
+     * order.
+     *
+     * @return void
+     */
+    public function testAnExplainedContextNotesUnresolvedReferences(): void
+    {
+        $context = new CheckContext;
+
+        $context->noteUnresolved('input.a');
+
+        self::assertFalse($context->isExplaining());
+        self::assertSame([], $context->takeUnresolved());
+
+        $context->explain();
+        $context->noteUnresolved('input.a');
+        $context->noteUnresolved('input.b');
+
+        self::assertTrue($context->isExplaining());
+        self::assertSame(['input.a', 'input.b'], $context->takeUnresolved());
+        self::assertSame([], $context->takeUnresolved());
+    }
+
+    /**
+     * A reference is noted only when it cannot be resolved, and one into a
+     * namespace not yet built is neither looked up nor noted, so the namespace
+     * is not built; once it is, its references are noted as any other.
+     *
+     * @return void
+     */
+    public function testAReferenceIsNotedOnlyWhenItCannotBeResolved(): void
+    {
+        $built   = new \ArrayObject;
+        $builder = static function () use ($built): array {
+            $built->append('resource');
+
+            return ['resource' => ['owner' => 'u']];
+        };
+        $context = new CheckContext(['input' => ['a' => 'x', 'list' => ['y']]], ['resource' => $builder]);
+
+        foreach (['input.a', 'input.list', 'input.missing', 'resource.owner', 'resource.gone'] as $reference) {
+            $context->noteIfUnresolved($reference);
+        }
+
+        self::assertSame(['input.list', 'input.missing'], $context->takeUnresolved());
+        self::assertCount(0, $built);
+
+        $context->lookup('resource.owner');
+        $context->noteIfUnresolved('resource.owner');
+        $context->noteIfUnresolved('resource.gone');
+
+        self::assertSame(['resource.gone'], $context->takeUnresolved());
+        self::assertCount(1, $built);
+    }
+
+    /**
+     * A statement whose target did not match notes no tests, only its
+     * unresolved references, which are taken as any assessment is.
+     *
+     * @return void
+     */
+    public function testAMismatchIsNotedWithoutTests(): void
+    {
+        $context = new CheckContext;
+
+        $context->noteAssessment(null, ['input.a']);
+
+        self::assertSame([null, ['input.a']], $context->takeAssessment());
+        self::assertSame([null, []], $context->takeAssessment());
+    }
+
+    /**
+     * The tests a statement notes are taken once, with its unresolved
+     * references; a context noted with none gives none.
+     *
+     * @return void
+     */
+    public function testTheAssessmentNotedIsTakenOnce(): void
+    {
+        $context = new CheckContext;
+        $tests   = [new ConditionResult('input.a', 'eq', ConditionOutcome::HELD)];
+
+        self::assertSame([null, []], $context->takeAssessment());
+
+        $context->noteAssessment($tests, ['input.b']);
+
+        self::assertSame([$tests, ['input.b']], $context->takeAssessment());
+        self::assertSame([null, []], $context->takeAssessment());
     }
 
     /**

@@ -314,6 +314,43 @@ final class StatementValidator
     }
 
     /**
+     * Return the path of every well-formed `${…}` reference the key tests'
+     * string operands and the resource patterns name, each once, in the order
+     * first named: what a statement that is assessed may read beyond its
+     * condition keys. A malformed test names none, since it is never assessed
+     * against the context.
+     *
+     * @param  list<ConditionTest>  $tests
+     * @param  list<string>  $patterns
+     * @return list<string>
+     */
+    public static function dependenciesOf(array $tests, array $patterns): array
+    {
+        // Every statement is built through here when a policy is parsed, and
+        // most name no reference at all, so only the strings that hold one are
+        // kept and handed to the interpolator.
+        $strings = [];
+
+        foreach ($tests as $test) {
+            if ($test['error'] !== null || !\is_string($test['operand']) || !\str_contains($test['operand'], '${')) {
+                continue;
+            }
+
+            $strings[] = $test['operand'];
+        }
+
+        foreach ($patterns as $pattern) {
+            if (!\str_contains($pattern, '${')) {
+                continue;
+            }
+
+            $strings[] = $pattern;
+        }
+
+        return \array_values(\array_unique(\array_merge(...\array_map(ContextInterpolator::references(...), $strings))));
+    }
+
+    /**
      * Return every key test of the well-formed operator entries, in order: its
      * context key, the key's dot path split into segments, the operator it
      * tests with, whether the `_if_exists` suffix lets a missing key pass, the

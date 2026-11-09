@@ -121,6 +121,30 @@ final class RolePolicies
     }
 
     /**
+     * Return the attachments of policies to the roles with the given keys that
+     * hold in the current scope, each as the policy's key and the key of the
+     * role it is attached to, in one query on the write connection, as
+     * `heldThrough()` reads them: the attachments an explained check tells
+     * apart by the role that holds them.
+     *
+     * @param  string  $type
+     * @param  list<string>  $keys
+     * @return list<array{policy_id: string, role_id: string}>
+     */
+    public static function attachedTo(string $type, array $keys): array
+    {
+        /** @var list<array{policy_id: string, authorizable_id: string}> $attached */
+        $attached = self::attachments($type, $keys, ['policy_id', 'authorizable_id']);
+        $rows     = [];
+
+        foreach ($attached as $row) {
+            $rows[] = ['policy_id' => $row['policy_id'], 'role_id' => $row['authorizable_id']];
+        }
+
+        return $rows;
+    }
+
+    /**
      * Return the expiry of the grant a held role was read through.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $role
@@ -161,9 +185,10 @@ final class RolePolicies
      *
      * @param  string  $type
      * @param  list<string>  $keys
-     * @return list<array{policy_id: string, expires_at: string|null}>
+     * @param  list<string>  $columns
+     * @return list<array<string, mixed>>
      */
-    private static function attachments(string $type, array $keys): array
+    private static function attachments(string $type, array $keys, array $columns = ['policy_id', 'expires_at']): array
     {
         if ($keys === []) {
             return [];
@@ -171,12 +196,12 @@ final class RolePolicies
 
         $table = self::table();
 
-        /** @var list<array{policy_id: string, expires_at: string|null}> */
+        /** @var list<array<string, mixed>> */
         return self::scoped($table)
             ->useWritePdo()
             ->where($table . '.authorizable_type', $type)
             ->whereIn($table . '.authorizable_id', $keys)
-            ->get(['policy_id', 'expires_at'])
+            ->get($columns)
             ->map(static fn (object $row): array => (array) $row)
             ->all();
     }

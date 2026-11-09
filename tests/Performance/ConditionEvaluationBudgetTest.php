@@ -32,9 +32,10 @@ final class ConditionEvaluationBudgetTest extends TestCase
 {
     /**
      * Evaluating a 20-operator condition chain 1,000 times must complete in
-     * under half a second on the reference machine. Observed ~55μs per call on
-     * the reference machine (≈55ms total); budget is ~10× to tolerate CI
-     * variance.
+     * under a second. Observed ~70μs per call on the reference machine (≈70ms
+     * total). The CI job that collects coverage runs the loop under PCOV, which
+     * took it to about half a second, so the budget is ~14× the reference
+     * figure to tolerate that instrumentation and runner variance.
      *
      * @return void
      */
@@ -58,7 +59,7 @@ final class ConditionEvaluationBudgetTest extends TestCase
         $elapsed = \microtime(true) - $start;
 
         self::assertLessThan(
-            0.5,
+            1.0,
             $elapsed,
             "Statement::conditionsSatisfiedBy() budget exceeded ({$elapsed}s for 1,000 iterations of a 20-operator chain).",
         );

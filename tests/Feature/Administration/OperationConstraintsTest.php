@@ -599,7 +599,7 @@ final class OperationConstraintsTest extends TestCase
 
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $grant->reason);
         self::assertSame(DecisionStage::ADMINISTRATION, $grant->stage);
-        self::assertStringContainsString('[administration] administration.unprovable: refused', $grant->explain());
+        self::assertStringContainsString('[administration] administration.unprovable: refused', $grant->explain()->toText());
         self::assertTrue(Authorization::for($admin)->check(PackagePermissions::PERMISSION_REVOKE, self::revoke(self::user('user')))->isAllowed());
         self::assertTrue(Authorization::for($admin)->check(PackagePermissions::ROLE_GRANT)->isAllowed());
         self::assertSame(DecisionReason::NO_MATCH, ActingContext::for($other)->check(self::revoke(self::user('user')))->reason);

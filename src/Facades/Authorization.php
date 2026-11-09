@@ -39,7 +39,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static \SineMacula\Laravel\Authorization\Evaluation\Decision|null lastDecision()
  * @method static \SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance|null lastDecisionProvenance()
  * @method static void forgetLastDecision()
- * @method static string explain(string $action, mixed $resource = null, array<string, mixed> $context = [])
+ * @method static \SineMacula\Laravel\Authorization\Evaluation\Explanation explain(string $action, mixed $resource = null, array<string, mixed> $context = [])
  * @method static list<string> permissionsFor(object|null $subject, \SineMacula\Laravel\Authorization\Support\AuthorizationScope $scope, array<string, mixed> $context = [])
  * @method static \SineMacula\Laravel\Authorization\Subject|null currentSubject()
  * @method static void treeChanged(\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|\SineMacula\Laravel\Authorization\Support\Reference $tenant)

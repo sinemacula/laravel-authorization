@@ -674,4 +674,76 @@ final class ContextInterpolatorTest extends TestCase
 
         self::assertNull($this->interpolator->interpolate('${input.missing}', []));
     }
+
+    /**
+     * A reference that cannot be resolved is noted with an explained context,
+     * by its key, and one that resolves is not.
+     *
+     * @return void
+     */
+    public function testAnUnresolvedReferenceIsNotedWithTheContext(): void
+    {
+        $context = new CheckContext(['input' => ['a' => 'x', 'list' => ['y']]]);
+
+        $context->explain();
+
+        self::assertNull((new ContextInterpolator)->interpolate('${input.a}/${input.list}', $context));
+        self::assertNull((new ContextInterpolator)->interpolatePattern('${input.missing}', $context));
+        self::assertSame('x', (new ContextInterpolator)->interpolate('${input.a}', $context));
+        self::assertSame(['input.list', 'input.missing'], $context->takeUnresolved());
+    }
+
+    /**
+     * Through an explained context, every reference of a string that cannot be
+     * resolved is noted, not only the first, and only the first is logged; a
+     * later one that resolves is not noted, and a later one into a namespace no
+     * test has read is neither looked up nor noted, so its builder never runs.
+     * An everyday context notes none.
+     *
+     * @return void
+     */
+    public function testEveryUnresolvedReferenceOfAStringIsNoted(): void
+    {
+        $logger = new class extends AbstractLogger {
+            /** @var int The number of messages received. */
+            public int $count = 0;
+
+            /**
+             * Count a message.
+             *
+             * @param  mixed  $level
+             * @param  string|\Stringable  $message
+             * @param  array<array-key, mixed>  $context
+             * @return void
+             */
+            #[\Override]
+            public function log(mixed $level, string|\Stringable $message, array $context = []): void
+            {
+                $this->count++;
+            }
+        };
+
+        $container = new Container;
+        $container->instance('log', $logger);
+        Container::setInstance($container);
+
+        $built   = new \ArrayObject;
+        $builder = static function () use ($built): array {
+            $built->append('resource');
+
+            return ['resource' => ['owner' => 'u']];
+        };
+        $context  = new CheckContext(['input' => ['c' => 'z']], ['resource' => $builder]);
+        $everyday = new CheckContext(['input' => ['c' => 'z']]);
+
+        $context->explain();
+
+        self::assertNull($this->interpolator->interpolate('${input.a}-${input.b}/${input.c}/${resource.owner}', $context));
+        self::assertSame(['input.a', 'input.b'], $context->takeUnresolved());
+        self::assertCount(0, $built);
+        self::assertSame(1, $logger->count);
+
+        self::assertNull($this->interpolator->interpolatePattern('${input.a}-${input.b}', $everyday));
+        self::assertSame([], $everyday->takeUnresolved());
+    }
 }

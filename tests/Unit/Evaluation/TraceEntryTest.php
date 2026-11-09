@@ -6,6 +6,8 @@ namespace Tests\Unit\Evaluation;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\ConditionResult;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\ConditionOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
@@ -203,5 +205,25 @@ final class TraceEntryTest extends TestCase
         $entry = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD, null, ['scope' => false]);
 
         self::assertSame('[allow] permission: not_held (scope failed)', $entry->toString());
+    }
+
+    /**
+     * An entry defaults to no dependency and no recorded test, and keeps the
+     * evidence an explained check gives it.
+     *
+     * @return void
+     */
+    public function testEvidenceFields(): void
+    {
+        $plain     = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::MATCHED);
+        $tests     = [new ConditionResult('input.a', 'eq', ConditionOutcome::HELD)];
+        $explained = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::MATCHED, null, [], null, null, ['subject.id'], $tests, ['input.b']);
+
+        self::assertSame([], $plain->dependencies);
+        self::assertNull($plain->tests);
+        self::assertSame([], $plain->unresolved);
+        self::assertSame(['subject.id'], $explained->dependencies);
+        self::assertSame($tests, $explained->tests);
+        self::assertSame(['input.b'], $explained->unresolved);
     }
 }

@@ -57,7 +57,7 @@ trait AuthorizationAssertions
                 "Failed asserting that the principal can perform '%s'%s.\nDecision:\n%s",
                 $action,
                 self::describeResource($resource),
-                $decision->explain(),
+                $decision->explain()->toText(),
             ),
         );
     }
@@ -84,7 +84,7 @@ trait AuthorizationAssertions
                 "Failed asserting that the principal cannot perform '%s'%s.\nDecision:\n%s",
                 $action,
                 self::describeResource($resource),
-                $decision->explain(),
+                $decision->explain()->toText(),
             ),
         );
     }

@@ -88,6 +88,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  * session it was made in, until the earliest instant a met requirement it read
  * stops being met (N37).
  *
+ * Each step of a statement it assessed names the `${…}` references the
+ * statement names; through the context of an explained check, it also carries
+ * each condition test with what it found (see `TraceEntry`).
+ *
  * @phpstan-import-type StatementEntry from \SineMacula\Laravel\Authorization\Evaluation\StatementEntries
  * @phpstan-import-type Gathered from \SineMacula\Laravel\Authorization\Evaluation\StatementEntries
  *
@@ -401,6 +405,7 @@ final class PolicyEvaluator
         $found        = [self::DENY => [], self::INVALID => [], self::ALLOW => [], self::INSUFFICIENT => [], self::FAILED => [], self::NONE => []];
         $requirements = [];
         $isDeny       = $stage === DecisionStage::DENY;
+        $isExplaining = $context->isExplaining();
 
         foreach ($statements as [$reference, $statement, $notApplicable]) {
             // Most statements do not name the action, and decide nothing.
@@ -421,8 +426,9 @@ final class PolicyEvaluator
             $assessment = $statement->assess($action, $resource, $context, $this->interpolator());
             $outcome    = self::outcomeOf($assessment);
             $unmet      = $stage === DecisionStage::ALLOW ? $assessment->unmetRequirement : null;
+            $evidence   = $isExplaining ? $context->takeAssessment() : [null, []];
 
-            $trace[] = new TraceEntry($stage, $outcome, $reference, $assessment->conditions ?? []);
+            $trace[] = new TraceEntry($stage, $outcome, $reference, $assessment->conditions ?? [], null, null, $statement->dependencies, ...$evidence);
 
             if ($unmet === null) {
                 $found[self::categoryOf($isDeny, $outcome)][] = $reference;
