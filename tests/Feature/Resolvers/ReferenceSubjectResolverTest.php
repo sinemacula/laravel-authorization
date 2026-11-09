@@ -11,6 +11,9 @@ use SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\UnresolvedSubjectException;
 use SineMacula\Laravel\Authorization\Resolvers\ReferenceSubjectResolver;
+use Tests\Feature\Stubs\FailingSubjectResolver;
+use Tests\Feature\Stubs\NumberedIdentity;
+use Tests\Feature\Stubs\PlainIdentity;
 use Tests\Feature\Stubs\PrincipalSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
@@ -33,6 +36,9 @@ use Tests\TestCase;
 #[CoversClass(ReferenceSubjectResolver::class)]
 final class ReferenceSubjectResolverTest extends TestCase
 {
+    /** @var string A value a failure holds, which no refusal may carry. */
+    private const string SECRET = 'sentinel-failure-8a41';
+
     /**
      * Clear the morph map a test sets.
      *
@@ -208,6 +214,83 @@ final class ReferenceSubjectResolverTest extends TestCase
         $reference = StubSecondIdentity::class . ':person-3';
 
         $this->assertRefused($reference, "The subject '{$reference}' cannot be checked: its principal is not a saved authorizable identity.");
+
+        foreach ([new PlainIdentity, new \stdClass] as $principal) {
+            $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, $person));
+
+            $this->assertRefused($reference, "The subject '{$reference}' cannot be checked: its principal is not a saved authorizable identity.");
+        }
+    }
+
+    /**
+     * A key may hold a colon: only the first one ends the type.
+     *
+     * @return void
+     */
+    public function testAKeyMayHoldAColon(): void
+    {
+        $user = StubIdentity::create(['id' => 'org:7']);
+
+        self::assertTrue($user->is(self::model($this->resolver()->resolve(StubIdentity::class . ':org:7')->subject)));
+    }
+
+    /**
+     * A lookup that fails is refused without naming the reference or the
+     * failure, which is kept as the previous exception.
+     *
+     * @return void
+     */
+    public function testRefusesALookupThatFails(): void
+    {
+        StubIdentity::create(['id' => 'user-2']);
+
+        StubIdentity::retrieved(static function (): never {
+            throw new \RuntimeException(self::SECRET);
+        });
+
+        $exception = $this->refusal(StubIdentity::class . ':user-2', 'The subject could not be resolved.');
+
+        self::assertInstanceOf(\RuntimeException::class, $exception->getPrevious());
+        self::assertSame(self::SECRET, $exception->getPrevious()->getMessage());
+    }
+
+    /**
+     * A key the key column cannot hold is refused as not found or, on a
+     * database that refuses to compare it, as unresolvable, never with the
+     * database's error.
+     *
+     * @return void
+     */
+    public function testRefusesAKeyTheKeyColumnCannotHold(): void
+    {
+        $reference = NumberedIdentity::class . ':abc';
+
+        try {
+            $this->resolver()->resolve($reference);
+
+            self::fail("The reference '{$reference}' is refused.");
+        } catch (UnresolvedSubjectException $exception) {
+            self::assertContains($exception->getMessage(), ["No subject '{$reference}' was found.", 'The subject could not be resolved.']);
+        }
+    }
+
+    /**
+     * A subject resolver that fails, with any exception, is refused without
+     * naming the failure, which is kept as the previous exception.
+     *
+     * @return void
+     */
+    public function testRefusesASubjectResolverThatFails(): void
+    {
+        StubIdentity::create(['id' => 'user-3']);
+
+        foreach ([new \RuntimeException(self::SECRET), new \InvalidArgumentException(self::SECRET)] as $failure) {
+            $this->app?->instance(SubjectResolver::class, new FailingSubjectResolver($failure));
+
+            $exception = $this->refusal(StubIdentity::class . ':user-3', 'The subject could not be resolved.');
+
+            self::assertSame($failure, $exception->getPrevious());
+        }
     }
 
     /**
@@ -255,13 +338,27 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     private function assertRefused(string $reference, string $message): void
     {
+        $this->refusal($reference, $message);
+    }
+
+    /**
+     * Assert the reference is refused with the message, and return the refusal.
+     *
+     * @param  string  $reference
+     * @param  string  $message
+     * @return \SineMacula\Laravel\Authorization\Exceptions\UnresolvedSubjectException
+     */
+    private function refusal(string $reference, string $message): UnresolvedSubjectException
+    {
         try {
             $this->resolver()->resolve($reference);
-
-            self::fail("The reference '{$reference}' is refused.");
         } catch (UnresolvedSubjectException $exception) {
             self::assertSame($message, $exception->getMessage());
+
+            return $exception;
         }
+
+        self::fail("The reference '{$reference}' is refused.");
     }
 
     /**

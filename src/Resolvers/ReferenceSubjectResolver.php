@@ -27,6 +27,8 @@ use SineMacula\Laravel\Authorization\Subject;
  * returned must be about the model named, as its principal or its identity, or
  * the reference is ambiguous, and its principal must be a saved model that is
  * an authorizable identity, or the model cannot be checked; either is refused.
+ * So is a reference whose lookup or mapping fails, a database error or a key
+ * the key column cannot hold included, without naming the failure.
  *
  * The subject keeps its principal, its identity and its guard, and loses the
  * tenant, the application and any session the subject resolver gave it, so
@@ -62,11 +64,8 @@ final readonly class ReferenceSubjectResolver implements ConsoleSubjectResolver
     #[\Override]
     public function resolve(string $reference): Subject
     {
-        $model = self::model($reference);
-
-        /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $subjects */
-        $subjects  = $this->container->make(SubjectResolver::class);
-        $resolved  = $subjects->forUser($model);
+        $model     = self::model($reference);
+        $resolved  = $this->forUser($model);
         $principal = $resolved->subject;
 
         if (!self::isAbout($resolved, $model)) {
@@ -81,9 +80,31 @@ final readonly class ReferenceSubjectResolver implements ConsoleSubjectResolver
     }
 
     /**
+     * Return the subject the bound subject resolver maps the model to, refusing
+     * the model when the resolver cannot be read or fails.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $model
+     * @return \SineMacula\Laravel\Authorization\Subject
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnresolvedSubjectException
+     */
+    private function forUser(Model $model): Subject
+    {
+        try {
+            /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $subjects */
+            $subjects = $this->container->make(SubjectResolver::class);
+
+            return $subjects->forUser($model);
+        } catch (\Throwable $exception) {
+            throw UnresolvedSubjectException::unresolvable($exception);
+        }
+    }
+
+    /**
      * Load the saved model the reference names, refusing a reference not in the
-     * `{morphType}:{key}` format, a type that names no Eloquent model and a key
-     * no row has.
+     * `{morphType}:{key}` format, a type that names no Eloquent model, a key no
+     * row has, and a lookup that fails, as one whose key the key column cannot
+     * hold does on some databases.
      *
      * @param  string  $reference
      * @return \Illuminate\Database\Eloquent\Model
@@ -105,7 +126,13 @@ final readonly class ReferenceSubjectResolver implements ConsoleSubjectResolver
             throw UnresolvedSubjectException::unknownType($type);
         }
 
-        return $class::query()->find($key) ?? throw UnresolvedSubjectException::notFound($reference);
+        try {
+            $model = $class::query()->find($key);
+        } catch (\Throwable $exception) { // @phpstan-ignore catch.neverThrown (the query may fail, as one with a key the key column cannot hold does on PostgreSQL)
+            throw UnresolvedSubjectException::unresolvable($exception);
+        }
+
+        return $model ?? throw UnresolvedSubjectException::notFound($reference);
     }
 
     /**
@@ -122,8 +149,8 @@ final readonly class ReferenceSubjectResolver implements ConsoleSubjectResolver
     }
 
     /**
-     * Determine whether the party is the model: the same instance, or a model
-     * with the same key, table and connection.
+     * Determine whether the party is the model: a model with the same key,
+     * table and connection, the model itself included.
      *
      * @param  object|null  $party
      * @param  \Illuminate\Database\Eloquent\Model  $model
@@ -131,6 +158,6 @@ final readonly class ReferenceSubjectResolver implements ConsoleSubjectResolver
      */
     private static function isSame(?object $party, Model $model): bool
     {
-        return $party === $model || ($party instanceof Model && $model->is($party));
+        return $party instanceof Model && $model->is($party);
     }
 }

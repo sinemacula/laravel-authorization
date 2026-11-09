@@ -44,4 +44,21 @@ final class UnresolvedSubjectExceptionTest extends TestCase
             self::assertInstanceOf(\InvalidArgumentException::class, $exception);
         }
     }
+
+    /**
+     * A subject that failed to resolve is refused naming neither the reference
+     * nor the failure, which is kept as the previous exception.
+     *
+     * @return void
+     */
+    public function testAFailureIsKeptButNotNamed(): void
+    {
+        $failure   = new \RuntimeException('sentinel-failure-61d0', 7);
+        $exception = UnresolvedSubjectException::unresolvable($failure);
+
+        self::assertSame('The subject could not be resolved.', $exception->getMessage());
+        self::assertSame(0, $exception->getCode());
+        self::assertSame($failure, $exception->getPrevious());
+        self::assertInstanceOf(\InvalidArgumentException::class, $exception);
+    }
 }

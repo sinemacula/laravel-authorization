@@ -8,12 +8,13 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
  * Thrown when a console subject resolver cannot resolve the saved subject
  * reference it is given (see `Contracts\ConsoleSubjectResolver`): the reference
  * is malformed, its type is no Eloquent model, no row has its key, the model
- * cannot be the subject of a check, or the subject resolver maps it to a
- * subject that is not about it.
+ * cannot be the subject of a check, the subject resolver maps it to a subject
+ * that is not about it, or resolving it failed.
  *
  * It is an invalid invocation, which `authorization:why` reports and exits 2
  * for, rather than a denial. The message names the reference as it was given,
- * which the command escapes before it is written, and no other value.
+ * which the command escapes before it is written, and no other value; when
+ * resolving failed, it names neither the reference nor the failure.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,5 +77,19 @@ final class UnresolvedSubjectException extends \InvalidArgumentException
     public static function ambiguous(string $reference): self
     {
         return new self("The subject '{$reference}' is ambiguous: the subject resolver maps it to a subject that is not about it.");
+    }
+
+    /**
+     * Refuse a subject that could not be resolved because something failed
+     * while resolving it, such as the database lookup or the subject resolver,
+     * kept as the previous exception. The message names neither the reference
+     * nor the failure, which may hold a value.
+     *
+     * @param  \Throwable  $previous
+     * @return self
+     */
+    public static function unresolvable(\Throwable $previous): self
+    {
+        return new self('The subject could not be resolved.', 0, $previous);
     }
 }

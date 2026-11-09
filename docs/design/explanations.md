@@ -122,19 +122,20 @@ for a saved subject from the console.
 
 ## The `authorization:why` command
 
-`authorization:why {subject} {action} {resource?} --tenant= --application= --context= --format=text` explains the named
-subject under the given scope and console context, without their browser session (N91). It replaces
+`authorization:why {subject} {action} {resource?} --tenant= --application= --context= --format=text --opaque` explains
+the named subject under the given scope and console context, without their browser session (N91). It replaces
 `authorization:why-can`, which printed a check's trace, with no alias.
 
 1. **The subject is resolved, never inferred.** The `{subject}` reference is resolved by the bound
    `Contracts\ConsoleSubjectResolver`, never from whoever is signed in to the console. The default,
    `Resolvers\ReferenceSubjectResolver`, loads the row a `{morphType}:{key}` reference names (a morph alias or an
-   Eloquent class) and maps the model through the bound `SubjectResolver::forUser()`, the package's one translation of
-   a model into a subject (N55), read on every call. A malformed reference, a type that names no model and a key no
-   row has are refused; so is a mapping about neither the model's principal nor its identity (ambiguous), and one
-   whose principal is not a saved `AuthorizableIdentity` model (unsupported). The subject keeps its principal,
-   identity and guard and nothing else: no tenant, no application and no session, whatever the resolver gives it. An
-   application binds its own resolver on the contract, which replaces the default.
+   Eloquent class) and maps the model through the bound `SubjectResolver::forUser()`, the package's one translation of a
+   model into a subject (N55), read on every call. A malformed reference, a type that names no model and a key no row
+   has are refused; so is a mapping about neither the model's principal nor its identity (ambiguous), one whose
+   principal is not a saved `AuthorizableIdentity` model (unsupported), and a lookup or mapping that fails, such as a
+   key a PostgreSQL key column cannot hold (unresolvable, naming neither the reference nor the failure). The subject
+   keeps its principal, identity and guard and nothing else: no tenant, no application and no session, whatever the
+   resolver gives it. An application binds its own resolver on the contract, which replaces the default.
 
 2. **The scope is named, never inherited (N71).** `--tenant` omitted is `AuthorizationScope::platform()`, never the
    tenant in place; `TYPE:ID` is that tenant, a model-backed type naming a row that exists, by its morph class, and
@@ -151,23 +152,33 @@ subject under the given scope and console context, without their browser session
 4. **The context is input alone (N90).** `--context` is a JSON object read as the `input` namespace. Malformed JSON,
    a value that is not an object, and a top-level key naming a trusted namespace, or a dotted key whose first segment
    names one, are refused; `CheckContextFactory::trustedNamespaces()` lists them: the namespaces the authentication
-   context and the application's context sources supply, `request`, `environment`, `subject` and `resource`. The
-   resource is the string reference `check()` takes, an opaque identifier: no model is loaded, its attributes come
-   only from the declared providers, and missing provider data stays missing. A missing key is evidence, not advice
-   to supply it.
+   context and the application's context sources supply, `request`, `environment`, `subject` and `resource`. A
+   missing key is evidence, not advice to supply it.
 
-5. **Printed once, never a value.** `text`, the default, prints a fixed preamble saying what is explained and then
+5. **The resource is what `check()` takes (N92).** `type:id` names that record and is passed as the `(type, id)` pair,
+   its key keeping any colon after the first, so the bound `ResourceTenantResolver` gives its tenant, its resource
+   policies and its type's apply, and its type's attribute provider supplies its attributes, exactly as in an
+   ordinary check on the pair. `type:*` names the type alone, passed as the model class when the type is one and as
+   `ResourceReference::type()` otherwise. A resource with no colon, or any resource with `--opaque`, stays an opaque
+   identifier; an empty type or key beside the colon is refused. The command never loads the record or reads a
+   column: the providers decide what is read, and missing provider data stays missing.
+
+6. **Printed once, never a value.** `text`, the default, prints a fixed preamble saying what is explained and then
    `Explanation::toText()`; `json` prints only `json_encode($explanation)`, the versioned schema, with no prose or
    ANSI. Both are written raw, so a name's markup is never interpreted. No `--as-of`, previewer, policy override,
    session, proof, values or debug switch is offered.
 
-6. **Exit codes and errors.** `0` when an explanation is printed, whether it allows or denies; `2` for an invalid
-   invocation, an `InvalidArgumentException` (`UnresolvedSubjectException` among them) while the invocation is read or
-   the subject resolved; `1` when the check throws, naming the exception's class alone and printing no explanation.
-   Errors go to the standard error, never echo a context value, operand or attribute, and have their control
-   characters escaped as the text renderer escapes them and their console markup escaped.
+7. **Exit codes and errors.** `0` when an explanation is printed, whether it allows or denies; `2` for an invalid
+   invocation: one the console cannot bind (an unknown option, a missing argument), caught in `run()`; an option that
+   takes a value given without one, which the console reads as omitted; and every refusal while the invocation is
+   read or the subject resolved. A tenant lookup, a subject lookup, a subject resolver or a console subject resolver
+   that fails other than by refusing is refused naming only the argument, never the query, the value or the failure's
+   message. `1` when the check throws, naming the exception's class alone and printing no explanation. Errors go to
+   the standard error, never echo a context value, operand or attribute, and have their control, format,
+   bidirectional and line separator characters escaped as the text renderer escapes them, the whole message so when
+   it is not UTF-8, and their console markup escaped.
 
-7. **A trusted operator surface.** The command admits no caller: whoever can run the console sees the names an
+8. **A trusted operator surface.** The command admits no caller: whoever can run the console sees the names an
    explanation holds. Delegated or application disclosure of another subject's explanation stays on `previewFor()`
    (N85), which admits the caller first.
 
@@ -208,8 +219,10 @@ subject under the given scope and console context, without their browser session
   not evaluated, the schema, the escaping, each typed outcome, and the sentinels that no value reaches an explanation.
 - `WhyCommandTest`, `WhyInvocationTest`, `Resolvers\ReferenceSubjectResolverTest` (Feature) -- each option, its
   default and each refusal with its exit code, text and JSON for an allow and a deny, the JSON equal to `explain()`'s,
-  the verdict equal to `check()`'s, the scope isolated, not inherited and restored after an exception, the recording,
-  the principal and identity mapping, a custom resolver, and the sentinels that no value is printed.
+  the verdict equal to `check()`'s, a record with its tenant, resource policy and provider attribute, the type alone
+  and an opaque resource, the scope isolated, not inherited and restored after an exception, the recording, the
+  principal and identity mapping, a custom resolver, failing lookups and resolvers, and the sentinels that no value is
+  printed.
 - `SingleCheckBudgetTest`, `ConditionEvaluationBudgetTest`, `EvaluatorThroughputTest` (Performance) -- the everyday
   path's cost.
 

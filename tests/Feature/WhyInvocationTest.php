@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\FailingContextSource;
 use Tests\Feature\Stubs\StubIdentity;
@@ -43,6 +44,12 @@ use Tests\TestCase;
 final class WhyInvocationTest extends TestCase
 {
     use ActsAsTenant;
+
+    /** @var string A value a failure holds, which no refusal may carry. */
+    private const string SECRET = 'sentinel-failure-3c9e';
+
+    /** @var string The refusal of a resource with a colon but an empty type or key. */
+    private const string RESOURCE = 'The resource must be in the format {morphType}:{key} or {morphType}:* (e.g. post:42), or be given with --opaque.';
 
     /** @var list<string> The trusted namespaces the tests refuse. */
     private const array TRUSTED = ['authentication', 'request', 'environment', 'subject', 'resource'];
@@ -80,15 +87,50 @@ final class WhyInvocationTest extends TestCase
     }
 
     /**
-     * The resource is kept as given, and only a string is a resource.
+     * A `{morphType}:{key}` resource is the `(type, id)` pair of that record,
+     * its key keeping any colon, and `{morphType}:*` the type alone: a model
+     * class as it is, any other type as a reference to the type.
      *
      * @return void
      */
-    public function testKeepsTheResourceAsGiven(): void
+    public function testReadsARecordAndATypeAlone(): void
     {
-        self::assertSame('post:42', self::of(['action' => 'posts:read', 'resource' => 'post:42'], [])->resource);
-        self::assertSame('', self::of(['action' => 'posts:read', 'resource' => ''], [])->resource);
-        self::assertNull(self::of(['action' => 'posts:read', 'resource' => ['post', '42']], [])->resource);
+        self::assertSame(['post', '42'], self::resource('post:42'));
+        self::assertSame(['post', 'a:b'], self::resource('post:a:b'));
+        self::assertSame([StubTenant::class, 'tenant-1'], self::resource(StubTenant::class . ':tenant-1'));
+        self::assertEquals(ResourceReference::type('post'), self::resource('post:*'));
+        self::assertSame(StubTenant::class, self::resource(StubTenant::class . ':*'));
+        self::assertSame(['post', '42'], self::resource('post:42', ['opaque' => false]));
+    }
+
+    /**
+     * A resource with no colon, or any resource with `--opaque`, is the opaque
+     * identifier it is, and only a string is a resource.
+     *
+     * @return void
+     */
+    public function testKeepsAnOpaqueResourceAsGiven(): void
+    {
+        self::assertSame('posts/42', self::resource('posts/42'));
+        self::assertSame('', self::resource(''));
+        self::assertSame('post:42', self::resource('post:42', ['opaque' => true]));
+        self::assertSame('post:*', self::resource('post:*', ['opaque' => true]));
+        self::assertSame(':', self::resource(':', ['opaque' => true]));
+        self::assertNull(self::resource(null));
+        self::assertNull(self::resource(['post', '42']));
+        self::assertNull(self::resource(['post', '42'], ['opaque' => true]));
+    }
+
+    /**
+     * A resource with a colon but an empty type or key is refused.
+     *
+     * @return void
+     */
+    public function testRefusesAResourceWithAnEmptyTypeOrKey(): void
+    {
+        foreach ([':42', 'post:', ':', ':*'] as $resource) {
+            $this->assertRefused(['action' => 'a', 'resource' => $resource], [], self::RESOURCE);
+        }
     }
 
     /**
@@ -152,6 +194,8 @@ final class WhyInvocationTest extends TestCase
 
         self::assertEquals(new Reference('team', 'tenant-1'), self::of(['action' => 'a'], ['tenant' => StubTenant::class . ':tenant-1'])->scope->tenant);
         self::assertEquals(new Reference('team', 'tenant-1'), self::of(['action' => 'a'], ['tenant' => 'team:tenant-1'])->scope->tenant);
+
+        $this->assertRefused(['action' => 'a'], ['tenant' => 'team:missing'], 'No tenant \'team:missing\' was found.');
     }
 
     /**
@@ -180,6 +224,23 @@ final class WhyInvocationTest extends TestCase
         }
 
         $this->assertRefused(['action' => 'a'], ['tenant' => StubTenant::class . ':missing'], 'No tenant \'Tests\Feature\Stubs\StubTenant:missing\' was found.');
+    }
+
+    /**
+     * A tenant whose lookup fails is refused without naming the failure or the
+     * value it holds.
+     *
+     * @return void
+     */
+    public function testRefusesATenantWhoseLookupFails(): void
+    {
+        self::createTenant('tenant-5');
+
+        StubTenant::retrieved(static function (): never {
+            throw new \RuntimeException(self::SECRET);
+        });
+
+        $this->assertRefused(['action' => 'a'], ['tenant' => StubTenant::class . ':tenant-5'], 'The --tenant option could not be resolved.');
     }
 
     /**
@@ -344,6 +405,21 @@ final class WhyInvocationTest extends TestCase
     private static function of(array $arguments, array $options): WhyInvocation
     {
         return WhyInvocation::of($arguments, $options, self::TRUSTED);
+    }
+
+    /**
+     * Return the resource the invocation reads from the argument, with the
+     * options.
+     *
+     * @param  mixed  $resource
+     * @param  array<string, mixed>  $options
+     * @return array{string, string}|\SineMacula\Laravel\Authorization\Support\ResourceReference|string|null
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function resource(mixed $resource, array $options = []): array|ResourceReference|string|null
+    {
+        return self::of(['action' => 'posts:read', 'resource' => $resource], $options)->resource;
     }
 
     /**

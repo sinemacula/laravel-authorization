@@ -768,8 +768,8 @@ to have it evaluated as one.
 
 The decision, the trace and `explain()` name a resource policy's statements as they name any other, with the resource
 the policy is attached to: `post-42-sharing[<its key>]#0 sid="reviewers-read" on "post:42"`. `authorization:why`
-passes its resource to the check as an opaque identifier, so it reads no resource policies; explain a check on the model
-or the pair to see them.
+passes a `post:42` resource to the check as the `['post', '42']` pair, so it reads that record's resource policies and
+those of its type, and `post:*` as the type alone; with `--opaque`, the resource is an opaque identifier and reads none.
 
 ### Permission boundaries
 
@@ -3552,7 +3552,7 @@ php artisan authorization:revoke user:1 editor
 php artisan authorization:revoke user:1 editor --actor=user:7
 php artisan authorization:list-roles
 php artisan authorization:list-permissions
-php artisan authorization:why user:1 posts:delete posts/42 --tenant=team:7
+php artisan authorization:why user:1 posts:delete post:42 --tenant=team:7
 php artisan authorization:policy:validate --database
 php artisan authorization:prune --pretend
 php artisan authorization:check
@@ -3603,7 +3603,9 @@ Schedule::command('authorization:prune')->daily();
 
 ```bash
 php artisan authorization:why user:1 posts:publish --tenant=team:7
-php artisan authorization:why user:1 posts:publish posts/42 --tenant=team:7 --application=admin
+php artisan authorization:why user:1 posts:publish post:42 --tenant=team:7 --application=admin
+php artisan authorization:why user:1 posts:create 'post:*' --tenant=team:7
+php artisan authorization:why user:1 reports:read reports:42 --opaque
 php artisan authorization:why user:1 posts:publish --context='{"purpose":"support"}' --format=json
 ```
 
@@ -3622,21 +3624,23 @@ ALLOW at the allow stage by permission "posts:publish".
 |--------------------|-------------------------------------------------------------------------------------------------|------------------------------------------------------------------|
 | `{subject}`        | The saved subject, as `{morph type}:{key}`, resolved by the console subject resolver            | Required                                                         |
 | `{action}`         | The action, passed to the check unchanged                                                       | Required                                                         |
-| `{resource}`       | The string resource reference `check()` takes, an opaque identifier                             | A check without a resource, never every resource                 |
+| `{resource}`       | `{morph type}:{key}`, that record; `{morph type}:*`, the type alone; anything else, as given    | A check without a resource, never every resource                 |
 | `--tenant`         | The tenant, as `{morph type}:{key}`                                                             | The platform, never the tenant in place                          |
 | `--application`    | The application                                                                                 | No application: only the grants for every application count      |
 | `--context`        | A JSON object, read as the `input` namespace alone                                              | No input                                                         |
 | `--format`         | `text`, the preamble and `toText()`, or `json`, the versioned JSON alone, with no prose or ANSI | `text`                                                           |
+| `--opaque`         | The resource is an opaque identifier, used as given, even when it holds a colon                 | A resource with a colon names a record or a type                 |
 
-**The subject.** The reference is resolved by the `ConsoleSubjectResolver` bound in the container, never from whoever
-is signed in to the console. The default, `ReferenceSubjectResolver`, takes the type as a morph map alias or an
-Eloquent class, loads the row with the key, and maps the model to its principal and identity through the bound subject
-resolver's `forUser()`, as the Gate's user is: under the shipped resolver the model is its own principal and identity;
-under an application's resolver with principals, a person is mapped to the principal it acts as. It refuses a reference
-not in that format, a type that names no model, a key no row has, a mapping about neither the model's principal nor its
-identity (ambiguous), and a principal that is not a saved authorizable identity (unsupported). The subject keeps its
-principal, identity and guard, and nothing else the resolver gives it: the command adds the tenant and application, and
-there is never a session.
+**The subject.** The reference is resolved by the `ConsoleSubjectResolver` bound in the container, never from whoever is
+signed in to the console. The default, `ReferenceSubjectResolver`, takes the type as a morph map alias or an Eloquent
+class, loads the row with the key, and maps the model to its principal and identity through the bound subject resolver's
+`forUser()`, as the Gate's user is: under the shipped resolver the model is its own principal and identity; under an
+application's resolver with principals, a person is mapped to the principal it acts as. It refuses a reference not in
+that format, a type that names no model, a key no row has, a mapping about neither the model's principal nor its
+identity (ambiguous), a principal that is not a saved authorizable identity (unsupported), and a lookup or mapping that
+fails (unresolvable), keeping the failure as the previous exception. The subject keeps its principal, identity and
+guard, and nothing else the resolver gives it: the command adds the tenant and application, and there is never a
+session.
 
 **The scope.** `--tenant` omitted is the platform: a tenant resolved for the console, or one a job left in place, is
 never inherited. A type the morph map or a class name resolves to an Eloquent model must name a row that exists, and
@@ -3651,26 +3655,39 @@ $scope->within(fn () => Authorization::for($scope->subjectIn($subject))->explain
 The scope in place before is restored afterwards, even when the check throws. The check is recorded as the last
 decision and dispatches its `DecisionEvaluated`, as any explained check does.
 
+**The resource.** It is passed to the check as `check()` takes it, so the check on it is an ordinary one. A
+`{morph type}:{key}` resource, `post:42`, names that record as the `['post', '42']` pair: its tenant comes from the
+bound resource tenant resolver, its resource policies and those of its type apply, and its attributes come from the
+attribute provider declared for its type. The key keeps any colon after the first (`org:acme:eu` is the key `acme:eu`
+of `org`), and the type is used as given, as a pair's is, a model class named by its morph class. `{morph type}:*`,
+`post:*`, names the type alone, as a model class does when the type is one: the policies attached to the type apply,
+and no record's attributes are read. A resource with no colon, such as `posts/42`, and any resource given with
+`--opaque`, such as a URL, is an opaque identifier, used as given, with no tenant, no resource policy and no
+attributes. A colon with an empty type or key on either side (`:42`, `post:`) is refused. The command never loads the
+record or reads its columns: what the providers do not supply stays missing.
+
 **The context.** `--context` supplies the `input` namespace alone: `{"purpose":"support"}` gives `input.purpose`. It
 cannot fill a trusted namespace, so malformed JSON, a value that is not an object, and a key naming `authentication`,
-`request`, `environment`, `subject`, `resource` or a namespace an application's context source supplies, or a dotted
-key starting with one (`request.ip`), are refused. The resource's attributes come only from the attribute providers
-declared for it, never from a model's columns, and what they do not provide stays missing. Without the subject's
-browser session no authentication requirement is met, so an allow that needs one does not apply, and the explanation
-names its unmet parts. A key the explanation reports missing is evidence of what the decision found, not advice to
-supply it.
+a namespace your `AuthenticationContext` contributes beside it (such as `mfa`), `request`, `environment`, `subject`,
+`resource`, or a namespace an application's context source supplies, or a dotted key starting with one
+(`request.ip`), are refused. Without the subject's browser session no authentication requirement is met, so an allow
+that needs one does not apply, and the explanation names its unmet parts. A key the explanation reports missing is
+evidence of what the decision found, not advice to supply it.
 
 **Exit codes and errors.**
 
-| Code | When                                                                                                          |
-|------|---------------------------------------------------------------------------------------------------------------|
-| `0`  | An explanation was printed, whether the check allows or denies                                                |
-| `2`  | An invalid invocation: an option, the JSON, a reference, or a subject or tenant that cannot be resolved       |
-| `1`  | The check failed: no explanation is printed, and the error names the exception's class alone                  |
+| Code | When                                                                                                                                                |
+|------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `0`  | An explanation was printed, whether the check allows or denies                                                                                      |
+| `2`  | An invalid invocation: an unknown option, a missing argument or option value, the JSON, a reference, or a subject or tenant that cannot be resolved |
+| `1`  | The check failed: no explanation is printed, and the error names the exception's class alone                                                        |
 
 Errors go to the standard error, so a `--format=json` run leaves the standard output empty when it fails. They name the
-option or the reference, never a context value, operand or attribute, and their console markup and control characters
-are escaped, as every name in the text output is.
+option or the reference, never a context value, operand or attribute. A subject or tenant whose lookup fails, such as a
+key the key column cannot hold on PostgreSQL, a database error or a subject resolver that throws, exits `2` too, naming
+only the argument (`The subject could not be resolved.`), never the query, the value or the failure's message. Their
+console markup, control characters, format and bidirectional characters are escaped as every name in the text output is,
+and an error holding bytes that are not UTF-8 is escaped whole.
 
 **A trusted operator surface.** The command shows how the policies are built, the names of policies, statements,
 conditions, keys, roles and tenants, to whoever can run the console; it admits no caller. An application showing
@@ -3687,7 +3704,9 @@ $this->app->bind(ConsoleSubjectResolver::class, App\Authorization\StaffConsoleSu
 ```
 
 Its `resolve(string $reference): Subject` returns the subject with its principal and identity, and refuses a reference
-it cannot resolve by throwing `UnresolvedSubjectException`, which the command reports with exit code `2`.
+it cannot resolve by throwing `UnresolvedSubjectException`, which the command reports with exit code `2`. Anything
+else it throws is reported as `The subject could not be resolved.`, with exit code `2` too, and its message is never
+printed.
 
 ### Testing assertions
 

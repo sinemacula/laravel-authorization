@@ -34,7 +34,9 @@ interface ConsoleSubjectResolver
      *
      * A reference that is malformed, names nothing, names a model that cannot
      * be a subject, or names one that cannot be told apart from another is
-     * refused, never guessed at.
+     * refused, never guessed at. `authorization:why` prints a refusal's
+     * message; anything else thrown it reports as a subject that could not be
+     * resolved, never printing its message.
      *
      * @param  string  $reference
      * @return \SineMacula\Laravel\Authorization\Subject

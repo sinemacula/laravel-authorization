@@ -14,20 +14,29 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Console\WhyCommand;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Exceptions\UnresolvedSubjectException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Symfony\Component\Console\Input\ArgvInput;
+use Symfony\Component\Console\Output\BufferedOutput;
 use Symfony\Component\Console\Tester\CommandTester;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\FailingContextSource;
+use Tests\Feature\Stubs\FailingSubjectResolver;
 use Tests\Feature\Stubs\FixedConsoleSubjectResolver;
+use Tests\Feature\Stubs\FixedResourceTenantResolver;
+use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\PrincipalSubjectResolver;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\StubIdentity;
@@ -60,6 +69,12 @@ final class WhyCommandTest extends TestCase
 
     /** @var string A model attribute, which nothing the command prints may carry. */
     private const string NAME = 'sentinel-name-91b2';
+
+    /** @var string A resource attribute a provider supplies, which nothing the command prints may carry. */
+    private const string STATUS = 'sentinel-status-4e7d';
+
+    /** @var string The refusal of a resource with a colon but an empty type or key. */
+    private const string RESOURCE = 'The resource must be in the format {morphType}:{key} or {morphType}:* (e.g. post:42), or be given with --opaque.';
 
     /**
      * An allowed check is explained as text after the preamble and exits 0.
@@ -224,23 +239,24 @@ final class WhyCommandTest extends TestCase
             }
         }
 
-        self::assertSame([], $posts->calls);
+        self::assertCount(2, $posts->calls);
     }
 
     /**
-     * The resource is the string reference `check()` takes, passed as given: no
-     * model column is read and no attribute provider supplies an opaque
-     * reference, so a condition on the resource finds its key missing and
-     * reports it so.
+     * A record's attributes come only from its type's attribute provider: the
+     * row is never loaded, so a model column the provider does not supply stays
+     * missing, and is reported so, while the key the provider supplies holds.
      *
      * @return void
      */
     public function testResourceAttributesComeOnlyFromProviders(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-7']);
+        $user  = StubIdentity::create(['id' => 'user-7', 'name' => self::NAME]);
         $posts = new RecordingResourceAttributes;
 
-        $user->attachPolicy(self::policy('drafts', [['effect' => 'allow', 'actions' => ['posts:edit'], 'conditions' => ['eq' => ['resource.status' => 'draft']]]]));
+        $conditions = ['eq' => ['resource.status' => 'draft', 'resource.name' => self::NAME]];
+
+        $user->attachPolicy(self::policy('drafts', [['effect' => 'allow', 'actions' => ['posts:edit'], 'conditions' => $conditions]]));
         $this->useResourceAttributes($user->getMorphClass(), $posts);
 
         [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-7', 'action' => 'posts:edit', 'resource' => StubIdentity::class . ':user-7', '--format' => 'json']);
@@ -249,8 +265,170 @@ final class WhyCommandTest extends TestCase
 
         self::assertSame(0, $code);
         self::assertSame('deny', $document['effect']);
-        self::assertSame(['resource.status'], $document['missing_keys']);
+        self::assertSame(['resource.name'], $document['missing_keys']);
         self::assertSame(StubIdentity::class . ':user-7', $document['request']['resource'] ?? null);
+        self::assertEquals(['resource.status' => 'held', 'resource.name' => 'missing'], self::outcomes($document));
+        self::assertCount(1, $posts->calls);
+        self::assertSame(StubIdentity::class . ':user-7', $posts->calls[0][0]->identifier);
+        self::assertNull($posts->calls[0][1]);
+        self::assertStringNotContainsString(self::NAME, $output);
+    }
+
+    /**
+     * A `{morphType}:{key}` resource names that record, as the `(type, id)`
+     * pair `check()` takes: the resource policy attached to it decides, the
+     * condition on the attribute its provider supplies holds, and neither the
+     * provider's values nor the policy's operands are printed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testExplainsARecordWithItsPolicyAndProviderAttribute(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-18']);
+        $posts = new RecordingResourceAttributes(self::STATUS);
+
+        self::attach(self::policy('sharing', [self::share($user, 'posts:read', ['eq' => ['resource.status' => self::STATUS]])]), ['post', '42']);
+        $this->useResourceAttributes('post', $posts);
+
+        [$code, $json] = self::why(['subject' => StubIdentity::class . ':user-18', 'action' => 'posts:read', 'resource' => 'post:42', '--format' => 'json']);
+        [, $text]      = self::why(['subject' => StubIdentity::class . ':user-18', 'action' => 'posts:read', 'resource' => 'post:42']);
+
+        $document = self::decoded($json);
+        $decided  = $document['decided_by']['statements'][0] ?? [];
+
+        self::assertSame(0, $code);
+        self::assertSame('allow', $document['effect']);
+        self::assertSame('post:42', $document['request']['resource'] ?? null);
+        self::assertSame(['sharing', 'share', 'post:42'], [$decided['policy'] ?? null, $decided['sid'] ?? null, $decided['resource'] ?? null]);
+        self::assertSame(['resource.status' => 'held'], self::outcomes($document));
+        self::assertStringContainsString('sid="share" on "post:42"', $text);
+        self::assertSame(['post:42', 'post:42'], \array_map(static fn (array $call): string => $call[0]->identifier, $posts->calls));
+
+        foreach ([$json, $text] as $output) {
+            foreach ([self::STATUS, 'owner@example.com', 'classified'] as $value) {
+                self::assertStringNotContainsString($value, $output);
+            }
+        }
+    }
+
+    /**
+     * The verdict on a record is the one `check()` gives the same `(type, id)`
+     * pair, under the same scope, allowed and denied alike.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheVerdictOnARecordIsTheChecksVerdict(): void
+    {
+        $named = StubIdentity::create(['id' => 'user-19']);
+        $other = StubIdentity::create(['id' => 'user-20']);
+
+        self::attach(self::policy('sharing', [self::share($named, 'posts:read')]), ['post', '43']);
+
+        foreach (['user-19' => [$named, 'allow'], 'user-20' => [$other, 'deny']] as $id => [$user, $effect]) {
+            [, $output] = self::why(['subject' => StubIdentity::class . ':' . $id, 'action' => 'posts:read', 'resource' => 'post:43', '--format' => 'json']);
+
+            $scope   = AuthorizationScope::platform();
+            $checked = $scope->within(static fn (): bool => Authorization::for($scope->subjectIn(new Subject($user, $user)))->check('posts:read', ['post', '43'])->isAllowed());
+
+            self::assertSame($effect, self::decoded($output)['effect'], $id);
+            self::assertSame($effect === 'allow', $checked, $id);
+        }
+    }
+
+    /**
+     * A record is decided with the tenant the bound resource tenant resolver
+     * gives it: in the tenant named when it is that tenant's, denied as out of
+     * scope when it is another's, as `check()` decides it; an opaque resource
+     * has no tenant, so the resolver is never asked about it.
+     *
+     * @return void
+     */
+    public function testTheRecordsTenantApplies(): void
+    {
+        $tenant = self::createTenant('tenant-f');
+        $other  = self::createTenant('tenant-g');
+        $user   = StubIdentity::create(['id' => 'user-21']);
+        $option = $tenant->getMorphClass() . ':tenant-f';
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']), null, $tenant);
+
+        $this->app?->instance(ResourceTenantResolver::class, new FixedResourceTenantResolver(null, Reference::of($tenant)));
+
+        [, $own] = self::why(['subject' => StubIdentity::class . ':user-21', 'action' => 'posts:read', 'resource' => 'post:44', '--tenant' => $option, '--format' => 'json']);
+
+        $foreign = new FixedResourceTenantResolver(null, Reference::of($other));
+
+        $this->app?->instance(ResourceTenantResolver::class, $foreign);
+
+        $parameters  = ['subject' => StubIdentity::class . ':user-21', 'action' => 'posts:read', 'resource' => 'post:44', '--tenant' => $option, '--format' => 'json'];
+        [, $outside] = self::why($parameters);
+        [, $opaque]  = self::why([...$parameters, '--opaque' => true]);
+
+        $scope   = AuthorizationScope::tenant($tenant);
+        $checked = $scope->within(static fn (): ?DecisionReason => Authorization::for($scope->subjectIn(new Subject($user, $user)))->check('posts:read', ['post', '44'])->reason);
+
+        self::assertSame('allow', self::decoded($own)['effect']);
+        self::assertSame(['deny', 'tenant_scope'], [self::decoded($outside)['effect'], self::decoded($outside)['reason']]);
+        self::assertSame(DecisionReason::TENANT_SCOPE, $checked);
+        self::assertSame('allow', self::decoded($opaque)['effect']);
+        self::assertSame([['post', '44'], ['post', '44']], $foreign->askedRecords);
+    }
+
+    /**
+     * A `{morphType}:*` resource names the type alone: a policy attached to the
+     * type applies, and no attribute provider is asked about a record.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testExplainsTheTypeAlone(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-22']);
+        $posts = new RecordingResourceAttributes;
+
+        self::attach(self::policy('creators', [self::share($user, 'posts:create')]), 'post');
+        $this->useResourceAttributes('post', $posts);
+
+        [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-22', 'action' => 'posts:create', 'resource' => 'post:*', '--format' => 'json']);
+
+        self::assertSame(0, $code);
+        self::assertSame('allow', self::decoded($output)['effect']);
+        self::assertSame('post:*', self::decoded($output)['request']['resource'] ?? null);
+        self::assertSame('creators', self::decoded($output)['decided_by']['statements'][0]['policy'] ?? null);
+        self::assertSame([], $posts->calls);
+    }
+
+    /**
+     * A resource with no colon, and one with a colon given with `--opaque`, is
+     * an opaque identifier: no resource policy is read for it and no attribute
+     * provider is asked about it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnOpaqueResourceNamesNoRecord(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-23']);
+        $posts = new RecordingResourceAttributes;
+
+        self::attach(self::policy('sharing', [self::share($user, 'posts:read')]), ['post', '45']);
+        $this->useResourceAttributes('post', $posts);
+
+        foreach ([['post:45', true], ['post-45', false]] as [$resource, $isOpaque]) {
+            $options         = $isOpaque ? ['--opaque' => true] : [];
+            [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-23', 'action' => 'posts:read', 'resource' => $resource, '--format' => 'json', ...$options]);
+
+            self::assertSame(0, $code, $resource);
+            self::assertSame('deny', self::decoded($output)['effect'], $resource);
+            self::assertSame($resource, self::decoded($output)['request']['resource'] ?? null, $resource);
+        }
+
         self::assertSame([], $posts->calls);
     }
 
@@ -440,7 +618,7 @@ final class WhyCommandTest extends TestCase
     /**
      * Return each invalid invocation and the error it is refused with.
      *
-     * @return iterable<string, array{array<string, string>, string}>
+     * @return iterable<string, array{array<string, string|null>, string}>
      */
     public static function invalidInvocations(): iterable
     {
@@ -468,13 +646,22 @@ final class WhyCommandTest extends TestCase
         yield 'a malformed subject' => [['subject' => 'user'], 'The subject must be in the format {morphType}:{key} (e.g. user:1).'];
         yield 'an unknown subject type' => [['subject' => 'nothing:1'], 'The subject type \'nothing\' is not an Eloquent model.'];
         yield 'an unknown subject' => [['subject' => StubIdentity::class . ':missing'], 'No subject \'Tests\Feature\Stubs\StubIdentity:missing\' was found.'];
+        yield 'a resource without a type' => [['resource' => ':42'], self::RESOURCE];
+        yield 'a resource without a key' => [['resource' => 'post:'], self::RESOURCE];
+        yield 'a bare tenant' => [['--tenant' => null], 'The --tenant option must be given a value.'];
+        yield 'a bare application' => [['--application' => null], 'The --application option must be given a value.'];
+        yield 'a bare context' => [['--context' => null], 'The --context option must be given a value.'];
+        yield 'a bare format' => [['--format' => null], 'The --format option must be given a value.'];
+        yield 'a bare tenant with the format' => [['--tenant' => null, '--format' => 'json'], 'The --tenant option must be given a value.'];
+        yield 'an unknown option' => [['--as-of' => '2026-01-01'], 'The "--as-of" option does not exist.'];
+        yield 'a missing action' => [['action' => null], 'Not enough arguments (missing: "action").'];
     }
 
     /**
      * Each invalid invocation exits 2 with an error naming what is wrong and no
      * value it was given.
      *
-     * @param  array<string, string>  $parameters
+     * @param  array<string, string|null>  $parameters
      * @param  string  $message
      * @return void
      */
@@ -483,7 +670,11 @@ final class WhyCommandTest extends TestCase
     {
         StubIdentity::create(['id' => 'user-14']);
 
-        [$code, $output] = self::why([...['subject' => StubIdentity::class . ':user-14', 'action' => 'posts:edit'], ...$parameters]);
+        $parameters = [...['subject' => StubIdentity::class . ':user-14', 'action' => 'posts:edit'], ...$parameters];
+
+        $given = \array_filter($parameters, static fn (?string $value, string $name): bool => $value !== null || \str_starts_with($name, '--'), \ARRAY_FILTER_USE_BOTH);
+
+        [$code, $output] = self::why($given);
 
         self::assertSame(2, $code);
         self::assertSame($message . "\n", $output);
@@ -540,6 +731,128 @@ final class WhyCommandTest extends TestCase
     }
 
     /**
+     * Return each subject or tenant whose key the key column cannot hold.
+     *
+     * @return iterable<string, array{array<string, string>, list<string>}>
+     */
+    public static function uncastableKeys(): iterable
+    {
+        $subject = NumberedIdentity::class . ':abc';
+
+        yield 'a subject' => [['subject' => $subject], ["No subject '{$subject}' was found.", 'The subject could not be resolved.']];
+        yield 'a tenant' => [['--tenant' => $subject], ["No tenant '{$subject}' was found.", 'The --tenant option could not be resolved.']];
+    }
+
+    /**
+     * A subject or tenant whose key the key column cannot hold exits 2, as not
+     * found or, on a database that refuses to compare it, as unresolvable,
+     * never with the database's error.
+     *
+     * @param  array<string, string>  $parameters
+     * @param  list<string>  $messages
+     * @return void
+     */
+    #[DataProvider('uncastableKeys')]
+    public function testRefusesAKeyTheKeyColumnCannotHold(array $parameters, array $messages): void
+    {
+        StubIdentity::create(['id' => 'user-24']);
+
+        [$code, $output] = self::why([...['subject' => StubIdentity::class . ':user-24', 'action' => 'posts:edit'], ...$parameters]);
+
+        self::assertSame(2, $code);
+        self::assertContains(\rtrim($output, "\n"), $messages);
+    }
+
+    /**
+     * A subject or tenant whose lookup fails exits 2, naming the argument and
+     * neither the failure nor the value it holds.
+     *
+     * @return void
+     */
+    public function testRefusesALookupThatFails(): void
+    {
+        $tenant = self::createTenant('tenant-h');
+
+        StubIdentity::create(['id' => 'user-25']);
+        StubIdentity::retrieved(static function (): never {
+            throw new \RuntimeException(self::SECRET);
+        });
+
+        $subject = self::why(['subject' => StubIdentity::class . ':user-25', 'action' => 'posts:edit']);
+
+        StubTenant::retrieved(static function (): never {
+            throw new \InvalidArgumentException(self::SECRET);
+        });
+
+        $scope = self::why(['subject' => 'nothing:1', 'action' => 'posts:edit', '--tenant' => $tenant->getMorphClass() . ':tenant-h']);
+
+        self::assertSame([2, "The subject could not be resolved.\n"], $subject);
+        self::assertSame([2, "The --tenant option could not be resolved.\n"], $scope);
+    }
+
+    /**
+     * A subject resolver that fails exits 2, naming the subject and neither the
+     * failure nor the value it holds, whatever it throws.
+     *
+     * @return void
+     */
+    public function testRefusesASubjectResolverThatFails(): void
+    {
+        StubIdentity::create(['id' => 'user-26']);
+
+        foreach ([new \RuntimeException(self::SECRET), new \InvalidArgumentException(self::SECRET)] as $failure) {
+            $this->app?->instance(SubjectResolver::class, new FailingSubjectResolver($failure));
+
+            self::assertSame([2, "The subject could not be resolved.\n"], self::why(['subject' => StubIdentity::class . ':user-26', 'action' => 'posts:edit']));
+        }
+    }
+
+    /**
+     * A console subject resolver that fails other than by refusing the subject
+     * exits 2 without naming the failure; one that refuses it exits 2 with its
+     * refusal.
+     *
+     * @return void
+     */
+    public function testRefusesAConsoleSubjectResolverThatFails(): void
+    {
+        $failures = [
+            "The subject could not be resolved.\n" => [new \RuntimeException(self::SECRET), new \InvalidArgumentException(self::SECRET)],
+            "No subject 'staff:1' was found.\n"    => [UnresolvedSubjectException::notFound('staff:1')],
+        ];
+
+        foreach ($failures as $message => $thrown) {
+            foreach ($thrown as $failure) {
+                $this->app?->instance(ConsoleSubjectResolver::class, new FixedConsoleSubjectResolver(new Subject(new StubIdentity), $failure));
+
+                self::assertSame([2, $message], self::why(['subject' => 'staff:1', 'action' => 'posts:edit']));
+            }
+        }
+    }
+
+    /**
+     * Run from the command line, an unknown option exits 2 with its error on
+     * the standard error, and an option after `--` is no option but the
+     * resource, which is never refused as a bare option.
+     *
+     * @return void
+     */
+    public function testRefusesAnUnknownOptionFromTheCommandLine(): void
+    {
+        $this->editor('user-27');
+
+        $subject = StubIdentity::class . ':user-27';
+
+        self::assertSame([2, "The \"--as-of\" option does not exist.\n"], $this->commandLine(['authorization:why', $subject, 'posts:edit', '--as-of=2026-01-01']));
+        self::assertSame([2, "Not enough arguments (missing: \"action\").\n"], $this->commandLine(['authorization:why', $subject]));
+
+        [$code, $output] = $this->commandLine(['authorization:why', $subject, 'posts:edit', '--format=json', '--', '--tenant']);
+
+        self::assertSame(0, $code);
+        self::assertSame('--tenant', self::decoded($output)['request']['resource'] ?? null);
+    }
+
+    /**
      * Errors go to the standard error, leaving the standard output empty, and
      * an explanation goes to the standard output alone.
      *
@@ -554,6 +867,12 @@ final class WhyCommandTest extends TestCase
         self::assertSame(2, $refused->execute(['subject' => 'bad', 'action' => 'posts:edit'], ['capture_stderr_separately' => true]));
         self::assertSame('', $refused->getDisplay());
         self::assertStringContainsString('The subject must be in the format', $refused->getErrorOutput());
+
+        $unbound = $this->tester();
+
+        self::assertSame(2, $unbound->execute(['subject' => 'bad', '--as-of' => 'x'], ['capture_stderr_separately' => true]));
+        self::assertSame('', $unbound->getDisplay());
+        self::assertSame("The \"--as-of\" option does not exist.\n", $unbound->getErrorOutput());
 
         $explained = $this->tester();
 
@@ -586,6 +905,23 @@ final class WhyCommandTest extends TestCase
     }
 
     /**
+     * An error holding a byte that is not UTF-8, such as an 8-bit control, is
+     * escaped whole, and format and bidirectional characters are escaped, so
+     * none reaches the terminal.
+     *
+     * @return void
+     */
+    public function testErrorsEscapeInvalidBytesAndFormatCharacters(): void
+    {
+        [$code, $invalid] = self::why(['subject' => "\x9b2J:1", 'action' => 'posts:edit']);
+        [, $bidi]         = self::why(['subject' => "a\u{202E}b\u{200B}c\u{2028}d:1", 'action' => 'posts:edit']);
+
+        self::assertSame(2, $code);
+        self::assertSame("The subject type '\\ufffd2J' is not an Eloquent model.\n", $invalid);
+        self::assertSame("The subject type 'a\\u202eb\\u200bc\\u2028d' is not an Eloquent model.\n", $bidi);
+    }
+
+    /**
      * Markup in a name the explanation prints, the resource and the application
      * here, is escaped in the text output.
      *
@@ -615,6 +951,23 @@ final class WhyCommandTest extends TestCase
         $code = Artisan::call('authorization:why', $parameters);
 
         return [$code, Artisan::output()];
+    }
+
+    /**
+     * Run the command line through the console kernel, returning its exit code
+     * and everything it wrote.
+     *
+     * @param  list<string>  $arguments
+     * @return array{int, string}
+     */
+    private function commandLine(array $arguments): array
+    {
+        $kernel = $this->app?->make(Kernel::class);
+        $output = new BufferedOutput;
+
+        self::assertInstanceOf(Kernel::class, $kernel);
+
+        return [$kernel->handle(new ArgvInput(['artisan', ...$arguments]), $output), $output->fetch()];
     }
 
     /**
@@ -684,6 +1037,66 @@ final class WhyCommandTest extends TestCase
     }
 
     /**
+     * Attach the policy to the resource through the resource policy service.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  mixed  $resource
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private static function attach(Policy $policy, mixed $resource): void
+    {
+        $service = ResourcePolicyService::instance();
+
+        self::assertInstanceOf(ResourcePolicyService::class, $service);
+
+        $service->attach($policy, $resource);
+    }
+
+    /**
+     * Return a resource policy statement, `share`, allowing the identity the
+     * action, on the conditions.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  string  $action
+     * @param  array<string, mixed>  $conditions
+     * @return array<string, mixed>
+     */
+    private static function share(StubIdentity $identity, string $action, array $conditions = []): array
+    {
+        $principal = Reference::of($identity);
+        $statement = ['sid' => 'share', 'effect' => 'allow', 'actions' => [$action], 'principals' => [$principal->getMorphClass() . ':' . $principal->getKey()]];
+
+        return $conditions === [] ? $statement : [...$statement, 'conditions' => $conditions];
+    }
+
+    /**
+     * Return the outcome of every condition test the explanation's JSON
+     * records, keyed by the key it tested.
+     *
+     * @param  array<string, mixed>  $document
+     * @return array<string, mixed>
+     */
+    private static function outcomes(array $document): array
+    {
+        $outcomes = [];
+
+        /** @var list<array{steps: list<array{tests: list<array{key: string, outcome: string}>|string}>}> $stages */
+        $stages = $document['stages'];
+
+        foreach ($stages as $stage) {
+            foreach ($stage['steps'] as $step) {
+                foreach (\is_array($step['tests']) ? $step['tests'] : [] as $test) {
+                    $outcomes[$test['key']] = $test['outcome'];
+                }
+            }
+        }
+
+        return $outcomes;
+    }
+
+    /**
      * Create a policy of the statements.
      *
      * @param  string  $name
@@ -705,6 +1118,6 @@ final class WhyCommandTest extends TestCase
     {
         $reference = Reference::of($model);
 
-        return \str_replace('\\', '\\\\', $reference->type) . ':' . $reference->id;
+        return \str_replace('\\', '\\\\', $reference->getMorphClass()) . ':' . $reference->getKey();
     }
 }
