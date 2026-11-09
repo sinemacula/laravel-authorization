@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Reviews\Support;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Reviews\Enums\ReviewKind;
@@ -21,8 +22,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * - Expiring: the rows whose expiry is at or after the start of the UTC window
  *   and before its end, so a row expiring exactly at the end falls in the next
- *   window. An expiring row does not by itself mean access is lost: another
- *   route may keep the target held.
+ *   window, each bound kept to the microsecond against expiries stored to the
+ *   whole second (see `window()`). An expiring row does not by itself mean
+ *   access is lost: another route may keep the target held.
  * - Granted by: the rows whose `granted_by` pair is exactly the actor's: the
  *   last actor to grant or change each (N95), since a regrant, a changed expiry
  *   or a changed reach overwrites it. A trusted write names no actor, so no
@@ -70,14 +72,38 @@ final class StoredRows
      * Return the condition a row expiring within the query's window meets: its
      * expiry at or after the window's start and before its end.
      *
+     * An expiry is stored to the whole second, its fraction dropped, and an
+     * instant is bound in the same whole-second format, so each bound is first
+     * rounded up to the next whole second when it has a fraction: a stored
+     * expiry is at or after a bound exactly when it is at or after the bound
+     * rounded up, and before it exactly when it is before the bound rounded up,
+     * so the window keeps its sub-second bounds on every database.
+     *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
      * @return \Closure(\Illuminate\Database\Query\Builder, string): void
+     *
+     * @throws \UnexpectedValueException
      */
     private static function window(ReviewQuery $query): \Closure
     {
-        return static function (Builder $stored, string $table) use ($query): void {
-            $stored->where($table . '.expires_at', '>=', $query->from)->where($table . '.expires_at', '<', $query->until);
+        $from  = self::wholeSecondAtOrAfter($query->from ?? throw new \UnexpectedValueException('A review of expiries names its window.'));
+        $until = self::wholeSecondAtOrAfter($query->until ?? throw new \UnexpectedValueException('A review of expiries names its window.'));
+
+        return static function (Builder $stored, string $table) use ($from, $until): void {
+            $stored->where($table . '.expires_at', '>=', $from)->where($table . '.expires_at', '<', $until);
         };
+    }
+
+    /**
+     * Return the instant itself when it falls on a whole second, else the next
+     * whole second.
+     *
+     * @param  \Carbon\CarbonImmutable  $at
+     * @return \Carbon\CarbonImmutable
+     */
+    private static function wholeSecondAtOrAfter(CarbonImmutable $at): CarbonImmutable
+    {
+        return $at->microsecond === 0 ? $at : $at->startOfSecond()->addSecond();
     }
 
     /**

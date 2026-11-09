@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Reviews\Support;
 
+use Illuminate\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
@@ -22,7 +23,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * applies in a tenant, the attachment must apply there as well; in any other,
  * it must hold in the application the review selects. An attachment of an
  * inline policy to a role it does not belong to is never read, as a check never
- * applies it (see `InlinePolicies`).
+ * applies it (see `InlinePolicies`), nor is one naming half a tenant (see
+ * `ReviewRun::placed()`). A query of role grants can be limited to those that
+ * reach one of the attachments read (see `reaching()`), so a grant that would
+ * add no route is never read.
  *
  * The routes of one grant are collected in the review's order: by the roles of
  * the chain to the carrying role, then by the row each rests on.
@@ -83,7 +87,7 @@ final class RoleCarriers
         $query = InlinePolicies::attachedToTheirGrantee($run->live(GrantRows::of(GrantTarget::POLICY), $table), $table)
             ->where($table . '.authorizable_type', Definitions::morph(GrantTarget::ROLE));
 
-        $run->isApplicability() ? $run->constrain($query, $table) : $run->scope->application->constrain($query, $table);
+        $run->isApplicability() ? $run->constrain($query, $table) : $run->scope->application->constrain($run->placed($query, $table), $table);
 
         if ($roles !== null) {
             $query->whereIn($table . '.authorizable_id', $roles);
@@ -94,6 +98,32 @@ final class RoleCarriers
         }
 
         return self::byGrantee($query->get(), GrantTarget::POLICY->value);
+    }
+
+    /**
+     * Limit a query of role grants to the rows of the table that reach one of
+     * the attachments: the grant's role, by its chain, reaches the attachment's
+     * role, and the two hold together somewhere (see `ReviewRun::meeting()`),
+     * so every grant the query reads adds at least one route.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  string  $table
+     * @param  array<array-key, list<string>>  $chains
+     * @param  array<array-key, list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>>  $attachments
+     * @return \Illuminate\Database\Query\Builder
+     */
+    public static function reaching(ReviewRun $run, Builder $query, string $table, array $chains, array $attachments): Builder
+    {
+        $reaches = self::reaches(self::carriersOf($chains), $attachments);
+
+        return $query->where(static function (Builder $any) use ($run, $table, $reaches): void {
+            $any->whereRaw('1 = 0');
+
+            foreach ($reaches as [$roles, $scope]) {
+                $any->orWhere(static fn (Builder $one): Builder => $run->meeting($one->whereIn($table . '.role_id', $roles), $table, $scope));
+            }
+        });
     }
 
     /**
@@ -195,6 +225,53 @@ final class RoleCarriers
 
             $rows->route($kind, $subject, $grant, $reference, $route['path'], [$route['row']], $via);
         }
+    }
+
+    /**
+     * Return the roles whose chain reaches each carrying role, by the carrying
+     * role's key.
+     *
+     * @param  array<array-key, list<string>>  $chains
+     * @return array<string, list<string>>
+     */
+    private static function carriersOf(array $chains): array
+    {
+        $carriers = [];
+
+        foreach ($chains as $role => $chain) {
+            foreach ($chain as $carrier) {
+                $carriers[$carrier][] = (string) $role;
+            }
+        }
+
+        return $carriers;
+    }
+
+    /**
+     * Return, for each attachment some role's chain reaches, those roles and
+     * the attachment's scope.
+     *
+     * @param  array<string, list<string>>  $carriers
+     * @param  array<array-key, list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>>  $attachments
+     * @return list<array{list<string>, \SineMacula\Laravel\Authorization\Support\GrantScope}>
+     */
+    private static function reaches(array $carriers, array $attachments): array
+    {
+        $reaches = [];
+
+        foreach ($attachments as $role => $rowsOfRole) {
+            $roles = $carriers[(string) $role] ?? [];
+
+            foreach ($rowsOfRole as $attachment) {
+                if ($roles === [] || $attachment->scope === null) {
+                    continue;
+                }
+
+                $reaches[] = [$roles, $attachment->scope];
+            }
+        }
+
+        return $reaches;
     }
 
     /**

@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Reviews;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Config\ReviewConfigValidator;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Reviews\Enums\ReviewKind;
 use SineMacula\Laravel\Authorization\Reviews\Support\Definitions;
@@ -27,14 +28,18 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   every principal the identity directory lists, each row keeping its actual
  *   grantee, and the result saying whether that list was complete;
  * - `expiring()`: the stored grants, attachments and role edges whose expiry
- *   falls within the UTC half-open window `[from, until)`;
+ *   falls within the UTC half-open window `[from, until)`, each bound kept to
+ *   the microsecond: an expiry is stored to the whole second, its fraction
+ *   dropped, so a bound with a fraction is compared as the next whole second,
+ *   which selects exactly the stored expiries within the window;
  * - `grantedBy()`: the stored grants whose `granted_by` pair is exactly the
  *   actor's, the last actor to grant or change each (N95).
  *
  * Every input is a plain value, a model or a resolved subject: nothing is read
  * from a request (D22). Every review is bounded: it returns at most its limit
- * of rows, `authorization.reviews.limit` (1000 by default) unless `withLimit()`
- * sets another, and says whether more were left out.
+ * of rows, `authorization.reviews.limit` (1000 by default, a whole number of at
+ * least 1, validated at boot) unless `withLimit()` sets another, and says
+ * whether more were left out.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -223,16 +228,17 @@ final readonly class ReviewQuery
 
     /**
      * Return the most rows a review returns by default:
-     * `authorization.reviews.limit`, or the default when it is not a positive
-     * whole number.
+     * `authorization.reviews.limit`, or the default when it is not configured,
+     * refusing one that is not a whole number of at least 1, as the config is
+     * refused at boot, rather than falling back to another bound.
      *
      * @return int
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function defaultLimit(): int
     {
-        $limit = config('authorization.reviews.limit', self::DEFAULT_LIMIT);
-
-        return \is_int($limit) && $limit > 0 ? $limit : self::DEFAULT_LIMIT;
+        return ReviewConfigValidator::limit(config('authorization.reviews.limit', self::DEFAULT_LIMIT));
     }
 
     /**

@@ -4,11 +4,14 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Reviews\Support;
 
+use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Reviews\Support\ReviewOrder;
+use Tests\Concerns\CompilesQueries;
 use Tests\TestCase;
 
 /**
@@ -26,6 +29,8 @@ use Tests\TestCase;
 #[CoversClass(ReviewOrder::class)]
 final class ReviewOrderTest extends TestCase
 {
+    use CompilesQueries;
+
     /**
      * A database orders a column byte for byte, as `strcmp()` does, a null
      * first when the column may hold one, whatever its collation or locale.
@@ -58,6 +63,53 @@ final class ReviewOrderTest extends TestCase
         $values = ReviewOrder::by(DB::table('review_order_values')->whereNotNull('value'), 'review_order_values.value')->pluck('value')->all();
 
         self::assertSame($sorted, $values);
+    }
+
+    /**
+     * The order compiles, on each driver's grammar, to the null tag when the
+     * column may hold a null, then the driver's own byte-for-byte expression,
+     * so what orders a column never rests on how one database sorts.
+     *
+     * @return void
+     */
+    public function testTheOrderCompilesForEachDriver(): void
+    {
+        $bytes = [
+            'sqlite'  => static fn (string $wrapped): string => "{$wrapped} collate binary",
+            'pgsql'   => static fn (string $wrapped): string => "cast({$wrapped} as text) collate \"C\"",
+            'mysql'   => static fn (string $wrapped): string => "cast({$wrapped} as binary)",
+            'mariadb' => static fn (string $wrapped): string => "cast({$wrapped} as binary)",
+        ];
+
+        foreach (self::drivers() as $driver) {
+            $wrapped = self::wrappedOn($driver, 'review_order_values.value');
+            $table   = self::wrappedOn($driver, 'review_order_values');
+
+            self::assertSame(
+                "select * from {$table} order by case when {$wrapped} is null then 0 else 1 end, " . $bytes[$driver]($wrapped),
+                ReviewOrder::by(self::queryOn($driver, 'review_order_values'), 'review_order_values.value', true)->toSql(),
+                $driver,
+            );
+            self::assertSame(
+                "select * from {$table} order by " . $bytes[$driver]($wrapped),
+                ReviewOrder::by(self::queryOn($driver, 'review_order_values'), 'review_order_values.value')->toSql(),
+                $driver,
+            );
+        }
+    }
+
+    /**
+     * A query whose connection is not a database connection orders by the
+     * column as it is, as a driver the order does not know does.
+     *
+     * @return void
+     */
+    public function testAQueryWithoutADatabaseConnectionOrdersByTheColumn(): void
+    {
+        $sqlite = self::queryOn('sqlite', 'review_order_values');
+        $query  = new Builder(self::createStub(ConnectionInterface::class), $sqlite->getGrammar(), $sqlite->getProcessor());
+
+        self::assertSame('select * from "review_order_values" order by "value"', ReviewOrder::by($query->from('review_order_values'), 'value')->toSql());
     }
 
     /**

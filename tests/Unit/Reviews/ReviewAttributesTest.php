@@ -25,15 +25,29 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 final class ReviewAttributesTest extends TestCase
 {
     /**
-     * It declares every key a review resource names, each a string.
+     * It declares every key a review resource names, each a string but whether
+     * the reviewer is impersonated, a boolean.
      *
      * @return void
      */
     public function testItDeclaresEveryKeyAsAString(): void
     {
-        $keys = ['query', 'scope', 'application_selection', 'application', 'target_type', 'target_id', 'subject_type', 'subject_id', 'actor_type', 'actor_id'];
+        $keys = [
+            'query',
+            'scope',
+            'application_selection',
+            'application',
+            'target_type',
+            'target_id',
+            'subject_type',
+            'subject_id',
+            'actor_type',
+            'actor_id',
+            'impersonator_type',
+            'impersonator_id',
+        ];
 
-        self::assertSame(\array_fill_keys($keys, ContextKeyType::STRING), (new ReviewAttributes)->attributes());
+        self::assertSame([...\array_fill_keys($keys, ContextKeyType::STRING), 'impersonated' => ContextKeyType::BOOL], (new ReviewAttributes)->attributes());
     }
 
     /**

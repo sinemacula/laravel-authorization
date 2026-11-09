@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
+use SineMacula\Laravel\Authorization\Reviews\Support\GrantRow;
 use SineMacula\Laravel\Authorization\Reviews\Support\StoredRows;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsAdministrator;
@@ -101,6 +102,89 @@ final class StoredRowsTest extends TestCase
         self::assertNull($rows[3]->originScope);
         self::assertSame($role->getKey(), $rows[4]->subject->id);
         self::assertSame('2030-06-01T00:00:00Z', $rows[0]->toArray()['expires_at']);
+
+        // A role's grant, its permission edge and its policy attachment name
+        // the role as their path; a grant of a permission or a policy none.
+        self::assertSame(
+            [[$role->getKey()], [], [], [$role->getKey()], [$role->getKey()]],
+            \array_map(static fn (ReviewRow $row): array => \array_map(static fn (Reference $path): string => $path->id, $row->rolePath), $rows),
+        );
+
+        // Each row's key names the table it is stored in, and the row it rests
+        // on is that same stored row.
+        $sources = [GrantTarget::ROLE->value, GrantTarget::PERMISSION->value, GrantTarget::POLICY->value, GrantRow::EDGE, GrantTarget::POLICY->value];
+
+        foreach ($rows as $index => $row) {
+            self::assertStringStartsWith(\strlen($sources[$index]) . ':' . $sources[$index] . '|', $row->sourceKey);
+            self::assertSame([$row->sourceKey], \array_column($row->toArray()['supporting_grants'], 'source_key'));
+        }
+    }
+
+    /**
+     * Role permission edges expiring in the window come in the review's order:
+     * by their permission first, then by their role.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testExpiringEdgesAreOrderedByPermissionThenRole(): void
+    {
+        $at    = new Carbon('2030-06-01 00:00:00', 'UTC');
+        $roles = [self::role('first'), self::role('second')];
+        $perms = [self::permission('first:read'), self::permission('second:read')];
+
+        $byKey = static fn ($one, $other): int => \strcmp((string) $one->getKey(), (string) $other->getKey());
+
+        \usort($roles, $byKey);
+        \usort($perms, $byKey);
+
+        self::roles()->grantPermission($roles[0], $perms[1], $at);
+        self::roles()->grantPermission($roles[1], $perms[0], $at);
+        self::roles()->grantPermission($roles[0], $perms[0], $at);
+
+        $rows = self::trusted(ReviewQuery::expiring(ReviewScope::everywhere(), $at->copy()->subDay(), $at->copy()->addDay()))->rows;
+
+        self::assertSame(
+            [
+                [$perms[0]->getKey(), $roles[0]->getKey()],
+                [$perms[0]->getKey(), $roles[1]->getKey()],
+                [$perms[1]->getKey(), $roles[0]->getKey()],
+            ],
+            \array_map(static fn (ReviewRow $row): array => [$row->target->id, $row->subject->id], $rows),
+        );
+    }
+
+    /**
+     * The window keeps the fractions of its bounds: a row expiring on the
+     * second before a start with a fraction is not in it, one expiring on the
+     * next second is, and one expiring on the second before an end with a
+     * fraction is in it too.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheWindowKeepsTheFractionsOfItsBounds(): void
+    {
+        $at = static fn (string $time): Carbon => new Carbon('2030-06-01 ' . $time, 'UTC');
+
+        self::grants()->grantPermission(self::identity('before'), self::permission('before:read'), $at('10:00:00'));
+        self::grants()->grantPermission(self::identity('first'), self::permission('first:read'), $at('10:00:01'));
+        self::grants()->grantPermission(self::identity('last'), self::permission('last:read'), $at('11:00:00'));
+        self::grants()->grantPermission(self::identity('after'), self::permission('after:read'), $at('11:00:01'));
+
+        $listed = static fn (Carbon $from, Carbon $until): array => \array_map(
+            static fn (ReviewRow $row): string => $row->subject->id,
+            self::trusted(ReviewQuery::expiring(ReviewScope::everywhere(), $from, $until))->rows,
+        );
+
+        self::assertEqualsCanonicalizing(['first', 'last'], $listed($at('10:00:00.700000'), $at('11:00:00.500000')));
+        self::assertEqualsCanonicalizing(['before', 'first', 'last'], $listed($at('10:00:00'), $at('11:00:01')));
+        self::assertEqualsCanonicalizing(['first', 'last', 'after'], $listed($at('10:00:00.000001'), $at('11:00:01.000001')));
+
+        // A window within one second holds no whole second, so no expiry.
+        self::assertSame([], $listed($at('10:00:00.200000'), $at('10:00:00.800000')));
     }
 
     /**

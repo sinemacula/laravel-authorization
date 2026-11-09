@@ -29,10 +29,18 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * is matched by its key, so two definitions sharing a name under another guard
  * or owner are never confused.
  *
- * The grants are read a page at a time in the review's order, so the rows held
- * never exceed the limit and its one extra, and the queries never grow with the
- * holders: the roles involved are read first, in a fixed number of queries,
- * then the grants of all of them together.
+ * The grants are read a page at a time in the review's order, each page no
+ * larger than the room left (the limit and its one extra, less the rows held),
+ * so the grants read stay bounded by the limit. A grant adds one row for each
+ * role of its chain that carries the target, or each attachment that holds
+ * where it does, so the rows held may exceed the limit and its one extra before
+ * they are cut to the limit. The roles involved are read first, in a fixed
+ * number of queries, then the grants of all of them together, never one query
+ * per holder: for a policy, only the grants that reach one of its attachments
+ * are read (see `RoleCarriers::reaching()`), so a grant that would add no row
+ * is never read, and whether each page's grants meet the attachments is settled
+ * in a fixed number of queries (see `ReviewRun::settle()`), never one for each
+ * tenant a grant is held in.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -154,9 +162,20 @@ final class HolderRoutes
 
         $chains = RoleChains::below($run, \array_map(strval(...), \array_keys($attachments)));
 
-        self::throughRoles($run, $chains, $rows, static function (GrantRow $grant, array $chain) use ($run, $rows, $attachments): void {
+        $expand = static function (GrantRow $grant, array $chain) use ($run, $rows, $attachments): void {
             RoleCarriers::throughAttachments($run, $rows, $grant->grantee, $grant, $chain, $attachments);
-        });
+        };
+
+        self::throughRoles(
+            $run,
+            $chains,
+            $rows,
+            $expand,
+            static fn (Builder $query, string $table): Builder => RoleCarriers::reaching($run, $query, $table, $chains, $attachments),
+            static function (array $page) use ($run, $attachments): void {
+                $run->settle($page, $attachments);
+            },
+        );
     }
 
     /**
@@ -195,25 +214,32 @@ final class HolderRoutes
      * Collect the routes the callback expands each grant of one of the roles
      * into, given the role's chain, reading the grants a page at a time in the
      * review's order until the rows are full or none is left: a page is the
-     * room left, and a grant may expand into no route at all, a role's policy
-     * attachment holding nowhere the grant does, so another page is read only
-     * then.
+     * room left, the query narrowed first when asked, and each page handed to
+     * the reader given before it is expanded. Every grant read expands into at
+     * least one route, so the first page fills the rows or is the last.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  array<string, list<string>>  $chains
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
      * @param  \Closure(\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow, list<string>): void  $expand
+     * @param  (\Closure(\Illuminate\Database\Query\Builder, string): \Illuminate\Database\Query\Builder)|null  $narrow
+     * @param  (\Closure(list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>): void)|null  $read
      * @return void
      */
-    private static function throughRoles(ReviewRun $run, array $chains, RowCollector $rows, \Closure $expand): void
+    private static function throughRoles(ReviewRun $run, array $chains, RowCollector $rows, \Closure $expand, ?\Closure $narrow = null, ?\Closure $read = null): void
     {
         $table  = GrantTarget::ROLE->table();
-        $query  = GrantRows::ordered(self::scoped($run, GrantTarget::ROLE)->whereIn($table . '.role_id', \array_map(strval(...), \array_keys($chains))), $table, 'role_id', false);
+        $query  = self::scoped($run, GrantTarget::ROLE)->whereIn($table . '.role_id', \array_map(strval(...), \array_keys($chains)));
+        $query  = GrantRows::ordered($narrow === null ? $query : $narrow($query, $table), $table, 'role_id', false);
         $offset = 0;
 
         while ($chains !== [] && !$rows->isFull()) {
             $size = $rows->room();
             $page = GrantRows::page($query, GrantTarget::ROLE->value, $offset, $size);
+
+            if ($read !== null) {
+                $read($page);
+            }
 
             foreach ($page as $grant) {
                 $expand($grant, $chains[$grant->targetId] ?? [$grant->targetId]);

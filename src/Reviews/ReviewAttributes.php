@@ -24,7 +24,9 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * - `subject_type`, `subject_id`: the principal or identity whose holdings are
  *   listed, missing for any other review;
  * - `actor_type`, `actor_id`: the actor whose last grants are listed, missing
- *   for any other review.
+ *   for any other review;
+ * - `impersonated`, a boolean, `impersonator_type`, `impersonator_id`: whether
+ *   someone is impersonating the reviewer, and who, missing when no one is.
  *
  * The built-ins `resource.id` (the question), `resource.type`, and
  * `resource.tenant.type` and `resource.tenant.id` (the reviewed tenant, missing
@@ -37,7 +39,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  */
 final readonly class ReviewAttributes implements ResourceAttributeProvider
 {
-    /** @var list<string> The keys the provider supplies, each a string. */
+    /** @var list<string> The keys the provider supplies as strings, beside `impersonated`. */
     private const array KEYS = [
         'query',
         'scope',
@@ -49,6 +51,8 @@ final readonly class ReviewAttributes implements ResourceAttributeProvider
         'subject_id',
         'actor_type',
         'actor_id',
+        'impersonator_type',
+        'impersonator_id',
     ];
 
     /**
@@ -59,7 +63,7 @@ final readonly class ReviewAttributes implements ResourceAttributeProvider
     #[\Override]
     public function attributes(): array
     {
-        return \array_fill_keys(self::KEYS, ContextKeyType::STRING);
+        return [...\array_fill_keys(self::KEYS, ContextKeyType::STRING), 'impersonated' => ContextKeyType::BOOL];
     }
 
     /**

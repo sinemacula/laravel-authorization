@@ -7,12 +7,14 @@ namespace Tests\Feature\Reviews\Support;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
 use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRow;
+use SineMacula\Laravel\Authorization\Reviews\Support\GrantRows;
 use SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun;
 use SineMacula\Laravel\Authorization\Reviews\Support\RoleCarriers;
 use SineMacula\Laravel\Authorization\Reviews\Support\RowCollector;
@@ -99,7 +101,12 @@ final class RoleCarriersTest extends TestCase
 
         self::grants()->attachPolicy($role, $policy, tenant: self::tenant('acct1'));
         self::grants()->attachPolicy($role, $other = self::policy('other'), application: 'web');
+        self::grants()->attachPolicy($role, $offchain = self::policy('offchain'), tenant: self::tenant('acct2'));
+        self::grants()->attachPolicy($role, $halved = self::policy('halved'), tenant: self::tenant('acct2'));
         self::grants()->attachPolicy(self::identity('ann'), $policy);
+
+        // An attachment naming half a tenant is read by no review.
+        DB::table('authorizable_policies')->where('policy_id', $halved->getKey())->update(['tenant_id' => null]);
 
         $inline = Policy::query()->create(
             ['name' => 'inline', 'owner_type' => 'u', 'owner_id' => 'someone', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['x:y']]]]],
@@ -112,12 +119,22 @@ final class RoleCarriersTest extends TestCase
         $key = Reference::of($role)->id;
         $all = RoleCarriers::attachments(ReviewRun::of(ReviewScope::everywhere()), [$key]);
 
-        self::assertEqualsCanonicalizing([Reference::of($policy)->id, Reference::of($other)->id], self::targets($all[$key]));
+        self::assertEqualsCanonicalizing([Reference::of($policy)->id, Reference::of($other)->id, Reference::of($offchain)->id], self::targets($all[$key]));
         self::assertSame(
             [Reference::of($policy)->id],
             self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::appliesIn(self::tenant('team1'), ApplicationSelector::none())), [$key])[$key]),
         );
-        self::assertSame([Reference::of($policy)->id], self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::everywhere(ApplicationSelector::none())), [$key])[$key]));
+        self::assertEqualsCanonicalizing(
+            [Reference::of($policy)->id, Reference::of($offchain)->id],
+            self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::everywhere(ApplicationSelector::none())), [$key])[$key]),
+        );
+
+        // Outside a review of what applies in a tenant, an attachment is read
+        // whatever its tenant, for the routes to weigh where it holds.
+        self::assertEqualsCanonicalizing(
+            [Reference::of($policy)->id, Reference::of($other)->id, Reference::of($offchain)->id],
+            self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::rootedWithin(self::tenant('acct1'))), [$key])[$key]),
+        );
         self::assertSame([Reference::of($other)->id], self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::everywhere()), null, Reference::of($other)->id)[$key]));
         self::assertSame([], RoleCarriers::attachments(ReviewRun::of(ReviewScope::everywhere()), []));
     }
@@ -138,7 +155,7 @@ final class RoleCarriersTest extends TestCase
         $run   = ReviewRun::of(ReviewScope::everywhere());
         $rows  = new RowCollector($run, 10);
         $grant = self::grant('held', 'acct1');
-        $edges = ['held' => [self::edge('held', 'p1')], 'parent' => [self::edge('parent', 'p2'), self::edge('parent', 'p3')]];
+        $edges = ['held' => [self::edge('held', 'p1')], 'parent' => [self::edge('parent', 'p3'), self::edge('parent', 'p2')]];
 
         RoleCarriers::throughEdges($rows, new Reference('u', 'ann'), $grant, ['held', 'parent'], $edges, new Reference('person', 'p'));
 
@@ -152,7 +169,7 @@ final class RoleCarriersTest extends TestCase
 
         $attachments = [
             'held'   => [self::attachment('held', 'y1', 'acct2')],
-            'parent' => [self::attachment('parent', 'y2', null), self::attachment('parent', 'y3', 'team1')],
+            'parent' => [self::attachment('parent', 'y3', 'team1'), self::attachment('parent', 'y2', null)],
         ];
 
         $policies = new RowCollector($run, 10);
@@ -161,6 +178,57 @@ final class RoleCarriersTest extends TestCase
 
         self::assertSame(['role_policy y2 held>parent', 'role_policy y3 held>parent'], self::routes($policies));
         self::assertSame([SourceKind::ROLE_POLICY, null], [$policies->rows()[0]->sourceKind, $policies->rows()[0]->viaIdentity]);
+
+        // The routes come in their own order, not the chain's: a role above
+        // whose key sorts before the row a lower role carries comes first.
+        $sorted  = new RowCollector($run, 10);
+        $carried = ['held' => [self::edge('held', 'p1')], '01parent' => [self::edge('01parent', 'p2')]];
+
+        RoleCarriers::throughEdges($sorted, new Reference('u', 'ann'), $grant, ['held', '01parent'], $carried);
+
+        self::assertSame(['role_permission p2 held>01parent', 'role_permission p1 held'], self::routes($sorted));
+    }
+
+    /**
+     * A query of role grants is limited to those that reach one of the
+     * attachments: of a role whose chain reaches the attachment's role, in an
+     * application and a tenant where both hold; a role reaching no attachment
+     * adds nothing, and no attachment leaves no grant.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRoleGrantsAreLimitedToThoseReachingAnAttachment(): void
+    {
+        $this->tree();
+
+        $parent = self::role('parent');
+        $child  = self::role('child', $parent);
+        $other  = self::role('other');
+        $policy = self::policy('deny');
+
+        self::grants()->attachPolicy($parent, $policy, tenant: self::tenant('acct1'), includeSubtree: false, application: 'web');
+
+        self::grants()->grantRole(self::identity('platform'), $child);
+        self::grants()->grantRole(self::identity('here'), $child, tenant: self::tenant('acct1'));
+        self::grants()->grantRole(self::identity('below'), $child, tenant: self::tenant('team1'));
+        self::grants()->grantRole(self::identity('sibling'), $child, tenant: self::tenant('acct2'));
+        self::grants()->grantRole(self::identity('api'), $child, tenant: self::tenant('acct1'), application: 'api');
+        self::grants()->grantRole(self::identity('unrelated'), $other, tenant: self::tenant('acct1'));
+
+        $run         = ReviewRun::of(ReviewScope::everywhere());
+        $table       = 'authorizable_roles';
+        $attachments = RoleCarriers::attachments($run, null, Reference::of($policy)->id);
+        $chains      = [Reference::of($child)->id => [Reference::of($child)->id, Reference::of($parent)->id], Reference::of($other)->id => [Reference::of($other)->id]];
+        $reaching    = static fn (array $attachments): array => \array_map(
+            static fn (GrantRow $row): string => $row->grantee->id,
+            GrantRows::all(RoleCarriers::reaching($run, GrantRows::of(GrantTarget::ROLE), $table, $chains, $attachments), 'role'),
+        );
+
+        self::assertEqualsCanonicalizing(['platform', 'here'], $reaching($attachments));
+        self::assertSame([], $reaching([]));
+        self::assertSame([], $reaching([Reference::of($other)->id . '-none' => $attachments[Reference::of($parent)->id]]));
     }
 
     /**

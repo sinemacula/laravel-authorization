@@ -77,12 +77,36 @@ final class ReviewResourceTest extends TestCase
             'subject_id'            => 'u',
             'actor_type'            => 'user',
             'actor_id'              => 'a',
+            'impersonated'          => false,
         ], $full->attributes());
 
         self::assertSame(
-            ['query' => 'holdings', 'scope' => 'everywhere', 'application_selection' => 'any'],
+            ['query' => 'holdings', 'scope' => 'everywhere', 'application_selection' => 'any', 'impersonated' => false],
             (new ReviewResource(ReviewKind::HOLDINGS, ReviewScope::everywhere()))->attributes(),
         );
+    }
+
+    /**
+     * A resource acted on while impersonating names the impersonator, keeping
+     * everything else it names; acted on by no one, it names none.
+     *
+     * @return void
+     */
+    public function testAnImpersonatedResourceNamesTheImpersonator(): void
+    {
+        $review = new ReviewResource(ReviewKind::HOLDERS, ReviewScope::everywhere(), new Reference('role', 'r'), new Reference('user', 'u'), new Reference('user', 'a'));
+        $acted  = $review->actedBy(new Reference('admin', 'imp'));
+
+        self::assertSame(
+            [ReviewKind::HOLDERS, $review->scope, 'r', 'u', 'a', 'imp'],
+            [$acted->kind, $acted->scope, $acted->target?->id, $acted->subject?->id, $acted->actor?->id, $acted->impersonator?->id],
+        );
+        self::assertSame(
+            ['impersonated' => true, 'impersonator_type' => 'admin', 'impersonator_id' => 'imp'],
+            \array_slice($acted->attributes(), -3, 3, true),
+        );
+        self::assertNull($acted->actedBy(null)->impersonator);
+        self::assertFalse($acted->actedBy(null)->attributes()['impersonated']);
     }
 
     /**

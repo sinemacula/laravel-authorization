@@ -7,9 +7,9 @@ namespace SineMacula\Laravel\Authorization\Reviews;
 use Carbon\CarbonImmutable;
 
 /**
- * What an admitted access review returns: its rows, in the review's order, at
- * most its limit of them, whether more were left out, whether the subjects it
- * read were all known, and the instant it was made at.
+ * What an access review returns, admitted or trusted: its rows, in the review's
+ * order, at most its limit of them, whether more were left out, whether the
+ * identity's principals could all be listed, and the instant it was made at.
  *
  * `isTruncated` is exact: true only when at least one row was left out.
  * `isComplete` is false only for a review of an identity's holdings whose
@@ -40,7 +40,7 @@ final readonly class ReviewResult
         /** Whether at least one row was left out by the limit. */
         public bool $isTruncated,
 
-        /** Whether every subject the review reads was known. */
+        /** Whether the identity directory listed every principal of the identity whose holdings were reviewed; true for every other review. */
         public bool $isComplete,
 
         /** The instant the review was made at, in UTC, against which each row's expiry is read. */

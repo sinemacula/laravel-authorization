@@ -38,11 +38,13 @@ use SineMacula\Laravel\Authorization\Reviews\Support\SubjectStates;
  * and an acting context that cannot be resolved is refused before a review is
  * reached.
  *
- * Every read is on the write connection, as every other grant read is, in a
- * fixed number of queries whatever the number of holders, and at most the
- * review's limit of rows, and one more, is held at a time (one subject's
- * holdings are read whole, then ordered). The rows come in one deterministic
- * order, the same on every supported database (see `Support\ReviewOrder`).
+ * Every read is on the write connection, as every other grant read is, never
+ * one query per holder: the grants are read a page of the limit at a time, and
+ * whether a role's grant meets a policy attached to the role is settled in a
+ * fixed number of queries, never one for each tenant a grant is held in (one
+ * subject's holdings are read whole, an identity's principals a chunk at a
+ * time, then ordered). The rows come in one deterministic order, the same on
+ * every supported database (see `Support\ReviewOrder`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -91,8 +93,8 @@ final readonly class AccessReview
     }
 
     /**
-     * Run the review: read its rows, at most its limit and one more, and return
-     * them with what is known of their subjects.
+     * Run the review: read its rows, the limit and one more at least, and
+     * return at most the limit of them with what is known of their subjects.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
      * @return \SineMacula\Laravel\Authorization\Reviews\ReviewResult

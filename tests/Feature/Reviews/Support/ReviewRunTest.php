@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
+use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRow;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRows;
@@ -278,6 +279,136 @@ final class ReviewRunTest extends TestCase
 
         self::assertTrue($applying->intersects($scope('org1'), $scope('acct1', null, false)));
         self::assertFalse($applying->intersects($scope('org1', 'web'), $scope('acct1', 'api')));
+    }
+
+    /**
+     * A grant naming half a tenant, a type without a key or a key without a
+     * type, is left out of every selection, so no review shows it as the
+     * platform's; a role's policy attachment naming half a tenant is never
+     * paired with a grant as the platform's either.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARowNamingHalfATenantIsLeftOut(): void
+    {
+        $this->seedGrants();
+
+        $role  = self::role('halved');
+        $table = GrantTarget::ROLE->table();
+
+        self::grants()->grantRole(new Reference('u', 'no-key'), $role, tenant: self::tenant('acct1'));
+        self::grants()->grantRole(new Reference('u', 'no-type'), $role, tenant: self::tenant('acct1'));
+
+        DB::table($table)->where('authorizable_id', 'no-key')->update(['tenant_id' => null]);
+        DB::table($table)->where('authorizable_id', 'no-type')->update(['tenant_type' => null]);
+
+        $scopes = [
+            ReviewScope::everywhere(),
+            ReviewScope::appliesIn(null, ApplicationSelector::any()),
+            ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none()),
+            ReviewScope::rootedWithin(self::tenant('org1')),
+        ];
+
+        foreach ($scopes as $scope) {
+            self::assertSame([], \array_values(\array_intersect(['no-key', 'no-type'], self::selected($scope))));
+        }
+
+        $policy  = self::policy('halved-policy');
+        $carrier = self::role('carrier');
+
+        self::grants()->attachPolicy($carrier, $policy, tenant: self::tenant('acct1'), includeSubtree: false);
+        self::grants()->grantRole(new Reference('u', 'elsewhere'), $carrier, tenant: self::tenant('acct2'), includeSubtree: false);
+
+        DB::table(GrantTarget::POLICY->table())->where('policy_id', $policy->getKey())->update(['tenant_id' => null]);
+
+        self::assertSame([], self::trusted(ReviewQuery::holders($policy, ReviewScope::everywhere()))->rows);
+    }
+
+    /**
+     * A role grant query is limited in SQL to the grants that meet an
+     * attachment exactly where the run weighs them as meeting: the same
+     * applications, and outside a review of what applies in a tenant, the same
+     * tenants.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantMeetsAnAttachmentInSqlAsItDoesInPhp(): void
+    {
+        $this->seedGrants();
+
+        $table       = GrantTarget::ROLE->table();
+        $attachments = [
+            new GrantScope(null, null, true),
+            new GrantScope(self::tenant('acct1'), null, true),
+            new GrantScope(self::tenant('acct1'), 'web', false),
+            new GrantScope(self::tenant('team1'), null, false),
+            new GrantScope(self::tenant('org2'), 'api', true),
+        ];
+
+        foreach ([ReviewScope::everywhere(), ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::any())] as $scope) {
+            $run    = ReviewRun::of($scope);
+            $grants = GrantRows::all($run->constrain(GrantRows::of(GrantTarget::ROLE), $table), 'role');
+
+            foreach ($attachments as $attachment) {
+                $expected = \array_values(\array_map(
+                    static fn (GrantRow $grant): string => $grant->grantee->id,
+                    \array_filter($grants, static fn (GrantRow $grant): bool => $grant->scope !== null && $run->intersects($grant->scope, $attachment)),
+                ));
+
+                $read = GrantRows::all($run->meeting($run->constrain(GrantRows::of(GrantTarget::ROLE), $table), $table, $attachment), 'role');
+
+                self::assertEqualsCanonicalizing($expected, \array_map(static fn (GrantRow $grant): string => $grant->grantee->id, $read));
+            }
+        }
+    }
+
+    /**
+     * Once the run settles the grants and attachments it read, weighing them
+     * asks the tree nothing more; a review of what applies in a tenant settles
+     * nothing, and needs nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testSettledGrantsAndAttachmentsAskTheTreeNothing(): void
+    {
+        $this->tree();
+
+        $counting = new CountingTenantTree(new ClosureTenantTree);
+
+        $this->app?->instance(TenantTree::class, $counting);
+
+        $grant = static fn (string $tenant, bool $isSubtree): GrantRow => GrantRow::from(
+            (object) ['target_id' => 'r', 'grantee_type' => 'u', 'grantee_id' => $tenant, 'tenant_type' => 'tenant', 'tenant_id' => $tenant, 'include_subtree' => $isSubtree],
+            'role',
+        );
+        $grants   = [$grant('team1', false), $grant('acct2', false), $grant('org1', true), $grant('org2', true)];
+        $attached = GrantRow::from(
+            (object) ['target_id' => 'p', 'grantee_type' => 'role', 'grantee_id' => 'r', 'tenant_type' => 'tenant', 'tenant_id' => 'acct1', 'include_subtree' => true],
+            'policy',
+        );
+        $attachments = ['r' => [$attached]];
+        $run         = ReviewRun::of(ReviewScope::everywhere());
+
+        $run->settle($grants, $attachments);
+
+        $asked = [$counting->withinAsked, $counting->ancestorsRead];
+        $meets = \array_map(static fn (GrantRow $one): bool => $one->scope !== null && $attached->scope !== null && $run->intersects($one->scope, $attached->scope), $grants);
+
+        self::assertSame([true, false, true, false], $meets);
+        self::assertSame($asked, [$counting->withinAsked, $counting->ancestorsRead]);
+
+        $applying = ReviewRun::of(ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::any()));
+        $before   = [$counting->withinAsked, $counting->ancestorsRead];
+
+        $applying->settle($grants, $attachments);
+
+        self::assertSame($before, [$counting->withinAsked, $counting->ancestorsRead]);
     }
 
     /**

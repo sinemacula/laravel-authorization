@@ -9,6 +9,7 @@ use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRow;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRows;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\CompilesQueries;
 use Tests\Concerns\ReviewsAccess;
 use Tests\TestCase;
 
@@ -26,7 +27,7 @@ use Tests\TestCase;
 #[CoversClass(GrantRows::class)]
 final class GrantRowsTest extends TestCase
 {
-    use ReviewsAccess;
+    use CompilesQueries, ReviewsAccess;
 
     /**
      * A grant table's rows are read with their target, grantee and every column
@@ -114,5 +115,66 @@ final class GrantRowsTest extends TestCase
         self::assertSame(['r0 a -', 'r1 a -', 'r0 a t', 'r0 b -'], $first(false));
         self::assertSame(['r0 a t', 'r0 b -'], $first(true, 1, 2));
         self::assertSame(['r1 a -'], $first(true, 3, 2));
+    }
+
+    /**
+     * Two grants that differ only in their application come every application
+     * first, then the one named, on every database.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryApplicationComesBeforeANamedOne(): void
+    {
+        $role  = self::role('one');
+        $table = GrantTarget::ROLE->table();
+
+        self::grants()->grantRole(new Reference('u', 'a'), $role, application: 'web');
+        self::grants()->grantRole(new Reference('u', 'a'), $role, tenant: self::tenant('t'), application: 'web');
+        self::grants()->grantRole(new Reference('u', 'a'), $role);
+        self::grants()->grantRole(new Reference('u', 'a'), $role, tenant: self::tenant('t'));
+
+        $read = \array_map(
+            static fn (GrantRow $row): string => ($row->scope?->tenant->id ?? '-') . ' ' . ($row->scope->application ?? '-'),
+            GrantRows::all(GrantRows::ordered(GrantRows::of(GrantTarget::ROLE), $table, 'role_id'), 'role'),
+        );
+
+        self::assertSame(['- -', '- web', 't -', 't web'], $read);
+    }
+
+    /**
+     * The order compiles, on each driver's grammar, to the target, the
+     * grantee's type and key, then the tenant's type and key and the
+     * application, each of those three tagged for a null first, then the reach;
+     * the target last when asked.
+     *
+     * @return void
+     */
+    public function testTheOrderCompilesForEachDriver(): void
+    {
+        foreach (self::drivers() as $driver) {
+            $column = static fn (string $name): string => self::wrappedOn($driver, 'authorizable_roles.' . $name);
+            $bytes  = static fn (string $name): string => match ($driver) {
+                'sqlite' => $column($name) . ' collate binary',
+                'pgsql'  => 'cast(' . $column($name) . ' as text) collate "C"',
+                default  => 'cast(' . $column($name) . ' as binary)',
+            };
+            $tagged = static fn (string $name): string => 'case when ' . $column($name) . ' is null then 0 else 1 end, ' . $bytes($name);
+            $scope  = [
+                $bytes('authorizable_type'),
+                $bytes('authorizable_id'),
+                $tagged('tenant_type'),
+                $tagged('tenant_id'),
+                $tagged('application'),
+                $column('include_subtree') . ' asc',
+            ];
+
+            $first = GrantRows::ordered(self::queryOn($driver, 'authorizable_roles'), 'authorizable_roles', 'role_id')->toSql();
+            $last  = GrantRows::ordered(self::queryOn($driver, 'authorizable_roles'), 'authorizable_roles', 'role_id', false)->toSql();
+
+            self::assertStringEndsWith(' order by ' . \implode(', ', [$bytes('role_id'), ...$scope]), $first, $driver);
+            self::assertStringEndsWith(' order by ' . \implode(', ', [...$scope, $bytes('role_id')]), $last, $driver);
+        }
     }
 }

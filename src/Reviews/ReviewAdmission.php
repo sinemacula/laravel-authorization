@@ -39,7 +39,18 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * where only authority that reaches below counts, or at platform scope, and the
  * review is refused when anything that denies or caps the reviewer anywhere in
  * the reach could limit the right (see `Administration\PossessionLimits`), so
- * one child tenant's deny refuses a review of its parent's subtree.
+ * one child tenant's deny refuses a review of its parent's subtree. A review of
+ * any application applying in one tenant is decided at that tenant with no
+ * application, and is weighed across every application there in the same way,
+ * so a deny, boundary or guardrail held for one application refuses it.
+ *
+ * A review run while someone impersonates the reviewer discloses what it reads
+ * to the impersonator, so it is weighed as a delegated change made while
+ * impersonating is (see `Administration\OperationConstraints`): the resource
+ * names the impersonator (`resource.impersonated`, `impersonator_type` and
+ * `impersonator_id`), and the review is refused as
+ * `administration.impersonating` unless the reviewer is also allowed
+ * `authorization:administration.impersonated` on the same review.
  *
  * A refusal is recorded and reported as `authorize()` records and reports any,
  * and throws `AuthorizationException` with the one generic `denied` line,
@@ -73,7 +84,8 @@ final class ReviewAdmission
      */
     public static function admit(ActingContext $reviewer, ReviewResource $resource, string $action = PackagePermissions::REVIEW_READ): void
     {
-        $manager = self::manager($reviewer);
+        $manager  = self::manager($reviewer);
+        $resource = $resource->actedBy($reviewer->impersonator);
 
         TenantScope::within($resource->scope->tenant, $resource->reach()->application, static function () use ($manager, $action, $resource): void {
             self::authorize($manager, $action, $resource);
@@ -82,9 +94,11 @@ final class ReviewAdmission
 
     /**
      * Weigh the reach of a review the decision allowed: an allowed review right
-     * on a review resource is refused as `administration.scope` at the
-     * administration stage unless the reviewer's right covers the review's
-     * whole reach; any other decision is returned as it is.
+     * on a review resource is refused at the administration stage, as
+     * `administration.impersonating` when the reviewer is impersonated and
+     * nothing allows that, else as `administration.scope` unless the reviewer's
+     * right covers the review's whole reach; any other decision is returned as
+     * it is.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
      * @param  string  $action
@@ -100,7 +114,8 @@ final class ReviewAdmission
             return $decision;
         }
 
-        $reason = AdministeredScope::refusalOf($action, $resource, $review->reach(), $checks);
+        $reason = self::impersonation($review, $resource, $checks)
+            ?? AdministeredScope::refusalOf($action, $resource, $review->reach(), $checks, $review->scope->isAcrossApplications());
 
         if ($reason === null) {
             return $decision->withStep(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED));
@@ -109,6 +124,24 @@ final class ReviewAdmission
         $step = new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, cap: $reason->value);
 
         return Decision::deny($reason, DecisionStage::ADMINISTRATION, [], [...$decision->trace, $step])->withFreshness($decision->freshness);
+    }
+
+    /**
+     * Return `administration.impersonating` when someone impersonates the
+     * reviewer and the reviewer is not also allowed
+     * `authorization:administration.impersonated` on the review; null
+     * otherwise.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewResource  $review
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
+     */
+    private static function impersonation(ReviewResource $review, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
+    {
+        $isRefused = $review->impersonator !== null && !$checks->decide(PackagePermissions::ADMINISTRATION_IMPERSONATED, $resource)->isAllowed();
+
+        return $isRefused ? DecisionReason::ADMINISTRATION_IMPERSONATING : null;
     }
 
     /**

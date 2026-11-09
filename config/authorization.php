@@ -654,8 +654,8 @@ return [
     | actor last granted, one row for each grant route. Every review returns
     | at most a bounded number of rows and says whether more were left out:
     | `limit` is that number unless the review sets its own with
-    | `withLimit()`. A whole number of at least 1; anything else falls back
-    | to 1000.
+    | `withLimit()`. A whole number of at least 1; anything else is refused
+    | at boot.
     |
     */
 

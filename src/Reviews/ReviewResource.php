@@ -26,7 +26,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * `ReviewAdmission`).
  *
  * It names references and plain values alone, never a model, a row, a count or
- * a value of what is reviewed.
+ * a value of what is reviewed. When someone impersonates the reviewer, it names
+ * the impersonator too, who is the one shown what the review discloses, so the
+ * review is weighed as a delegated change made while impersonating is (see
+ * `ReviewAdmission`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,6 +47,7 @@ final readonly class ReviewResource implements AuthorizableResource
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $target
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $impersonator
      */
     public function __construct(
 
@@ -61,6 +65,9 @@ final readonly class ReviewResource implements AuthorizableResource
 
         /** The actor whose last grants are listed; null for none. */
         public ?Reference $actor = null,
+
+        /** Who is impersonating the reviewer, or null when no one is. */
+        public ?Reference $impersonator = null,
     ) {}
 
     /**
@@ -72,6 +79,18 @@ final readonly class ReviewResource implements AuthorizableResource
     public static function of(ReviewQuery $query): self
     {
         return new self($query->kind, $query->scope, $query->target, $query->about(), $query->actor);
+    }
+
+    /**
+     * Return this resource of the review run while the impersonator, when there
+     * is one, impersonates the reviewer.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $impersonator
+     * @return self
+     */
+    public function actedBy(?Reference $impersonator): self
+    {
+        return new self($this->kind, $this->scope, $this->target, $this->subject, $this->actor, $impersonator);
     }
 
     /**
@@ -88,10 +107,11 @@ final readonly class ReviewResource implements AuthorizableResource
     /**
      * Return what the review names, as the package's attribute provider offers
      * it under `resource`: the question, the scope's selection, the selection
-     * of its application and the application named, and the target, subject and
-     * actor by morph type and key; a key with no value is left out.
+     * of its application and the application named, the target, subject and
+     * actor by morph type and key, whether the reviewer is impersonated, and by
+     * whom; a key with no value is left out.
      *
-     * @return array<string, string>
+     * @return array<string, bool|string>
      */
     public function attributes(): array
     {
@@ -106,9 +126,12 @@ final readonly class ReviewResource implements AuthorizableResource
             'subject_id'            => $this->subject?->id,
             'actor_type'            => $this->actor?->type,
             'actor_id'              => $this->actor?->id,
+            'impersonated'          => $this->impersonator !== null,
+            'impersonator_type'     => $this->impersonator?->type,
+            'impersonator_id'       => $this->impersonator?->id,
         ];
 
-        return \array_filter($attributes, static fn (?string $value): bool => $value !== null);
+        return \array_filter($attributes, static fn (bool|string|null $value): bool => $value !== null);
     }
 
     /**

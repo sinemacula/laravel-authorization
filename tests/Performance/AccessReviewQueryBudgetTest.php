@@ -27,7 +27,9 @@ use Tests\TestCase;
  * Query budget of the access reviews (AUTHZ-11.6): a review reads the roles it
  * involves in a fixed number of queries and the grants of all its holders
  * together, a page at a time, so its queries never grow with its holders, the
- * holders of a role through a deep hierarchy costing what one holder does.
+ * holders of a role through a deep hierarchy costing what one holder does; nor
+ * with the tenants its grants are held in, nor with grants that reach no
+ * attachment of the policy reviewed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -106,6 +108,180 @@ final class AccessReviewQueryBudgetTest extends TestCase
         $this->holders(40);
 
         self::assertCount(\count($few['queries']), $this->queriesOf($expiring)['queries']);
+    }
+
+    /**
+     * The holders of a policy attached to a role at a tenant reaching below it
+     * cost the same queries for one holder as for forty, each granted the role
+     * in a tenant of its own below that tenant, in a review of everywhere and
+     * one rooted within the tenant: the tree is asked once for the attachment,
+     * never once for each tenant a grant is held in.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testPolicyHoldersCostTheSameWhateverTheTenantsTheyAreIn(): void
+    {
+        [$role, $policy] = $this->attachedAtTheRoot(true);
+
+        $queries = [ReviewQuery::holders($policy, ReviewScope::everywhere()), ReviewQuery::holders($policy, ReviewScope::rootedWithin(new Reference('tenant', 'root')))];
+
+        self::grantedInTenantsOfTheirOwn($role, 1, true);
+
+        $baselines = \array_map($this->queriesOf(...), $queries);
+
+        self::grantedInTenantsOfTheirOwn($role, 40, true);
+
+        foreach ($queries as $index => $query) {
+            $measured = $this->queriesOf($query);
+
+            self::assertSame([1, 40], [\count($baselines[$index]['rows']), \count($measured['rows'])]);
+            self::assertCount(\count($baselines[$index]['queries']), $measured['queries'], "The review cost other queries:\n" . \implode("\n", $measured['queries']));
+        }
+    }
+
+    /**
+     * Role grants that reach no attachment of a policy, held in another
+     * application or in tenants the attachment does not meet, are never read:
+     * the holders of the policy cost the same queries, and list no one, for two
+     * such grants as for forty, however small the limit.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testGrantsReachingNoAttachmentCostNothing(): void
+    {
+        [$role, $policy] = $this->attachedAtTheRoot(false);
+
+        $elsewhere = Role::query()->create(['name' => 'elsewhere']);
+        $web       = Policy::query()->create(['name' => 'web-only', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:delete']]]]]);
+
+        self::grants()->attachPolicy($elsewhere, $web, application: 'web');
+
+        $queries = [
+            ReviewQuery::holders($policy, ReviewScope::everywhere())->withLimit(1),
+            ReviewQuery::holders($web, ReviewScope::appliesIn(null, ApplicationSelector::any()))->withLimit(1),
+        ];
+
+        self::grantedInTenantsOfTheirOwn($role, 2, false);
+        self::grantedIn($elsewhere, 2, 'api');
+
+        $baselines = \array_map($this->queriesOf(...), $queries);
+
+        self::grantedInTenantsOfTheirOwn($role, 40, false);
+        self::grantedIn($elsewhere, 40, 'api');
+
+        foreach ($queries as $index => $query) {
+            $measured = $this->queriesOf($query);
+
+            self::assertSame([0, 0], [\count($baselines[$index]['rows']), \count($measured['rows'])]);
+            self::assertCount(\count($baselines[$index]['queries']), $measured['queries'], "The review cost other queries:\n" . \implode("\n", $measured['queries']));
+        }
+    }
+
+    /**
+     * What a subject holds through a role whose policy is attached at a tenant
+     * reaching below it costs the same queries for a grant of the role in one
+     * tenant below it as in twenty.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testHoldingsCostTheSameWhateverTheTenantsTheyAreIn(): void
+    {
+        [$role] = $this->attachedAtTheRoot(true);
+
+        $ann     = StubIdentity::query()->create(['id' => 'ann']);
+        $query   = ReviewQuery::holdings(new Subject($ann, $ann), ReviewScope::everywhere());
+        $granted = 0;
+        $grant   = static function (int $count) use ($ann, $role, &$granted): void {
+            for (; $granted < $count; $granted++) {
+                $tenant = new Reference('tenant', 'ann-' . $granted);
+
+                ClosureTenantTree::add($tenant, new Reference('tenant', 'root'));
+
+                self::grants()->grantRole($ann, $role, tenant: $tenant);
+            }
+        };
+
+        $grant(1);
+
+        $baseline = $this->queriesOf($query);
+
+        $grant(20);
+
+        $measured = $this->queriesOf($query);
+
+        self::assertSame([2, 40], [\count($baseline['rows']), \count($measured['rows'])]);
+        self::assertCount(\count($baseline['queries']), $measured['queries'], "The review cost other queries:\n" . \implode("\n", $measured['queries']));
+    }
+
+    /**
+     * Put a root tenant in the closure-table tree, and a role with a deny-only
+     * policy attached at the root, reaching below it when asked; return the
+     * role and the policy.
+     *
+     * @param  bool  $isSubtree
+     * @return array{\SineMacula\Laravel\Authorization\Models\Role, \SineMacula\Laravel\Authorization\Models\Policy}
+     *
+     * @throws \Throwable
+     */
+    private function attachedAtTheRoot(bool $isSubtree): array
+    {
+        $this->app?->instance(TenantTree::class, new ClosureTenantTree);
+
+        ClosureTenantTree::add(new Reference('tenant', 'root'));
+
+        $role   = Role::query()->create(['name' => 'carrier']);
+        $policy = Policy::query()->create(['name' => 'deny-root', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:delete']]]]]);
+
+        self::grants()->attachPolicy($role, $policy, tenant: new Reference('tenant', 'root'), includeSubtree: $isSubtree);
+
+        return [$role, $policy];
+    }
+
+    /**
+     * Grant the role to more holders, until there are as many as given, each in
+     * a tenant of its own below the root, reaching below it when asked.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  int  $count
+     * @param  bool  $isSubtree
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private static function grantedInTenantsOfTheirOwn(Role $role, int $count, bool $isSubtree): void
+    {
+        for ($index = StubIdentity::query()->where('id', 'like', 'tenanted-%')->count(); $index < $count; $index++) {
+            $holder = StubIdentity::query()->create(['id' => 'tenanted-' . $index]);
+            $tenant = new Reference('tenant', 'child-' . $index);
+
+            ClosureTenantTree::add($tenant, new Reference('tenant', 'root'));
+
+            self::grants()->grantRole($holder, $role, tenant: $tenant, includeSubtree: $isSubtree);
+        }
+    }
+
+    /**
+     * Grant the role to more holders, until there are as many as given, each at
+     * the platform for the application.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  int  $count
+     * @param  string  $application
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private static function grantedIn(Role $role, int $count, string $application): void
+    {
+        for ($index = StubIdentity::query()->where('id', 'like', 'applied-%')->count(); $index < $count; $index++) {
+            self::grants()->grantRole(StubIdentity::query()->create(['id' => 'applied-' . $index]), $role, application: $application);
+        }
     }
 
     /**

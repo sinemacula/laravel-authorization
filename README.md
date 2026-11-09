@@ -2828,8 +2828,10 @@ application, as a check reads them. Alternative routes through different roles a
 structure alone, with the same tenant chain, application matching, live-grant and definition-visibility rules a check
 reads, and never evaluates a statement, condition, deny or cap, so a holder may well be denied what it holds: for what a
 subject may actually do, use `check()`, [`permissionsFor()`](#effective-permissions) or a [preview](#preview). A
-suspended or inactive subject keeps its live grants in a review, marked `inactive`, or `unknown` when its record is
-gone.
+suspended, inactive or soft-deleted subject keeps its live grants in a review, marked `inactive`, whether it is named
+by reference or given as a resolved `Subject`, or `unknown` when its record is gone. A grant row that names half a
+tenant (a type without a key, or the reverse), which the package never writes, is left out, never shown as the
+platform's.
 
 **The queries.**
 
@@ -2848,10 +2850,12 @@ the grantees the grants name: a grant to an identity lists the identity, not its
 machines or neither), each naming the identity as `via_identity`, and a sibling principal's never are. In identity mode
 (`holdings()` given an identity's model or reference) the identity's grants and those of every principal the identity
 directory lists are read, each row keeping its actual grantee, and `isComplete` is false when the directory says its
-list may leave one out. Expiring rows are stored rows, not routes, each marked `live` or `expired` at the review's
-instant; a role's permission edge and its policy attachment are kinds of their own. "Granted by" means the last writer:
-a regrant, a changed expiry or a changed reach overwrites it, a trusted write names no actor, and a revoked grant is
-gone, so the history stays with the audit log the grant events feed.
+list may leave one out; `isComplete` says nothing else, and is true for every other review. Expiring rows are stored
+rows, not routes, each marked `live` or `expired` at the review's instant; a role's permission edge and its policy
+attachment are kinds of their own. The window's bounds keep their microseconds: an expiry is stored to the whole second,
+so a bound with a fraction is compared as the next whole second, which lists exactly the expiries within it. "Granted
+by" means the last writer: a regrant, a changed expiry or a changed reach overwrites it, a trusted write names no actor,
+and a revoked grant is gone, so the history stays with the audit log the grant events feed.
 
 **The scope.** Each selection is a value of its own, never a null that could mean two things:
 
@@ -2888,10 +2892,14 @@ document or value. Its shape is versioned (`version: 1`):
 
 The rows come in one total order, the same on SQLite, PostgreSQL and MySQL: by source kind, target, grantee, origin
 scope (the platform before a tenant, every application before a named one) and route, every string compared byte for
-byte. A review returns at most `authorization.reviews.limit` rows (1000 by default), or the limit `withLimit()` sets,
-and reads one more to say exactly whether any was left out. Every grant is read on the write connection, and the queries
-never grow with the holders: the roles a review involves are read in a fixed number of queries, then the grants of all
-of them together, a page at a time.
+byte. A review returns at most `authorization.reviews.limit` rows (1000 by default; a whole number of at least 1, or
+boot fails), or the limit `withLimit()` sets, and reads at least one more to say exactly whether any was left out.
+Every grant is read on the write connection, never one query per holder: the roles a review involves are read in a
+fixed number of queries, then the grants of all of them together, a page of the limit at a time. Each grant read adds
+a row for every carrying role or attachment in its chain, so a page may hold more rows than the limit before they are
+cut. For a policy, only the role grants that reach one of its attachments are read, and whether they meet in some
+tenant is settled once for each attachment's tenant, never once for each tenant a grant is held in. One subject's
+holdings are read whole, an identity's principals 500 at a time.
 
 **The review rights.** The package declares `authorization:review.read`, the right to run a review, and
 `authorization:review.export`, the right to export one, which needs both. `review()` admits the review before anything
@@ -2899,24 +2907,30 @@ is read, through `check()` as the reviewer, with its real session, denies, bound
 resource `authorization:review:{query}` in the reviewed tenant and application. No rank rule applies, and policies read
 these keys of it to restrict who may review what:
 
-| Key                                                      | Value                                                                               |
-|----------------------------------------------------------|-------------------------------------------------------------------------------------|
-| `resource.id`, `resource.type`                           | The query (`holders`, `holdings`, `expiring`, `granted_by`), `authorization:review` |
-| `resource.tenant.type`, `resource.tenant.id`             | The reviewed tenant; missing for the platform and everywhere                        |
-| `resource.query`, `resource.scope`                       | The query, and `applies_in`, `rooted_within` or `everywhere`                        |
-| `resource.application_selection`, `resource.application` | `none`, `named` or `any`, and the application named                                 |
-| `resource.target_type`, `resource.target_id`             | The role, permission or policy whose holders are listed                             |
-| `resource.subject_type`, `resource.subject_id`           | The principal or identity whose holdings are listed                                 |
-| `resource.actor_type`, `resource.actor_id`               | The actor whose last grants are listed                                              |
+| Key                                                                               | Value                                                                               |
+|-----------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
+| `resource.id`, `resource.type`                                                    | The query (`holders`, `holdings`, `expiring`, `granted_by`), `authorization:review` |
+| `resource.tenant.type`, `resource.tenant.id`                                      | The reviewed tenant; missing for the platform and everywhere                        |
+| `resource.query`, `resource.scope`                                                | The query, and `applies_in`, `rooted_within` or `everywhere`                        |
+| `resource.application_selection`, `resource.application`                          | `none`, `named` or `any`, and the application named                                 |
+| `resource.target_type`, `resource.target_id`                                      | The role, permission or policy whose holders are listed                             |
+| `resource.subject_type`, `resource.subject_id`                                    | The principal or identity whose holdings are listed                                 |
+| `resource.actor_type`, `resource.actor_id`                                        | The actor whose last grants are listed                                              |
+| `resource.impersonated`, `resource.impersonator_type`, `resource.impersonator_id` | Whether the reviewer is impersonated, and by whom                                   |
 
-A review of one tenant is decided at that tenant. A review across a reach, rooted within a tenant, applying at the
-platform or of everywhere, is decided again across the reach by the rule delegated administration uses: just below the
-reach's tenant, where only a right that reaches below counts, or at platform scope, and refused as
-`administration.scope` when anything that denies or caps the reviewer anywhere in the reach could limit the right, a
-conditional deny included. So a deny the reviewer holds in one child tenant refuses a review of its parent's subtree. A
-refused review throws `AuthorizationException` with the one generic line, carrying the reviewer's own decision (a
-step-up the right needs included), after recording and reporting it as any refused check, and discloses no row, count,
-truncation or completeness.
+A review of one tenant, in one application or none, is decided at that tenant. A review across a reach, rooted within a
+tenant, applying at the platform or of everywhere, is decided again across the reach by the rule delegated
+administration uses: just below the reach's tenant, where only a right that reaches below counts, or at platform scope,
+and refused as `administration.scope` when anything that denies or caps the reviewer anywhere in the reach could limit
+the right, a conditional deny included. So a deny the reviewer holds in one child tenant refuses a review of its
+parent's subtree. Applications are weighed the same way: a review of `ApplicationSelector::any()` in one tenant needs
+the right held for every application, and is refused when a deny, boundary or guardrail held for any one application
+could limit it. A review run while the reviewer is impersonated (`ActingContext::impersonatedBy()`) is refused as
+`administration.impersonating` unless the reviewer is also allowed `authorization:administration.impersonated` on it, as
+a delegated change is, since the impersonator is the one shown what it discloses. A refused review throws
+`AuthorizationException` with the one generic line, carrying the reviewer's own decision (a step-up the right needs
+included), after recording and reporting it as any refused check, and discloses no row, count, truncation or
+completeness.
 
 **The trusted path.** `trusted()` runs a review as trusted system work, for a scheduled job or a command, with no
 reviewer and no admission. Nothing falls back to it: `review()` always takes an acting context, and one that cannot be

@@ -119,6 +119,27 @@ final class RowCollectorTest extends TestCase
     }
 
     /**
+     * A route resting on a row that never expires and one that does expires
+     * when that one does, the never-expiring row passed over rather than taken
+     * as the earliest.
+     *
+     * @return void
+     */
+    public function testARouteOverRowsWithAndWithoutAnExpiryEndsAtTheDatedOne(): void
+    {
+        $rows  = new RowCollector(ReviewRun::of(ReviewScope::everywhere()), 5);
+        $start = self::grant('ann', 'role-1', null);
+        $edge  = GrantRow::from((object) ['target_id' => 'perm', 'grantee_id' => 'role-1', 'expires_at' => '2030-06-01 00:00:00'], GrantRow::EDGE, 'role');
+
+        $rows->route(SourceKind::ROLE_PERMISSION, new Reference('u', 'ann'), $start, new Reference('permission', 'perm'), ['role-1'], [$edge]);
+
+        $row = $rows->rows()[0];
+
+        self::assertSame('2030-06-01T00:00:00Z', $row->toArray()['route_expires_at']);
+        self::assertNull($row->toArray()['expires_at']);
+    }
+
+    /**
      * The run needs one more row than the limit, so the room left counts down
      * to none, the rows are truncated only when more were collected than the
      * limit, and only the limit's worth is returned.

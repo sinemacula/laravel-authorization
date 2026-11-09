@@ -4,12 +4,15 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Reviews\Support;
 
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
+use SineMacula\Laravel\Authorization\Reviews\Support\GrantRows;
 use SineMacula\Laravel\Authorization\Reviews\Support\HoldingRoutes;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -175,6 +178,56 @@ final class HoldingRoutesTest extends TestCase
 
         self::assertEqualsCanonicalizing(['permission_grant person identity:read', 'permission_grant person via person-web web:read'], self::described($incomplete));
         self::assertFalse($incomplete->isComplete);
+    }
+
+    /**
+     * An identity with more principals than one query of grants takes has them
+     * read a chunk at a time, so no query's bindings grow with them, and every
+     * principal's grants are still listed, in the review's order.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnIdentitysPrincipalsAreReadAChunkAtATime(): void
+    {
+        $identity   = self::identity('person');
+        $principals = [];
+
+        for ($index = 0; $index <= GrantRows::CHUNK * 2; $index++) {
+            $principals[] = new Reference('principal', \sprintf('p%04d', $index));
+        }
+
+        $last = $principals[\count($principals) - 1];
+
+        $permission = self::permission('posts:read');
+
+        foreach ([$identity, $last, $principals[GrantRows::CHUNK], $principals[0]] as $grantee) {
+            self::grants()->grantPermission($grantee, $permission);
+        }
+
+        $this->app?->instance(IdentityDirectory::class, new ListedIdentityDirectory([ListedIdentityDirectory::key(Reference::of($identity)) => \array_reverse($principals)]));
+
+        $bindings = [];
+
+        DB::listen(static function (QueryExecuted $executed) use (&$bindings): void {
+            $bindings[] = \count($executed->bindings);
+        });
+
+        $result = self::trusted(ReviewQuery::holdings($identity, ReviewScope::everywhere()));
+
+        $this->app?->make('events')->forget(QueryExecuted::class);
+
+        self::assertLessThanOrEqual(GrantRows::CHUNK + 16, \max($bindings));
+        self::assertSame(
+            [
+                'permission_grant person posts:read',
+                'permission_grant person via p0000 posts:read',
+                'permission_grant person via p0500 posts:read',
+                'permission_grant person via p1000 posts:read',
+            ],
+            self::described($result),
+        );
     }
 
     /**

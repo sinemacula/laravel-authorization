@@ -7,6 +7,7 @@ namespace Tests\Unit\Reviews;
 use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -157,8 +158,9 @@ final class ReviewQueryTest extends TestCase
 
     /**
      * Every review is bounded: by the configured limit, by the default when
-     * none valid is configured, or by the limit given, of at least one row, the
-     * rest of the query kept.
+     * none is configured, or by the limit given, of at least one row, the rest
+     * of the query kept; a configured limit that is not a whole number of at
+     * least one refuses the review rather than fall back to another bound.
      *
      * @return void
      */
@@ -173,10 +175,22 @@ final class ReviewQueryTest extends TestCase
 
         self::assertSame(25, ReviewQuery::defaultLimit());
 
-        foreach ([0, -1, '50', null] as $invalid) {
+        config(['authorization.reviews.limit' => 0]);
+
+        // A review built while the limit is invalid is refused, never bounded
+        // by another limit.
+        self::assertSame('authorization.reviews.limit', self::refusedLimitKey(static fn (): ReviewQuery => ReviewQuery::grantedBy($actor, ReviewScope::everywhere())));
+
+        foreach ([0, -1, '50', 1.5, null] as $invalid) {
             config(['authorization.reviews.limit' => $invalid]);
 
-            self::assertSame(1000, ReviewQuery::defaultLimit());
+            try {
+                ReviewQuery::defaultLimit();
+
+                self::fail('An invalid configured limit was taken.');
+            } catch (InvalidAuthorizationConfigException $exception) {
+                self::assertSame('authorization.reviews.limit', $exception->getConfigKey());
+            }
         }
 
         config(['authorization.reviews.limit' => 1]);
@@ -206,5 +220,23 @@ final class ReviewQueryTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
 
         $limited->withLimit(0);
+    }
+
+    /**
+     * Return the config key the callback is refused under for an invalid
+     * configured limit, or null when it is not refused.
+     *
+     * @param  \Closure(): mixed  $callback
+     * @return string|null
+     */
+    private static function refusedLimitKey(\Closure $callback): ?string
+    {
+        try {
+            $callback();
+        } catch (\Throwable $exception) {
+            return $exception instanceof InvalidAuthorizationConfigException ? $exception->getConfigKey() : null;
+        }
+
+        return null;
     }
 }

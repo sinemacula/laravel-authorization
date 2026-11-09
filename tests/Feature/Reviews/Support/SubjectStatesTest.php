@@ -112,6 +112,35 @@ final class SubjectStatesTest extends TestCase
     }
 
     /**
+     * A resolved subject whose principal is deleted softly, or whose separate
+     * identity is, gives every row the inactive state, as a subject read by
+     * reference does; one whose models are kept stays active.
+     *
+     * @return void
+     */
+    public function testASoftDeletedResolvedSubjectIsInactive(): void
+    {
+        $rows      = [self::row(new Reference('no model', 'x'))];
+        $states    = static fn (Subject $subject): array => \array_map(static fn (ReviewRow $row): SubjectState => $row->subjectState, SubjectStates::apply($rows, $subject));
+        $principal = NumberedIdentity::query()->create(['name' => 'departed']);
+        $identity  = NumberedIdentity::query()->create(['name' => 'person']);
+        $kept      = StubIdentity::query()->create(['id' => 'kept']);
+
+        self::assertSame([SubjectState::ACTIVE], $states(new Subject($principal, $identity)));
+
+        $principal->delete();
+
+        self::assertSame([SubjectState::INACTIVE], $states(new Subject($principal, $principal)));
+        self::assertSame([SubjectState::INACTIVE], $states(new Subject($principal, null)));
+
+        $identity->delete();
+
+        self::assertSame([SubjectState::INACTIVE], $states(new Subject($kept, $identity)));
+        self::assertSame([SubjectState::ACTIVE], $states(new Subject($kept, $kept)));
+        self::assertSame([SubjectState::ACTIVE], $states(new Subject(new Reference('no model', 'x'), null)));
+    }
+
+    /**
      * Return a row whose subject is the reference.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $subject

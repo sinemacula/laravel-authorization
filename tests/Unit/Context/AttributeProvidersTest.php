@@ -348,7 +348,7 @@ final class AttributeProvidersTest extends TestCase
 
         self::assertSame([OperationAttributes::class, PreviewAttributes::class, ReviewAttributes::class], \array_keys($declared));
         self::assertSame(['target_type' => 'user', 'target_id' => '7'], $providers->resourceValues($preview));
-        self::assertSame(['query' => 'expiring', 'scope' => 'everywhere', 'application_selection' => 'any'], $providers->resourceValues($review));
+        self::assertSame(['query' => 'expiring', 'scope' => 'everywhere', 'application_selection' => 'any', 'impersonated' => false], $providers->resourceValues($review));
 
         $this->container->instance('config', new Repository);
 

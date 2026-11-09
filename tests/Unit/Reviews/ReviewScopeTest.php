@@ -76,6 +76,23 @@ final class ReviewScopeTest extends TestCase
     }
 
     /**
+     * A review reads every application at once only when it selects any; one
+     * application, or none, is a single application.
+     *
+     * @return void
+     */
+    public function testAReviewOfAnyApplicationIsAcrossApplications(): void
+    {
+        $tenant = new Reference('tenant', 't1');
+
+        self::assertTrue(ReviewScope::appliesIn($tenant, ApplicationSelector::any())->isAcrossApplications());
+        self::assertTrue(ReviewScope::everywhere()->isAcrossApplications());
+        self::assertFalse(ReviewScope::appliesIn($tenant, ApplicationSelector::none())->isAcrossApplications());
+        self::assertFalse(ReviewScope::appliesIn($tenant, ApplicationSelector::named('web'))->isAcrossApplications());
+        self::assertFalse(ReviewScope::rootedWithin($tenant, ApplicationSelector::named('web'))->isAcrossApplications());
+    }
+
+    /**
      * A tenant model is named by its morph type and key, and one without a key
      * is refused.
      *

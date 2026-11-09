@@ -218,6 +218,36 @@ final class AdministeredScopeTest extends TestCase
     }
 
     /**
+     * A node's reach across every application is wider than the node, as a
+     * subtree is: what could limit the action in any application refuses it,
+     * and sources that cannot be read do too, while the same node in one
+     * application, or in none, is decided at the node alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testANodeAcrossApplicationsIsWeighedAsAWiderReach(): void
+    {
+        $resource = ResourceReference::record('authorization:review', 'holders');
+        $node     = new GrantScope(new Reference('tenant', 'a'), null, false);
+        $actor    = StubIdentity::query()->firstOrCreate(['id' => 'admin']);
+        $checks   = static fn (?CheckSources $sources): FurtherChecks => new FurtherChecks(
+            new Subject($actor, $actor),
+            static fn (): Decision => Decision::allow(DecisionStage::ALLOW),
+            static fn (): ?CheckSources => $sources,
+        );
+
+        $denying = self::sources(policies: [['effect' => 'deny', 'actions' => ['authorization:review.*']]]);
+
+        self::assertNull(AdministeredScope::refusalOf(PackagePermissions::REVIEW_READ, $resource, $node, $checks($denying)));
+        self::assertNull(AdministeredScope::refusalOf(PackagePermissions::REVIEW_READ, $resource, $node, $checks(null), false));
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, AdministeredScope::refusalOf(PackagePermissions::REVIEW_READ, $resource, $node, $checks($denying), true));
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, AdministeredScope::refusalOf(PackagePermissions::REVIEW_READ, $resource, $node, $checks(null), true));
+        self::assertNull(AdministeredScope::refusalOf(PackagePermissions::REVIEW_READ, $resource, $node, $checks(self::sources()), true));
+    }
+
+    /**
      * Return why the role grant, decided across the reach through the checks,
      * is refused.
      *

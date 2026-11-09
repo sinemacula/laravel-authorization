@@ -29,8 +29,12 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  * identity directory lists, each row naming its actual grantee, and the review
  * is incomplete when the directory says its list may leave one out.
  *
- * One subject's grants are read whole, in a fixed number of queries, then
- * sorted into the review's order.
+ * One subject's grants are read whole, then sorted into the review's order: in
+ * a fixed number of queries for a principal, and for an identity a chunk of its
+ * principals at a time (see `GrantRows::CHUNK`), so no query's bindings grow
+ * with its principals. Whether its role grants meet the policies attached to
+ * their roles is settled in a fixed number of queries (see
+ * `ReviewRun::settle()`), never one for each tenant a grant is held in.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -77,13 +81,15 @@ final class HoldingRoutes
      */
     private static function throughRoles(ReviewRun $run, RowCollector $rows, Reference $subject, array $grantees, ?Reference $via): void
     {
-        $grants = GrantRows::all(self::granted($run, GrantTarget::ROLE, $grantees), GrantTarget::ROLE->value);
+        $grants = self::grantsOf($run, GrantTarget::ROLE, $grantees);
         $chains = RoleChains::above($run, \array_values(\array_unique(\array_map(static fn (GrantRow $grant): string => $grant->targetId, $grants))));
         $roles  = \array_values(\array_unique(\array_merge([], ...\array_values($chains))));
 
         $edges       = RoleCarriers::edges($run, $roles);
         $attachments = RoleCarriers::attachments($run, $roles);
         $type        = Definitions::morph(GrantTarget::ROLE);
+
+        $run->settle($grants, $attachments);
 
         foreach ($grants as $grant) {
             $chain   = $chains[$grant->targetId] ?? [];
@@ -118,34 +124,34 @@ final class HoldingRoutes
      */
     private static function direct(ReviewRun $run, RowCollector $rows, GrantTarget $kind, Reference $subject, array $grantees, ?Reference $via): void
     {
-        $query  = self::granted($run, $kind, $grantees);
         $type   = Definitions::morph($kind);
         $source = $kind === GrantTarget::POLICY ? SourceKind::POLICY_ATTACHMENT : SourceKind::PERMISSION_GRANT;
 
-        if ($kind === GrantTarget::POLICY) {
-            InlinePolicies::attachedToTheirGrantee($query, $kind->table());
-        }
-
-        foreach (GrantRows::all($query, $kind->value) as $grant) {
+        foreach (self::grantsOf($run, $kind, $grantees) as $grant) {
             $rows->route($source, $subject, $grant, new Reference($type, $grant->targetId), [], [], self::isThrough($grant, $via) ? $via : null);
         }
     }
 
     /**
-     * Return a query of the grantees' live grants of the kind in the review's
-     * scope, of definitions the reviewed tenant sees.
+     * Return the grantees' live grants of the kind in the review's scope, of
+     * definitions the reviewed tenant sees, a policy's only where an inline
+     * policy is attached to its own grantee, read a chunk of the grantees at a
+     * time.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $grantees
-     * @return \Illuminate\Database\Query\Builder
+     * @return list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>
      */
-    private static function granted(ReviewRun $run, GrantTarget $kind, array $grantees): Builder
+    private static function grantsOf(ReviewRun $run, GrantTarget $kind, array $grantees): array
     {
         $table = $kind->table();
-        $query = GrantRows::grantedTo($run->live($run->constrain(GrantRows::of($kind), $table), $table), $table, $grantees);
 
-        return $run->visible($query, $kind, $table . '.' . $kind->column());
+        return GrantRows::allOf($grantees, static function (array $chunk) use ($run, $kind, $table): Builder {
+            $query = $run->visible(GrantRows::grantedTo($run->live($run->constrain(GrantRows::of($kind), $table), $table), $table, $chunk), $kind, $table . '.' . $kind->column());
+
+            return $kind === GrantTarget::POLICY ? InlinePolicies::attachedToTheirGrantee($query, $table) : $query;
+        }, $kind->value);
     }
 
     /**

@@ -4,23 +4,31 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Reviews;
 
+use Illuminate\Container\Container;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
+use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
+use SineMacula\Laravel\Authorization\Reviews\Enums\ReviewKind;
 use SineMacula\Laravel\Authorization\Reviews\ReviewAdmission;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Reviews\ReviewResource;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReviewsAccess;
@@ -98,8 +106,15 @@ final class ReviewAdmissionTest extends TestCase
         $this->signIn($node);
 
         $refusal = self::assertRefusedAs(DecisionReason::ADMINISTRATION_SCOPE, static fn (): mixed => self::reviews()->review($query, ActingContext::current()));
+        $trace   = $refusal->getDecision()->trace ?? [];
 
         self::assertSame(DecisionStage::ADMINISTRATION, $refusal->getDecision()?->stage);
+
+        // The refusal keeps the trace of the allow it refuses, then its own
+        // step.
+        self::assertGreaterThan(1, \count($trace));
+        self::assertEquals(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, cap: DecisionReason::ADMINISTRATION_SCOPE->value), \end($trace));
+        self::assertNotSame(DecisionStage::ADMINISTRATION, $trace[0]->stage);
     }
 
     /**
@@ -158,11 +173,17 @@ final class ReviewAdmissionTest extends TestCase
 
         self::attachStatements($stepped, 'stepped-up-review', [self::requiring(PackagePermissions::REVIEW_READ)]);
 
-        $this->signIn($stepped, 'session-1', null, null, new StubRequirementChecker(RequirementResult::unmet(['multifactor'])));
-
+        $manager = $this->signIn($stepped, 'session-1', null, null, new StubRequirementChecker(RequirementResult::unmet(['multifactor'])));
         $refusal = self::assertRefusedAs(DecisionReason::INSUFFICIENT_AUTHENTICATION, static fn (): mixed => self::reviews()->review($query, ActingContext::current()));
 
         self::assertSame(AuthorizationException::class, $refusal::class);
+
+        // The decision that asked for the step-up is carried, its stage and
+        // requirements with it, never a stand-in.
+        self::assertNotNull($refusal->getDecision());
+        self::assertSame($manager->lastDecision(), $refusal->getDecision());
+        self::assertNotSame(DecisionStage::SESSION, $refusal->getDecision()->stage);
+        self::assertNotSame([], $refusal->getDecision()->requirements);
     }
 
     /**
@@ -284,6 +305,157 @@ final class ReviewAdmissionTest extends TestCase
         self::assertRefusedAs(DecisionReason::ADMINISTRATION_SCOPE, static function () use ($resource): void {
             ReviewAdmission::admit(ActingContext::current(), $resource, PackagePermissions::REVIEW_EXPORT);
         });
+    }
+
+    /**
+     * A review of any application in one tenant is weighed across every
+     * application there: a deny held for one application refuses it, though a
+     * decision with no application never reads that deny, while a review of
+     * none is admitted and a review of that application is denied outright.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAReviewOfAnyApplicationIsWeighedAcrossApplications(): void
+    {
+        $this->tree();
+
+        $reviewer = self::reviewer('reviewer', self::tenant('acct1'));
+        $role     = self::role('reviewed');
+
+        self::grants()->attachPolicy($reviewer, self::denying(), tenant: self::tenant('acct1'), application: 'billing');
+        self::grants()->grantRole(self::identity('holder'), $role, tenant: self::tenant('acct1'), application: 'billing');
+
+        $this->signIn($reviewer);
+
+        $review = static fn (ApplicationSelector $application): mixed => self::reviews()->review(
+            ReviewQuery::holders($role, ReviewScope::appliesIn(self::tenant('acct1'), $application)),
+            ActingContext::current(),
+        );
+
+        self::assertRefusedAs(DecisionReason::EXPLICIT_DENY, static fn (): mixed => $review(ApplicationSelector::named('billing')));
+        self::assertRefusedAs(DecisionReason::ADMINISTRATION_SCOPE, static fn (): mixed => $review(ApplicationSelector::any()));
+        self::assertSame([], $review(ApplicationSelector::none())->rows);
+        self::assertSame([], $review(ApplicationSelector::named('web'))->rows);
+    }
+
+    /**
+     * A review of any application in one tenant with nothing held for one
+     * application that could limit the right is admitted, and lists the grants
+     * of every application there.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAReviewOfAnyApplicationIsAdmittedWhenNothingLimitsIt(): void
+    {
+        $this->tree();
+
+        $reviewer = self::reviewer('reviewer', self::tenant('acct1'));
+        $role     = self::role('reviewed');
+
+        self::grants()->grantRole(self::identity('holder'), $role, tenant: self::tenant('acct1'), application: 'billing');
+
+        $this->signIn($reviewer);
+
+        $rows = self::reviews()->review(ReviewQuery::holders($role, ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::any())), ActingContext::current())->rows;
+
+        self::assertSame(['holder'], \array_map(static fn ($row): string => $row->subject->id, $rows));
+    }
+
+    /**
+     * A review while someone impersonates the reviewer is refused as
+     * `administration.impersonating`, after the trace of the allow it refuses,
+     * unless the reviewer is also allowed to act while impersonated; the
+     * resource names the impersonator to policies.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnImpersonatedReviewerIsWeighed(): void
+    {
+        $reviewer     = self::reviewer('reviewer', null);
+        $impersonator = self::identity('impersonator');
+        $query        = ReviewQuery::holders(self::role('reviewed'), ReviewScope::appliesIn(null, ApplicationSelector::none()));
+
+        $this->signIn($reviewer);
+
+        self::assertSame([], self::reviews()->review($query, ActingContext::current())->rows);
+
+        $refusal = self::assertRefusedAs(
+            DecisionReason::ADMINISTRATION_IMPERSONATING,
+            static fn (): mixed => self::reviews()->review($query, ActingContext::current()->impersonatedBy($impersonator)),
+        );
+        $trace = $refusal->getDecision()->trace ?? [];
+
+        self::assertSame(DecisionStage::ADMINISTRATION, $refusal->getDecision()?->stage);
+        self::assertEquals(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, cap: DecisionReason::ADMINISTRATION_IMPERSONATING->value), \end($trace));
+
+        self::attachStatements($reviewer, 'impersonated-reviews', [[
+            'effect'     => 'allow',
+            'actions'    => [PackagePermissions::ADMINISTRATION_IMPERSONATED],
+            'conditions' => ['eq' => ['resource.impersonator_id' => 'impersonator', 'resource.type' => ReviewResource::TYPE]],
+        ]]);
+
+        self::assertSame([], self::reviews()->review($query, ActingContext::current()->impersonatedBy($impersonator))->rows);
+        self::assertRefusedAs(
+            DecisionReason::ADMINISTRATION_IMPERSONATING,
+            static fn (): mixed => self::reviews()->review($query, ActingContext::current()->impersonatedBy(self::identity('someone-else'))),
+        );
+    }
+
+    /**
+     * Only an allowed review right on a review resource is weighed: any other
+     * resource, or none, leaves the decision as it is.
+     *
+     * @return void
+     */
+    public function testOnlyAReviewResourceIsWeighed(): void
+    {
+        $allow  = Decision::allow(DecisionStage::ALLOW);
+        $deny   = static fn (): Decision => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::ALLOW);
+        $checks = new FurtherChecks(new Subject(new \stdClass), $deny, static fn (): null => null);
+        $review = (new ReviewResource(ReviewKind::EXPIRING, ReviewScope::everywhere()))->toResourceReference();
+
+        self::assertSame($allow, ReviewAdmission::weigh($allow, PackagePermissions::REVIEW_READ, null, $checks));
+        self::assertSame($allow, ReviewAdmission::weigh($allow, PackagePermissions::REVIEW_READ, ResourceReference::record('post', '1'), $checks));
+        self::assertSame($allow, ReviewAdmission::weigh($allow, 'posts:read', $review, $checks));
+
+        $weighed = ReviewAdmission::weigh($allow, PackagePermissions::REVIEW_READ, $review, $checks);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, $weighed->reason);
+    }
+
+    /**
+     * With no authorization manager bound, a review is refused as an unresolved
+     * subject, never admitted.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testWithoutAManagerAReviewIsRefused(): void
+    {
+        $reviewer  = StubIdentity::query()->create(['id' => 'reviewer']);
+        $actor     = ActingContext::for(new Subject($reviewer, $reviewer));
+        $resource  = ReviewResource::of(ReviewQuery::holders(self::role('reviewed'), ReviewScope::everywhere()));
+        $container = Container::getInstance();
+
+        Container::setInstance(new Container);
+
+        try {
+            ReviewAdmission::admit($actor, $resource);
+
+            self::fail('A review was admitted with no manager bound.');
+        } catch (AuthorizationException $exception) {
+            self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $exception->getReason());
+            self::assertSame(DecisionStage::SUBJECT, $exception->getDecision()?->stage);
+        } finally {
+            Container::setInstance($container);
+        }
     }
 
     /**

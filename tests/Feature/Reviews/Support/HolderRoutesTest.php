@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Reviews\Support;
 
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -382,8 +383,55 @@ final class HolderRoutesTest extends TestCase
     }
 
     /**
+     * The holders of a policy through a role are only the grants that meet one
+     * of its attachments, however the grants that meet none fall in the
+     * review's order, so a small limit still finds the holders and says exactly
+     * whether one was left out.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicysHoldersAreTheGrantsMeetingAnAttachment(): void
+    {
+        $this->tree();
+
+        $role   = self::role('carrier');
+        $policy = self::policy('deny');
+
+        self::grants()->attachPolicy($role, $policy, tenant: self::tenant('acct1'), application: 'web');
+
+        foreach (['a-sibling' => 'acct2', 'b-team' => 'team1', 'c-other' => 'org2', 'd-account' => 'acct1'] as $holder => $tenant) {
+            self::grants()->grantRole(self::identity($holder), $role, tenant: self::tenant($tenant));
+        }
+
+        self::grants()->grantRole(self::identity('a-api'), $role, tenant: self::tenant('acct1'), application: 'api');
+        self::grants()->grantRole(self::identity('e-parent'), $role, tenant: self::tenant('org1'));
+        self::grants()->grantRole(self::identity('a-parent-node'), $role, tenant: self::tenant('org1'), includeSubtree: false);
+
+        $holders = static fn (ReviewQuery $query): array => \array_map(static fn ($row): string => $row->subject->id, self::trusted($query)->rows);
+
+        foreach ([ReviewScope::everywhere(), ReviewScope::rootedWithin(self::tenant('org1'))] as $scope) {
+            self::assertEqualsCanonicalizing(['b-team', 'd-account', 'e-parent'], $holders(ReviewQuery::holders($policy, $scope)));
+
+            $first = self::trusted(ReviewQuery::holders($policy, $scope)->withLimit(1));
+
+            self::assertCount(1, $first->rows);
+            self::assertTrue($first->isTruncated);
+            self::assertFalse(self::trusted(ReviewQuery::holders($policy, $scope)->withLimit(3))->isTruncated);
+        }
+
+        $account = static fn (string $application): ReviewScope => ReviewScope::rootedWithin(self::tenant('acct1'), ApplicationSelector::named($application));
+
+        self::assertEqualsCanonicalizing(['b-team', 'd-account'], $holders(ReviewQuery::holders($policy, $account('web'))));
+        self::assertSame([], $holders(ReviewQuery::holders($policy, $account('api'))));
+    }
+
+    /**
      * A reference whose key no definition could have names no definition, so
-     * nothing holds it, on every database, whatever its kind.
+     * nothing holds it, on every database, whatever its kind, and it is never
+     * compared with a key column: no query is made, so PostgreSQL never refuses
+     * a value its `uuid` column cannot hold.
      *
      * @return void
      *
@@ -391,17 +439,39 @@ final class HolderRoutesTest extends TestCase
      */
     public function testAKeyNoDefinitionCouldHaveIsHeldByNoOne(): void
     {
+        $this->tree();
+
         $role = self::role('admin');
 
         self::grants()->grantRole(self::identity('ann'), $role);
 
-        foreach ([$role, self::permission('posts:read'), self::policy('deny')] as $definition) {
-            $reference = new Reference(Reference::of($definition)->type, 'not-a-key');
+        $queries = [];
 
-            foreach ([ReviewScope::everywhere(), ReviewScope::appliesIn(null, ApplicationSelector::none())] as $scope) {
-                self::assertSame([], self::trusted(ReviewQuery::holders($reference, $scope))->rows);
+        DB::listen(static function (QueryExecuted $executed) use (&$queries): void {
+            $queries[] = $executed->sql;
+        });
+
+        $scopes  = [ReviewScope::everywhere(), ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none()), ReviewScope::rootedWithin(self::tenant('org1'))];
+        $keys    = ['not-a-key', '1', '\' or 1=1 --', \str_repeat('a', 191), '00000000-0000-0000-0000-00000000000g'];
+        $reviews = [];
+
+        foreach ([$role, self::permission('posts:read'), self::policy('deny')] as $definition) {
+            foreach ($keys as $key) {
+                foreach ($scopes as $scope) {
+                    $reviews[] = ReviewQuery::holders(new Reference(Reference::of($definition)->type, $key), $scope);
+                    $reviews[] = ReviewQuery::holders(new Reference(Reference::of($definition)->type, $key), $scope, true);
+                }
             }
         }
+
+        foreach ($reviews as $review) {
+            $queries = [];
+
+            self::assertSame([], self::trusted($review)->rows);
+            self::assertSame([], \array_filter($queries, static fn (string $sql): bool => !\str_contains($sql, 'closure')), \implode("\n", $queries));
+        }
+
+        $this->app?->make('events')->forget(QueryExecuted::class);
     }
 
     /**

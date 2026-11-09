@@ -18,14 +18,15 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  * returns alone, one query for each morph type among them, never one for each
  * subject.
  *
- * A subject the review was given resolved is as `SubjectGrants::isInactive()`
- * reads it: inactive when it or its identity reports itself inactive. Any other
- * is read through the model its morph type names, on the write connection and
- * outside every global scope, so a record deleted softly is read too: inactive
- * when it is deleted softly, or is an identity that reports itself inactive;
- * active when it is read and is neither; unknown when its type names no model
- * or its record is gone. A review lists an inactive subject's stored grants all
- * the same (N93).
+ * A subject the review was given resolved is inactive when it or its identity
+ * reports itself inactive, as `SubjectGrants::isInactive()` reads it, or when
+ * its principal or identity is a model deleted softly; active otherwise. Any
+ * other is read through the model its morph type names, on the write connection
+ * and outside every global scope, so a record deleted softly is read too:
+ * inactive when it is deleted softly, or is an identity that reports itself
+ * inactive; active when it is read and is neither; unknown when its type names
+ * no model or its record is gone. A review lists an inactive subject's stored
+ * grants all the same (N93).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,7 +47,7 @@ final class SubjectStates
     public static function apply(array $rows, ?Subject $subject = null): array
     {
         if ($subject !== null) {
-            $state = SubjectGrants::isInactive($subject) ? SubjectState::INACTIVE : SubjectState::ACTIVE;
+            $state = self::isResolvedInactive($subject) ? SubjectState::INACTIVE : SubjectState::ACTIVE;
 
             return \array_map(static fn (ReviewRow $row): ReviewRow => $row->withSubjectState($state), $rows);
         }
@@ -111,6 +112,20 @@ final class SubjectStates
         }
 
         return $states;
+    }
+
+    /**
+     * Determine whether the resolved subject, or its identity, reports itself
+     * inactive, or is a model deleted softly.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @return bool
+     */
+    private static function isResolvedInactive(Subject $subject): bool
+    {
+        $models = \array_filter([$subject->subject, $subject->identity], static fn (mixed $side): bool => $side instanceof Model && self::isInactive($side));
+
+        return $models !== [] || SubjectGrants::isInactive($subject);
     }
 
     /**

@@ -14,8 +14,11 @@ use SineMacula\Laravel\Authorization\Enums\GrantTarget;
  * `GrantRow` reads, on the package's write connection, as every grant read is
  * (AUTHZ-12.4), and ordered in the review's order (see `ReviewOrder`).
  *
- * A query is read a page at a time, never whole, so what a review holds in
- * memory is bounded by its limit, not by the rows stored.
+ * A query of holders or of stored rows is read a page at a time, so what such a
+ * review holds in memory is bounded by its limit, not by the rows stored; one
+ * subject's holdings are read whole by design (see `HoldingRoutes`), their
+ * grantees a chunk at a time (see `CHUNK`), so no query's bindings grow with
+ * the principals an identity has.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -24,6 +27,9 @@ use SineMacula\Laravel\Authorization\Enums\GrantTarget;
  */
 final class GrantRows
 {
+    /** @var int The most grantees one query of grants is limited to. */
+    public const int CHUNK = 500;
+
     /** @var list<string> The columns of a grant row read beside its target and grantee, each under its own name. */
     private const array COLUMNS = ['tenant_type', 'tenant_id', 'include_subtree', 'application', 'expires_at', 'created_at', 'updated_at', 'granted_by_type', 'granted_by_id'];
 
@@ -64,7 +70,8 @@ final class GrantRows
 
     /**
      * Limit a grant query to the rows granted to one of the grantees, each
-     * matched by its exact morph type and key.
+     * matched by its exact morph type and key, the grantees of one type matched
+     * together, so the query holds one term for each type, not each grantee.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $table
@@ -80,9 +87,16 @@ final class GrantRows
                 return;
             }
 
+            $types = [];
+
             foreach ($grantees as $grantee) {
-                $any->orWhere(static function (Builder $pair) use ($table, $grantee): void {
-                    $pair->where($table . '.authorizable_type', $grantee->type)->where($table . '.authorizable_id', $grantee->id);
+                $types[ReviewOrder::key([$grantee->type])]['type']              = $grantee->type;
+                $types[ReviewOrder::key([$grantee->type])]['ids'][$grantee->id] = $grantee->id;
+            }
+
+            foreach ($types as ['type' => $type, 'ids' => $ids]) {
+                $any->orWhere(static function (Builder $pair) use ($table, $type, $ids): void {
+                    $pair->where($table . '.authorizable_type', $type)->whereIn($table . '.authorizable_id', \array_values($ids));
                 });
             }
         });
@@ -115,6 +129,27 @@ final class GrantRows
         $query->orderBy($table . '.include_subtree');
 
         return $isTargetFirst ? $query : ReviewOrder::by($query, $table . '.' . $target);
+    }
+
+    /**
+     * Read every row of the grants of each chunk of the grantees, the query of
+     * a chunk given by the callback limited to the chunk, as stored rows of the
+     * source, in the order of the chunks, one query a chunk.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $grantees
+     * @param  \Closure(list<\SineMacula\Laravel\Authorization\Support\Reference>): \Illuminate\Database\Query\Builder  $query
+     * @param  string  $source
+     * @return list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>
+     */
+    public static function allOf(array $grantees, \Closure $query, string $source): array
+    {
+        $rows = [];
+
+        foreach (\array_chunk($grantees, self::CHUNK) as $chunk) {
+            \array_push($rows, ...self::all($query($chunk), $source));
+        }
+
+        return $rows;
     }
 
     /**

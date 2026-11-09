@@ -55,11 +55,13 @@ the rows and their order, how a review is admitted (N96), and what part 1 of BL-
    principal the `IdentityDirectory` lists, each row keeping its actual grantee, and the result incomplete when the
    directory says its list may leave one out (N81). `expiring()` lists the stored grants, attachments and role edges
    whose expiry falls in the UTC half-open window `[from, until)`, a role's permission edge and its policy attachment
-   kinds of their own, each marked `live` or `expired` at the review's instant; in a review applying in a tenant, an
-   edge is listed only when the tenant sees its role and permission, and a role's policy attachment only when it sees
-   the role, as a check reaches either only through that role. `grantedBy()` lists the stored grants whose `granted_by`
-   pair is exactly the actor's: the last writer (N95), since a regrant, a changed expiry or reach overwrites it, a
-   trusted write names no actor, and a revoked grant is gone.
+   kinds of their own, each marked `live` or `expired` at the review's instant. The bounds keep their microseconds: an
+   expiry is stored to the whole second, its fraction dropped, so a bound with a fraction is compared as the next whole
+   second, which selects exactly the stored expiries in the window on every database. In a review applying in a
+   tenant, an edge is listed only when the tenant sees its role and permission, and a role's policy attachment only
+   when it sees the role, as a check reaches either only through that role. `grantedBy()` lists the stored grants whose
+   `granted_by` pair is exactly the actor's: the last writer (N95), since a regrant, a changed expiry or reach
+   overwrites it, a trusted write names no actor, and a revoked grant is gone.
 
 7. **Reference-only, versioned rows.** A `ReviewRow` names references alone (a morph type and a string key) and plain
    values, never a name, email, description, document or value. Its shape is `version: 1`: `row_key`, `subject`,
@@ -68,7 +70,11 @@ the rows and their order, how a review is admitted (N96), and what part 1 of BL-
    stored row's key is built from the columns that make it unique (target, grantee, tenant and application; role and
    permission for an edge), each part length-prefixed so no two lists of parts share one. A subject is `inactive` when
    it, or the identity of a resolved subject, reports itself inactive or is deleted softly, `unknown` when its record
-   is gone or its type names no model, read one query for each morph type among the rows returned.
+   is gone or its type names no model, read one query for each morph type among the rows returned; a resolved subject
+   is weighed as given, its principal and identity models included. `isComplete` says only whether an identity's
+   principals could all be listed, and is true for every other review. A grant row that names half a tenant (a type
+   without a key, or a key without a type), which the package never writes, is left out of every review, so it is never
+   shown as a platform-wide origin nor paired with an attachment as one.
 
 8. **One total order (`Reviews\Support\ReviewOrder`).** By source kind (in `SourceKind`'s declared order), target,
    grantee, origin scope and route, each nullable component tagged so the platform comes before a tenant and every
@@ -77,11 +83,17 @@ the rows and their order, how a review is admitted (N96), and what part 1 of BL-
    every supported database.
 
 9. **Bounded, on the writer, no query per holder.** A review returns at most its limit (`authorization.reviews.limit`,
-   1000 by default, or `withLimit()`), reading one more to say exactly whether one was left out. The holders of a
-   target are read a page at a time in the review's order, so what is held never exceeds the limit and its one extra,
-   and the queries never grow with the holders: the roles a review involves are read first, then the grants of all of
-   them together. One subject's holdings are read whole in a fixed number of queries, then sorted. Every read is on the
-   package's write connection.
+   1000 by default and validated at boot as a whole number of at least 1, or `withLimit()`), reading at least one more
+   to say exactly whether one was left out. The holders of a target are read a page at a time in the review's order,
+   each page no larger than the room left (the limit and its one extra, less the rows held), so the grants read stay
+   bounded by the limit; a grant adds one row for each carrying role or attachment in its chain, so the rows held may
+   pass the limit and its one extra before they are cut. The roles a review involves are read first, then the grants
+   of all of them together. For a policy, only the role grants that reach one of its attachments are read, the
+   attachment's application, chain and subtree in the query, so a grant that would add no row is never read, and
+   whether a page's grants meet the attachments in some tenant is settled in a fixed number of queries, one for each
+   attachment's tenant, never one for each tenant a grant is held in. One subject's holdings are read whole, then
+   sorted; an identity's principals a chunk of 500 at a time, so no query's bindings grow with them. Every read is on
+   the package's write connection.
 
 10. **Admission through `check()` (N96).** `authorization:review.read` and `authorization:review.export` are package
     permissions; exporting needs both. `AccessReview::review($query, $reviewer)` admits the review before anything is
@@ -90,11 +102,20 @@ the rows and their order, how a review is admitted (N96), and what part 1 of BL-
     tenant, or the platform, and the named application, or none, in place. The resource's attributes (see
     `ReviewAttributes`) let policies restrict who may review what; no rank rule applies.
 
-11. **A broad reach is administered whole.** A review of one tenant's node is decided there. At the administration
-    stage of the same check, a review rooted within a tenant, applying at the platform or of everywhere is weighed by
-    `AdministeredScope::refusalOf()`, the #122 rule, with no lock, rank or self rule: the right is decided again just
-    below the reach's tenant, or at platform scope, and refused as `administration.scope` when anything that denies or
-    caps the reviewer anywhere in the reach could limit it (`PossessionLimits`), a conditional deny included.
+11. **A broad reach is administered whole.** A review of one tenant's node, in one application or in none, is decided
+    there. At the administration stage of the same check, a review rooted within a tenant, applying at the platform or
+    of everywhere is weighed by `AdministeredScope::refusalOf()`, the #122 rule, with no lock, rank or self rule: the
+    right is decided again just below the reach's tenant, or at platform scope, and refused as `administration.scope`
+    when anything that denies or caps the reviewer anywhere in the reach could limit it (`PossessionLimits`), a
+    conditional deny included. The application dimension is treated as the tenant one: a review of any application
+    applying in one tenant is decided at the tenant with no application, and is weighed across every application there,
+    so a deny, boundary or guardrail held for one application refuses it, while a review of none or one application
+    is not.
+
+    An impersonated reviewer is weighed as a delegated change made while impersonating is: the impersonator is the
+    one shown the disclosure, so the review resource names it (`resource.impersonated`, `impersonator_type`,
+    `impersonator_id`), and the review is refused as `administration.impersonating` unless the reviewer is also
+    allowed `authorization:administration.impersonated` on the same review.
 
 12. **Refusal discloses nothing.** A refused review is recorded and reported as `authorize()` records and reports a
     refusal and throws `AuthorizationException` with the one generic line, carrying the reviewer's own decision, a
@@ -132,12 +153,16 @@ across every tenant, as trusted work.
   one application or tenant reaches no holder whose grant holds elsewhere.
 - A stored hierarchy cycle refuses the review; a role whose owner moved out of the reviewed tenant's chain ends a chain
   there.
-- An inactive or deleted-softly holder keeps its rows, marked `inactive`; a grant to a grantee whose record is gone is
-  listed as `unknown`.
+- An inactive or deleted-softly holder keeps its rows, marked `inactive`, whether it is read by reference or given as a
+  resolved subject; a grant to a grantee whose record is gone is listed as `unknown`.
 - A target whose key no definition could have (every definition is keyed by a UUID) is held by no one, on every
-  database, rather than reaching a `uuid` column it cannot be compared with.
+  database, without a query, rather than reaching a `uuid` column it cannot be compared with.
+- A grant row naming half a tenant is left out of every review, never shown as the platform's.
+- A window whose bounds fall within one second holds no stored expiry, since every expiry is a whole second.
 - A window that does not end after it starts, a limit below one, a target that is no definition, and a subject that
-  names no key are refused with `InvalidArgumentException` when the query is built.
+  names no key are refused with `InvalidArgumentException` when the query is built. A configured limit that is not a
+  whole number of at least 1 is refused at boot with `InvalidAuthorizationConfigException`, and so is one changed
+  after boot when a review reads it.
 
 ## Implementation Anchors
 
@@ -148,6 +173,9 @@ across every tenant, as trusted work.
   administration stage `Evaluation\DecisionPipeline::decideGrants()` runs for a review resource.
 - `Administration\AdministeredScope::refusalOf()` -- the reach rule shared with delegated administration.
 - `Reviews\Support\ReviewRun` -- the scope and instant of one run, and the structural predicates.
+- `Reviews\Support\TenantRelations` -- whether role grants and attachments meet in some tenant, in a fixed number of
+  queries.
+- `Config\ReviewConfigValidator` -- the boot-time validation of `authorization.reviews`.
 - `Reviews\Support\HolderRoutes`, `HoldingRoutes`, `StoredRows` -- the four queries.
 - `Reviews\Support\RoleChains`, `RoleCarriers` -- the hierarchy and what roles carry.
 - `Reviews\Support\GrantRows`, `GrantRow`, `RowCollector`, `ReviewOrder`, `SubjectStates`, `Definitions` -- the reads,
@@ -163,13 +191,18 @@ across every tenant, as trusted work.
 - `Reviews\Support\StoredRowsTest` (Feature) -- every stored kind, the half-open UTC window, non-UTC bounds, dates
   beyond 2038, expired rows, scopes for edges, and the last writer after an actor replacement.
 - `Reviews\ReviewAdmissionTest` (Feature) -- the tenant, the subtree and the platform, a child's deny blocking a broad
-  review, caps and step-up, policies on the attributes, refusals reported and disclosing nothing, scoped disclosure.
+  review, one application's deny blocking a review of any application, an impersonated reviewer, caps and step-up,
+  policies on the attributes, refusals reported and disclosing nothing, scoped disclosure, no manager bound.
+- `Reviews\Support\TenantRelationsTest` (Feature) -- grants and attachments meeting in some tenant, settled in a fixed
+  number of queries a chunk at a time, written into a grant query, and a subtree that cannot be nested.
+- `Config\ReviewConfigValidatorTest` (Unit) -- the boot-time validation of the review limit.
 - `Reviews\AccessReviewTest` (Feature) -- trusted and admitted runs, the unresolved reviewer, exact truncation, the
   byte-order total order with unusual references and nullable scopes, the reference-only sentinel, subject states and
   the write connection.
 - `Reviews\Support\ReviewRunTest`, `ReviewOrderTest` (Feature) -- applicability against containment, application
   selection, the frozen instant and the byte order on every database.
-- `Performance\AccessReviewQueryBudgetTest` -- no query growth with holders, grants or rows.
+- `Performance\AccessReviewQueryBudgetTest` -- no query growth with holders, grants, rows, the tenants grants are held
+  in, or grants that reach no attachment.
 
 ## Change Triggers
 

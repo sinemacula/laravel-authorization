@@ -32,7 +32,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * `appliesIn()` always takes and the others take as `any()` when none is given.
  *
  * A review is admitted in its reach (see `reach()` and `ReviewAdmission`): a
- * review applying in a tenant at that tenant; any other across all it covers.
+ * review applying in a tenant, in one application or in none, at that tenant;
+ * any other across all it covers, a review of any application applying in a
+ * tenant across every application there.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -114,6 +116,18 @@ final readonly class ReviewScope
         $isNode = $this->selection === ScopeSelection::APPLIES_IN && $this->tenant !== null;
 
         return new GrantScope($this->tenant, $this->application->application, !$isNode);
+    }
+
+    /**
+     * Determine whether the review reads the grants of every application at
+     * once, so its reach is wider than its node across applications as a
+     * subtree is across tenants.
+     *
+     * @return bool
+     */
+    public function isAcrossApplications(): bool
+    {
+        return $this->application->isAny;
     }
 
     /**

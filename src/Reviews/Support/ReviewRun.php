@@ -30,27 +30,32 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * `GrantRoots::within()` reads it, the tree's subtree query nested whole, never
  * loaded.
  *
+ * A row that names half a tenant, a tenant type without a key or a key without
+ * a type, which the package never writes, is left out of every review: a check
+ * applies the first nowhere, and reads the second at the platform by its
+ * missing type alone, so neither is shown as a platform-wide origin, and
+ * neither is paired with an attachment as one (see `placed()`).
+ *
  * A role's policy attachment reaches a holder of the role only where both the
  * role's grant and the attachment hold, as `RolePolicies` reads them in a
  * check: in a review of a scope a check is decided in, both apply there, so
  * only their applications must meet; in any other review, their tenants must
- * meet too (see `intersects()`), the tree asked once for each pair of tenants.
+ * meet too (see `intersects()`), the tree asked in a fixed number of queries
+ * for the grants and attachments read together (see `TenantRelations`), never
+ * once for each holder or each tenant a grant is held in.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
  */
-final class ReviewRun
+final readonly class ReviewRun
 {
     /** @var string The column of a definition or grant row naming its tenant's type. */
     private const string TENANT_TYPE = '.tenant_type';
 
     /** @var string The column of a definition or grant row naming its tenant's key. */
     private const string TENANT_ID = '.tenant_id';
-
-    /** @var array<string, bool> Whether one tenant is within another, as the tree answered, by the pair's key. */
-    private array $within = [];
 
     /**
      * Create a new run.
@@ -59,20 +64,24 @@ final class ReviewRun
      * @param  \Carbon\CarbonImmutable  $now
      * @param  \SineMacula\Laravel\Authorization\Support\TenantChain|null  $chain
      * @param  (\Closure(\Illuminate\Database\Query\Builder, string): void)|null  $rooted
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\TenantRelations  $relations
      */
     private function __construct(
 
         /** The scope the review reads. */
-        public readonly ReviewScope $scope,
+        public ReviewScope $scope,
 
         /** The instant the review is made at, in UTC. */
-        public readonly CarbonImmutable $now,
+        public CarbonImmutable $now,
 
         /** The chain of the tenant a review of what applies there reads, or the platform's; null for any other review. */
-        private readonly ?TenantChain $chain,
+        private ?TenantChain $chain,
 
         /** The condition a row rooted within the reviewed tenant meets; null for any other review. */
-        private readonly ?\Closure $rooted,
+        private ?\Closure $rooted,
+
+        /** Whether grants and attachments read in the run meet in some tenant, as the tree answered. */
+        private TenantRelations $relations = new TenantRelations,
     ) {}
 
     /**
@@ -110,7 +119,7 @@ final class ReviewRun
      * Limit a grant query to the rows of the table the scope selects: those
      * that apply in the reviewed tenant, or at the platform, or those rooted
      * within the reviewed tenant, or every row; and of those, the rows that
-     * hold in the application selected.
+     * name a whole tenant or none and hold in the application selected.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $table
@@ -119,6 +128,7 @@ final class ReviewRun
     public function constrain(Builder $query, string $table): Builder
     {
         $this->chain?->grants($query, $table);
+        $this->placed($query, $table);
 
         if ($this->rooted !== null) {
             $rooted = $this->rooted;
@@ -127,6 +137,23 @@ final class ReviewRun
         }
 
         return $this->scope->application->constrain($query, $table);
+    }
+
+    /**
+     * Limit a query of grant or attachment rows to those of the table that name
+     * a whole tenant, both its type and its key, or none, the platform; a row
+     * naming half a tenant holds at no tenant a review can show.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  string  $table
+     * @return \Illuminate\Database\Query\Builder
+     */
+    public function placed(Builder $query, string $table): Builder
+    {
+        return $query->where(static function (Builder $placed) use ($table): void {
+            $placed->where(static fn (Builder $platform): Builder => $platform->whereNull($table . self::TENANT_TYPE)->whereNull($table . self::TENANT_ID))
+                ->orWhere(static fn (Builder $tenant): Builder => $tenant->whereNotNull($table . self::TENANT_TYPE)->whereNotNull($table . self::TENANT_ID));
+        });
     }
 
     /**
@@ -285,7 +312,52 @@ final class ReviewRun
             return false;
         }
 
-        return $this->isApplicability() || $this->tenantsMeet($grant, $attachment);
+        return $this->isApplicability() || $this->relations->canHoldTogether($grant, $attachment);
+    }
+
+    /**
+     * Limit a query of a role's grants to the rows of the table that hold
+     * together with the attachment somewhere, as `intersects()` weighs them:
+     * their applications meet, and, outside a review of a scope a check is
+     * decided in, their tenants do too (see `TenantRelations::constrain()`).
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  string  $table
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $attachment
+     * @return \Illuminate\Database\Query\Builder
+     */
+    public function meeting(Builder $query, string $table, GrantScope $attachment): Builder
+    {
+        $application = $attachment->application;
+
+        if ($application !== null) {
+            $query->where(static fn (Builder $meets): Builder => $meets->whereNull($table . '.application')->orWhere($table . '.application', $application));
+        }
+
+        return $this->isApplicability() ? $query : $this->relations->constrain($query, $table, $attachment);
+    }
+
+    /**
+     * Learn, in a fixed number of queries, whether each of the role grants read
+     * meets each of the attachments read in some tenant, so weighing them asks
+     * the tree nothing more; a review of a scope a check is decided in needs
+     * nothing.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>  $grants
+     * @param  array<array-key, list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>>  $attachments
+     * @return void
+     *
+     * @throws \UnexpectedValueException
+     */
+    public function settle(array $grants, array $attachments): void
+    {
+        if ($this->isApplicability()) {
+            return;
+        }
+
+        $scopes = static fn (array $rows): array => \array_values(\array_filter(\array_map(static fn (GrantRow $row): ?GrantScope => $row->scope, $rows)));
+
+        $this->relations->settle($scopes($grants), $scopes(\array_merge([], ...\array_values($attachments))));
     }
 
     /**
@@ -300,41 +372,5 @@ final class ReviewRun
     private static function rootedWithin(ReviewScope $scope): \Closure
     {
         return GrantRoots::within($scope->tenant ?? throw new \UnexpectedValueException('A review rooted within a tenant names one.'), TenantChain::tree());
-    }
-
-    /**
-     * Determine whether two scopes hold in some tenant together: either is
-     * platform-wide, both name one tenant, or one reaches below a tenant the
-     * other names or is below.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $one
-     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $other
-     * @return bool
-     */
-    private function tenantsMeet(GrantScope $one, GrantScope $other): bool
-    {
-        $first  = $one->tenant;
-        $second = $other->tenant;
-
-        if ($first === null || $second === null || ($first->type === $second->type && $first->id === $second->id)) {
-            return true;
-        }
-
-        return ($one->includeSubtree && $this->isWithin($second, $first)) || ($other->includeSubtree && $this->isWithin($first, $second));
-    }
-
-    /**
-     * Determine whether the tenant is the ancestor or below it, asking the tree
-     * once for each pair in the run.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $ancestor
-     * @return bool
-     */
-    private function isWithin(Reference $tenant, Reference $ancestor): bool
-    {
-        $key = ReviewOrder::key([$tenant->type, $tenant->id, $ancestor->type, $ancestor->id]);
-
-        return $this->within[$key] ??= TenantChain::isWithin($tenant, $ancestor);
     }
 }
