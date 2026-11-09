@@ -56,9 +56,35 @@ final class AdministeredScope
      */
     public static function refusal(OperationResource $operation, ResourceReference $resource, GrantScope $reach, FurtherChecks $checks): ?DecisionReason
     {
-        $action      = $operation->action;
+        return self::refusalOf($operation->action, $resource, $reach, $checks);
+    }
+
+    /**
+     * Return `administration.scope` when the actor's authority for the action
+     * does not cover the whole reach, decided as `refusal()` decides an
+     * operation's: the action is not allowed on the resource in the reach, or
+     * anything that applies to the actor anywhere in a reach wider than its
+     * node could limit it; null when it covers it all. An access review is
+     * admitted across its reach by this rule (see `Reviews\ReviewAdmission`),
+     * with no lock, rank or self rule.
+     *
+     * A reach across applications, every application at once rather than the
+     * grants held for every application, is wider than its node in the
+     * application dimension as a subtree is in the tenant one: a decision with
+     * no application reads only what is held for every application, so anything
+     * held for one application that could limit the action limits it too.
+     *
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
+     * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
+     * @param  bool  $isAcrossApplications
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
+     */
+    public static function refusalOf(string $action, ResourceReference $resource, GrantScope $reach, FurtherChecks $checks, bool $isAcrossApplications = false): ?DecisionReason
+    {
         $below       = $reach->tenant !== null && $reach->includeSubtree;
-        $administers = static fn (): bool => $checks->decide($action, $resource)->isAllowed() && !self::isLimited($action, $reach, $checks);
+        $administers = static fn (): bool => $checks->decide($action, $resource)->isAllowed() && !self::isLimited($action, $reach, $checks, $isAcrossApplications);
 
         return TenantScope::within($reach->tenant, $reach->application, $administers, $below) ? null : DecisionReason::ADMINISTRATION_SCOPE;
     }
@@ -66,18 +92,20 @@ final class AdministeredScope
     /**
      * Determine whether anything that applies to the actor anywhere in the
      * reach could limit the action, the reach in place: a reach of one tenant's
-     * node alone is what its decision reads, so nothing more can; for a wider
-     * one, the sources of the action, read in the scope in place, that cannot
-     * be read limit it too.
+     * node alone, in one application or in none, is what its decision reads, so
+     * nothing more can; for a wider one, below the tenant, at the platform or
+     * across applications, the sources of the action, read in the scope in
+     * place, that cannot be read limit it too.
      *
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
+     * @param  bool  $isAcrossApplications
      * @return bool
      */
-    private static function isLimited(string $action, GrantScope $reach, FurtherChecks $checks): bool
+    private static function isLimited(string $action, GrantScope $reach, FurtherChecks $checks, bool $isAcrossApplications): bool
     {
-        if ($reach->tenant !== null && !$reach->includeSubtree) {
+        if ($reach->tenant !== null && !$reach->includeSubtree && !$isAcrossApplications) {
             return false;
         }
 

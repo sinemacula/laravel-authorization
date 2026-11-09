@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 #[CoversClass(PackagePermissions::class)]
 final class PackagePermissionsTest extends TestCase
 {
-    /** @var list<string> Every administration action, and the right to preview, in the catalogue's order. */
+    /** @var list<string> Every administration action, the right to preview and the review rights, in the catalogue's order. */
     private const array ACTIONS = [
         'authorization:role.grant',
         'authorization:role.revoke',
@@ -57,6 +57,8 @@ final class PackagePermissionsTest extends TestCase
         'authorization:administration.impersonated',
         'authorization:administration.unbounded',
         'authorization:subject.preview',
+        'authorization:review.read',
+        'authorization:review.export',
     ];
 
     /**
@@ -84,8 +86,9 @@ final class PackagePermissionsTest extends TestCase
 
     /**
      * Each action's constant names it, the right to manage guardrails renamed
-     * to `authorization:guardrail.manage`, and the right to preview is
-     * `authorization:subject.preview`.
+     * to `authorization:guardrail.manage`, the right to preview is
+     * `authorization:subject.preview`, and the review rights are
+     * `authorization:review.read` and `authorization:review.export`.
      *
      * @return void
      */
@@ -125,9 +128,13 @@ final class PackagePermissionsTest extends TestCase
             PackagePermissions::ADMINISTRATION_IMPERSONATED,
             PackagePermissions::ADMINISTRATION_UNBOUNDED,
             PackagePermissions::SUBJECT_PREVIEW,
+            PackagePermissions::REVIEW_READ,
+            PackagePermissions::REVIEW_EXPORT,
         ]);
         self::assertSame('Preview what a subject may do, without acting as it.', (new PackagePermissions)->permissions()[32]->description);
         self::assertSame('Set and remove guardrails from above the scope they cap.', (new PackagePermissions)->permissions()[21]->description);
+        self::assertSame('Run an access review of who holds what.', (new PackagePermissions)->permissions()[33]->description);
+        self::assertSame('Export an access review.', (new PackagePermissions)->permissions()[34]->description);
     }
 
     /**

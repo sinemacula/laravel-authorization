@@ -86,6 +86,13 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   never reached, its escaped text and versioned schema, what it never holds, what a stored decision explains, and the
   `authorization:why` command: the console subject resolver, the named scope, the resource as `check()` takes it,
   `--context` as input alone, the formats and the exit codes.
+- `access-reviews.md`: what an access review means by holding (grant routes, never effective access), the structural
+  predicates it shares with a check and never evaluates beyond, every edge live and every route kept, the hierarchy
+  read in a fixed number of queries, the scope selections and the explicit application selector, `holders()`,
+  `holdings()` in principal and identity mode, `expiring()` in a UTC half-open window and `grantedBy()` as the last
+  writer, the reference-only versioned rows, the byte-for-byte total order on every database, the bounded list with
+  its exact truncation, the `authorization:review.read` admission through `check()` with the reach rule, the refusal
+  that discloses nothing, and the explicit trusted path.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

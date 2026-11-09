@@ -37,6 +37,10 @@ use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
+use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
+use SineMacula\Laravel\Authorization\Reviews\Enums\ReviewKind;
+use SineMacula\Laravel\Authorization\Reviews\ReviewResource;
+use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
@@ -426,6 +430,49 @@ final class DecisionPipelineTest extends TestCase
 
         self::assertSame(DecisionReason::ADMINISTRATION_OWNER, $decide()->reason);
         self::assertTrue(TenantScope::within($tenant, null, $decide)->isAllowed());
+    }
+
+    /**
+     * An allow of a review right on a review resource passes the review's reach
+     * at the administration stage: a right held at a tenant's node admits a
+     * review of that node, a satisfied step in the trace, but not one of its
+     * subtree, refused as out of scope; any other action on the resource, and a
+     * denied right, pass the stage untouched.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAReviewsReachIsWeighedAfterTheAllow(): void
+    {
+        $user    = StubIdentity::create(['id' => 'reviewer']);
+        $subject = new Subject($user, $user);
+        $tenant  = new Reference('tenant', 'a');
+
+        $user->givePermission(Permission::create(['name' => PackagePermissions::REVIEW_READ]), null, $tenant, false);
+        $user->givePermission(Permission::create(['name' => 'posts:read']), null, $tenant);
+
+        $pipeline = $this->pipeline();
+        $node     = (new ReviewResource(ReviewKind::HOLDERS, ReviewScope::appliesIn($tenant, ApplicationSelector::none())))->toResourceReference();
+        $subtree  = (new ReviewResource(ReviewKind::HOLDERS, ReviewScope::rootedWithin($tenant, ApplicationSelector::none())))->toResourceReference();
+        $decide   = static fn (string $action, ResourceReference $on): Decision => TenantScope::within(
+            $tenant,
+            null,
+            static fn (): Decision => $pipeline->decide($subject, $action, $on, []),
+        );
+
+        $admitted = $decide(PackagePermissions::REVIEW_READ, $node);
+        $refused  = $decide(PackagePermissions::REVIEW_READ, $subtree);
+        $other    = $decide('posts:read', $subtree);
+        $denied   = $decide(PackagePermissions::REVIEW_EXPORT, $node);
+
+        self::assertTrue($admitted->isAllowed());
+        self::assertEquals(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED), $admitted->trace[\count($admitted->trace) - 1]);
+        self::assertSame([DecisionReason::ADMINISTRATION_SCOPE, DecisionStage::ADMINISTRATION], [$refused->reason, $refused->stage]);
+        self::assertEquals(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, cap: 'administration.scope'), $refused->trace[\count($refused->trace) - 1]);
+        self::assertTrue($other->isAllowed());
+        self::assertNotSame(DecisionStage::ADMINISTRATION, $other->trace[\count($other->trace) - 1]->stage);
+        self::assertSame(DecisionReason::NO_MATCH, $denied->reason);
     }
 
     /**

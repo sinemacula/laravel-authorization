@@ -342,6 +342,39 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * The access review limit is validated with the rest: the package's default
+     * passes, and a limit below 1 or one that is not a whole number is refused
+     * under its key, so a review never falls back to another bound.
+     *
+     * @return void
+     */
+    public function testTheReviewLimitIsValidated(): void
+    {
+        $config = $this->authorizationConfig();
+
+        self::assertSame(['limit' => 1000], $config['reviews']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        $zero = $config;
+        $text = $config;
+
+        $zero['reviews']['limit'] = 0;
+        $text['reviews']['limit'] = '100';
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($zero, $this->app),
+            'authorization.reviews.limit',
+            'expected a whole number of at least 1, got 0 (int).',
+        );
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($text, $this->app),
+            'authorization.reviews.limit',
+            'expected a whole number of at least 1, got \'100\' (string).',
+        );
+    }
+
+    /**
      * The grant hooks are validated with the rest: the package's default, an
      * empty list, passes, as does a missing key, and a class that is not a hook
      * is refused under its entry's key.

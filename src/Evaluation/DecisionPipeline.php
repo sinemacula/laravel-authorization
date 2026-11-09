@@ -20,6 +20,8 @@ use SineMacula\Laravel\Authorization\Resolvers\GrantProvenanceResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
+use SineMacula\Laravel\Authorization\Reviews\ReviewAdmission;
+use SineMacula\Laravel\Authorization\Reviews\ReviewResource;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -444,7 +446,9 @@ final class DecisionPipeline
      * check they need is decided here, as this one is up to the allow, in the
      * scope in place when they ask, and never through the administration stage
      * again; the stage also learns the tenant the check was made from, before
-     * the operation's own tenant was put in place.
+     * the operation's own tenant was put in place. An allow of a review right
+     * on a review resource passes the review's reach there in the same way (see
+     * `Reviews\ReviewAdmission`), which can only refuse it.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -464,7 +468,13 @@ final class DecisionPipeline
     ): Decision {
         $decision = $this->decideAlone($subject, $action, $resource, $context, $attributes, $this->evidence);
 
-        return $resource?->source instanceof OperationResource
+        $source = $resource?->source;
+
+        if ($source instanceof ReviewResource) {
+            return ReviewAdmission::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from));
+        }
+
+        return $source instanceof OperationResource
             ? OperationConstraints::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from))
             : $decision;
     }

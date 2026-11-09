@@ -29,7 +29,11 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
  * them yet. `subject.preview` is the right to preview another subject
  * (`Authorization::previewFor()`), decided on a preview resource (see
  * `Preview\PreviewResource`); it is spelt as the administration actions are,
- * the subject its noun, though a preview administers nothing.
+ * the subject its noun, though a preview administers nothing. `review.read` is
+ * the right to run an access review (`Reviews\AccessReview`), decided on a
+ * review resource (see `Reviews\ReviewResource`), and `review.export` the right
+ * to export one, which needs both; exports come with a later part of the
+ * reviews, so nothing asks for it yet.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -135,6 +139,12 @@ final readonly class PackagePermissions implements PermissionProvider
     /** @var string The right to preview what a subject may do, as that subject, in a tenant and application (AUTHZ-11.4). */
     public const string SUBJECT_PREVIEW = 'authorization:subject.preview';
 
+    /** @var string The right to run an access review in a scope, decided on its review resource (AUTHZ-11.6). */
+    public const string REVIEW_READ = 'authorization:review.read';
+
+    /** @var string The right to export an access review, which also needs the right to run it. */
+    public const string REVIEW_EXPORT = 'authorization:review.export';
+
     /** @var string The category every package permission is filed under. */
     private const string CATEGORY = 'authorization';
 
@@ -173,6 +183,8 @@ final readonly class PackagePermissions implements PermissionProvider
         self::ADMINISTRATION_IMPERSONATED => 'Make a delegated change while impersonating.',
         self::ADMINISTRATION_UNBOUNDED    => 'Replace a permission boundary with a wider one, or remove one.',
         self::SUBJECT_PREVIEW             => 'Preview what a subject may do, without acting as it.',
+        self::REVIEW_READ                 => 'Run an access review of who holds what.',
+        self::REVIEW_EXPORT               => 'Export an access review.',
     ];
 
     /**
