@@ -70,6 +70,18 @@ final class CheckContextFactoryTest extends TestCase
     }
 
     /**
+     * The trusted namespaces are every one a context holds besides `input`: the
+     * authentication context's, the application's sources', `request`,
+     * `environment`, `subject` and `resource`, in that order, each once.
+     *
+     * @return void
+     */
+    public function testTheTrustedNamespacesAreEveryOneButInput(): void
+    {
+        self::assertSame(['authentication', 'mfa', 'tenant', 'request', 'environment', 'subject', 'resource'], $this->factory()->trustedNamespaces());
+    }
+
+    /**
      * What the caller passes is held under `input` and never promoted into
      * another namespace, so it can never stand in for a trusted one.
      *

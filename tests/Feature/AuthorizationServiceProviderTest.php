@@ -31,6 +31,7 @@ use SineMacula\Laravel\Authorization\Context\RoutedRequestContext;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
+use SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
@@ -65,6 +66,7 @@ use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
+use SineMacula\Laravel\Authorization\Resolvers\ReferenceSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
@@ -76,6 +78,7 @@ use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\DeclaredAbilities;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -83,6 +86,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
+use Tests\Feature\Stubs\FixedConsoleSubjectResolver;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\InjectedRequirementChecker;
 use Tests\Feature\Stubs\PermissiveActionCatalogue;
@@ -404,7 +408,9 @@ final class AuthorizationServiceProviderTest extends TestCase
 
     /**
      * Every package command is registered in the console, the catalogue sync,
-     * the prune, the policy validation and the configuration check included.
+     * the prune, the policy validation, the configuration check and the
+     * explanation included, and `authorization:why-can`, which
+     * `authorization:why` replaced, no longer is.
      *
      * @return void
      */
@@ -412,9 +418,32 @@ final class AuthorizationServiceProviderTest extends TestCase
     {
         $commands = \array_keys(Artisan::all());
 
-        foreach (['list-roles', 'list-permissions', 'grant', 'revoke', 'why-can', 'migrate-spatie', 'sync', 'prune', 'policy:validate', 'check'] as $name) {
+        foreach (['list-roles', 'list-permissions', 'grant', 'revoke', 'why', 'migrate-spatie', 'sync', 'prune', 'policy:validate', 'check'] as $name) {
             self::assertContains("authorization:{$name}", $commands);
         }
+
+        self::assertNotContains('authorization:why-can', $commands);
+    }
+
+    /**
+     * The console subject resolver defaults to `ReferenceSubjectResolver`, and
+     * one the application binds on the contract replaces it and survives the
+     * reset between jobs.
+     *
+     * @return void
+     */
+    public function testBindsTheConsoleSubjectResolver(): void
+    {
+        $app = $this->application();
+
+        self::assertInstanceOf(ReferenceSubjectResolver::class, $app->make(ConsoleSubjectResolver::class));
+
+        $bound = new FixedConsoleSubjectResolver(new Subject(new \stdClass));
+        $app->instance(ConsoleSubjectResolver::class, $bound);
+
+        $this->startNextJob();
+
+        self::assertSame($bound, $app->make(ConsoleSubjectResolver::class));
     }
 
     /**

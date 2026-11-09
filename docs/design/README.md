@@ -83,7 +83,9 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
 - `explanations.md`: explain mode, the switch on the one decision path that leaves every everyday check as it was, the
   evidence it records (each condition test with its typed outcome, the unresolved references, where each grant that
   allowed a check came from, and what the check asked), the `Explanation` projection, its causes and the stages it
-  never reached, its escaped text and versioned schema, what it never holds, and what a stored decision explains.
+  never reached, its escaped text and versioned schema, what it never holds, what a stored decision explains, and the
+  `authorization:why` command: the console subject resolver, the named scope, the resource as `check()` takes it,
+  `--context` as input alone, the formats and the exit codes.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

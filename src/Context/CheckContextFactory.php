@@ -126,6 +126,20 @@ final readonly class CheckContextFactory
     }
 
     /**
+     * Return every namespace a check's context holds besides `input`: those the
+     * authentication context and the application's sources supply, `request`,
+     * `environment`, `subject` and `resource`. What the caller passes can fill
+     * none of them, so a caller that names one, as `authorization:why` refuses
+     * its `--context` naming one, is trying to stand in for a trusted source.
+     *
+     * @return list<string>
+     */
+    public function trustedNamespaces(): array
+    {
+        return [...\array_keys($this->builders), ...ContextSource::ATTRIBUTE_NAMESPACES];
+    }
+
+    /**
      * Determine whether a namespace of a check about the subject depends on the
      * request alone, so `whereAuthorized()` may read it once for a query rather
      * than once per row (AUTHZ-10.1): `input`, a namespace whose source is
