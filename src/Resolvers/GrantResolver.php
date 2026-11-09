@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 use SineMacula\Laravel\Authorization\Support\RolePolicies;
+use SineMacula\Laravel\Authorization\Usage\RouteSources;
 
 /**
  * Resolves what an identity's grants come to: the names of its roles, the keys
@@ -38,6 +39,12 @@ use SineMacula\Laravel\Authorization\Support\RolePolicies;
  * roles the identity holds and however deep they sit. Policies take four more,
  * however many roles and however deep, only when a role holds a policy in the
  * current scope.
+ *
+ * While grant usage is tracked (see `ResolutionPins::isRouting()`), the
+ * permissions and the policies are resolved with the routes of the stored
+ * grants behind each (see `Usage\RouteSources`), read from the same rows in the
+ * same queries, each also reading where its grants were made and when; a
+ * resolution whose hierarchy moved while it ran says none.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -106,14 +113,20 @@ final class GrantResolver
      */
     public static function permissions(MorphToMany $direct, MorphToMany $roles, ResolutionPins $pins): Resolution
     {
-        $granted = self::held($direct);
-        $held    = self::held($roles);
+        $granted = self::heldOf($direct, $pins);
+        $held    = self::heldOf($roles, $pins);
         $keys    = \array_keys($held->getDictionary());
         $reach   = RoleGraph::reach($keys);
 
         $pins->roles(\array_keys($reach));
 
-        $within    = RoleGraph::permissionsWithin($reach, $keys);
+        $chains = $pins->isRouting() ? RoleGraph::chainsWithin($reach, $keys) : null;
+        $within = match (true) {
+            !$pins->isRouting() => RoleGraph::permissionsWithin($reach, $keys),
+            $chains === null    => null,
+            default             => RoleGraph::carriedWithin($chains),
+        };
+
         $inherited = $within ?? RoleGraph::permissionsHeldBy(self::rolesAfresh($roles, $keys));
 
         /** @var list<string> $names */
@@ -123,6 +136,7 @@ final class GrantResolver
             \array_values(\array_unique([...$names, ...$inherited->names])),
             self::expiresIn($inherited->expiresIn, $granted, $held),
             $within !== null,
+            $chains === null ? null : RouteSources::permissions($direct->getParent(), $granted, $held, $chains, $inherited),
         );
     }
 
@@ -156,9 +170,10 @@ final class GrantResolver
             $pins->rolePolicies();
         }
 
-        [$own, $throughRoles] = self::attached($grants, $roles);
+        [$own, $throughRoles] = self::attached($grants, $roles, $pins->isRouting());
 
-        $inherited = $roles !== null && $throughRoles ? RolePolicies::heldThrough(self::held($roles), $roles, $pins) : new InheritedPolicies;
+        $held      = $roles !== null && $throughRoles ? self::heldOf($roles, $pins) : null;
+        $inherited = $roles !== null && $held !== null ? RolePolicies::heldThrough($held, $roles, $pins) : new InheritedPolicies;
 
         // Flipping the keys and back lists each policy once, in the order it
         // was first reached.
@@ -174,7 +189,9 @@ final class GrantResolver
             $policies[] = self::hydrate($policy);
         }
 
-        return new Resolution($policies, GrantExpiry::nearest($inherited->expiresIn, \array_column($own, 'expires_at')), $inherited->stable);
+        $routes = $pins->isRouting() ? RouteSources::policies($grants->getParent(), $own, $held, $inherited) : null;
+
+        return new Resolution($policies, GrantExpiry::nearest($inherited->expiresIn, \array_column($own, 'expires_at')), $inherited->stable, $routes);
     }
 
     /**
@@ -224,15 +241,17 @@ final class GrantResolver
      * the write connection, and, given the relation onto its roles, whether any
      * role holds a policy in the current scope, in the same query. An
      * attachment of an inline policy that belongs to another grantee is left
-     * out.
+     * out. While grant usage is tracked, each is read with where it was made
+     * and its creation too.
      *
      * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, \Illuminate\Database\Eloquent\Model>  $grants
      * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>|null  $roles
+     * @param  bool  $isRouting
      * @return array{0: array<int, array{policy_id: string, authorizable_type: string, expires_at: string|null}>, 1: bool}
      */
-    private static function attached(MorphToMany $grants, ?MorphToMany $roles): array
+    private static function attached(MorphToMany $grants, ?MorphToMany $roles, bool $isRouting = false): array
     {
-        $columns = ['policy_id', 'authorizable_type', 'expires_at'];
+        $columns = $isRouting ? ['policy_id', 'authorizable_type', 'expires_at', ...RouteSources::SCOPE, 'created_at'] : ['policy_id', 'authorizable_type', 'expires_at'];
         $query   = InlinePolicies::attachedToTheirGrantee((clone $grants->getQuery())->toBase(), $grants->getTable())
             ->select(\array_map($grants->qualifyPivotColumn(...), $columns));
 
@@ -259,6 +278,19 @@ final class GrantResolver
     {
         /** @var \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model> */
         return $grants->useWritePdo()->get(); // @phpstan-ignore method.notFound
+    }
+
+    /**
+     * Read the grants of the relation as `held()` reads them, with where each
+     * was made when the resolution keeps the routes behind what it finds.
+     *
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
+     * @return \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>
+     */
+    private static function heldOf(MorphToMany $grants, ResolutionPins $pins): EloquentCollection
+    {
+        return self::held($pins->isRouting() ? RouteSources::scoped($grants) : $grants);
     }
 
     /**

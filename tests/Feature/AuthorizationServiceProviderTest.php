@@ -421,7 +421,23 @@ final class AuthorizationServiceProviderTest extends TestCase
     {
         $commands = \array_keys(Artisan::all());
 
-        foreach (['list-roles', 'list-permissions', 'grant', 'revoke', 'why', 'review', 'migrate-spatie', 'sync', 'prune', 'policy:validate', 'check'] as $name) {
+        $names = [
+            'list-roles',
+            'list-permissions',
+            'grant',
+            'revoke',
+            'why',
+            'review',
+            'migrate-spatie',
+            'sync',
+            'prune',
+            'usage-heartbeat',
+            'usage-prune',
+            'policy:validate',
+            'check',
+        ];
+
+        foreach ($names as $name) {
             self::assertContains("authorization:{$name}", $commands);
         }
 

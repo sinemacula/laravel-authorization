@@ -35,7 +35,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   queries take no reference.
  * - `expiring` takes `--from` and `--until`, each a date and time read in UTC
  *   when it names no zone; `granted_by` takes `--actor` as `{morphType}:{key}`,
- *   matched exactly as stored. No other query takes them.
+ *   matched exactly as stored; `unused` takes `--since`, read as `--from` is.
+ *   No other query takes them.
  * - The scope is what applies in `--tenant`, or at the platform when no scope
  *   option is given; the grants rooted within `--rooted-within`; or
  *   `--everywhere`; at most one of the three. Each tenant is read as
@@ -125,9 +126,23 @@ final readonly class ReviewInvocation
         return match ($this->kind) {
             ReviewKind::HOLDERS    => ReviewQuery::holders(self::target((string) $this->reference), $this->scope, ($options['direct-only'] ?? false) === true),
             ReviewKind::HOLDINGS   => ReviewQuery::holdings(self::subject($subjects, (string) $this->reference), $this->scope),
-            ReviewKind::EXPIRING   => ReviewQuery::expiring($this->scope, self::instant('from', $options['from'] ?? null), self::instant('until', $options['until'] ?? null)),
+            ReviewKind::EXPIRING   => ReviewQuery::expiring($this->scope, $this->instantOf('from'), $this->instantOf('until')),
             ReviewKind::GRANTED_BY => ReviewQuery::grantedBy(self::reference('actor', $options['actor'] ?? null), $this->scope),
+            ReviewKind::UNUSED     => ReviewQuery::unused($this->scope, $this->instantOf('since')),
         };
+    }
+
+    /**
+     * Return the instant the option names, read in UTC when it names no zone.
+     *
+     * @param  string  $option
+     * @return \Carbon\CarbonImmutable
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function instantOf(string $option): CarbonImmutable
+    {
+        return self::instant($option, $this->options[$option] ?? null);
     }
 
     /**
@@ -140,7 +155,7 @@ final readonly class ReviewInvocation
      */
     private static function kindOf(mixed $query): ReviewKind
     {
-        return ReviewKind::tryFrom(\is_string($query) ? $query : '') ?? throw new \InvalidArgumentException('The query must be holders, holdings, expiring or granted_by.');
+        return ReviewKind::tryFrom(\is_string($query) ? $query : '') ?? throw new \InvalidArgumentException('The query must be holders, holdings, expiring, granted_by or unused.');
     }
 
     /**
@@ -162,7 +177,7 @@ final readonly class ReviewInvocation
             return $given;
         }
 
-        $message = $isNamed ? 'The holders and holdings queries name a reference as {type}:{key}.' : 'The expiring and granted_by queries take no reference.';
+        $message = $isNamed ? 'The holders and holdings queries name a reference as {type}:{key}.' : 'The expiring, granted_by and unused queries take no reference.';
 
         throw new \InvalidArgumentException($message);
     }
@@ -170,7 +185,7 @@ final readonly class ReviewInvocation
     /**
      * Refuse an option the query does not take, and a missing one it needs:
      * `--direct-only` is the holders', `--from` and `--until` the expiries',
-     * and `--actor` an actor's grants'.
+     * `--actor` an actor's grants', and `--since` the unused grants'.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\ReviewKind  $kind
      * @param  array<string, mixed>  $options
@@ -180,7 +195,13 @@ final readonly class ReviewInvocation
      */
     private static function refuseForeign(ReviewKind $kind, array $options): void
     {
-        $owners = ['direct-only' => ReviewKind::HOLDERS, 'from' => ReviewKind::EXPIRING, 'until' => ReviewKind::EXPIRING, 'actor' => ReviewKind::GRANTED_BY];
+        $owners = [
+            'direct-only' => ReviewKind::HOLDERS,
+            'from'        => ReviewKind::EXPIRING,
+            'until'       => ReviewKind::EXPIRING,
+            'actor'       => ReviewKind::GRANTED_BY,
+            'since'       => ReviewKind::UNUSED,
+        ];
 
         foreach ($owners as $option => $owner) {
             $isGiven = ($options[$option] ?? null) !== null && ($options[$option] ?? null) !== false;

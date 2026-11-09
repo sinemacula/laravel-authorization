@@ -51,7 +51,7 @@ final class ReviewCommand extends Command
     /** @var string The console command signature. */
     protected $signature = <<<'EOD'
         authorization:review
-                                    {query : The review: holders, holdings, expiring or granted_by}
+                                    {query : The review: holders, holdings, expiring, granted_by or unused}
                                     {reference? : For holders, the role, permission or policy as type:key (e.g. role:1); for holdings, the saved subject as morphType:key}
                                     {--tenant= : Review what applies in the tenant, as morphType:key; the platform when no scope option is given}
                                     {--rooted-within= : Review the grants made in the tenant or below it, as morphType:key}
@@ -60,6 +60,7 @@ final class ReviewCommand extends Command
                                     {--from= : For expiring, the start of the window, inclusive}
                                     {--until= : For expiring, the end of the window, exclusive}
                                     {--actor= : For granted_by, the actor as morphType:key}
+                                    {--since= : For unused, the instant to look back to}
                                     {--direct-only : For holders, list the direct grants alone}
                                     {--output= : Write the JSON Lines to the file rather than the standard output}
                                     {--force : Overwrite the --output file when it exists}

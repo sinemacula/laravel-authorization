@@ -8,7 +8,11 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCodec;
+use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Usage\GrantRoute;
+use SineMacula\Laravel\Authorization\Usage\StoredGrant;
 
 /**
  * Unit tests for `ResolutionCodec`, which writes what a resolution finds to the
@@ -129,5 +133,47 @@ final class ResolutionCodecTest extends TestCase
         $this->expectExceptionMessage('Cached policy entry is not a policy document with its key.');
 
         ResolutionCodec::policies($stored);
+    }
+
+    /**
+     * While grant usage is tracked a grantee's permissions and policies are
+     * kept under a routed kind of their own; every other kind, and every kind
+     * while tracking is off, keeps its own.
+     *
+     * @return void
+     */
+    public function testRoutedKindsAreKeptApart(): void
+    {
+        $kinds = \array_map(static fn (string $kind): string => ResolutionCodec::kindOf($kind, true), ['permissions', 'policies', 'roles', 'boundaries']);
+
+        self::assertSame(['permissions-routed', 'policies-routed', 'roles', 'boundaries'], $kinds);
+        self::assertSame(['permissions', 'policies'], [ResolutionCodec::kindOf('permissions', false), ResolutionCodec::kindOf('policies', false)]);
+        self::assertTrue(ResolutionCodec::isRouted('permissions-routed'));
+        self::assertFalse(ResolutionCodec::isRouted('permissions'));
+    }
+
+    /**
+     * Routes are written as plain values beside an entry, none for none, and
+     * read back as they were; anything but routes is refused.
+     *
+     * @return void
+     */
+    public function testWritesAndReadsRoutesBack(): void
+    {
+        $route  = new GrantRoute('k', new StoredGrant(GrantTarget::ROLE, 'r', new Reference('user', 'u'), 'tenant', 't', null, 9));
+        $stored = ResolutionCodec::encodeRoutes(['posts:read' => [$route]]);
+
+        self::assertSame([], ResolutionCodec::encodeRoutes(null));
+        self::assertSame(['routes' => ['posts:read' => [$route->toArray()]]], $stored);
+        self::assertEquals(['posts:read' => [$route]], ResolutionCodec::routes($stored['routes']));
+
+        foreach (['routes', ['posts:read' => 'route'], ['posts:read' => [['key' => 5]]]] as $corrupt) {
+            try {
+                ResolutionCodec::routes($corrupt);
+                self::fail('Corrupt routes were read back.');
+            } catch (\UnexpectedValueException) {
+                self::addToAssertionCount(1);
+            }
+        }
     }
 }

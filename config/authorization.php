@@ -74,6 +74,8 @@ return [
         'resource_policies'        => env('AUTHORIZATION_TABLE_RESOURCE_POLICIES', 'resource_policies'),
         'authorizable_boundaries'  => env('AUTHORIZATION_TABLE_AUTHORIZABLE_BOUNDARIES', 'authorizable_boundaries'),
         'guardrails'               => env('AUTHORIZATION_TABLE_GUARDRAILS', 'guardrails'),
+        'grant_usage'              => env('AUTHORIZATION_TABLE_GRANT_USAGE', 'authorization_grant_usage'),
+        'usage_coverage'           => env('AUTHORIZATION_TABLE_USAGE_COVERAGE', 'authorization_usage_coverage'),
     ],
 
     /*
@@ -665,6 +667,35 @@ return [
 
     'reviews' => [
         'limit' => (int) env('AUTHORIZATION_REVIEWS_LIMIT', 1000),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Grant usage tracking
+    |---------------------------------------------------------------------------
+    |
+    | Opt-in tracking of which grants are used, for the unused-grant review
+    | (`ReviewQuery::unused()`) and the `usage` field of every review row. Off
+    | by default, and free when off: checks do no extra work and nothing is read
+    | or written. When on, every live grant route behind an allowed check, and
+    | every policy whose statement decided a check, is noted in memory, at most
+    | once an `interval` (in seconds, at least 60) per worker, and sent as one
+    | queued job at the end of each request, job or command, or once a worker
+    | holds `batch` observations. `connection` and `queue` name where the job
+    | goes; null takes the defaults. Coverage, the periods tracking was on, is
+    | kept for `retention` days (`authorization:usage-prune`). Schedule
+    | `authorization:usage-heartbeat` once an interval so a quiet site stays
+    | covered.
+    |
+    */
+
+    'usage' => [
+        'enabled'    => (bool) env('AUTHORIZATION_USAGE_ENABLED', false),
+        'interval'   => (int) env('AUTHORIZATION_USAGE_INTERVAL', 3600),
+        'batch'      => (int) env('AUTHORIZATION_USAGE_BATCH', 1000),
+        'connection' => env('AUTHORIZATION_USAGE_QUEUE_CONNECTION'),
+        'queue'      => env('AUTHORIZATION_USAGE_QUEUE'),
+        'retention'  => (int) env('AUTHORIZATION_USAGE_RETENTION_DAYS', 400),
     ],
 
     /*

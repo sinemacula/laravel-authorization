@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Preview\Previewing;
+use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GrantProvenanceResolver;
@@ -29,6 +30,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceScope;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
+use SineMacula\Laravel\Authorization\Usage\DecisionRoutes;
+use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
 
 /**
  * Decides a check for the authorization manager, stage by stage (AUTHZ-7.1).
@@ -53,6 +56,15 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  * `DecisionEvidence`). Every other pipeline records none, and costs what it did
  * before explanations.
  *
+ * A pipeline `tracking()` returns notes, while grant usage is tracked, the
+ * grant routes each decision it makes used (N100, see `Usage\DecisionRoutes`),
+ * read in the scope the decision was made in from what the resolution cache
+ * keeps, once its administration stage, if any, is passed. The manager hands
+ * its everyday checks to one; a preview, an explanation, a listing of
+ * permissions, a scoped query and a review's admission are never tracked, and
+ * neither is a further check an administration stage makes. Every other
+ * pipeline notes nothing, and costs what it did before usage tracking.
+ *
  * A bulk check decides each of its checks through `decide()` too, exactly as a
  * single check is decided; `prepare()` only reads ahead, in bulk, what those
  * checks will read, and a check of the batch reads its resource's attributes
@@ -74,6 +86,9 @@ final class DecisionPipeline
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder|null Records the evidence of the one check an `explaining()` pipeline decides; null for every other pipeline. */
     private ?EvidenceRecorder $evidence = null;
+
+    /** @var \SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder|null Notes the grant routes the decisions of a `tracking()` pipeline use; null for every other pipeline. */
+    private ?GrantUsageRecorder $usage = null;
 
     /**
      * Create a new decision pipeline instance.
@@ -161,6 +176,21 @@ final class DecisionPipeline
     {
         $pipeline           = clone $this;
         $pipeline->evidence = new EvidenceRecorder;
+
+        return $pipeline;
+    }
+
+    /**
+     * Return a pipeline that notes, with the recorder, the grant routes each
+     * decision it makes used (see `Usage\DecisionRoutes`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder  $usage
+     * @return self
+     */
+    public function tracking(GrantUsageRecorder $usage): self
+    {
+        $pipeline        = clone $this;
+        $pipeline->usage = $usage;
 
         return $pipeline;
     }
@@ -470,13 +500,24 @@ final class DecisionPipeline
 
         $source = $resource?->source;
 
+        // A review's admission is introspection, never use (N94), and a
+        // preview's admission is part of the preview (N100).
         if ($source instanceof ReviewResource) {
             return ReviewAdmission::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from));
         }
 
-        return $source instanceof OperationResource
+        // The routes are read before the administration stage, whose further
+        // checks may move the scope, and noted only when it keeps the verdict.
+        $used  = $this->usage === null || $source instanceof PreviewResource ? [] : DecisionRoutes::of($subject, $action, $decision, $this->policyOverride !== null);
+        $final = $source instanceof OperationResource
             ? OperationConstraints::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from))
             : $decision;
+
+        if ($this->usage !== null && $final->isAllowed() === $decision->isAllowed()) {
+            $this->usage->observe($used);
+        }
+
+        return $final;
     }
 
     /**

@@ -523,6 +523,54 @@ final class RolePoliciesTest extends TestCase
     }
 
     /**
+     * Resolved for grant usage tracking, the roles held are read with the chain
+     * of each and the policies attached to each role, in the same queries; a
+     * hierarchy that moves meanwhile says no chains, its policies still read
+     * afresh.
+     *
+     * @return void
+     */
+    public function testARoutedResolutionReadsWhichRoleEachPolicyCameThrough(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $parent = Role::create(['name' => 'publisher']);
+        $role   = Role::create(['name' => 'editor', 'parent_id' => $parent->id]);
+        $policy = self::policy('publishers');
+
+        $parent->attachPolicy($policy);
+        $user->assignRole($role);
+
+        $held      = $user->roles()->get();
+        $inherited = RolePolicies::heldThrough($held, $user->roles(), new ResolutionPins(null, true));
+
+        self::assertSame([$policy->id], $inherited->keys);
+        self::assertSame([$role->id => [$role->id, $parent->id]], $inherited->chains);
+        self::assertSame([$parent->id => [$policy->id]], $inherited->byRole);
+        self::assertTrue($inherited->stable);
+
+        $plain = RolePolicies::heldThrough($held, $user->roles(), new ResolutionPins);
+
+        self::assertSame([[$policy->id], null, []], [$plain->keys, $plain->chains, $plain->byRole]);
+
+        DB::table('roles')->where('id', $role->id)->update(['parent_id' => null]);
+
+        $moved = false;
+        $store = new VersionedStore(new Repository(self::onPin(static function (array $keys) use (&$moved, $role, $parent): void {
+            if ($moved || !\in_array('authz:version:role:' . $role->id, $keys, true)) {
+                return;
+            }
+
+            $moved = true;
+
+            DB::table('roles')->where('id', $role->id)->update(['parent_id' => $parent->id]);
+        })), 'authz');
+
+        $unstable = RolePolicies::heldThrough($user->roles()->get(), $user->roles(), new ResolutionPins($store, true));
+
+        self::assertSame([[$policy->id], null, false], [$unstable->keys, $unstable->chains, $unstable->stable]);
+    }
+
+    /**
      * A holder whose roles are all hidden by the tenant scope, or who holds
      * none, gets no role's policy, though a role somewhere holds one.
      *

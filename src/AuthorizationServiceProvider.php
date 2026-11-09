@@ -22,6 +22,8 @@ use SineMacula\Laravel\Authorization\Console\PruneGrantsCommand;
 use SineMacula\Laravel\Authorization\Console\ReviewCommand;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
 use SineMacula\Laravel\Authorization\Console\SyncPermissionsCommand;
+use SineMacula\Laravel\Authorization\Console\UsageHeartbeatCommand;
+use SineMacula\Laravel\Authorization\Console\UsagePruneCommand;
 use SineMacula\Laravel\Authorization\Console\ValidatePolicyCommand;
 use SineMacula\Laravel\Authorization\Console\WhyCommand;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
@@ -49,6 +51,7 @@ use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\QueryScopeRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\UsageRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
@@ -75,6 +78,8 @@ use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
+use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
+use SineMacula\Laravel\Authorization\Usage\UsageTracking;
 
 /**
  * Service provider for the authorization package.
@@ -104,6 +109,13 @@ use SineMacula\Laravel\Authorization\Support\SessionScopes;
  *
  * The context key catalogue is one per application, so the keys a service
  * provider registers on it are kept for every request and job.
+ *
+ * Grant usage tracking is wired by `UsageRegistrar`: the usage store, which an
+ * application may bind itself, and the recorder, one per worker; while tracking
+ * is on, the resolution cache keeps the routes behind each grantee's grants,
+ * the manager notes those its everyday checks use, and the recorder flushes
+ * them as each request, command or job ends. With tracking off none of this
+ * runs.
  *
  * The contracts an application may bind itself (the subject resolver, the
  * tenant tree, the identity directory, the grant hook, the policy store, the
@@ -152,6 +164,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->registerPolicyEvaluator();
         $this->registerAuthorizationManager();
         $this->registerManagementServices();
+
+        (new UsageRegistrar($this->app))->register();
     }
 
     /**
@@ -176,6 +190,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
         (new BladeDirectiveRegistrar($this->app))->register();
         (new QueryScopeRegistrar)->register();
+        (new UsageRegistrar($this->app))->boot();
     }
 
     /**
@@ -217,6 +232,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
             MigrateSpatieCommand::class,
             SyncPermissionsCommand::class,
             PruneGrantsCommand::class,
+            UsageHeartbeatCommand::class,
+            UsagePruneCommand::class,
             ValidatePolicyCommand::class,
             CheckConfigurationCommand::class,
         ]);
@@ -337,7 +354,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
                 $store   = $manager->store($storeName);
             }
 
-            return new ResolutionCache(store: $store, ttl: $ttl, prefix: $prefix);
+            return new ResolutionCache(store: $store, ttl: $ttl, prefix: $prefix, isTrackingUsage: UsageTracking::isEnabled());
         });
     }
 
@@ -432,6 +449,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             resourcePolicies: new ResourcePolicyResolver,
             guardrails: new GuardrailResolver,
             sessionCaps: new SessionCapResolver($app->make(SessionPolicySource::class), $app->make(SessionScopes::class)),
+            usage: UsageTracking::isEnabled() ? $app->make(GrantUsageRecorder::class) : null,
         ));
 
         $this->app->alias('authorization', AuthorizationManager::class);

@@ -5,11 +5,16 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Cache;
 
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
+use SineMacula\Laravel\Authorization\Usage\GrantRoute;
 
 /**
  * How the persistent tier of the resolution cache writes what a resolution
  * finds and reads it back: names as they are, and policies as their stored key,
  * their document and, for a resource policy, the resource it is attached to.
+ * While grant usage is tracked, a grantee's permissions and policies are kept
+ * under a kind of their own, with the routes of the grants behind them (see
+ * `Usage\GrantRoute`), so an entry kept without them, before tracking was
+ * turned on, is never read for one.
  *
  * Whatever is read back is checked against the shape it was written in, and an
  * entry that does not hold to it is refused with `UnexpectedValueException`, so
@@ -22,13 +27,88 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
  */
 final class ResolutionCodec
 {
+    /** @var list<string> The kinds of entry kept with the routes of the grants behind them while grant usage is tracked. */
+    private const array ROUTED = ['permissions', 'policies'];
+
+    /** @var string The suffix of the kind a routed entry is kept under. */
+    private const string ROUTED_SUFFIX = '-routed';
+
+    /**
+     * Return the kind an entry of the kind is kept under: its own, or, while
+     * grant usage is tracked, a grantee's permissions' and policies' routed
+     * kind.
+     *
+     * @param  string  $kind
+     * @param  bool  $isTrackingUsage
+     * @return string
+     */
+    public static function kindOf(string $kind, bool $isTrackingUsage): string
+    {
+        return $isTrackingUsage && \in_array($kind, self::ROUTED, true) ? $kind . self::ROUTED_SUFFIX : $kind;
+    }
+
+    /**
+     * Determine whether entries of the kind are kept with their routes.
+     *
+     * @param  string  $kind
+     * @return bool
+     */
+    public static function isRouted(string $kind): bool
+    {
+        return \str_ends_with($kind, self::ROUTED_SUFFIX);
+    }
+
+    /**
+     * Return what the persistent tier holds of the routes behind an entry, as
+     * the entry's `routes`, or nothing for none.
+     *
+     * @param  array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>|null  $routes
+     * @return array<string, array<string, list<array<string, mixed>>>>
+     */
+    public static function encodeRoutes(?array $routes): array
+    {
+        if ($routes === null) {
+            return [];
+        }
+
+        return ['routes' => \array_map(static fn (array $list): array => \array_map(static fn (GrantRoute $route): array => $route->toArray(), $list), $routes)];
+    }
+
+    /**
+     * Read stored routes back, by what each gives, refusing anything that is
+     * not routes.
+     *
+     * @param  mixed  $stored
+     * @return array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>
+     *
+     * @throws \UnexpectedValueException
+     */
+    public static function routes(mixed $stored): array
+    {
+        if (!\is_array($stored)) {
+            throw new \UnexpectedValueException('Cached routes are not a map of routes.');
+        }
+
+        $routes = [];
+
+        foreach ($stored as $key => $list) {
+            if (!\is_array($list)) {
+                throw new \UnexpectedValueException('Cached routes are not a list.');
+            }
+
+            $routes[(string) $key] = \array_map(GrantRoute::fromArray(...), \array_values($list));
+        }
+
+        return $routes;
+    }
+
     /**
      * Determine whether a stored value has the shape of an entry.
      *
      * @param  mixed  $entry
      * @return bool
      *
-     * @phpstan-assert-if-true array{versions: non-empty-array<string, string>, value: array<mixed>, until: int} $entry
+     * @phpstan-assert-if-true array{versions: non-empty-array<string, string>, value: array<mixed>, until: int, routes?: mixed} $entry
      */
     public static function isEntry(mixed $entry): bool
     {

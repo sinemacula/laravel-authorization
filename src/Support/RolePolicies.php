@@ -93,6 +93,10 @@ final class RolePolicies
      * The nearest expiry counts the identity's grants of the roles as well as
      * the roles' attachments, since a policy stops applying when either lapses.
      *
+     * A resolution tracking grant usage (see `ResolutionPins::isRouting()`)
+     * reads, in the same queries, the chain of each role held and the role each
+     * attachment is to, so it can say which route each policy came through.
+     *
      * @param  \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>  $held
      * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $roles
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
@@ -104,19 +108,28 @@ final class RolePolicies
     {
         // With no role held, every read below returns at once, without a query.
         /** @var list<string> $keys */
-        $keys  = \array_keys($held->getDictionary());
-        $reach = RoleGraph::reach($keys);
+        $keys    = \array_keys($held->getDictionary());
+        $reach   = RoleGraph::reach($keys);
+        $columns = ['policy_id', 'expires_at'];
 
         $pins->roles(\array_keys($reach));
 
-        $within = RoleGraph::keysWithin($reach, $keys);
-        $rows   = self::attachments($roles->getRelated()->getMorphClass(), $within ?? self::afresh($roles, $keys));
+        $chains = $pins->isRouting() ? RoleGraph::chainsWithin($reach, $keys) : null;
+        $within = match (true) {
+            !$pins->isRouting() => RoleGraph::keysWithin($reach, $keys),
+            $chains === null    => null,
+            default             => RoleGraph::keysOf($chains),
+        };
+        $type   = $roles->getRelated()->getMorphClass();
+        $rows   = self::attachments($type, $within ?? self::afresh($roles, $keys), $pins->isRouting() ? [...$columns, 'authorizable_id'] : $columns);
         $grants = $rows === [] ? [] : $held->map(static fn (Model $role): mixed => self::grantExpiry($role))->all();
 
         return new InheritedPolicies(
             \array_column($rows, 'policy_id'),
             GrantExpiry::nearest(GrantExpiry::nearest(null, \array_column($rows, 'expires_at')), $grants),
             $within !== null,
+            $chains,
+            $pins->isRouting() ? self::byRole($rows) : [],
         );
     }
 
@@ -142,6 +155,31 @@ final class RolePolicies
         }
 
         return $rows;
+    }
+
+    /**
+     * Return the keys of the policies attached to each role, by the role's key,
+     * from the attachments read.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return array<string, list<string>>
+     */
+    private static function byRole(array $rows): array
+    {
+        $attached = [];
+
+        foreach ($rows as $row) {
+            $role   = $row['authorizable_id'] ?? null;
+            $policy = $row['policy_id']       ?? null;
+
+            if (!\is_scalar($role) || !\is_scalar($policy)) {
+                continue;
+            }
+
+            $attached[(string) $role][] = (string) $policy;
+        }
+
+        return $attached;
     }
 
     /**

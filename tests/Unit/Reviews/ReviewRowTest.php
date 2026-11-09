@@ -10,8 +10,10 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Reviews\Enums\GrantState;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState;
+use SineMacula\Laravel\Authorization\Reviews\Enums\UsageStatus;
 use SineMacula\Laravel\Authorization\Reviews\OriginScope;
 use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
+use SineMacula\Laravel\Authorization\Reviews\RowUsage;
 use SineMacula\Laravel\Authorization\Reviews\SupportingGrant;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -64,6 +66,7 @@ final class ReviewRowTest extends TestCase
             'granted_by'       => ['type' => 'user', 'id' => 'admin'],
             'grant_state'      => 'live',
             'subject_state'    => 'unknown',
+            'usage'            => ['status' => 'unknown', 'last_observed_at' => null, 'coverage_from' => null, 'coverage_until' => null],
         ], $row->toArray());
 
         self::assertSame('2040-01-02T03:04:05Z', ReviewRow::instant($row->routeExpiresAt()));
@@ -138,6 +141,30 @@ final class ReviewRowTest extends TestCase
         self::assertSame(SubjectState::ACTIVE, $active->subjectState);
         self::assertSame(\array_diff_key($row->toArray(), ['subject_state' => true]), \array_diff_key($active->toArray(), ['subject_state' => true]));
         self::assertSame('active', $active->toArray()['subject_state']);
+    }
+
+    /**
+     * The row is given what is known of its use, everything else kept, and
+     * keeps it when given its subject's state; its starting grant's creation is
+     * read back as stored.
+     *
+     * @return void
+     */
+    public function testTheRowIsGivenItsUsage(): void
+    {
+        $row     = self::row();
+        $seen    = CarbonImmutable::create(2030, 6, 1, 10, 0, 0, 'UTC');
+        $covered = CarbonImmutable::create(2030, 5, 1, 0, 0, 0, 'UTC');
+        $used    = $row->withUsage(new RowUsage(UsageStatus::USED, $seen, $covered, $seen))->withSubjectState(SubjectState::ACTIVE);
+
+        $usage = ['status' => 'used', 'last_observed_at' => '2030-06-01T10:00:00Z', 'coverage_from' => '2030-05-01T00:00:00Z', 'coverage_until' => '2030-06-01T10:00:00Z'];
+        $rest  = ['usage' => true, 'subject_state' => true];
+
+        self::assertSame($usage, $used->toArray()['usage']);
+        self::assertSame(\array_diff_key($row->toArray(), $rest), \array_diff_key($used->toArray(), $rest));
+        self::assertNull($row->usage);
+        self::assertSame(UsageStatus::USED, $used->usage?->status);
+        self::assertSame('2030-01-01T00:00:00Z', ReviewRow::instant($row->createdAt()));
     }
 
     /**

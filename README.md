@@ -257,7 +257,8 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
 Gate switch, the policy store, the policy limits, the context keys and sources, the attribute providers, the subject
 resolver, the identity directory, the authentication requirement checker, the session policy source and the scope map,
-the cache, the bulk checks' chunk size, and the role hierarchy and rank.
+the cache, the bulk checks' chunk size, the role hierarchy and rank, the access reviews' limit, and grant usage
+tracking (see [Usage tracking](#usage-tracking)).
 
 ## Usage
 
@@ -2301,7 +2302,7 @@ or about the subject of the scoped manager it is called on:
 | `withPolicies($policies)`                         | Returns a scoped manager that evaluates only the policies given                                                           |
 | `queryScope($model, $action, $context)`           | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))                               |
 | `GrantScopeQuery::forIdentity()`, `hasGrantIn()`  | Not on the manager: grant scope and presence in a tenant (see [Grant scope query](#grant-scope-query))                    |
-| `AccessReview::review()`, `trusted()`             | Not on the manager: grant routes held, holdings, expiries and grants by actor (see [Access reviews](#access-reviews))     |
+| `AccessReview::review()`, `trusted()`             | Not on the manager: holders, holdings, expiries, grants by actor, unused (see [Access reviews](#access-reviews))          |
 | `AccessReview::page()`, `stream()`, `export()`    | Not on the manager: a review a keyset page, a lazy stream or JSON Lines at a time, each with a `trusted…()` counterpart   |
 
 `check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` deciding as `checkMany()`
@@ -2798,8 +2799,9 @@ options name, without the subject's browser session (see
 ### Access reviews
 
 `AccessReview` lists, for periodic reviews and their sign-off (AUTHZ-11.6), who holds a role, a permission or a policy
-in a scope, what a subject holds and where, which grants expire within a window, and which grants an actor last granted
-or changed. Resolve it from the container, where it is a singleton, and run a typed `ReviewQuery`:
+in a scope, what a subject holds and where, which grants expire within a window, which grants an actor last granted or
+changed, and, with [usage tracking](#usage-tracking) on, which grants show no use. Resolve it from the container, where
+it is a singleton, and run a typed `ReviewQuery`:
 
 ```php
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
@@ -2858,6 +2860,7 @@ Holders, holdings, expiries and an actor's grants each follow their scope select
 | `ReviewQuery::holdings($subject, $scope)`        | A `Subject`'s own grants and its identity's that reach it; or an identity's and its listed principals' |
 | `ReviewQuery::expiring($scope, $from, $until)`   | Grants, attachments and role permission edges expiring within `[from, until)`, in UTC                  |
 | `ReviewQuery::grantedBy($actor, $scope)`         | Grants whose `granted_by` pair is exactly the actor's                                                  |
+| `ReviewQuery::unused($scope, $since)`            | Live grants with no observed use since the instant (see [Usage tracking](#usage-tracking))             |
 | `withLimit($limit)`                              | The same review returning at most that many rows                                                       |
 
 A permission target means that definition, never a policy statement or wildcard grant that might authorise its action,
@@ -2906,6 +2909,7 @@ document or value. Its shape is versioned (`version: 1`):
 | `route_expires_at`                       | The earliest expiry of every row the route rests on                                          |
 | `granted_by`                             | The last actor to grant or change the starting row; null for a trusted write                 |
 | `grant_state`, `subject_state`           | `live`, `expired` or `malformed`; `active`, `inactive` or `unknown`                          |
+| `usage`                                  | `status` (`used`, `unused` or `unknown`), the last observed use and the coverage             |
 
 The rows come in one total order, the same on SQLite, PostgreSQL and MySQL: by source kind, target, grantee, origin
 scope (the platform before a tenant, every application before a named one) and route (the first role of its chain, how
@@ -3025,7 +3029,7 @@ review's order, then a footer:
 
 ```json lines
 {"record":"header","version":1,"query":"holders","scope":{"selection":"applies_in","tenant":{"type":"tenant","id":"acct1"},"application":{"selection":"named","name":"admin"}},"reviewed_at":"2026-11-08T12:00:00.250000Z","scan_started_at":"2026-11-08T12:00:00.250000Z","consistency":"live"}
-{"record":"row","version":1,"row_key":"004885d0a74311b154e17bb6365cb7332cfd7ae2bb46526880e6be6593bd8ac5","subject":{"type":"user","id":"17"},"grantee":{"type":"user","id":"17"},"target":{"type":"role","id":"01a1be88-d4d3-72cc-b9bc-620cc97d4906"},"source_kind":"role_grant","source_key":"4:role|36:01a1be88-d4d3-72cc-b9bc-620cc97d4906|4:user|2:17|~|~|~","origin_scope":{"tenant":null,"application":null,"include_subtree":true},"via_identity":null,"role_path":[{"type":"role","id":"01a1be88-d4d3-72cc-b9bc-620cc97d4906"}],"supporting_grants":[{"source_key":"4:role|36:01a1be88-d4d3-72cc-b9bc-620cc97d4906|4:user|2:17|~|~|~","scope":{"tenant":null,"application":null,"include_subtree":true},"expires_at":null}],"created_at":"2026-10-01T09:00:00Z","updated_at":"2026-10-01T09:00:00Z","expires_at":null,"route_expires_at":null,"granted_by":null,"grant_state":"live","subject_state":"active"}
+{"record":"row","version":1,"row_key":"004885d0a74311b154e17bb6365cb7332cfd7ae2bb46526880e6be6593bd8ac5","subject":{"type":"user","id":"17"},"grantee":{"type":"user","id":"17"},"target":{"type":"role","id":"01a1be88-d4d3-72cc-b9bc-620cc97d4906"},"source_kind":"role_grant","source_key":"4:role|36:01a1be88-d4d3-72cc-b9bc-620cc97d4906|4:user|2:17|~|~|~","origin_scope":{"tenant":null,"application":null,"include_subtree":true},"via_identity":null,"role_path":[{"type":"role","id":"01a1be88-d4d3-72cc-b9bc-620cc97d4906"}],"supporting_grants":[{"source_key":"4:role|36:01a1be88-d4d3-72cc-b9bc-620cc97d4906|4:user|2:17|~|~|~","scope":{"tenant":null,"application":null,"include_subtree":true},"expires_at":null}],"created_at":"2026-10-01T09:00:00Z","updated_at":"2026-10-01T09:00:00Z","expires_at":null,"route_expires_at":null,"granted_by":null,"grant_state":"live","subject_state":"active","usage":{"status":"unknown","last_observed_at":null,"coverage_from":null,"coverage_until":null}}
 {"record":"footer","version":1,"rows":1,"scan_ended_at":"2026-11-08T12:00:00.412000Z","complete":true}
 ```
 
@@ -3053,8 +3057,114 @@ tables already have: on MySQL and SQLite, whose reference columns compare their 
 table's unique index. The migration honours the configured table names and connection.
 
 **What is left out.** Boundaries, guardrails and resource-policy attachments restrict or extend what a check decides,
-but are not held, so no review lists them. Snapshot exports and CSV are not offered, and the unused-grant report comes
-in the next part of the reviews. See [Access reviews](docs/design/access-reviews.md) for the design.
+but are not held, so no review lists them. Snapshot exports and CSV are not offered. See
+[Access reviews](docs/design/access-reviews.md) for the design.
+
+#### Usage tracking
+
+Usage tracking records which grants are used, so a review can tell a grant nobody uses from one whose use was never
+watched (N94, N100 to N102). It is off by default, and free when off: a check does no extra work and allocates nothing
+for it, no listener is registered and no usage table is read, and every review row's `usage` reads `unknown`. Turn it on
+in `config/authorization.php`, or with `AUTHORIZATION_USAGE_ENABLED=true`:
+
+```php
+'usage' => [
+    'enabled'    => true,
+    'interval'   => 3600,   // the bucket, in seconds; at least 60
+    'batch'      => 1000,   // the most observations a worker holds before it sends them
+    'connection' => null,   // the queue connection the recording job goes to; null for the default
+    'queue'      => null,   // the queue; null for the connection's default
+    'retention'  => 400,    // the days coverage is kept
+],
+```
+
+**The cost.** While tracking is on, a resolution of a grantee's permissions and policies also keeps the routes of the
+stored grants behind each, read from the rows it reads already and kept beside its entry in the resolution cache, so a
+cold check reads no more queries than before, and a warm check finds the routes behind its decision at a constant extra
+cost and with no query. A cache entry kept before tracking was turned on is never read for one, so turning it on
+resolves each grantee once more. The routes are noted in memory and sent to be recorded by a queued job, never written
+on the check.
+
+**What counts.** An allowed decision counts every live grant route behind the permission that allowed it, redundant
+ones included: the direct grant, each role grant that carried it with the ancestor role it reached, and the identity's
+grant, behind every held permission that covers the action. A policy counts whenever one of its statements decided,
+allow or deny, so a policy that only denies, doing its job, is used. These are everyday decisions and count: `check()`,
+`can()`, `cannot()`, `any()`, `all()`, `authorize()`, `checkMany()`, `canEach()`, `filterAuthorized()`, the Gate, the
+Blade directives and the middleware, and a delegated change's own check. A role check (`hasRole()`, `@role`, `role:`)
+is no decision and counts nothing.
+
+**What never counts.** Only a decision the application acts on is use, so nothing else counts:
+
+| Path                                                                           | Why it never counts                                                                     |
+|--------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
+| `previewFor()` and its admission                                               | A preview decides about another subject as the caller, who uses none of its grants      |
+| `explain()` and `authorization:why`                                            | An explanation runs the check to show it, not to act on it (N89)                        |
+| `permissionsFor()`                                                             | A listing of what a subject may do is introspection (N70)                               |
+| `whereAuthorized()` and `queryScope()`                                         | A scoped query compiles SQL and decides no record                                       |
+| A review's admission and its reads                                             | Reviewing who holds what is introspection, and must not create the use it reports       |
+| A delegated change's administration stage                                      | Its further checks weigh the change, and a refused change counts nothing it was allowed |
+| A permission from a custom `getPermissions()`                                  | A grantee whose grants the package does not resolve cannot say where they came from     |
+| A policy from a store, a resource, `withPolicies()`, a guardrail or a boundary | None of these is a grant a subject holds                                                |
+
+**The interval.** Observations are bucketed by `interval` seconds, an hour by default: a bucket starts at a whole
+multiple of the interval in UTC, so every worker agrees where it starts. Each route is noted at most once a bucket per
+worker, and a review says a route was last used within the interval that starts at its `last_observed_at`.
+
+**The queue.** What a worker notes is sent as one `RecordGrantUsage` job when the request, command or queued job ends,
+or as soon as the worker holds `batch` observations, so a long-running worker never holds more. The job goes to the
+`connection` and `queue` configured. Sending never reaches a decision: a queue that refuses the job is written to the
+log channel and its observations dropped, and a check never waits on the store. On the `sync` connection the job runs
+as it is sent, at the end of the request or as a batch fills.
+
+**The tables and pruning.** The migration `2026_11_09_000001_create_grant_usage_tables` adds
+`authorization_grant_usage`, one row for each grant route with the start of the last bucket it was observed in and the
+creation of the grant it was observed through, keyed by a stable digest of its source kind, target, grantee, tenant,
+application and reach (the roles it runs through), and `authorization_usage_coverage`, the periods tracking was on,
+`[from, until)` in UTC. Both honour the configured table names (`tables.grant_usage`, `tables.usage_coverage`) and
+connection. A write never moves a route's last use backwards, so a job delivered twice or out of order changes nothing.
+`authorization:usage-prune` removes the usage of every route whose stored grant no longer exists and the coverage older
+than `retention` days.
+
+**The heartbeat.** Each recording job extends the current coverage period, or opens a new one when the gap since the
+last one ended exceeds two intervals. A site that is tracking but quiet sends no jobs, so schedule the heartbeat at
+least once an interval to keep it covered; it records nothing while tracking is off:
+
+```php
+Schedule::command('authorization:usage-heartbeat')->hourly();
+Schedule::command('authorization:usage-prune')->daily();
+```
+
+**The store.** Usage is kept behind `Contracts\GrantUsageStore`: `record(UsageBatch $batch)` keeps a batch, each route
+only when its observation is newer, and extends the coverage to the batch's instant; `lastObserved(array $keys)` returns
+what is kept of each route asked about; and `coverage($from, $until)` returns the periods that overlap a window. The
+package binds `Usage\DatabaseGrantUsageStore` on the tables above; bind your own to send usage elsewhere.
+
+**Coverage and unknown.** A row's window runs from the later of the review's `since` and the grant's creation to the
+review's instant. Its `usage` is `used` when its route was observed in a bucket that ends after the window starts;
+`unused` only when the coverage periods, each taken to reach two intervals past its end, cover the whole window and the
+route was never observed in it; and `unknown` otherwise: tracking is off, coverage of the window is incomplete (a
+window that starts before tracking began, or that a gap interrupts), or the route's source cannot report its use (a
+role's permission edge or policy attachment, a grantee with its own `getPermissions()` or `getPolicies()`, or, for a
+policy, a policy resolver of your own). A missing observation alone is never taken as proof of non-use.
+`coverage_from` and `coverage_until` give the latest coverage period overlapping the window.
+
+**Regrants.** A grant revoked and made again is a new row, created later, and never inherits the old grant's use: an
+observation made through a grant created before the current one is ignored. A grant whose expiry or reach is rewritten
+in place keeps its creation, and so its use.
+
+**The unused review.** `ReviewQuery::unused($scope, $since)` lists the live grants in the scope (roles and permissions
+granted, policies attached to grantees) with no observed use since the instant, each `unused` or `unknown`, and leaves
+out those used. It pages, streams and exports as every review does, admitted by the same `authorization:review.read`
+right, which never counts as use; `authorization:review unused --since=…` exports one. Every review row carries
+`usage`, read in one batched lookup a page. The row's shape stays `version: 1`, since the package is unreleased.
+
+```php
+$reviews->trusted(ReviewQuery::unused(ReviewScope::everywhere(), now()->subDays(90)));
+```
+
+Recording lags: a worker's observations reach the store when it next sends them, so a grant used only in the last
+moments may read as unused until then, and observations a refused job carried are lost while other workers' jobs keep
+the coverage going.
 
 ### Grant scope query
 
@@ -3826,6 +3936,8 @@ php artisan authorization:why user:1 posts:delete post:42 --tenant=team:7
 php artisan authorization:review holders role:1 --rooted-within=team:7 --output=holders.jsonl
 php artisan authorization:policy:validate --database
 php artisan authorization:prune --pretend
+php artisan authorization:usage-heartbeat
+php artisan authorization:usage-prune --pretend
 php artisan authorization:check
 ```
 
@@ -3866,6 +3978,10 @@ boundaries apart from the grants as a run does, and `--chunk`, and is scheduled 
 ```php
 Schedule::command('authorization:prune')->daily();
 ```
+
+`authorization:usage-heartbeat` extends the coverage of [usage tracking](#usage-tracking) to now, so a quiet site stays
+covered, and records nothing while tracking is off; `authorization:usage-prune` removes the usage of grants that no
+longer exist and coverage older than `authorization.usage.retention` days, and takes `--pretend`.
 
 #### Explaining a check from the console
 
@@ -3996,11 +4112,12 @@ php artisan authorization:review holders permission:01a1be88-d4e0-7153-8120-e043
 php artisan authorization:review holdings user:1 --rooted-within=team:7
 php artisan authorization:review expiring --everywhere --from=2026-12-01 --until=2027-01-01 --output=expiring.jsonl
 php artisan authorization:review granted_by --actor=user:7 --everywhere --output=granted.jsonl --force
+php artisan authorization:review unused --since=2026-09-01 --everywhere --output=unused.jsonl
 ```
 
 | Argument or option  | What it names                                                                                                                                                                                                               | When omitted                                         |
 |---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------|
-| `{query}`           | `holders`, `holdings`, `expiring` or `granted_by`                                                                                                                                                                           | Required                                             |
+| `{query}`           | `holders`, `holdings`, `expiring`, `granted_by` or `unused`                                                                                                                                                                 | Required                                             |
 | `{reference}`       | For `holders`, the role, permission or policy as `role:{key}`, `permission:{key}` or `policy:{key}`, or its morph type; for `holdings`, the saved subject as `{morph type}:{key}`, resolved by the console subject resolver | Required for those two; refused for the others       |
 | `--tenant`          | Review what applies in the tenant, as `{morph type}:{key}`, read as `authorization:why` reads it                                                                                                                            | The platform, when no scope option is given          |
 | `--rooted-within`   | Review the grants made in the tenant or below it                                                                                                                                                                            |                                                      |
@@ -4008,6 +4125,7 @@ php artisan authorization:review granted_by --actor=user:7 --everywhere --output
 | `--application`     | `none`, `any` or the application's name                                                                                                                                                                                     | `none` for a tenant or the platform, `any` otherwise |
 | `--from`, `--until` | For `expiring`, the window `[from, until)`, each a date and time, in UTC when it names no zone                                                                                                                              | Required for `expiring`; refused for the others      |
 | `--actor`           | For `granted_by`, the actor as `{morph type}:{key}`, matched exactly as stored                                                                                                                                              | Required for `granted_by`; refused for the others    |
+| `--since`           | For `unused`, the instant to look back to, a date and time, in UTC when it names no zone                                                                                                                                    | Required for `unused`; refused for the others        |
 | `--direct-only`     | For `holders`, the direct grants alone                                                                                                                                                                                      | Every route; refused for the others                  |
 | `--output`          | The file to write, which must not exist                                                                                                                                                                                     | The standard output                                  |
 | `--force`           | Overwrite the `--output` file when it exists                                                                                                                                                                                | An existing file is refused                          |
