@@ -5,12 +5,10 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Console\Support;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\Relation;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Evaluation\Explanation;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
-use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
@@ -200,43 +198,7 @@ final readonly class WhyInvocation
             return AuthorizationScope::platform($application);
         }
 
-        $parts = \explode(':', \is_string($tenant) ? $tenant : '', 2);
-
-        if (\count($parts) !== 2 || $parts[0] === '' || $parts[1] === '') {
-            throw new \InvalidArgumentException('The --tenant option must be in the format {morphType}:{key} (e.g. team:1).');
-        }
-
-        return AuthorizationScope::tenant(self::tenant($parts[0], $parts[1]), $application);
-    }
-
-    /**
-     * Return the reference to the tenant of the type and key: the row of the
-     * Eloquent model the type resolves to, by its morph class, or the type and
-     * key as given when it resolves to none. A lookup that fails, as one whose
-     * key the key column cannot hold does on some databases, is refused without
-     * naming the failure.
-     *
-     * @param  string  $type
-     * @param  string  $key
-     * @return \SineMacula\Laravel\Authorization\Support\Reference
-     *
-     * @throws \InvalidArgumentException
-     */
-    private static function tenant(string $type, string $key): Reference
-    {
-        $class = Relation::getMorphedModel($type) ?? $type;
-
-        if (!\is_subclass_of($class, Model::class)) {
-            return new Reference($type, $key);
-        }
-
-        try {
-            $model = $class::query()->find($key);
-        } catch (\Throwable) { // @phpstan-ignore catch.neverThrown (the query may fail, as one with a key the key column cannot hold does on PostgreSQL)
-            throw new \InvalidArgumentException('The --tenant option could not be resolved.');
-        }
-
-        return Reference::of($model ?? throw new \InvalidArgumentException("No tenant '{$type}:{$key}' was found."));
+        return AuthorizationScope::tenant(TenantOption::reference('tenant', $tenant), $application);
     }
 
     /**

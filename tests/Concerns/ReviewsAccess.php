@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace Tests\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -52,6 +54,16 @@ trait ReviewsAccess
         ClosureTenantTree::add(self::tenant('acct2'), self::tenant('org1'));
         ClosureTenantTree::add(self::tenant('team1'), self::tenant('acct1'));
         ClosureTenantTree::add(self::tenant('org2'));
+    }
+
+    /**
+     * Give the application a key, so paged reviews can sign their cursors.
+     *
+     * @return void
+     */
+    protected static function keyCursors(): void
+    {
+        config(['app.key' => 'base64:' . \base64_encode(\str_repeat('k', 32))]);
     }
 
     /**
@@ -171,6 +183,42 @@ trait ReviewsAccess
     protected static function trusted(ReviewQuery $query): ReviewResult
     {
         return self::reviews()->trusted($query);
+    }
+
+    /**
+     * Read every page of the review as trusted work, at most the size of rows a
+     * page, from the first to the last, and return the rows of all of them and
+     * the SQL each page ran.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
+     * @param  int  $size
+     * @return array{rows: list<\SineMacula\Laravel\Authorization\Reviews\ReviewRow>, queries: list<list<string>>}
+     *
+     * @throws \Throwable
+     */
+    protected static function pagedThrough(ReviewQuery $query, int $size): array
+    {
+        $sql = [];
+
+        DB::listen(static function (QueryExecuted $executed) use (&$sql): void {
+            $sql[] = $executed->sql;
+        });
+
+        $rows    = [];
+        $queries = [];
+        $cursor  = null;
+
+        do {
+            $sql    = [];
+            $page   = self::reviews()->trustedPage($query, $cursor, $size);
+            $cursor = $page->nextCursor;
+
+            \array_push($rows, ...$page->rows);
+
+            $queries[] = $sql;
+        } while ($cursor !== null && \count($queries) < 10000);
+
+        return ['rows' => $rows, 'queries' => $queries];
     }
 
     /**

@@ -37,7 +37,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * only when the tenant sees its role too, as a check reaches it only through
  * that role.
  *
- * Each kind is read in the review's order, one query of at most the room left.
+ * Each kind is read in the review's order, one query of at most the room left,
+ * a later page resuming after the last row of the page before by its keyset.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -157,7 +158,9 @@ final class StoredRows
 
     /**
      * Collect at most the room left of the query's rows, in the review's order,
-     * each the row of the source, its target of the kind.
+     * each the row of the source, its target of the kind: none when the rows
+     * are full or every row of the source comes before the page before ended,
+     * and on a later page those after its last row.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind  $source
@@ -165,17 +168,19 @@ final class StoredRows
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string|null  $roleType
      * @return void
+     *
+     * @throws \UnexpectedValueException
      */
     private static function collect(RowCollector $rows, SourceKind $source, GrantTarget $kind, Builder $query, ?string $roleType = null): void
     {
-        if ($rows->isFull()) {
+        if ($rows->isFull() || $rows->isPast($source)) {
             return;
         }
 
         $type   = Definitions::morph($kind);
         $stored = $roleType === null ? $kind->value : GrantRow::EDGE;
 
-        foreach (GrantRows::page($query, $stored, 0, $rows->room(), $roleType) as $row) {
+        foreach (GrantRows::page(self::resumed($query, $kind, $roleType !== null, $rows->resumeAt($source)), $stored, $rows->room(), $roleType) as $row) {
             $isRoleRow = $source === SourceKind::ROLE_POLICY_ATTACHMENT || $source === SourceKind::ROLE_PERMISSION_EDGE;
             $chain     = match (true) {
                 $source === SourceKind::ROLE_GRANT => [$row->targetId],
@@ -185,6 +190,28 @@ final class StoredRows
 
             $rows->route($source, $row->grantee, $row, new Reference($type, $row->targetId), $chain);
         }
+    }
+
+    /**
+     * Return the ordered query limited to the rows after the stored row the
+     * last row of the page before is, given its sort key; from its start, given
+     * none. Each stored row is one row of the review, so none is read again.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  bool  $isEdge
+     * @param  list<bool|int|string|null>|null  $after
+     * @return \Illuminate\Database\Query\Builder
+     *
+     * @throws \UnexpectedValueException
+     */
+    private static function resumed(Builder $query, GrantTarget $kind, bool $isEdge, ?array $after): Builder
+    {
+        return match (true) {
+            $after === null => $query,
+            $isEdge         => GrantRows::afterEdge($query, GrantRows::edgeAt($after)),
+            default         => GrantRows::after($query, $kind->table(), $kind->column(), true, GrantRows::positionAt($after, true)),
+        };
     }
 
     /**

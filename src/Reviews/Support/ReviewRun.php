@@ -89,17 +89,19 @@ final readonly class ReviewRun
     ) {}
 
     /**
-     * Return a run of a review of the scope, made now, reading the tenant tree
+     * Return a run of a review of the scope, made at the instant given, frozen
+     * for a later page of a review begun then, or now, reading the tenant tree
      * once for it.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewScope  $scope
+     * @param  \Carbon\CarbonImmutable|null  $at
      * @return self
      *
      * @throws \UnexpectedValueException
      */
-    public static function of(ReviewScope $scope): self
+    public static function of(ReviewScope $scope, ?CarbonImmutable $at = null): self
     {
-        $now = CarbonImmutable::now('UTC');
+        $now = $at?->utc() ?? CarbonImmutable::now('UTC');
 
         return match ($scope->selection) {
             ScopeSelection::APPLIES_IN    => new self($scope, $now, TenantChain::of($scope->tenant, TenantChain::tree()), null),
