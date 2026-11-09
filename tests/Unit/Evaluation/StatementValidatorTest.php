@@ -603,6 +603,8 @@ final class StatementValidatorTest extends TestCase
         self::assertSame(['subject.id', 'input.b', 'resource.owner'], StatementValidator::dependenciesOf($tests, ['posts:*', 'posts:${resource.owner}/${subject.id}']));
         self::assertSame([], StatementValidator::dependenciesOf([], []));
         self::assertSame([], StatementValidator::dependenciesOf(StatementValidator::conditionTests(['eq' => ['input.a' => []]]), []));
+        self::assertSame([], StatementValidator::dependenciesOf(StatementValidator::conditionTests(['between' => ['input.f' => '${input.malformed}']]), []));
+        self::assertSame(['input.g'], StatementValidator::dependenciesOf([], ['posts:*', 'posts:${input.g}', 'posts:${input.g}']));
     }
 
     /**
