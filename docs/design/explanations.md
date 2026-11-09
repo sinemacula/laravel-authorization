@@ -171,10 +171,13 @@ the named subject under the given scope and console context, without their brows
 7. **Exit codes and errors.** `0` when an explanation is printed, whether it allows or denies; `2` for an invalid
    invocation: one the console cannot bind (an unknown option, a missing argument), caught in `run()`; an option that
    takes a value given without one, which the console reads as omitted; and every refusal while the invocation is
-   read or the subject resolved. A tenant lookup, a subject lookup, a subject resolver or a console subject resolver
-   that fails other than by refusing is refused naming only the argument, never the query, the value or the failure's
-   message. `1` when the check throws, naming the exception's class alone and printing no explanation. Errors go to
-   the standard error, never echo a context value, operand or attribute, and have their control, format,
+   read or the subject resolved. A subject or tenant that is malformed, names no model or no saved row, or that the
+   console subject resolver refuses, is refused by its argument or option alone, by what is wrong
+   (`UnresolvedSubjectException::namingOnly()`, read from the refusal's code), never the value given. A tenant lookup,
+   a subject lookup, a subject resolver or a console subject resolver that fails other than by refusing, or refuses in
+   words of its own, is refused naming only the argument, never the query, the value or the failure's message. `1`
+   when the check throws, naming the exception's class alone and printing no explanation. Errors go to the standard
+   error, never echo a value given, context value, operand or attribute, and have their control, format,
    bidirectional and line separator characters escaped as the text renderer escapes them, the whole message so when
    it is not UTF-8, and their console markup escaped.
 

@@ -641,11 +641,11 @@ final class WhyCommandTest extends TestCase
         yield 'a tenant without a key' => [['--tenant' => 'team'], 'The --tenant option must be in the format {morphType}:{key} (e.g. team:1).'];
         yield 'a tenant without a type' => [['--tenant' => ':1'], 'The --tenant option must be in the format {morphType}:{key} (e.g. team:1).'];
         yield 'an empty tenant' => [['--tenant' => ''], 'The --tenant option must be in the format {morphType}:{key} (e.g. team:1).'];
-        yield 'an unknown tenant' => [['--tenant' => StubIdentity::class . ':missing'], 'No tenant \'Tests\Feature\Stubs\StubIdentity:missing\' was found.'];
+        yield 'an unknown tenant' => [['--tenant' => StubIdentity::class . ':' . self::SECRET], 'The --tenant option names no saved row.'];
         yield 'an empty application' => [['--application' => ''], 'The --application option must name an application.'];
         yield 'a malformed subject' => [['subject' => 'user'], 'The subject must be in the format {morphType}:{key} (e.g. user:1).'];
-        yield 'an unknown subject type' => [['subject' => 'nothing:1'], 'The subject type \'nothing\' is not an Eloquent model.'];
-        yield 'an unknown subject' => [['subject' => StubIdentity::class . ':missing'], 'No subject \'Tests\Feature\Stubs\StubIdentity:missing\' was found.'];
+        yield 'an unknown subject type' => [['subject' => self::SECRET . ':1'], 'The subject\'s type is not an Eloquent model.'];
+        yield 'an unknown subject' => [['subject' => StubIdentity::class . ':' . self::SECRET], 'The subject names no saved row.'];
         yield 'a resource without a type' => [['resource' => ':42'], self::RESOURCE];
         yield 'a resource without a key' => [['resource' => 'post:'], self::RESOURCE];
         yield 'a bare tenant' => [['--tenant' => null], 'The --tenant option must be given a value.'];
@@ -739,8 +739,8 @@ final class WhyCommandTest extends TestCase
     {
         $subject = NumberedIdentity::class . ':abc';
 
-        yield 'a subject' => [['subject' => $subject], ["No subject '{$subject}' was found.", 'The subject could not be resolved.']];
-        yield 'a tenant' => [['--tenant' => $subject], ["No tenant '{$subject}' was found.", 'The --tenant option could not be resolved.']];
+        yield 'a subject' => [['subject' => $subject], ['The subject names no saved row.', 'The subject could not be resolved.']];
+        yield 'a tenant' => [['--tenant' => $subject], ['The --tenant option names no saved row.', 'The --tenant option could not be resolved.']];
     }
 
     /**
@@ -809,16 +809,22 @@ final class WhyCommandTest extends TestCase
 
     /**
      * A console subject resolver that fails other than by refusing the subject
-     * exits 2 without naming the failure; one that refuses it exits 2 with its
-     * refusal.
+     * exits 2 without naming the failure; one that refuses it exits 2 with what
+     * its refusal says is wrong, naming the subject argument alone, and one
+     * that refuses it in words of its own as unresolvable.
      *
      * @return void
      */
     public function testRefusesAConsoleSubjectResolverThatFails(): void
     {
         $failures = [
-            "The subject could not be resolved.\n" => [new \RuntimeException(self::SECRET), new \InvalidArgumentException(self::SECRET)],
-            "No subject 'staff:1' was found.\n"    => [UnresolvedSubjectException::notFound('staff:1')],
+            "The subject could not be resolved.\n" => [
+                new \RuntimeException(self::SECRET),
+                new \InvalidArgumentException(self::SECRET),
+                new UnresolvedSubjectException(self::SECRET),
+            ],
+            "The subject names no saved row.\n"              => [UnresolvedSubjectException::notFound('staff:1')],
+            "The subject's type is not an Eloquent model.\n" => [UnresolvedSubjectException::unknownType('staff')],
         ];
 
         foreach ($failures as $message => $thrown) {
@@ -885,7 +891,8 @@ final class WhyCommandTest extends TestCase
 
     /**
      * Markup and control characters in an error are escaped, so neither styles
-     * nor moves the terminal, even on a decorated output.
+     * nor moves the terminal, even on a decorated output: an unknown option is
+     * named as it was given, escaped, and a subject is never named at all.
      *
      * @return void
      */
@@ -893,15 +900,22 @@ final class WhyCommandTest extends TestCase
     {
         $tester = $this->tester();
 
-        $tester->execute(['subject' => "<fg=red>evil\e[2J\u{85}</>:1", 'action' => 'posts:edit'], ['capture_stderr_separately' => true, 'decorated' => true]);
+        $tester->execute(['subject' => 'user:1', 'action' => 'posts:edit', "--<fg=red>evil\e[2J\u{85}</>" => 'x'], ['capture_stderr_separately' => true, 'decorated' => true]);
 
         $error = $tester->getErrorOutput();
 
-        self::assertStringContainsString('\'<fg=red>evil\u001b[2J\u0085</>\'', $error);
+        self::assertStringContainsString('"--<fg=red>evil\u001b[2J\u0085</>"', $error);
         self::assertStringNotContainsString("\e[31m", $error);
         self::assertStringNotContainsString("\e[2J", $error);
         self::assertStringNotContainsString("\u{85}", $error);
         self::assertStringStartsWith("\e[37;41m", $error);
+
+        $subject = $this->tester();
+
+        $subject->execute(['subject' => "<fg=red>evil\e[2J\u{85}</>:1", 'action' => 'posts:edit'], ['capture_stderr_separately' => true, 'decorated' => true]);
+
+        self::assertStringContainsString('The subject\'s type is not an Eloquent model.', $subject->getErrorOutput());
+        self::assertStringNotContainsString('evil', $subject->getErrorOutput());
     }
 
     /**
@@ -913,12 +927,12 @@ final class WhyCommandTest extends TestCase
      */
     public function testErrorsEscapeInvalidBytesAndFormatCharacters(): void
     {
-        [$code, $invalid] = self::why(['subject' => "\x9b2J:1", 'action' => 'posts:edit']);
-        [, $bidi]         = self::why(['subject' => "a\u{202E}b\u{200B}c\u{2028}d:1", 'action' => 'posts:edit']);
+        [$code, $invalid] = self::why(['subject' => 'user:1', 'action' => 'posts:edit', "--\x9b2J" => 'x']);
+        [, $bidi]         = self::why(['subject' => 'user:1', 'action' => 'posts:edit', "--a\u{202E}b\u{200B}c\u{2028}d" => 'x']);
 
         self::assertSame(2, $code);
-        self::assertSame("The subject type '\\ufffd2J' is not an Eloquent model.\n", $invalid);
-        self::assertSame("The subject type 'a\\u202eb\\u200bc\\u2028d' is not an Eloquent model.\n", $bidi);
+        self::assertSame("The \\\"--\\ufffd2J\\\" option does not exist.\n", $invalid);
+        self::assertSame("The \"--a\\u202eb\\u200bc\\u2028d\" option does not exist.\n", $bidi);
     }
 
     /**

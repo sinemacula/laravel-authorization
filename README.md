@@ -127,7 +127,9 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
 - **Access reviews**: `AccessReview` lists who holds a role, permission or policy in a scope, what a subject holds and
   where, what expires within a window and what an actor last granted, one row for each grant route, by reference alone,
   in one order on every database and bounded by a limit. A review is admitted through `check()` as the reviewer under
-  `authorization:review.read`, across the whole of a broad reach, or run as trusted work.
+  `authorization:review.read`, across the whole of a broad reach, or run as trusted work. It is read a page at a time
+  by keyset with signed cursors, streamed a chunk at a time, or exported as versioned JSON Lines under
+  `authorization:review.export` as well, and `authorization:review` exports one from the console.
 - **Grant scope query**: `GrantScopeQuery` tells a trusted integration whether every grant of an identity and of the
   principals an application-bound identity directory lists lies within a tenant (`within`), any lies outside it
   (`outside`), or that cannot be told (`unknown`), and whether a principal holds a grant that applies in a tenant. It
@@ -1576,6 +1578,7 @@ it that way only from your own code, never as an endpoint for user-controlled ad
 | The Spatie aliases `givePermissionTo()`, `revokePermissionTo()` and `removeRole()`         | Trusted without `actor:`; each takes one and passes it on                |
 | A role's `givePermission()`, `revokePermission()`, `syncPermissions()` and their aliases   | Trusted without `actor:`; each takes one and passes it to `RoleService`  |
 | `authorization:grant` and `authorization:revoke`, seeders and migrations                   | Trusted without `--actor`; both commands take one and pass it on         |
+| `AccessReview::trusted()`, `trustedPage()`, `trustedStream()`, `trustedExport()`           | Always trusted; `authorization:review` uses `trustedExport()` alone      |
 
 The maintenance commands `authorization:sync`, `authorization:prune` and `authorization:migrate-spatie` define the
 catalogue, clear expired and orphaned rows and import from Spatie for whoever runs the console; they are not
@@ -2344,6 +2347,7 @@ or about the subject of the scoped manager it is called on:
 | `queryScope($model, $action, $context)`           | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))                               |
 | `GrantScopeQuery::forIdentity()`, `hasGrantIn()`  | Not on the manager: grant scope and presence in a tenant (see [Grant scope query](#grant-scope-query))                    |
 | `AccessReview::review()`, `trusted()`             | Not on the manager: grant routes held, holdings, expiries and grants by actor (see [Access reviews](#access-reviews))     |
+| `AccessReview::page()`, `stream()`, `export()`    | Not on the manager: a review a keyset page, a lazy stream or JSON Lines at a time, each with a `trusted…()` counterpart   |
 
 `check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` deciding as `checkMany()`
 decides a batch of one: every other method but `queryScope()` and `permissionsFor()` adapts one of them, and each
@@ -2949,15 +2953,16 @@ document or value. Its shape is versioned (`version: 1`):
 | `grant_state`, `subject_state`           | `live`, `expired` or `malformed`; `active`, `inactive` or `unknown`                          |
 
 The rows come in one total order, the same on SQLite, PostgreSQL and MySQL: by source kind, target, grantee, origin
-scope (the platform before a tenant, every application before a named one) and route, every string compared byte for
-byte. A review returns at most `authorization.reviews.limit` rows (1000 by default; a whole number of at least 1, or
-boot fails), or the limit `withLimit()` sets, and reads at least one more to say exactly whether any was left out.
-Every grant is read on the write connection, never one query per holder: the roles a review involves are read in a
-fixed number of queries, then the grants of all of them together, a page of the limit at a time. Each grant read adds
-a row for every carrying role or attachment in its chain, so a page may hold more rows than the limit before they are
-cut. For a policy, only the role grants that reach one of its attachments are read, and whether they meet in some
-tenant is settled once for each attachment's tenant, never once for each tenant a grant is held in. One subject's
-holdings are read whole, an identity's principals 500 at a time.
+scope (the platform before a tenant, every application before a named one) and route (the first role of its chain, how
+many roles the chain runs through, then the rows it rests on), every string compared byte for byte. A review returns at
+most `authorization.reviews.limit` rows (1000 by default; a whole number of at least 1, or boot fails), or the limit
+`withLimit()` sets, and reads at least one more to say exactly whether any was left out. Every grant is read on the
+write connection, never one query per holder: the roles a review involves are read in a fixed number of queries, then
+the grants of all of them together, a page of the limit at a time. Each grant read adds a row for every carrying role or
+attachment in its chain, so a page may hold more rows than the limit before they are cut. For a policy, only the role
+grants that reach one of its attachments are read, and whether they meet in some tenant is settled once for each
+attachment's tenant, never once for each tenant a grant is held in. One subject's holdings are read whole, an identity's
+principals 500 at a time.
 
 **The review rights.** The package declares `authorization:review.read`, the right to run a review, and
 `authorization:review.export`, the right to export one, which needs both. `review()` admits the review before anything
@@ -2994,10 +2999,107 @@ completeness.
 reviewer and no admission. Nothing falls back to it: `review()` always takes an acting context, and one that cannot be
 resolved is refused before the review is reached.
 
+**Paging.** `page()` reads a review a page at a time, and `trustedPage()` as trusted work:
+
+```php
+$query  = ReviewQuery::holders($editor, ReviewScope::rootedWithin($organisation));
+$cursor = null;
+
+do {
+    $page = $reviews->page($query, ActingContext::current(), $cursor, limit: 250);
+
+    foreach ($page->rows as $row) {
+        // ...
+    }
+
+    $cursor = $page->nextCursor;
+} while ($cursor !== null);
+```
+
+| `ReviewPage`  | Holds                                                                                                    |
+|---------------|----------------------------------------------------------------------------------------------------------|
+| `rows`        | At most the page's limit of rows (the query's own, `withLimit()` or the configured one, unless given)    |
+| `nextCursor`  | The cursor of the next page; null on the last, so a page followed by no row ends the review              |
+| `reviewedAt`  | The review's instant, frozen when its first page is read and the same on every page                      |
+| `isComplete`  | As a result's: false only when an identity's principals could not all be listed                          |
+| `isLast()`    | Whether `nextCursor` is null                                                                             |
+
+A page resumes after the last row of the page before by keyset over the review's one order, never at an offset, so a
+page costs the same queries whatever its number, and `review()` is simply the first page of `page()`, through the same
+query, admission and rows. A page of a target's direct holders seeks to its keyset through an index leading with the
+target and the grantee, and reads no grant before it: on PostgreSQL, the planner can walk the review index in the page's
+order and read about the rows it returns; on MySQL, whose index on the target holds digests of the tenant and
+application, it reads the target's grants from its keyset on and sorts them for the page, so its work grows with the
+target's grants after the page, never with the tenant's. A page of routes through the roles below a target, of an expiry
+window or of an actor's grants reads the rows its filter matches from its keyset on and sorts them, so its work grows
+with the rows that target's roles, window or actor match; only the sort's top rows are bounded by the page. Every page
+is admitted again before anything, its cursor included, is read, so a right revoked between pages refuses the next one
+with `AuthorizationException`.
+
+**Cursors.** A cursor is opaque and tamper-evident: an HMAC-SHA256 signature, keyed from the application key
+(`app.key`), over its payload and over what it is bound to: the query (its kind, target or subject, scope selection,
+tenant, application selector, window, actor and `directOnly`) and the reviewer (its principal and any impersonator) or
+the trusted path. Its payload holds the row schema version, the review's instant and the sort key of the last row
+returned, whose parts are the references and scope values that row already shows, never a name or a value; a route is
+keyed by its first role and its length, so a cursor stays a few kilobytes at most however deep the role hierarchy runs.
+A cursor is read only in the one text that encodes it, each part the canonical, unpadded base64url of its bytes. A
+cursor used with another query, scope or reviewer, a trusted cursor given to a reviewer and the reverse, one of another
+schema version, and one changed in any byte, even to text that decodes to the same bytes, are each refused with
+`InvalidReviewCursorException`, whose one message says nothing of why. The limit is not bound, so a client may change
+its page size between pages. Signing a cursor needs the application key; without one, `MissingAppKeyException` is thrown
+when a cursor is issued or read, and a review that fits on one page needs none.
+
+**The consistency mode: a live scan.** The review's instant is frozen when its first page is read and carried by the
+cursor, so every page classifies each expiry at that instant: a grant that expires between pages is still listed, and
+still `live`, on a later page. It is not a database snapshot: a row written or revoked between pages may appear or
+disappear (a row written where the scan has already passed is never returned, one written ahead of it is), but a row
+present for the whole scan is returned exactly once, in its place in the order.
+
+**Streaming.** `stream($query, $reviewer, $chunk = 1000)` and `trustedStream($query, $chunk)` return a lazy iterable of
+every row: nothing is read until it is iterated, then each chunk is read through the same keyset pages, and the
+reviewer is admitted again before each, so a refusal part way throws `AuthorizationException` from the iteration. What
+a stream holds in memory is bounded by the chunk, however large the tenant; one subject's holdings are read whole for
+each chunk, by design.
+
+**Exports.** `export($query, $reviewer, $sink, $chunk = 1000)` and `trustedExport($query, $sink, $chunk)` write the
+review as versioned JSON Lines to a writable stream resource, each line written whole, or to a callback given each
+line, and return how many rows they wrote. Exporting needs both `authorization:review.read` and
+`authorization:review.export` (N96): the two are decided together before the header is written and again before every
+chunk, each across a broad reach as the read right is. The first line is a header, then one line a row, in the
+review's order, then a footer:
+
+```json lines
+{"record":"header","version":1,"query":"holders","scope":{"selection":"applies_in","tenant":{"type":"tenant","id":"acct1"},"application":{"selection":"named","name":"admin"}},"reviewed_at":"2026-11-08T12:00:00.250000Z","scan_started_at":"2026-11-08T12:00:00.250000Z","consistency":"live"}
+{"record":"row","version":1,"row_key":"004885d0a74311b154e17bb6365cb7332cfd7ae2bb46526880e6be6593bd8ac5","subject":{"type":"user","id":"17"},"grantee":{"type":"user","id":"17"},"target":{"type":"role","id":"01a1be88-d4d3-72cc-b9bc-620cc97d4906"},"source_kind":"role_grant","source_key":"4:role|36:01a1be88-d4d3-72cc-b9bc-620cc97d4906|4:user|2:17|~|~|~","origin_scope":{"tenant":null,"application":null,"include_subtree":true},"via_identity":null,"role_path":[{"type":"role","id":"01a1be88-d4d3-72cc-b9bc-620cc97d4906"}],"supporting_grants":[{"source_key":"4:role|36:01a1be88-d4d3-72cc-b9bc-620cc97d4906|4:user|2:17|~|~|~","scope":{"tenant":null,"application":null,"include_subtree":true},"expires_at":null}],"created_at":"2026-10-01T09:00:00Z","updated_at":"2026-10-01T09:00:00Z","expires_at":null,"route_expires_at":null,"granted_by":null,"grant_state":"live","subject_state":"active"}
+{"record":"footer","version":1,"rows":1,"scan_ended_at":"2026-11-08T12:00:00.412000Z","complete":true}
+```
+
+| Record   | Fields                                                                                                                                                                       |
+|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `header` | `version`, the `query` kind, the `scope` (selection, tenant or null, application selection and name), `reviewed_at`, `scan_started_at` and `consistency`, always `live`      |
+| `row`    | The row's versioned shape (see the fields above), references alone                                                                                                           |
+| `footer` | `version`, how many `rows` were written, `scan_ended_at`, and whether it is `complete`: false only for an identity's holdings whose directory could not list every principal |
+
+The output is UTF-8 and deterministic: the same rows at the same instants give the same bytes. Each line is one JSON
+object with its keys in a fixed order, slashes and Unicode unescaped, the line and paragraph separators escaped, and
+invalid UTF-8 refused with `JsonException` rather than replaced. An export the reviewer stops being admitted to part
+way (a revoked right, a step-up no longer met, a session cap that no longer covers the rights), or that fails, stops
+there with no footer, so a reader can tell it is incomplete. CSV is not offered yet (N97).
+
+**From the console.** `authorization:review` exports a review as JSON Lines on the trusted path (see
+[Exporting an access review from the console](#exporting-an-access-review-from-the-console)).
+
+**Indexes.** The migration `2026_11_08_000001_add_access_review_indexes` adds an index on the `granted_by` pair of each
+grant table, which a review of an actor's grants is matched on, and one on the permission of the role permission edges,
+which the holders of a permission are found by (MySQL already indexes that column for its foreign key, and keeps that
+index). On PostgreSQL it also adds an index on each grant table's target and its grantee's type and key, collated `C`,
+the order a page of direct holders is read and resumed in. The other review queries are served by the indexes the
+tables already have: on MySQL and SQLite, whose reference columns compare their bytes, a target's grants by each grant
+table's unique index. The migration honours the configured table names and connection.
+
 **What is left out.** Boundaries, guardrails and resource-policy attachments restrict or extend what a check decides,
-but are not held, so no review lists them. Keyset cursors, streaming exports in JSON Lines and their indexes come in the
-next part of the reviews, and the unused-grant report after it. See [Access reviews](docs/design/access-reviews.md) for
-the design.
+but are not held, so no review lists them. Snapshot exports and CSV are not offered, and the unused-grant report comes
+in the next part of the reviews. See [Access reviews](docs/design/access-reviews.md) for the design.
 
 ### Grant scope query
 
@@ -3766,6 +3868,7 @@ php artisan authorization:revoke user:1 editor --actor=user:7
 php artisan authorization:list-roles
 php artisan authorization:list-permissions
 php artisan authorization:why user:1 posts:delete post:42 --tenant=team:7
+php artisan authorization:review holders role:1 --rooted-within=team:7 --output=holders.jsonl
 php artisan authorization:policy:validate --database
 php artisan authorization:prune --pretend
 php artisan authorization:check
@@ -3896,11 +3999,14 @@ evidence of what the decision found, not advice to supply it.
 | `1`  | The check failed: no explanation is printed, and the error names the exception's class alone                                                        |
 
 Errors go to the standard error, so a `--format=json` run leaves the standard output empty when it fails. They name the
-option or the reference, never a context value, operand or attribute. A subject or tenant whose lookup fails, such as a
-key the key column cannot hold on PostgreSQL, a database error or a subject resolver that throws, exits `2` too, naming
-only the argument (`The subject could not be resolved.`), never the query, the value or the failure's message. Their
-console markup, control characters, format and bidirectional characters are escaped as every name in the text output is,
-and an error holding bytes that are not UTF-8 is escaped whole.
+argument or option, never a value given, context value, operand or attribute: a subject or tenant that is malformed,
+whose type names no model or whose key no saved row has is refused by its argument or option alone (`The subject names
+no saved row.`, `The --tenant option names no saved row.`), and so is a subject the resolver refuses, by what its
+refusal's code says is wrong. A subject or tenant whose lookup fails, such as a key the key column cannot hold on
+PostgreSQL, a database error or a subject resolver that throws, or refuses it in words of its own, exits `2` too,
+naming only the argument (`The subject could not be resolved.`), never the query, the value or the failure's message.
+Their console markup, control characters, format and bidirectional characters, in an unknown option's name say, are
+escaped as every name in the text output is, and an error holding bytes that are not UTF-8 is escaped whole.
 
 **A trusted operator surface.** The command shows how the policies are built, the names of policies, statements,
 conditions, keys, roles and tenants, to whoever can run the console; it admits no caller. An application showing
@@ -3917,9 +4023,54 @@ $this->app->bind(ConsoleSubjectResolver::class, App\Authorization\StaffConsoleSu
 ```
 
 Its `resolve(string $reference): Subject` returns the subject with its principal and identity, and refuses a reference
-it cannot resolve by throwing `UnresolvedSubjectException`, which the command reports with exit code `2`. Anything
-else it throws is reported as `The subject could not be resolved.`, with exit code `2` too, and its message is never
-printed.
+it cannot resolve by throwing `UnresolvedSubjectException`, which the command reports with exit code `2`, by what the
+refusal's code says is wrong (`MALFORMED`, `UNKNOWN_TYPE`, `NOT_FOUND`, `UNSUPPORTED`, `AMBIGUOUS` or `UNRESOLVABLE`,
+as the exception's factories set it) and the argument's name alone: its message is never printed, since it may name
+the reference. A refusal with any other code, and anything else it throws, is reported as
+`The subject could not be resolved.`, with exit code `2` too.
+
+#### Exporting an access review from the console
+
+`authorization:review` exports an access review (see [Access reviews](#access-reviews)) as JSON Lines, as trusted system
+work through `AccessReview::trustedExport()`: the console is a trusted operator surface, so it admits no caller, and
+never runs as whoever is signed in to it.
+
+```bash
+php artisan authorization:review holders role:01a1be88-d4d3-72cc-b9bc-620cc97d4906 --tenant=team:7 --application=admin
+php artisan authorization:review holders permission:01a1be88-d4e0-7153-8120-e043891fb9d3 --everywhere --direct-only
+php artisan authorization:review holdings user:1 --rooted-within=team:7
+php artisan authorization:review expiring --everywhere --from=2026-12-01 --until=2027-01-01 --output=expiring.jsonl
+php artisan authorization:review granted_by --actor=user:7 --everywhere --output=granted.jsonl --force
+```
+
+| Argument or option  | What it names                                                                                                                                                                                                               | When omitted                                         |
+|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------|
+| `{query}`           | `holders`, `holdings`, `expiring` or `granted_by`                                                                                                                                                                           | Required                                             |
+| `{reference}`       | For `holders`, the role, permission or policy as `role:{key}`, `permission:{key}` or `policy:{key}`, or its morph type; for `holdings`, the saved subject as `{morph type}:{key}`, resolved by the console subject resolver | Required for those two; refused for the others       |
+| `--tenant`          | Review what applies in the tenant, as `{morph type}:{key}`, read as `authorization:why` reads it                                                                                                                            | The platform, when no scope option is given          |
+| `--rooted-within`   | Review the grants made in the tenant or below it                                                                                                                                                                            |                                                      |
+| `--everywhere`      | Review every stored grant                                                                                                                                                                                                   |                                                      |
+| `--application`     | `none`, `any` or the application's name                                                                                                                                                                                     | `none` for a tenant or the platform, `any` otherwise |
+| `--from`, `--until` | For `expiring`, the window `[from, until)`, each a date and time, in UTC when it names no zone                                                                                                                              | Required for `expiring`; refused for the others      |
+| `--actor`           | For `granted_by`, the actor as `{morph type}:{key}`, matched exactly as stored                                                                                                                                              | Required for `granted_by`; refused for the others    |
+| `--direct-only`     | For `holders`, the direct grants alone                                                                                                                                                                                      | Every route; refused for the others                  |
+| `--output`          | The file to write, which must not exist                                                                                                                                                                                     | The standard output                                  |
+| `--force`           | Overwrite the `--output` file when it exists                                                                                                                                                                                | An existing file is refused                          |
+
+At most one of `--tenant`, `--rooted-within` and `--everywhere` may be given. Nothing but the JSON Lines is written to
+the standard output, so it can be piped, and nothing is written there until the review's first page is read. The file
+is created only when it does not exist, so a file made at the same moment is never overwritten without `--force`. The
+exit codes are those of `authorization:why`:
+
+| Code | When                                                                                                                                                                                                                                       |
+|------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `0`  | The export was written                                                                                                                                                                                                                     |
+| `2`  | An invalid invocation: an unknown option, a missing argument or option value, an option the query does not take, a reference, tenant, window or subject that cannot be read or resolved, or an output file that exists or cannot be opened |
+| `1`  | The review failed, such as on a stored role hierarchy cycle: the error names the exception's class alone, and the export has no footer                                                                                                     |
+
+Errors go to the standard error, name the argument or option and never a value given (a subject or tenant that is
+malformed, names no model or no saved row, or cannot be resolved is named by its argument or option alone), and are
+escaped as `authorization:why` escapes its own.
 
 ### Testing assertions
 
@@ -3961,7 +4112,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Preview](docs/design/preview.md)                                                           | `previewFor()`, its admission, recording and what it refuses  |
 | [Grant scope](docs/design/grant-scope.md)                                                   | The identity directory, the scope query and the grant hooks   |
 | [Explanations](docs/design/explanations.md)                                                 | Explain mode, the `Explanation` and `authorization:why`       |
-| [Access reviews](docs/design/access-reviews.md)                                             | Grant routes, the queries, scopes, rows, order and admission  |
+| [Access reviews](docs/design/access-reviews.md)                                             | Grant routes, queries, rows, admission, paging and exports    |
 
 ## Requirements
 

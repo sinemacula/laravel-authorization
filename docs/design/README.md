@@ -92,7 +92,9 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   `holdings()` in principal and identity mode, `expiring()` in a UTC half-open window and `grantedBy()` as the last
   writer, the reference-only versioned rows, the byte-for-byte total order on every database, the bounded list with
   its exact truncation, the `authorization:review.read` admission through `check()` with the reach rule, the refusal
-  that discloses nothing, and the explicit trusted path.
+  that discloses nothing, and the explicit trusted path; then the keyset pages and their signed cursors bound to their
+  review, readmission on every page and the frozen instant of a live scan, lazy streams, the versioned JSON Lines
+  export under `authorization:review.export`, `authorization:review`, and the review indexes.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

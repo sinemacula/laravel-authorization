@@ -31,16 +31,19 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * The grants are read a page at a time in the review's order, each page no
  * larger than the room left (the limit and its one extra, less the rows held),
- * so the grants read stay bounded by the limit. A grant adds one row for each
- * role of its chain that carries the target, or each attachment that holds
- * where it does, so the rows held may exceed the limit and its one extra before
- * they are cut to the limit. The roles involved are read first, in a fixed
- * number of queries, then the grants of all of them together, never one query
- * per holder: for a policy, only the grants that reach one of its attachments
- * are read (see `RoleCarriers::reaching()`), so a grant that would add no row
- * is never read, and whether each page's grants meet the attachments is settled
- * in a fixed number of queries (see `ReviewRun::settle()`), never one for each
- * tenant a grant is held in.
+ * so the grants read stay bounded by the limit. A later page of the review
+ * reads no source whose rows all come before the page before ended, and the
+ * source of its last row resumes, by keyset, at the grant that row starts from
+ * (see `RowCollector`). A grant adds one row for each role of its chain that
+ * carries the target, or each attachment that holds where it does, so the rows
+ * held may exceed the limit and its one extra before they are cut to the limit.
+ * The roles involved are read first, in a fixed number of queries, then the
+ * grants of all of them together, never one query per holder: for a policy,
+ * only the grants that reach one of its attachments are read (see
+ * `RoleCarriers::reaching()`), so a grant that would add no row is never read,
+ * and whether each page's grants meet the attachments is settled in a fixed
+ * number of queries (see `ReviewRun::settle()`), never one for each tenant a
+ * grant is held in.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,7 +55,10 @@ final class HolderRoutes
     /**
      * Collect the rows of the holders of the query's target: none for a key no
      * definition could have, or for a definition the reviewed tenant does not
-     * see.
+     * see. A definition's key is a UUID, read in its canonical lowercase form
+     * however the query spells it, as every database stores and returns it, so
+     * a key in capitals finds the same holders, through the same routes, on
+     * every database.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
@@ -63,7 +69,7 @@ final class HolderRoutes
      */
     public static function read(ReviewRun $run, ReviewQuery $query, RowCollector $rows): bool
     {
-        $target = $query->target;
+        $target = $query->target === null ? null : new Reference($query->target->type, \strtolower($query->target->id));
         $kind   = $query->targetKind();
 
         if ($target !== null && $kind !== null && Definitions::isKey($target->id) && $run->seesDefinition($kind, $target->id)) {
@@ -101,7 +107,7 @@ final class HolderRoutes
 
         unset($below[$role->id]);
 
-        self::throughRoles($run, $below, $rows, static function (GrantRow $grant, array $chain) use ($rows, $role): void {
+        self::throughRoles($run, $below, $rows, SourceKind::ROLE_INHERITED, static function (GrantRow $grant, array $chain) use ($rows, $role): void {
             $path = \array_slice($chain, 0, (int) \array_search($role->id, $chain, true) + 1);
 
             $rows->route(SourceKind::ROLE_INHERITED, $grant->grantee, $grant, $role, $path);
@@ -132,7 +138,7 @@ final class HolderRoutes
 
         $chains = RoleChains::below($run, \array_map(strval(...), \array_keys($edges)));
 
-        self::throughRoles($run, $chains, $rows, static function (GrantRow $grant, array $chain) use ($rows, $edges): void {
+        self::throughRoles($run, $chains, $rows, SourceKind::ROLE_PERMISSION, static function (GrantRow $grant, array $chain) use ($rows, $edges): void {
             RoleCarriers::throughEdges($rows, $grant->grantee, $grant, $chain, $edges);
         });
     }
@@ -170,6 +176,7 @@ final class HolderRoutes
             $run,
             $chains,
             $rows,
+            SourceKind::ROLE_POLICY,
             $expand,
             static fn (Builder $query, string $table): Builder => RoleCarriers::reaching($run, $query, $table, $chains, $attachments),
             static function (array $page) use ($run, $attachments): void {
@@ -180,74 +187,156 @@ final class HolderRoutes
 
     /**
      * Collect the target's direct grants in the scope, each one route, a
-     * policy's attachments to roles left to the routes through roles.
+     * policy's attachments to roles left to the routes through roles: none when
+     * every one comes before the page before ended, and on a later page those
+     * from its last row's on. Every grant read is of the one target, so they
+     * are ordered, and resumed, by their grantee and scope alone, which the
+     * index leading with the target and the grantee serves, and each row names
+     * the target by the key its grant stores.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $target
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
      * @return void
+     *
+     * @throws \UnexpectedValueException
      */
     private static function direct(ReviewRun $run, GrantTarget $kind, Reference $target, RowCollector $rows): void
     {
-        $table = $kind->table();
-        $query = self::scoped($run, $kind)->where($table . '.' . $kind->column(), $target->id);
-
-        if ($kind === GrantTarget::POLICY) {
-            InlinePolicies::attachedToTheirGrantee($query, $table)->where($table . '.authorizable_type', '!=', Definitions::morph(GrantTarget::ROLE));
-        }
-
         $source = match ($kind) {
             GrantTarget::ROLE       => SourceKind::ROLE_GRANT,
             GrantTarget::PERMISSION => SourceKind::PERMISSION_GRANT,
             GrantTarget::POLICY     => SourceKind::POLICY_ATTACHMENT,
         };
 
-        $chain = $kind === GrantTarget::ROLE ? [$target->id] : [];
+        if ($rows->isPast($source)) {
+            return;
+        }
 
-        foreach (GrantRows::page(GrantRows::ordered($query, $table, $kind->column()), $kind->value, 0, $rows->room()) as $grant) {
-            $rows->route($source, $grant->grantee, $grant, $target, $chain);
+        $table = $kind->table();
+        $query = GrantRows::ordered(self::scoped($run, $kind)->where($table . '.' . $kind->column(), $target->id), $table, $kind->column(), null);
+
+        if ($kind === GrantTarget::POLICY) {
+            InlinePolicies::attachedToTheirGrantee($query, $table)->where($table . '.authorizable_type', '!=', Definitions::morph(GrantTarget::ROLE));
+        }
+
+        $resume = $rows->resumeAt($source);
+
+        foreach (GrantRows::page(self::resumed($query, $table, $kind->column(), null, $resume), $kind->value, self::sizeOf($rows, $resume)) as $grant) {
+            $rows->route($source, $grant->grantee, $grant, new Reference($target->type, $grant->targetId), $kind === GrantTarget::ROLE ? [$grant->targetId] : []);
         }
     }
 
     /**
-     * Collect the routes the callback expands each grant of one of the roles
-     * into, given the role's chain, reading the grants a page at a time in the
-     * review's order until the rows are full or none is left: a page is the
-     * room left, the query narrowed first when asked, and each page handed to
-     * the reader given before it is expanded. Every grant read expands into at
-     * least one route, so the first page fills the rows or is the last.
+     * Collect the routes of the source's kind the callback expands each grant
+     * of one of the roles into, given the role's chain, reading the grants a
+     * page at a time in the review's order until the rows are full or none is
+     * left: none for no role; a page is the room left, the query narrowed first
+     * when asked, and each page handed to the reader given before it is
+     * expanded. The routes through roles are the last kind of a review of
+     * holders, so no page before can have ended past them. Each page after the
+     * first starts after the last grant read, never at an offset; on a later
+     * page of the review, the first starts at the grant its last row starts
+     * from, read again for its remaining routes, so it reads one grant more.
+     * Every grant read expands into at least one route, so the first page fills
+     * the rows or is the last.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  array<string, list<string>>  $chains
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind  $source
      * @param  \Closure(\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow, list<string>): void  $expand
      * @param  (\Closure(\Illuminate\Database\Query\Builder, string): \Illuminate\Database\Query\Builder)|null  $narrow
      * @param  (\Closure(list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>): void)|null  $read
      * @return void
+     *
+     * @throws \UnexpectedValueException
      */
-    private static function throughRoles(ReviewRun $run, array $chains, RowCollector $rows, \Closure $expand, ?\Closure $narrow = null, ?\Closure $read = null): void
-    {
+    private static function throughRoles(
+        ReviewRun $run,
+        array $chains,
+        RowCollector $rows,
+        SourceKind $source,
+        \Closure $expand,
+        ?\Closure $narrow = null,
+        ?\Closure $read = null,
+    ): void {
         $table  = GrantTarget::ROLE->table();
         $query  = self::scoped($run, GrantTarget::ROLE)->whereIn($table . '.role_id', \array_map(strval(...), \array_keys($chains)));
         $query  = GrantRows::ordered($narrow === null ? $query : $narrow($query, $table), $table, 'role_id', false);
-        $offset = 0;
+        $resume = $rows->resumeAt($source);
+        $isLeft = $chains !== [];
 
-        while ($chains !== [] && !$rows->isFull()) {
-            $size = $rows->room();
-            $page = GrantRows::page($query, GrantTarget::ROLE->value, $offset, $size);
+        while ($isLeft && !$rows->isFull()) {
+            $size = self::sizeOf($rows, $resume);
+            $page = GrantRows::page(self::resumed(clone $query, $table, 'role_id', false, $resume), GrantTarget::ROLE->value, $size);
 
-            if ($read !== null) {
-                $read($page);
-            }
+            self::expand($page, $chains, $expand, $read);
 
-            foreach ($page as $grant) {
-                $expand($grant, $chains[$grant->targetId] ?? [$grant->targetId]);
-            }
-
-            $offset += $size;
-            $chains = \count($page) < $size ? [] : $chains;
+            $isLeft = \count($page) === $size;
+            $resume = $page[$size - 1] ?? null;
         }
+    }
+
+    /**
+     * Hand the page of grants to the reader given, then expand each grant into
+     * its routes, given its role's chain, or its role alone when the role has
+     * none.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>  $page
+     * @param  array<string, list<string>>  $chains
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow, list<string>): void  $expand
+     * @param  (\Closure(list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>): void)|null  $read
+     * @return void
+     */
+    private static function expand(array $page, array $chains, \Closure $expand, ?\Closure $read): void
+    {
+        if ($read !== null) {
+            $read($page);
+        }
+
+        foreach ($page as $grant) {
+            $expand($grant, $chains[$grant->targetId] ?? [$grant->targetId]);
+        }
+    }
+
+    /**
+     * Return the ordered grant query limited to start where the review left
+     * off: at the stored row the last row of the page before starts from, read
+     * again for its remaining routes, given that row's sort key; after a grant
+     * already read, given the grant; from its start, given nothing.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  string  $table
+     * @param  string  $target
+     * @param  bool|null  $isTargetFirst
+     * @param  list<bool|int|string|null>|\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow|null  $from
+     * @return \Illuminate\Database\Query\Builder
+     *
+     * @throws \UnexpectedValueException
+     */
+    private static function resumed(Builder $query, string $table, string $target, ?bool $isTargetFirst, array|GrantRow|null $from): Builder
+    {
+        return match (true) {
+            $from === null            => $query,
+            $from instanceof GrantRow => GrantRows::after($query, $table, $target, $isTargetFirst, GrantRows::positionOf($from, $isTargetFirst)),
+            default                   => GrantRows::after($query, $table, $target, $isTargetFirst, GrantRows::positionAt($from, $isTargetFirst), true),
+        };
+    }
+
+    /**
+     * Return how many grants to read next: the room left, and one more when the
+     * read starts at the stored row a row of the page before starts from, which
+     * may add no row.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
+     * @param  list<bool|int|string|null>|\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow|null  $from
+     * @return int
+     */
+    private static function sizeOf(RowCollector $rows, array|GrantRow|null $from): int
+    {
+        return $rows->room() + (\is_array($from) ? 1 : 0);
     }
 
     /**

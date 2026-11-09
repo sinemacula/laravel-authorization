@@ -1,0 +1,39 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Unit\Reviews\Support;
+
+use Carbon\CarbonImmutable;
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Reviews\Support\PageRead;
+use SineMacula\Laravel\Authorization\Reviews\Support\ReviewPosition;
+
+/**
+ * Unit tests for one page of a review as it was read.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ */
+#[CoversClass(PageRead::class)]
+final class PageReadTest extends TestCase
+{
+    /**
+     * It keeps its rows, where the next page starts, its completeness and its
+     * instant.
+     *
+     * @return void
+     */
+    public function testItKeepsWhatWasRead(): void
+    {
+        $at   = CarbonImmutable::create(2030, 1, 1, 0, 0, 0, 'UTC');
+        $next = new ReviewPosition($at, [0]);
+        $page = new PageRead([], $next, false, $at);
+
+        self::assertSame([[], $next, false, $at], [$page->rows, $page->next, $page->isComplete, $page->at]);
+        self::assertNull((new PageRead([], null, true, $at))->next);
+    }
+}
