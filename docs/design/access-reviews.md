@@ -5,7 +5,8 @@
 Periodic access reviews and their sign-off need four lists no check gives (AUTHZ-11.6): who holds a role, permission or
 policy in a scope, what a subject holds and where, which grants expire within a window, and which grants an actor last
 granted or changed. This note explains what a review means by "holds" (N93), the typed query and its scope selections,
-the rows and their order, how a review is admitted (N96), and what part 1 of BL-69 (N98) leaves out.
+the rows and their order, how a review is admitted (N96), how it is paged, streamed and exported (part 2 of BL-69,
+N97, N98), and what is still left out.
 
 ## Invariants
 
@@ -103,15 +104,15 @@ the rows and their order, how a review is admitted (N96), and what part 1 of BL-
 9. **Bounded, on the writer, no query per holder.** A review returns at most its limit (`authorization.reviews.limit`,
    1000 by default and validated at boot as a whole number of at least 1, or `withLimit()`), reading at least one more
    to say exactly whether one was left out. The holders of a target are read a page at a time in the review's order,
-   each page no larger than the room left (the limit and its one extra, less the rows held), so the grants read stay
-   bounded by the limit; a grant adds one row for each carrying role or attachment in its chain, so the rows held may
-   pass the limit and its one extra before they are cut. The roles a review involves are read first, then the grants
-   of all of them together. For a policy, only the role grants that reach one of its attachments are read, the
-   attachment's application, chain and subtree in the query, so a grant that would add no row is never read, and
-   whether a page's grants meet the attachments in some tenant is settled in a fixed number of queries, one for each
-   attachment's tenant, never one for each tenant a grant is held in. One subject's holdings are read whole, then
-   sorted; an identity's principals a chunk of 500 at a time, so no query's bindings grow with them. Every read is on
-   the package's write connection.
+   each page resuming by keyset after the last grant read (see invariant 15), never at an offset, and no larger than the
+   room left (the limit and its one extra, less the rows held), so the grants read stay bounded by the limit; a grant
+   adds one row for each carrying role or attachment in its chain, so the rows held may pass the limit and its one extra
+   before they are cut. The roles a review involves are read first, then the grants of all of them together. For a
+   policy, only the role grants that reach one of its attachments are read, the attachment's application, chain and
+   subtree in the query, so a grant that would add no row is never read, and whether a page's grants meet the
+   attachments in some tenant is settled in a fixed number of queries, one for each attachment's tenant, never one for
+   each tenant a grant is held in. One subject's holdings are read whole, then sorted; an identity's principals a chunk
+   of 500 at a time, so no query's bindings grow with them. Every read is on the package's write connection.
 
 10. **Admission through `check()` (N96).** `authorization:review.read` and `authorization:review.export` are package
     permissions; exporting needs both. `AccessReview::review($query, $reviewer)` admits the review before anything is
@@ -146,6 +147,69 @@ the rows and their order, how a review is admitted (N96), and what part 1 of BL-
 14. **Scoped disclosure.** A review admitted in a tenant reads only what applies there: an inherited grant, such as a
     platform grant or a parent's reaching below, is listed, but never the holders in other tenants it also reaches.
 
+15. **Keyset paging (`Reviews\Support\Keyset`, `RowCollector`).** `AccessReview::page()` reads a review a page at a
+    time over its one total order (invariant 8), never by offset, so a page costs the same queries whatever its number.
+    A page's position is the sort key of the last row returned: the kind's position, the target, the stored row's
+    grantee and scope (each nullable part tagged), then the route. A later page passes over every source whose kind
+    comes before that row's without reading it; the source of that row's kind resumes from the stored row the row
+    starts from, by a condition written column by column (greater, or equal and the rest after), each comparison byte
+    for byte as the order sorts (`ReviewOrder::compared()`), a null before any value and false before true. A grant
+    through roles is read again from that row, one more than the room left, since it may carry routes still to come,
+    and every route at or before the position is passed over; a stored row, one row of the review, resumes after itself.
+    One subject's holdings are read whole for each page and the rows after the position kept, by design. `review()`
+    is the first page of `page()`: every review, page, stream and export reads through one `AccessReview::read()`, one
+    query construction, admission and projection (D22), and only shapes its pages differently.
+
+16. **Signed cursors bound to their review (`Reviews\Support\ReviewCursor`).** A page's cursor carries its position
+    between pages: its payload (the row schema version, the review's instant to the microsecond, and the sort key, each
+    string part base64-encoded so any bytes survive) and an HMAC-SHA256 signature, keyed by a key derived from
+    `app.key` for cursors alone, over the payload and over what the cursor is bound to: the schema version, the query's
+    kind, scope selection, tenant, application selector and name, target, subject (its principal and identity, and
+    which mode), window, actor and `directOnly`, and the reviewer (its principal and impersonator) or the trusted path,
+    each part length-prefixed. A cursor is read only once its signature verifies, in constant time, for the query and
+    reviewer it is presented with; anything else, a changed byte, another query, scope, reviewer or path, another schema
+    version, a payload of another shape or no cursor at all, is refused with `InvalidReviewCursorException`, whose one
+    message says nothing of why. The cursor discloses nothing a page did not: the parts of its sort key are references
+    and scope values its last row shows. The limit is not bound. No key refuses to sign or read one
+    (`MissingAppKeyException`); a review that fits on its first page issues none.
+
+17. **Readmission and the frozen instant: a live scan.** Every page is admitted again before anything, its cursor
+    included, is read, and a stream or an export is admitted before each chunk, so a right revoked, a step-up no longer
+    met or a session cap that no longer covers the right between pages refuses the next. The review's instant is
+    frozen when the first page is read (`ReviewPosition`) and carried to every later page, so each expiry is
+    classified at the same instant throughout: a grant expiring between pages is still listed, and live, later. The
+    scan is live, not a database snapshot: a row written or revoked between pages may appear or disappear, a row
+    written where the scan has passed never appears and one written ahead of it does, but a row present for the whole
+    scan is returned exactly once, in its place.
+
+18. **Streams and JSON Lines exports (N97).** `stream()` returns a lazy iterable: nothing is read until it is iterated,
+    then each chunk is read through the same pages, so memory is bounded by the chunk, not the tenant. `export()`
+    writes versioned JSON Lines (`Reviews\Support\JsonLinesExport`) to a writable stream, each line written whole, or
+    to a callback: a header (`record` `header`, `version`, the `query` kind, the `scope`, `reviewed_at`,
+    `scan_started_at`, `consistency` `live`), one line a row (`record` `row` and the row's shape), and a footer
+    (`record` `footer`, `version`, `rows`, `scan_ended_at`, `complete`). Each line is encoded with its keys in a fixed
+    order, slashes and Unicode unescaped, the line and paragraph separators escaped, invalid UTF-8 refused rather than
+    replaced, so the output is UTF-8 and the same bytes for the same rows at the same instants. Exporting needs both
+    `authorization:review.read` and `authorization:review.export`, decided together before the header and again before
+    every chunk; nothing is written before admission, and an export refused or failing part way has no footer.
+
+19. **The console (`Console\ReviewCommand`).** `authorization:review` exports a review on the trusted path, as
+    scheduled system work. Its scope options mirror `authorization:why` (`--tenant`, with `--rooted-within` and
+    `--everywhere` beside it, at most one, and `--application` `none`, `any` or a name), with `--from` and `--until`,
+    `--actor` and `--direct-only` taken by their own queries alone; a holdings subject is resolved by the console
+    subject resolver. It writes nothing but the JSON Lines to the standard output, or to `--output`, created only when
+    it does not exist unless `--force` is given, and exits as `authorization:why` does: 0 written, 2 for an invalid
+    invocation, 1 when the review fails.
+
+20. **Indexes (N95).** A new migration, `2026_11_08_000001_add_access_review_indexes`, adds `{table}_granted_by_index`
+    on the `granted_by` pair of each grant table, and `{table}_permission_id_index` on the role permission edges, whose
+    primary key leads with the role; MySQL already indexes that column for its foreign key and keeps that index. Checked
+    against the review queries with `EXPLAIN`: an actor's grants are matched on the new index on PostgreSQL and MySQL; a
+    target's grants, through roles or direct, on each grant table's unique index, which leads with the target; an expiry
+    window on each table's `expires_at` index; a grantee's on its morph index. The order is byte for byte, which no
+    index on a collated column gives, so the database sorts what a page selects, bounded by the page. The migration
+    honours the configured table names and connection.
+
 ## Success Path
 
 ```php
@@ -155,12 +219,23 @@ $scope   = ReviewScope::appliesIn($account, ApplicationSelector::named('admin'))
 $holders  = $reviews->review(ReviewQuery::holders($editor, $scope), ActingContext::current());
 $holdings = $reviews->review(ReviewQuery::holdings($identity, ReviewScope::rootedWithin($organisation)), $auditor);
 $expiring = $reviews->trusted(ReviewQuery::expiring(ReviewScope::everywhere(), now(), now()->addMonth()));
+
+$page = $reviews->page(ReviewQuery::holders($editor, $scope), ActingContext::current(), null, 250);
+$next = $reviews->page(ReviewQuery::holders($editor, $scope), ActingContext::current(), $page->nextCursor, 250);
+
+foreach ($reviews->stream(ReviewQuery::holders($editor, $scope), ActingContext::current()) as $row) {
+    // one chunk at a time
+}
+
+$reviews->export(ReviewQuery::holders($editor, $scope), $auditor, \fopen('holders.jsonl', 'xb'));
 ```
 
 An auditor allowed `authorization:review.read` in the account reviews who holds `editor` there: the direct grants,
 then the grants of every role below `editor`, each with its role path, the platform's and the organisation's grants
 reaching the account included, nothing granted in a sibling account. A scheduled job lists what expires next month,
-across every tenant, as trusted work.
+across every tenant, as trusted work. The holders are read 250 at a time, each page admitted again and resumed from the
+cursor the page before returned, streamed a chunk at a time, or exported as JSON Lines by an auditor holding both review
+rights.
 
 ## Failure / Edge Cases
 
@@ -179,6 +254,13 @@ across every tenant, as trusted work.
   review of everywhere too, never in one rooted within a tenant; either is marked `malformed`, its origin scope as
   stored.
 - A window whose bounds fall within one second holds no stored expiry, since every expiry is a whole second.
+- A cursor changed in any byte, issued for another query, scope, reviewer or the trusted path, or of another schema
+  version is refused with `InvalidReviewCursorException`; a page of a reviewer who lost the right is refused with
+  `AuthorizationException` before its cursor is read.
+- An export without `authorization:review.export` beside the read right is refused before its header is written; one
+  refused at a later chunk, or failing, ends with no footer; a sink that is neither a stream nor a callback is refused
+  with `InvalidArgumentException`, a stream that takes none of a line with `RuntimeException`, and a row holding
+  invalid UTF-8 with `JsonException`.
 - A window that does not end after it starts, a limit below one, a target that is no definition, and a subject that
   names no key are refused with `InvalidArgumentException` when the query is built. A configured limit that is not a
   whole number of at least 1 is refused at boot with `InvalidAuthorizationConfigException`, and so is one changed
@@ -186,7 +268,15 @@ across every tenant, as trusted work.
 
 ## Implementation Anchors
 
-- `Reviews\AccessReview` -- `review()`, `trusted()` and the run.
+- `Reviews\AccessReview` -- `review()`, `page()`, `stream()`, `export()`, their trusted counterparts and the one read.
+- `Reviews\ReviewPage`, `Reviews\Support\ReviewPosition`, `Reviews\Support\PageRead` -- a page, where a review
+  stands, and a page as read.
+- `Reviews\Support\ReviewCursor`, `Exceptions\InvalidReviewCursorException` -- the signed cursors and their refusal.
+- `Reviews\Support\Keyset`, `Reviews\Support\GrantRows::after()` -- the keyset a page resumes from.
+- `Reviews\Support\JsonLinesExport` -- the JSON Lines format and its sinks.
+- `Console\ReviewCommand`, `Console\Support\ReviewInvocation`, `Console\Support\TenantOption`,
+  `Console\Concerns\RefusesInvocations` -- `authorization:review`.
+- `database/migrations/2026_11_08_000001_add_access_review_indexes.php` -- the review indexes.
 - `Reviews\ReviewQuery`, `Reviews\ReviewScope`, `Reviews\ApplicationSelector` -- the typed, immutable inputs.
 - `Reviews\ReviewRow`, `Reviews\SupportingGrant`, `Reviews\OriginScope`, `Reviews\ReviewResult` -- the versioned
   output.
@@ -224,11 +314,24 @@ across every tenant, as trusted work.
   selection, the frozen instant and the byte order on every database.
 - `Performance\AccessReviewQueryBudgetTest` -- no query growth with holders, grants, rows, the tenants grants are held
   in, or grants that reach no attachment.
+- `Reviews\AccessReviewTest` (Feature) -- pages by cursor to the last, the page limit, cursors serving their own review
+  alone, the frozen instant, a right revoked between pages, the live scan, lazy streams admitted per chunk, the exact
+  export shape, the export right beside read, determinism and the reference-only sentinel, a step-up or cap part way.
+- `Integration\Reviews\ReviewPagingParityTest` -- the whole review, its pages, streams and export alike for every query
+  and scope, with nullable scopes, rows naming half a tenant and unusual references, on every database.
+- `Reviews\Support\KeysetTest`, `ReviewCursorTest`, `JsonLinesExportTest` (Feature) -- keyset boundaries on equal
+  prefixes and nullable parts; signing and every refusal; the format and its sinks.
+- `ReviewCommandTest`, `ReviewInvocationTest` (Feature) -- every option, refusal and exit code, `--output` and
+  `--force`, JSON-only standard output.
+- `Database\ReviewIndexesMigrationTest` (Feature) -- the indexes created and dropped cleanly on custom table names, on
+  every database.
+- `Performance\AccessReviewPagingBudgetTest` -- five thousand holders across fifty nested tenants and a deep hierarchy:
+  the same queries on every page, none at an offset, and a stream's memory bounded by its chunk.
 
 ## Change Triggers
 
-- Keyset cursors, streaming JSON Lines exports and their indexes (part 2 of BL-69) replace the bounded list, and must
-  readmit every page.
+- A change to the row shape or the sort key bumps `ReviewRow::VERSION`, which refuses every cursor issued before it.
+- A snapshot export, or a CSV adapter (N97), would be a mode or sink of its own beside the live JSON Lines.
 - Usage tracking and the unused-grant report (part 3, N94) add a column or store, and must never count a review.
 - A paged identity directory would let identity mode stream very large identities.
 - Listing boundaries, guardrails or resource policies would need rows labelled as restrictions, never as holdings.

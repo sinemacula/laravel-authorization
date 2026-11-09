@@ -63,6 +63,45 @@ final class ReviewOrderTest extends TestCase
         $values = ReviewOrder::by(DB::table('review_order_values')->whereNotNull('value'), 'review_order_values.value')->pluck('value')->all();
 
         self::assertSame($sorted, $values);
+
+        // A keyset compares as the order does: the values after one are those
+        // sorted after it, and only its own bytes equal it.
+        foreach ($sorted as $index => $value) {
+            $after = ReviewOrder::by(ReviewOrder::compared(DB::table('review_order_values'), 'value', '>', $value), 'value')->pluck('value')->all();
+            $equal = ReviewOrder::compared(DB::table('review_order_values'), 'value', '=', $value)->pluck('value')->all();
+
+            self::assertSame(\array_slice($sorted, $index + 1), $after, "after '{$value}'");
+            self::assertSame([$value], $equal, "equal to '{$value}'");
+        }
+    }
+
+    /**
+     * A comparison compiles, on each driver's grammar, to the driver's own
+     * byte-for-byte expression against the value, cast to bytes on MySQL, and
+     * any operator but `>` compares for equality.
+     *
+     * @return void
+     */
+    public function testAComparisonCompilesForEachDriver(): void
+    {
+        $bytes = [
+            'sqlite'  => static fn (string $wrapped, string $operator): string => "{$wrapped} collate binary {$operator} ?",
+            'pgsql'   => static fn (string $wrapped, string $operator): string => "cast({$wrapped} as text) collate \"C\" {$operator} ?",
+            'mysql'   => static fn (string $wrapped, string $operator): string => "cast({$wrapped} as binary) {$operator} cast(? as binary)",
+            'mariadb' => static fn (string $wrapped, string $operator): string => "cast({$wrapped} as binary) {$operator} cast(? as binary)",
+        ];
+
+        foreach (self::drivers() as $driver) {
+            $wrapped = self::wrappedOn($driver, 'review_order_values.value');
+            $table   = self::wrappedOn($driver, 'review_order_values');
+
+            foreach (['>' => '>', '=' => '=', '<' => '='] as $operator => $compiled) {
+                $query = ReviewOrder::compared(self::queryOn($driver, 'review_order_values'), 'review_order_values.value', $operator, 'a');
+
+                self::assertSame("select * from {$table} where " . $bytes[$driver]($wrapped, $compiled), $query->toSql(), "{$driver} {$operator}");
+                self::assertSame(['a'], $query->getBindings());
+            }
+        }
     }
 
     /**
@@ -99,8 +138,9 @@ final class ReviewOrderTest extends TestCase
     }
 
     /**
-     * A query whose connection is not a database connection orders by the
-     * column as it is, as a driver the order does not know does.
+     * A query whose connection is not a database connection orders, and
+     * compares, by the column as it is, as a driver the order does not know
+     * does.
      *
      * @return void
      */
@@ -110,6 +150,10 @@ final class ReviewOrderTest extends TestCase
         $query  = new Builder(self::createStub(ConnectionInterface::class), $sqlite->getGrammar(), $sqlite->getProcessor());
 
         self::assertSame('select * from "review_order_values" order by "value"', ReviewOrder::by($query->from('review_order_values'), 'value')->toSql());
+
+        $compared = new Builder(self::createStub(ConnectionInterface::class), $sqlite->getGrammar(), $sqlite->getProcessor());
+
+        self::assertSame('select * from "review_order_values" where "value" > ?', ReviewOrder::compared($compared->from('review_order_values'), 'value', '>', 'a')->toSql());
     }
 
     /**

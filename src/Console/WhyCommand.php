@@ -6,16 +6,13 @@ namespace SineMacula\Laravel\Authorization\Console;
 
 use Illuminate\Console\Command;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Console\Concerns\RefusesInvocations;
 use SineMacula\Laravel\Authorization\Console\Support\WhyInvocation;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Explanation;
-use SineMacula\Laravel\Authorization\Evaluation\ExplanationText;
 use SineMacula\Laravel\Authorization\Exceptions\UnresolvedSubjectException;
 use SineMacula\Laravel\Authorization\Subject;
-use Symfony\Component\Console\Exception\ExceptionInterface as ConsoleException;
-use Symfony\Component\Console\Formatter\OutputFormatter;
-use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
@@ -61,6 +58,8 @@ use Symfony\Component\Console\Output\OutputInterface;
  */
 final class WhyCommand extends Command
 {
+    use RefusesInvocations;
+
     /** @var string What the text format says before the explanation. */
     public const string PREAMBLE = 'Explanation for the named subject under the given scope and console context, without their browser session:';
 
@@ -84,25 +83,6 @@ final class WhyCommand extends Command
     protected $description = 'Explain why a subject may or may not take an action, under a scope and console context';
 
     /**
-     * Run the console command, refusing an invocation the console cannot bind
-     * to its signature, such as one with an unknown option or a missing
-     * argument, as an invalid invocation.
-     *
-     * @param  \Symfony\Component\Console\Input\InputInterface  $input
-     * @param  \Symfony\Component\Console\Output\OutputInterface  $output
-     * @return int
-     */
-    #[\Override]
-    public function run(InputInterface $input, OutputInterface $output): int
-    {
-        try {
-            return parent::run($input, $output);
-        } catch (ConsoleException $exception) {
-            return $this->refuse($exception->getMessage(), self::INVALID);
-        }
-    }
-
-    /**
      * Execute the console command.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver  $subjects
@@ -113,7 +93,7 @@ final class WhyCommand extends Command
     public function handle(ConsoleSubjectResolver $subjects, CheckContextFactory $contexts, AuthorizationManager $authorization): int
     {
         try {
-            $invocation = WhyInvocation::of($this->arguments(), $this->givenOptions(), $contexts->trustedNamespaces());
+            $invocation = WhyInvocation::of($this->arguments(), $this->givenOptions(self::VALUED), $contexts->trustedNamespaces());
             $subject    = self::subject($subjects, $this->argument('subject'));
         } catch (\InvalidArgumentException $exception) {
             return $this->refuse($exception->getMessage(), self::INVALID);
@@ -142,25 +122,6 @@ final class WhyCommand extends Command
         $this->output->writeln($printed, OutputInterface::OUTPUT_RAW);
 
         return self::SUCCESS;
-    }
-
-    /**
-     * Return the options given, refusing one that takes a value but was given
-     * without one, which the console reads as if it were omitted.
-     *
-     * @return array<string, mixed>
-     *
-     * @throws \InvalidArgumentException
-     */
-    private function givenOptions(): array
-    {
-        foreach (self::VALUED as $name) {
-            if ($this->option($name) === null && $this->input->hasParameterOption('--' . $name, true)) {
-                throw new \InvalidArgumentException("The --{$name} option must be given a value.");
-            }
-        }
-
-        return $this->options();
     }
 
     /**
@@ -211,25 +172,5 @@ final class WhyCommand extends Command
         return $isJson
             ? \json_encode($explanation, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_THROW_ON_ERROR)
             : self::PREAMBLE . "\n\n" . $explanation->toText();
-    }
-
-    /**
-     * Write the error to the standard error and return the exit code: its
-     * control, format, bidirectional and line separator characters escaped as
-     * the text renderer escapes names, the whole of a message that is not UTF-8
-     * escaped so, and its markup escaped. The error style is left open, since
-     * the console closes it at the end of the line.
-     *
-     * @param  string  $message
-     * @param  int  $code
-     * @return int
-     */
-    private function refuse(string $message, int $code): int
-    {
-        $escaped = \preg_replace_callback('/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u', static fn (array $character): string => ExplanationText::bare($character[0]), $message);
-
-        $this->output->getErrorStyle()->writeln('<error>' . OutputFormatter::escape($escaped ?? ExplanationText::bare($message)));
-
-        return $code;
     }
 }

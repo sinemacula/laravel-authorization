@@ -25,6 +25,10 @@ use Illuminate\Database\Query\Builder;
  * its bytes, a null as `~`, so no two lists of parts share a key, whatever
  * bytes they hold.
  *
+ * A keyset compares a column with a value through the same expression (see
+ * `compared()`), so a page resumes exactly where the order says the page before
+ * ended, on every database.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -49,9 +53,26 @@ final class ReviewOrder
             $query->orderByRaw("case when {$wrapped} is null then 0 else 1 end");
         }
 
-        $connection = $query->getConnection();
+        return $query->orderByRaw(self::bytes(self::driverOf($query), $wrapped));
+    }
 
-        return $query->orderByRaw(self::bytes($connection instanceof Connection ? $connection->getDriverName() : '', $wrapped));
+    /**
+     * Limit the query to the rows whose column compares to the value, byte for
+     * byte, as the operator says: `=` or `>`, as the review's order compares
+     * them, so a keyset resumes exactly where a page ended on every database.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  string  $column
+     * @param  string  $operator
+     * @param  string  $value
+     * @return \Illuminate\Database\Query\Builder
+     */
+    public static function compared(Builder $query, string $column, string $operator, string $value): Builder
+    {
+        $driver = self::driverOf($query);
+        $bound  = $driver === 'mysql' || $driver === 'mariadb' ? 'cast(? as binary)' : '?';
+
+        return $query->whereRaw(self::bytes($driver, $query->getGrammar()->wrap($column)) . ' ' . ($operator === '>' ? '>' : '=') . ' ' . $bound, [$value]);
     }
 
     /**
@@ -113,6 +134,20 @@ final class ReviewOrder
         }
 
         return ($one === null ? -1 : (int) $one) <=> ($other === null ? -1 : (int) $other);
+    }
+
+    /**
+     * Return the name of the driver the query runs on, or none when its
+     * connection is not a database connection.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @return string
+     */
+    private static function driverOf(Builder $query): string
+    {
+        $connection = $query->getConnection();
+
+        return $connection instanceof Connection ? $connection->getDriverName() : '';
     }
 
     /**

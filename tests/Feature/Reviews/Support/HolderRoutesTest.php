@@ -495,6 +495,69 @@ final class HolderRoutesTest extends TestCase
     }
 
     /**
+     * Holders are read a page at a time by keyset: each page resumes at the
+     * grant its last row started from, read again for the routes it has left,
+     * and a page after the direct grants reads none of them; the pages together
+     * are the whole review, for a role, a permission and a policy, whatever the
+     * page size.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testHoldersResumeFromTheGrantTheLastRowStartsFrom(): void
+    {
+        self::keyCursors();
+
+        $top        = self::role('top');
+        $mid        = self::role('mid', $top);
+        $leaf       = self::role('leaf', $mid);
+        $permission = self::permission('posts:edit');
+        $policy     = self::policy('deny-delete');
+
+        self::roles()->grantPermission($top, $permission);
+        self::roles()->grantPermission($mid, $permission);
+        self::grants()->attachPolicy($top, $policy);
+        self::grants()->attachPolicy($mid, $policy);
+
+        foreach (['a', 'b', 'c'] as $holder) {
+            self::grants()->grantRole(new Reference('u', $holder), $leaf);
+        }
+
+        foreach (['d', 'e'] as $holder) {
+            self::grants()->grantRole(new Reference('u', $holder), $top);
+            self::grants()->grantPermission(new Reference('u', $holder), $permission);
+            self::grants()->attachPolicy(new Reference('u', $holder), $policy);
+        }
+
+        foreach ([$top, $permission, $policy] as $target) {
+            $query = ReviewQuery::holders($target, ReviewScope::everywhere());
+            $whole = self::described(self::trusted($query->withLimit(1000)));
+
+            self::assertGreaterThanOrEqual(5, \count($whole));
+
+            foreach ([1, 2, 3] as $size) {
+                $paged = self::pagedThrough($query, $size);
+
+                self::assertSame($whole, \array_map(self::describe(...), $paged['rows']), "by {$size}");
+            }
+
+            $direct = match ($target) {
+                $top        => static fn (string $sql): bool => \str_contains($sql, 'from authorizable_roles') && \str_contains($sql, 'authorizable_roles.role_id = ?'),
+                $permission => static fn (string $sql): bool => \str_contains($sql, 'from authorizable_permissions'),
+                default     => static fn (string $sql): bool => \str_contains($sql, 'from authorizable_policies') && \str_contains($sql, 'authorizable_type != ?'),
+            };
+
+            $pages = \array_map(
+                static fn (array $page): int => \count(\array_filter($page, static fn (string $sql): bool => $direct(\str_replace(['"', '`'], '', $sql)))),
+                self::pagedThrough($query, 1)['queries'],
+            );
+
+            self::assertSame([1, 1, 1, ...\array_fill(0, \count($whole) - 3, 0)], $pages, $target::class);
+        }
+    }
+
+    /**
      * Return the reference to the permission with the name.
      *
      * @param  string  $name

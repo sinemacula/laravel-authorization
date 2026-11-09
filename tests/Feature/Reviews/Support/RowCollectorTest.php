@@ -193,6 +193,85 @@ final class RowCollectorTest extends TestCase
     }
 
     /**
+     * A later page collects only the rows after the last row of the page
+     * before: one at or before it is passed over, a kind before it is past, and
+     * the kind it is of resumes from it; a first page reads everything.
+     *
+     * @return void
+     */
+    public function testALaterPageCollectsOnlyTheRowsAfterTheLastOne(): void
+    {
+        $run   = ReviewRun::of(ReviewScope::everywhere());
+        $first = new RowCollector($run, 10);
+
+        foreach (SourceKind::cases() as $kind) {
+            self::assertSame([false, null], [$first->isPast($kind), $first->resumeAt($kind)]);
+        }
+
+        $first->route(SourceKind::ROLE_INHERITED, new Reference('u', 'b'), self::grant('b', 'r', null), new Reference('role', 'r'), ['r']);
+
+        $last  = self::lastKeyOf($first);
+        $later = new RowCollector($run, 10, $last);
+
+        self::assertSame([true, null], [$later->isPast(SourceKind::ROLE_GRANT), $later->resumeAt(SourceKind::ROLE_GRANT)]);
+        self::assertSame([false, $last], [$later->isPast(SourceKind::ROLE_INHERITED), $later->resumeAt(SourceKind::ROLE_INHERITED)]);
+        self::assertSame([false, null], [$later->isPast(SourceKind::PERMISSION_GRANT), $later->resumeAt(SourceKind::PERMISSION_GRANT)]);
+
+        foreach (['a', 'b', 'c'] as $grantee) {
+            $later->route(SourceKind::ROLE_INHERITED, new Reference('u', $grantee), self::grant($grantee, 'r', null), new Reference('role', 'r'), ['r']);
+        }
+
+        $later->route(SourceKind::ROLE_GRANT, new Reference('u', 'z'), self::grant('z', 'r', null), new Reference('role', 'r'), ['r']);
+        $later->route(SourceKind::PERMISSION_GRANT, new Reference('u', 'a'), self::grant('a', 'p', null), new Reference('permission', 'p'));
+
+        self::assertSame(['c', 'a'], \array_map(static fn (ReviewRow $row): string => $row->subject->id, $later->rows()));
+        self::assertSame(9, $later->room());
+    }
+
+    /**
+     * The next page starts after the last row returned, in the order the rows
+     * were last returned in, and there is none when no row was left out.
+     *
+     * @return void
+     */
+    public function testTheNextPageStartsAfterTheLastRowReturned(): void
+    {
+        $rows = new RowCollector(ReviewRun::of(ReviewScope::everywhere()), 2);
+
+        foreach (['c', 'a', 'b'] as $grantee) {
+            $rows->route(SourceKind::ROLE_GRANT, new Reference('u', $grantee), self::grant($grantee, 'r', null), new Reference('role', 'r'), ['r']);
+        }
+
+        $rows->rows();
+
+        self::assertSame('a', $rows->next()[4] ?? null);
+
+        $rows->rows(true);
+
+        self::assertSame([0, 'role', 'r', 'u', 'b', 0, '', 0, '', 0, '', true, 'r'], $rows->next());
+
+        $short = new RowCollector(ReviewRun::of(ReviewScope::everywhere()), 2);
+
+        $short->route(SourceKind::ROLE_GRANT, new Reference('u', 'a'), self::grant('a', 'r', null), new Reference('role', 'r'), ['r']);
+
+        self::assertNull($short->next());
+    }
+
+    /**
+     * Return the sort key of the only row collected, read as the next page
+     * would start after it.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
+     * @return list<bool|int|string|null>
+     */
+    private static function lastKeyOf(RowCollector $rows): array
+    {
+        $row = $rows->rows()[0];
+
+        return [SourceKind::ROLE_INHERITED->position(), $row->target->type, $row->target->id, 'u', $row->subject->id, 0, '', 0, '', 0, '', true, 'r'];
+    }
+
+    /**
      * Return the row of a direct route from the grant.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\GrantRow  $grant

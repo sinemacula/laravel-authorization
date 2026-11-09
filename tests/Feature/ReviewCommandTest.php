@@ -1,0 +1,374 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Feature;
+
+use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Console\ReviewCommand;
+use SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver;
+use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
+use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
+use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
+use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use Symfony\Component\Console\Input\ArgvInput;
+use Symfony\Component\Console\Output\BufferedOutput;
+use Symfony\Component\Console\Tester\CommandTester;
+use Tests\Concerns\ReviewsAccess;
+use Tests\Feature\Stubs\StubIdentity;
+use Tests\TestCase;
+
+/**
+ * Feature tests for the `authorization:review` Artisan command (AUTHZ-11.6,
+ * N97): an access review exported as JSON Lines on the trusted path, to the
+ * standard output alone or to a file that exists only with `--force`, for every
+ * query and scope option, exiting 0 when written, 2 for an invalid invocation
+ * and 1 when the review fails, its errors on the standard error.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ *
+ * @SuppressWarnings("php:S1192")
+ */
+#[CoversClass(ReviewCommand::class)]
+final class ReviewCommandTest extends TestCase
+{
+    use ReviewsAccess;
+
+    /** @var list<string> Files a test wrote, removed after it. */
+    private array $files = [];
+
+    /**
+     * Remove the files the test wrote and unfreeze the clock.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function tearDown(): void
+    {
+        foreach ($this->files as $file) {
+            if (!\is_file($file)) {
+                continue;
+            }
+
+            \unlink($file);
+        }
+
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
+
+    /**
+     * The holders of a role are exported to the standard output as JSON Lines
+     * alone, the same lines the trusted export writes, and exit 0.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheHoldersAreExportedAsJsonLinesAlone(): void
+    {
+        Carbon::setTestNow('2026-11-08 12:00:00');
+
+        $role = $this->holders();
+
+        [$code, $output, $errors] = $this->review(['query' => 'holders', 'reference' => 'role:' . Reference::of($role)->id, '--everywhere' => true]);
+
+        self::assertSame(0, $code);
+        self::assertSame('', $errors);
+        self::assertSame(self::exported(ReviewQuery::holders($role, ReviewScope::everywhere())), $output);
+        self::assertStringNotContainsString("\e", $output);
+        self::assertSame(['header', 'row', 'row', 'row', 'footer'], \array_column(self::lines($output), 'record'));
+    }
+
+    /**
+     * Every query and scope option reads the review it names: the direct
+     * holders, a saved subject's holdings, what expires in a window and an
+     * actor's grants, applying in a tenant or the platform, rooted within a
+     * tenant or everywhere, in the application selected.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryQueryAndScopeOptionIsRead(): void
+    {
+        Carbon::setTestNow('2026-11-08 12:00:00');
+
+        $this->tree();
+
+        $role  = self::role('reviewed');
+        $child = self::role('child', $role);
+        $ann   = StubIdentity::query()->create(['id' => 'ann']);
+        $soon  = now()->addWeek();
+
+        self::grants()->grantRole($ann, $role, $soon, tenant: self::tenant('acct1'), application: 'web');
+        self::grants()->grantRole(new Reference('u', 'inherits'), $child);
+
+        DB::table('authorizable_roles')->update(['granted_by_type' => 'user', 'granted_by_id' => 'writer']);
+
+        $target = 'role:' . Reference::of($role)->id;
+        $until  = $soon->copy()->addDay();
+
+        $cases = [
+            [
+                ['query' => 'holders', 'reference' => $target, '--direct-only' => true, '--everywhere' => true],
+                ReviewQuery::holders($role, ReviewScope::everywhere(), true),
+            ],
+            [
+                ['query' => 'holders', 'reference' => $target, '--tenant' => 'tenant:acct1', '--application' => 'web'],
+                ReviewQuery::holders($role, ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::named('web'))),
+            ],
+            [
+                ['query' => 'holders', 'reference' => $target],
+                ReviewQuery::holders($role, ReviewScope::appliesIn(null, ApplicationSelector::none())),
+            ],
+            [
+                ['query' => 'holdings', 'reference' => StubIdentity::class . ':ann', '--rooted-within' => 'tenant:org1'],
+                ReviewQuery::holdings(self::subjectOf($ann), ReviewScope::rootedWithin(self::tenant('org1'))),
+            ],
+            [
+                ['query' => 'expiring', '--from' => now()->toIso8601String(), '--until' => $until->toIso8601String(), '--everywhere' => true, '--application' => 'none'],
+                ReviewQuery::expiring(ReviewScope::everywhere(ApplicationSelector::none()), now(), $until),
+            ],
+            [
+                ['query' => 'granted_by', '--actor' => 'user:writer', '--everywhere' => true, '--application' => 'any'],
+                ReviewQuery::grantedBy(new Reference('user', 'writer'), ReviewScope::everywhere()),
+            ],
+        ];
+
+        foreach ($cases as $index => [$parameters, $query]) {
+            [$code, $output, $errors] = $this->review($parameters);
+
+            self::assertSame([0, ''], [$code, $errors], "case {$index}");
+            self::assertSame(self::exported($query), $output, "case {$index}");
+        }
+
+        self::assertCount(2, \array_filter(self::lines($this->review($cases[0][0])[1]), static fn (array $line): bool => $line['record'] !== 'row'));
+        self::assertNotSame(self::exported($cases[0][1]), self::exported(ReviewQuery::holders($role, ReviewScope::everywhere())));
+    }
+
+    /**
+     * The export is written to the file named, the standard output left empty;
+     * a file that exists is refused unless `--force` is given, and then
+     * overwritten; and a file that cannot be opened is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheOutputFileIsWrittenOnlyWhenNewOrForced(): void
+    {
+        $role = $this->holders();
+        $file = $this->file();
+        $base = ['query' => 'holders', 'reference' => 'role:' . Reference::of($role)->id, '--everywhere' => true];
+
+        [$code, $output] = $this->review([...$base, '--output' => $file]);
+
+        self::assertSame([0, ''], [$code, $output]);
+        self::assertSame(['header', 'row', 'row', 'row', 'footer'], \array_column(self::lines((string) \file_get_contents($file)), 'record'));
+
+        \file_put_contents($file, 'kept');
+
+        [$code, $output, $errors] = $this->review([...$base, '--output' => $file]);
+
+        self::assertSame([2, ''], [$code, $output]);
+        self::assertSame("The --output file exists; give --force to overwrite it.\n", $errors);
+        self::assertSame('kept', \file_get_contents($file));
+
+        [$code] = $this->review([...$base, '--output' => $file, '--force' => true]);
+
+        self::assertSame(0, $code);
+        self::assertStringStartsWith('{"record":"header"', (string) \file_get_contents($file));
+
+        [$code, , $errors] = $this->review([...$base, '--output' => \sys_get_temp_dir() . '/missing-' . \bin2hex(\random_bytes(4)) . '/out.jsonl']);
+
+        self::assertSame([2, "The --output file could not be opened.\n"], [$code, $errors]);
+    }
+
+    /**
+     * Each invalid invocation exits 2, its error on the standard error alone,
+     * naming no value given: an unknown option, a missing query, an unknown
+     * query, an option given without its value, an option the query does not
+     * take, two scopes, and a target that is no definition.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnInvalidInvocationExitsTwo(): void
+    {
+        $refusals = [
+            [['query' => 'holders', '--secret' => 'sentinel-value'], 'The "--secret" option does not exist.'],
+            [[], 'Not enough arguments (missing: "query").'],
+            [['query' => 'sentinel-value'], 'The query must be holders, holdings, expiring or granted_by.'],
+            [['query' => 'holders', 'reference' => 'role:x', '--from' => 'sentinel-value'], 'The --from option is taken by the expiring query alone.'],
+            [
+                ['query' => 'holders', 'reference' => 'role:x', '--everywhere' => true, '--tenant' => 'team:sentinel-value'],
+                'Give at most one of the --tenant, --rooted-within and --everywhere options.',
+            ],
+            [
+                ['query' => 'holders', 'reference' => 'sentinel:value'],
+                'An access review lists the holders of a role, a permission or a policy, named by its model or a reference to it.',
+            ],
+            [['query' => 'holdings', 'reference' => 'sentinel-value'], 'The subject must be in the format {morphType}:{key} (e.g. user:1).'],
+        ];
+
+        foreach ($refusals as [$parameters, $message]) {
+            [$code, $output, $errors] = $this->review($parameters);
+
+            self::assertSame([2, '', $message . "\n"], [$code, $output, $errors]);
+            self::assertStringNotContainsString('sentinel-value', $errors);
+        }
+
+        $kernel = $this->app?->make(Kernel::class);
+
+        self::assertInstanceOf(Kernel::class, $kernel);
+
+        $line = new ArgvInput(['artisan', 'authorization:review', 'holders', 'role:x', '--tenant']);
+        $out  = new BufferedOutput;
+
+        self::assertSame(2, $kernel->handle($line, $out));
+        self::assertStringContainsString('The --tenant option must be given a value.', $out->fetch());
+    }
+
+    /**
+     * A review that fails exits 1, naming the class of what it threw and no
+     * value, and writes nothing to the standard output when it fails before its
+     * first page.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAReviewThatFailsExitsOne(): void
+    {
+        $parent = self::role('parent');
+        $child  = self::role('child', $parent);
+
+        self::grants()->grantRole(new Reference('u', 'a'), $child);
+
+        DB::table('roles')->where('id', $parent->getKey())->update(['parent_id' => $child->getKey()]);
+
+        [$code, $output, $errors] = $this->review(['query' => 'holders', 'reference' => 'role:' . Reference::of($parent)->id, '--everywhere' => true]);
+
+        self::assertSame([1, ''], [$code, $output]);
+        self::assertSame("The review could not be exported (SineMacula\\Laravel\\Authorization\\Exceptions\\RoleHierarchyCycleException).\n", $errors);
+    }
+
+    /**
+     * Return a new role held by three grantees.
+     *
+     * @return \SineMacula\Laravel\Authorization\Models\Role
+     *
+     * @throws \Throwable
+     */
+    private function holders(): Role
+    {
+        $role = self::role('reviewed');
+
+        foreach (['a', 'b', 'c'] as $id) {
+            self::grants()->grantRole(new Reference('u', $id), $role);
+        }
+
+        return $role;
+    }
+
+    /**
+     * Run the command, returning its exit code, its standard output and its
+     * standard error.
+     *
+     * @param  array<string, mixed>  $parameters
+     * @return array{int, string, string}
+     */
+    private function review(array $parameters): array
+    {
+        $kernel = $this->app?->make(Kernel::class);
+
+        self::assertInstanceOf(Kernel::class, $kernel);
+
+        $tester = new CommandTester($kernel->all()['authorization:review']);
+        $code   = $tester->execute($parameters, ['capture_stderr_separately' => true]);
+
+        return [$code, $tester->getDisplay(), $tester->getErrorOutput()];
+    }
+
+    /**
+     * Return the JSON Lines the trusted export of the query writes.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
+     * @return string
+     *
+     * @throws \Throwable
+     */
+    private static function exported(ReviewQuery $query): string
+    {
+        $written = '';
+
+        self::reviews()->trustedExport($query, static function (string $line) use (&$written): void {
+            $written .= $line;
+        });
+
+        return $written;
+    }
+
+    /**
+     * Return each line of the JSON Lines decoded.
+     *
+     * @param  string  $output
+     * @return list<array<string, mixed>>
+     *
+     * @throws \JsonException
+     */
+    private static function lines(string $output): array
+    {
+        $lines = [];
+
+        foreach (\explode("\n", \rtrim($output, "\n")) as $line) {
+            /** @var array<string, mixed> $decoded */
+            $decoded = \json_decode($line, true, 512, \JSON_THROW_ON_ERROR);
+            $lines[] = $decoded;
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Return the subject the console resolves the identity to.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @return \SineMacula\Laravel\Authorization\Subject
+     */
+    private static function subjectOf(StubIdentity $identity): Subject
+    {
+        /** @var \SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver $resolver */
+        $resolver = app(ConsoleSubjectResolver::class);
+
+        return $resolver->resolve(StubIdentity::class . ':' . Reference::of($identity)->id);
+    }
+
+    /**
+     * Return the path of a file that does not exist yet, removed after the
+     * test.
+     *
+     * @return string
+     *
+     * @throws \Random\RandomException
+     */
+    private function file(): string
+    {
+        $file = \sys_get_temp_dir() . '/review-' . \bin2hex(\random_bytes(6)) . '.jsonl';
+
+        $this->files[] = $file;
+
+        return $file;
+    }
+}

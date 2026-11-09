@@ -410,9 +410,10 @@ final class AuthorizationServiceProviderTest extends TestCase
 
     /**
      * Every package command is registered in the console, the catalogue sync,
-     * the prune, the policy validation, the configuration check and the
-     * explanation included, and `authorization:why-can`, which
-     * `authorization:why` replaced, no longer is.
+     * the prune, the policy validation, the configuration check, the
+     * explanation and the access review export included, and
+     * `authorization:why-can`, which `authorization:why` replaced, no longer
+     * is.
      *
      * @return void
      */
@@ -420,7 +421,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     {
         $commands = \array_keys(Artisan::all());
 
-        foreach (['list-roles', 'list-permissions', 'grant', 'revoke', 'why', 'migrate-spatie', 'sync', 'prune', 'policy:validate', 'check'] as $name) {
+        foreach (['list-roles', 'list-permissions', 'grant', 'revoke', 'why', 'review', 'migrate-spatie', 'sync', 'prune', 'policy:validate', 'check'] as $name) {
             self::assertContains("authorization:{$name}", $commands);
         }
 

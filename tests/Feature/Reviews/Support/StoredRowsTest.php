@@ -121,6 +121,59 @@ final class StoredRowsTest extends TestCase
     }
 
     /**
+     * Stored rows are read a page at a time by keyset, each page after the
+     * stored row its last row is, and a kind of row before that row's is not
+     * read again: the pages together are the whole review, expiries and an
+     * actor's grants alike, whatever the page size.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testStoredRowsResumeAfterTheLastRowOfThePageBefore(): void
+    {
+        self::keyCursors();
+
+        $at    = new Carbon('2030-06-01 00:00:00', 'UTC');
+        $actor = new Reference('user', 'writer');
+
+        foreach (['ann', 'bob'] as $index => $id) {
+            $grantee = self::identity($id);
+            $role    = self::role('editor-' . $index);
+
+            self::grants()->grantRole($grantee, $role, $at);
+            self::grants()->grantPermission($grantee, self::permission('posts:read-' . $index), $at);
+            self::grants()->attachPolicy($grantee, self::policy('deny-own-' . $index), $at);
+            self::grants()->attachPolicy($role, self::policy('deny-role-' . $index), $at);
+            self::roles()->grantPermission($role, self::permission('posts:edit-' . $index), $at);
+        }
+
+        foreach (['authorizable_roles', 'authorizable_permissions', 'authorizable_policies'] as $table) {
+            DB::table($table)->update(['granted_by_type' => $actor->type, 'granted_by_id' => $actor->id]);
+        }
+
+        $queries = [
+            ReviewQuery::expiring(ReviewScope::everywhere(), $at->copy()->subDay(), $at->copy()->addDay()),
+            ReviewQuery::grantedBy($actor, ReviewScope::everywhere()),
+        ];
+
+        foreach ($queries as $query) {
+            $whole = self::described(self::trusted($query->withLimit(1000)));
+
+            self::assertGreaterThanOrEqual(8, \count($whole));
+
+            foreach ([1, 2, 3] as $size) {
+                self::assertSame($whole, \array_map(self::describe(...), self::pagedThrough($query, $size)['rows']), "by {$size}");
+            }
+
+            $readsRoleGrants = static fn (string $sql): bool => \str_contains(\str_replace(['"', '`'], '', $sql), 'from authorizable_roles');
+            $roleGrants      = \array_map(static fn (array $page): int => \count(\array_filter($page, $readsRoleGrants)), self::pagedThrough($query, 1)['queries']);
+
+            self::assertSame([1, 1, 1, ...\array_fill(0, \count($whole) - 3, 0)], $roleGrants);
+        }
+    }
+
+    /**
      * Role permission edges expiring in the window come in the review's order:
      * by their permission first, then by their role.
      *
