@@ -22,11 +22,12 @@ use SineMacula\Laravel\Authorization\Console\PruneGrantsCommand;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
 use SineMacula\Laravel\Authorization\Console\SyncPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\ValidatePolicyCommand;
-use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
+use SineMacula\Laravel\Authorization\Console\WhyCommand;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Context\ContextBindings;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
+use SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
@@ -55,6 +56,7 @@ use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
+use SineMacula\Laravel\Authorization\Resolvers\ReferenceSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
@@ -208,7 +210,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             ListPermissionsCommand::class,
             GrantRoleCommand::class,
             RevokeRoleCommand::class,
-            WhyCanCommand::class,
+            WhyCommand::class,
             MigrateSpatieCommand::class,
             SyncPermissionsCommand::class,
             PruneGrantsCommand::class,
@@ -219,10 +221,13 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
     /**
      * Bind the configured subject resolver, tenant tree and identity directory
-     * as the defaults, and the composite of the configured grant hooks as the
-     * grant hook, each scoped to the request or job so any state it keeps does
-     * not reach the next one. Rebinding the subject resolver or the tenant tree
-     * forgets the resolutions read through it.
+     * as the defaults, the composite of the configured grant hooks as the grant
+     * hook, and `ReferenceSubjectResolver` as the console subject resolver
+     * `authorization:why` resolves its subject through, each scoped to the
+     * request or job so any state it keeps does not reach the next one, and
+     * each replaced by a binding the application makes on its contract.
+     * Rebinding the subject resolver or the tenant tree forgets the resolutions
+     * read through it.
      *
      * @return void
      */
@@ -245,6 +250,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         }
 
         $this->bindScopedDefault(GrantHook::class, GrantHooks::fromConfig(...));
+        $this->bindScopedDefault(ConsoleSubjectResolver::class, ReferenceSubjectResolver::class);
     }
 
     /**
