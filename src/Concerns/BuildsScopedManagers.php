@@ -21,7 +21,10 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
  * target, and `withPolicies()`, which would decide through hypothetical
  * policies, and `withoutSessionCaps()`, which would lift the target's
  * credential caps, throw `InvalidPreviewException`, while `capped()` caps the
- * target's checks alone, never the previewer's admission.
+ * target's checks alone, never the previewer's admission. A manager carrying a
+ * policy override, or built by `withoutSessionCaps()`, cannot be previewed
+ * from, so a preview never decides through hypothetical policies or without
+ * session caps, for either party.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -147,7 +150,7 @@ trait BuildsScopedManagers
     public function previewFor(object $subject, ?AuthorizationScope $scope = null): self
     {
         $this->refuseOnPreview('previewFor');
-        $this->refuseOverride();
+        $this->refuseAlteredPipeline();
 
         $context = PreviewContext::of($this->scopedTo($this->currentSubject()), $subject, $scope ?? AuthorizationScope::current());
 
@@ -191,6 +194,10 @@ trait BuildsScopedManagers
      * `capped()` still apply. The check is otherwise the full decision, through
      * the one decision path, so a deny, a guardrail or a boundary still
      * refuses. Every manager not built through it keeps its session caps.
+     *
+     * It is for application admission alone: `previewFor()` refuses the manager
+     * it returns, so neither a previewer's admission nor a target's checks are
+     * decided without session caps, and a preview refuses it.
      *
      * @return self
      *
@@ -241,16 +248,22 @@ trait BuildsScopedManagers
 
     /**
      * Refuse a preview of a manager that carries a policy override, whose
-     * hypothetical policies would stand in for the stored ones.
+     * hypothetical policies would stand in for the stored ones, or that decides
+     * without session caps, which would admit the caller and decide about the
+     * target uncapped.
      *
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException
      */
-    private function refuseOverride(): void
+    private function refuseAlteredPipeline(): void
     {
         if ($this->pipeline->hasPolicyOverride()) {
             throw InvalidPreviewException::hypothetical();
+        }
+
+        if ($this->pipeline->isSessionless()) {
+            throw InvalidPreviewException::uncapped();
         }
     }
 }

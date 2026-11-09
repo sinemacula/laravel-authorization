@@ -30,10 +30,13 @@ and `forUser()` scopes, and how the Gate, middleware, Blade directives and tenan
 
 6. **A binding made first stands (N103).** The contract is bound to the package's default only when nothing is bound
    to it yet (`bindIf()`), so a resolver a sibling package or the application binds before the package registers
-   stands, `instance()` included, and one bound afterwards replaces the default; the default stays reachable under its
-   package-owned key. The same holds for every seam the package gives a default for. Rebinding the resolver still
-   empties the resolution cache's memo: one bound before the package registered is watched from its first resolution,
-   since watching it sooner would resolve it while providers register.
+   stands, `instance()` included, and one bound afterwards with `bind()`, `singleton()`, `scoped()` or `instance()`
+   replaces the default; the default stays reachable under its package-owned key. The same holds for every seam the
+   package gives a default for. Provider order still decides between bindings made outside the package: the later of
+   two wins, and a `bindIf()` made after the package registers is skipped. Rebinding the resolver still empties the
+   resolution cache's memo: one bound before the package registered, `instance()` included, is watched from its first
+   resolution in each container that resolves it, an Octane sandbox included, since watching it sooner would resolve it
+   while providers register.
 
 7. **Configuration fails closed.** `authorization.subject_resolver` must name a class implementing the contract. Null,
    a missing class or a class that does not implement it is refused at boot (AUTHZ-17.2).

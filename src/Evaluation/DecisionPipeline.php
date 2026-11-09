@@ -172,6 +172,17 @@ final class DecisionPipeline
     }
 
     /**
+     * Determine whether the pipeline decides its checks as for a principal that
+     * holds no session yet, as `withoutSessionCaps()` returned it.
+     *
+     * @return bool
+     */
+    public function isSessionless(): bool
+    {
+        return $this->isSessionless;
+    }
+
+    /**
      * Return a pipeline that decides one check in explain mode, recording the
      * evidence an explanation needs beside its decision; a pipeline for each
      * explained check, since it records that check's evidence alone.

@@ -22,10 +22,13 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  * sibling package's assurance keys are as untestable as the package's own.
  *
  * `namespaces()` and `assuranceKeys()` must answer the same for the life of the
- * process: they are read once, after every service provider has registered, at
- * boot by the configuration validation and at first use by the context key
- * catalogue, never while providers register, so a context a later provider
- * binds is the one read.
+ * process, and should be cheap and free of side effects: the package reads them
+ * more than once, though never while service providers register, so a context a
+ * later provider binds is the one read. Both are read at boot by the
+ * configuration validation, at its first use by the context key catalogue,
+ * which keeps what they said, and each time `PolicyValidator` checks a
+ * document; `namespaces()` is read too each time the check context factory is
+ * built, once per request or job.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

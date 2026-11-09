@@ -202,8 +202,9 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
     }
 
     /**
-     * Declaring a key again with another type or testability is refused, and
-     * leaves the declaration as it was.
+     * Declaring a key again with another type, or once the assurance keys are
+     * read with another testability, is refused, and leaves the declaration as
+     * it was.
      *
      * @param  string  $path
      * @param  \SineMacula\Laravel\Authorization\Enums\ContextKeyType  $type
@@ -216,6 +217,7 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
     {
         $catalogue = new DeclaredContextKeyCatalogue;
         $catalogue->declare('authentication.level', ContextKeyType::NUMBER, false);
+        $catalogue->keys();
 
         $declared = $catalogue->find($path);
 
@@ -549,12 +551,14 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
     }
 
     /**
-     * Declaring a key again with another testability reads the assurance keys,
-     * to accept it for an assurance key and refuse it for any other.
+     * Declaring a key again with another testability reads nothing: the first
+     * read judges it, accepting an assurance key and refusing any other with
+     * the refusal the declaration would have thrown, at that read and every
+     * later one.
      *
      * @return void
      */
-    public function testRedeclaringWithAnotherTestabilityReadsTheAssuranceKeys(): void
+    public function testRedeclaringWithAnotherTestabilityIsJudgedAtTheFirstRead(): void
     {
         /** @var \ArrayObject<int, bool> $reads */
         $reads  = new \ArrayObject;
@@ -566,36 +570,95 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
 
         $catalogue = new DeclaredContextKeyCatalogue([], [], $source);
         $catalogue->declare('mfa.level', ContextKeyType::NUMBER);
-        $catalogue->declare('mfa.level', ContextKeyType::NUMBER);
+        $catalogue->declare('mfa.level', ContextKeyType::NUMBER, false);
+        $catalogue->declare('mfa.enrolled', ContextKeyType::BOOL);
+        $catalogue->declare('mfa.enrolled', ContextKeyType::BOOL, false);
 
         self::assertCount(0, $reads);
 
-        $catalogue->declare('mfa.level', ContextKeyType::NUMBER, false);
+        foreach ([static fn (): ?ContextKey => $catalogue->find('mfa.level'), static fn (): bool => $catalogue->permits('mfa.enrolled', 'eq')] as $read) {
+            try {
+                $read();
+                self::fail('A key declared again with another testability was accepted.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame('Context key \'mfa.enrolled\' is already declared as bool.', $exception->getMessage());
+            }
+        }
 
-        self::assertCount(1, $reads);
-
-        $catalogue->declare('mfa.enrolled', ContextKeyType::BOOL);
-
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Context key \'mfa.enrolled\' is already declared as bool.');
-
-        $catalogue->declare('mfa.enrolled', ContextKeyType::BOOL, false);
+        self::assertCount(2, $reads);
     }
 
     /**
-     * A key declared with another type is refused with its type as a policy
-     * reads it, untestable for an assurance key declared testable.
+     * An assurance key declared again with another testability before the first
+     * read is accepted there, and stays untestable.
      *
      * @return void
      */
-    public function testARefusalStatesTheKeyAsAPolicyReadsIt(): void
+    public function testAnAssuranceKeyDeclaredAgainBeforeTheFirstReadIsAccepted(): void
     {
-        $catalogue = new DeclaredContextKeyCatalogue(['mfa' => ['level' => 'number']], [], new AssuranceKeys(['mfa'], ['level']));
+        $catalogue = new DeclaredContextKeyCatalogue([], [], static fn (): AssuranceKeys => new AssuranceKeys(['mfa'], ['level']));
+        $catalogue->declare('mfa.level', ContextKeyType::NUMBER, false);
+        $catalogue->declare('mfa.level', ContextKeyType::NUMBER);
+        $catalogue->declare('mfa.enrolled', ContextKeyType::BOOL);
 
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Context key \'mfa.level\' is already declared as number, untestable.');
+        self::assertEquals(new ContextKey('mfa.level', ContextKeyType::NUMBER, false), $catalogue->find('mfa.level'));
+        self::assertTrue($catalogue->permits('mfa.enrolled', 'eq'));
+    }
 
-        $catalogue->declare('mfa.level', ContextKeyType::STRING);
+    /**
+     * Once the assurance keys are read, a key declared again with another
+     * testability is judged at once: an assurance key is accepted, and any
+     * other refused, leaving the catalogue as it was.
+     *
+     * @return void
+     */
+    public function testRedeclaringAfterTheFirstReadIsJudgedAtOnce(): void
+    {
+        $catalogue = new DeclaredContextKeyCatalogue(['mfa' => ['level' => 'number', 'enrolled' => 'bool']], [], new AssuranceKeys(['mfa'], ['level']));
+
+        self::assertTrue($catalogue->permits('mfa.enrolled', 'eq'));
+
+        $catalogue->declare('mfa.level', ContextKeyType::NUMBER, false);
+
+        try {
+            $catalogue->declare('mfa.enrolled', ContextKeyType::BOOL, false);
+            self::fail('A key declared again with another testability was accepted.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('Context key \'mfa.enrolled\' is already declared as bool.', $exception->getMessage());
+        }
+
+        self::assertTrue($catalogue->permits('mfa.enrolled', 'eq'));
+        self::assertFalse($catalogue->permits('mfa.level', 'eq'));
+    }
+
+    /**
+     * A key declared with another type is refused at once, stated as first
+     * declared, without reading the assurance keys.
+     *
+     * @return void
+     */
+    public function testATypeRefusalStatesTheKeyAsDeclaredWithoutReadingTheContext(): void
+    {
+        /** @var \ArrayObject<int, bool> $reads */
+        $reads     = new \ArrayObject;
+        $catalogue = new DeclaredContextKeyCatalogue(['mfa' => ['level' => 'number']], [], static function () use ($reads): AssuranceKeys {
+            $reads->append(true);
+
+            return new AssuranceKeys(['mfa'], ['level']);
+        });
+
+        $catalogue->declare('mfa.factors', ContextKeyType::LIST, false);
+
+        foreach (['mfa.level' => 'number.', 'mfa.factors' => 'list, untestable.'] as $path => $declared) {
+            try {
+                $catalogue->declare($path, ContextKeyType::STRING);
+                self::fail('A key declared again with another type was accepted.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame("Context key '{$path}' is already declared as {$declared}", $exception->getMessage());
+            }
+        }
+
+        self::assertCount(0, $reads);
     }
 
     /**

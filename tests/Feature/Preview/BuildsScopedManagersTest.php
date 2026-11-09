@@ -103,7 +103,8 @@ final class BuildsScopedManagersTest extends TestCase
     /**
      * A preview cannot change its target, nor decide through hypothetical
      * policies or without the target's session caps, and a manager carrying a
-     * policy override cannot be previewed from.
+     * policy override, or deciding without session caps, cannot be previewed
+     * from.
      *
      * @return void
      *
@@ -124,14 +125,16 @@ final class BuildsScopedManagersTest extends TestCase
             'withPolicies'       => static fn (): mixed => $preview->withPolicies($policies),
             'withoutSessionCaps' => static fn (): mixed => $preview->withoutSessionCaps(),
             'overridden'         => static fn (): mixed => $manager->withPolicies($policies)->previewFor($target),
+            'sessionless'        => static fn (): mixed => $manager->withoutSessionCaps()->previewFor($target),
         ];
+        $named = ['overridden' => 'withPolicies', 'sessionless' => 'withoutSessionCaps'];
 
         foreach ($refusals as $name => $refusal) {
             try {
                 $refusal();
                 self::fail("{$name}() was not refused.");
             } catch (InvalidPreviewException $exception) {
-                self::assertStringContainsString($name === 'overridden' ? 'withPolicies' : $name, $exception->getMessage());
+                self::assertStringContainsString($named[$name] ?? $name, $exception->getMessage());
             }
         }
     }

@@ -440,8 +440,12 @@ it, so `provider_*` makes `sso.provider_name` an assurance key. A declared name 
 a `.` or has a `*` anywhere but at its end is refused at boot by `ContextConfigValidator`; elsewhere it fails closed,
 `DeclaredContextKeyCatalogue` throwing and `PolicyValidator` refusing every document with the reason. The fixed names
 never move into the context, and no sibling's names are added to `NAMES`. `namespaces()` and `assuranceKeys()` must be
-fixed for the life of the process: they are read once, after every provider has registered, at boot by the
-validation and at first use by the catalogue.
+fixed for the life of the process, and should be cheap and free of side effects, since they are read more than once,
+though never while providers register: at boot by the validation, at its first use by the catalogue, which keeps what
+they said, and each time `PolicyValidator` checks a document; `namespaces()` is read too each time the check context
+factory is built, once per request or job. A key the catalogue is asked to declare again with another testability is
+judged at its first use, since which keys are assurance keys is not known before then; a refusal there is the one the
+declaration would have thrown, and every later use throws it too.
 
 The package declares no assurance key; `DeclaredContextKeyCatalogue` declares any of them untestable whatever the
 declaring context, provider or configuration says, and `PolicyValidator` refuses a condition on one, and a `${…}`

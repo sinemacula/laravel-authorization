@@ -10,13 +10,16 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
  * `for()`, `forUser()`, `previewFor()` or `permissionsFor()` naming a subject,
  * or the scope it was admitted in, through a listing in another tenant or
  * application; to decide through policies other than the stored ones, with
- * `withPolicies()`, before or after it is built; or to preview a subject that
- * names no record, which no event could name.
+ * `withPolicies()`, before or after it is built; to decide without session
+ * caps, with `withoutSessionCaps()`, before or after it is built; or to preview
+ * a subject that names no record, which no event could name.
  *
- * Changing either party or the scope would need an admission of its own, and a
- * hypothetical policy would answer what the target could never do, so each is a
- * programming error rather than a denial, and Laravel renders it as a 500.
- * Nothing about the target is decided or revealed before it is thrown.
+ * Changing either party or the scope would need an admission of its own, a
+ * hypothetical policy would answer what the target could never do, and lifting
+ * the session caps would admit the caller, and decide about the target, as no
+ * session could, so each is a programming error rather than a denial, and
+ * Laravel renders it as a 500. Nothing about the target is decided or revealed
+ * before it is thrown.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,6 +57,17 @@ final class InvalidPreviewException extends \LogicException
     public static function hypothetical(): self
     {
         return new self('A preview decides through the stored policies alone; withPolicies() cannot be combined with previewFor().');
+    }
+
+    /**
+     * Refuse a preview of a manager that decides without session caps, which
+     * would admit the previewer, and decide about the target, uncapped.
+     *
+     * @return self
+     */
+    public static function uncapped(): self
+    {
+        return new self('A preview keeps the session caps of the caller and the target; withoutSessionCaps() cannot be combined with previewFor().');
     }
 
     /**

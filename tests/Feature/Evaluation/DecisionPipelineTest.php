@@ -317,6 +317,9 @@ final class DecisionPipelineTest extends TestCase
         $without  = $pipeline->withoutSessionCaps();
 
         self::assertNotSame($pipeline, $without);
+        self::assertFalse($pipeline->isSessionless());
+        self::assertTrue($without->isSessionless());
+        self::assertTrue($without->capped(['posts:*'])->isSessionless());
         self::assertTrue($without->decide($subject, 'users:read', null, [])->isAllowed());
         self::assertCount(0, $source->calls);
         self::assertSame(DecisionReason::SESSION_POLICY, $without->capped(['posts:*'])->decide($subject, 'users:read', null, [])->reason);

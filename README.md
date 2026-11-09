@@ -223,9 +223,14 @@ tenant resolver, the policy store, the policy resolver, the action catalogue, th
 authentication requirement checker, the session policy source and the authentication, request and environment
 contexts. The package binds its default only when nothing is bound to the contract yet, so a binding made before it
 registers, by a sibling package or by your application, `instance()` included, stands, and a binding made afterwards
-replaces the default. The order your providers register in never decides which binding wins. A binding of your own is
-kept as you bound it across the reset between queue jobs and Octane requests, while the package's defaults, the context
-key catalogue aside, are built afresh for each.
+with `bind()`, `singleton()`, `scoped()` or `instance()` replaces the default. The order your providers register in
+therefore never lets the package's default replace a binding of yours. It still decides between other bindings of the
+same contract: of two bindings made outside the package, by a sibling package and your application for example, the
+later one wins as usual, and a `bindIf()`, `singletonIf()` or `scopedIf()` only fills a contract nothing has bound yet,
+so one made after the package registers is skipped and the package's default stands. To replace a seam whatever order
+providers register in, bind it unconditionally. A binding of your own is kept as you bound it across the reset between
+queue jobs and Octane requests, while the package's defaults, the context key catalogue aside, are built afresh for
+each.
 
 List the enums whose cases are the application's permissions, and any permission providers; the Gate asks the package
 about every permission either declares:
@@ -1924,11 +1929,14 @@ $this->app->scoped(AuthenticationContext::class, App\Authorization\SessionAuthen
 `RequestContext` and `EnvironmentContext` are rebound the same way. The defaults are built per request or job, so queue
 workers and Octane read the request and the user they are serving; a binding of your own is kept as you bound it.
 
-`namespaces()` and `assuranceKeys()` must answer the same for the life of the process, since the package reads them
-once and keeps what they said: at boot, to validate them, and at the context key catalogue's first use, not when the
-catalogue is built. A context bound in any provider's `register()` is therefore the one read, whichever provider
-registers first, even when another resolves the catalogue while it registers. Register keys from `boot()`, as above, so
-the catalogue's first use comes after every provider has registered.
+`namespaces()` and `assuranceKeys()` must answer the same for the life of the process, and should be cheap and free of
+side effects, since the package reads them more than once, though never while providers register: at boot, to validate
+them; at the context key catalogue's first use, not when the catalogue is built, which keeps what they said from then
+on; each time a policy document is validated, on a write or by `authorization:policy:validate`; and, `namespaces()`
+alone, each time the check context factory is built, once per request or job. A context bound in any provider's
+`register()` is therefore the one read, whichever provider registers first, even when another resolves the catalogue
+or declares keys in it while it registers. Register keys from `boot()`, as above, so the catalogue's first use comes
+after every provider has registered.
 
 ### Subject and resource attributes
 

@@ -33,11 +33,24 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
  * N104), so declaring it testable again changes nothing.
  *
  * The authentication context's namespaces and assurance keys are read at the
- * catalogue's first use that needs them (a key found, permitted or listed, or a
- * key declared again with another testability), never when it is built, and
- * once: a context a service provider binds after the catalogue was built, as
- * long as it is bound before that first use, is the one read. They must stay
- * the same for the life of the process.
+ * catalogue's first use that needs them (a key found, permitted or listed),
+ * never when it is built or a key is declared, and once: a context a service
+ * provider binds after the catalogue was built, as long as it is bound before
+ * that first use, is the one read. They must stay the same for the life of the
+ * process.
+ *
+ * A key declared again with another testability is accepted only for an
+ * assurance key, which is untestable either way. Before the first read, which
+ * keys are assurance keys is not known yet, so such a declaration is held and
+ * judged at the first read, which throws the refusal the declaration itself
+ * would have thrown, naming the key and how it was first declared (N104): a
+ * provider may declare keys while providers still register, before the one
+ * binding the authentication context has, and reading the context then, even to
+ * read it again later, would resolve it while providers register. A refusal at
+ * the first read is not kept, so every later read throws it too and the
+ * catalogue fails closed. Once the keys are read, such a declaration is judged
+ * at once. A key declared again with another type is refused at once, stated as
+ * declared, without reading the context.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -74,6 +87,9 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
 
     /** @var \SineMacula\Laravel\Authorization\Context\AssuranceKeys|null The authentication context's assurance keys, once read. */
     private ?AssuranceKeys $assurance = null;
+
+    /** @var array<string, \SineMacula\Laravel\Authorization\Context\ContextKey> Each key declared again with another testability, as first declared, by dot path, judged at the assurance keys' first read. */
+    private array $retestable = [];
 
     /**
      * Create a new declared context key catalogue with the package's keys, the
@@ -217,8 +233,10 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
      * nothing.
      *
      * The key is held as declared, and made untestable when it is read (see
-     * `effective()`), so the authentication context's assurance keys are read
-     * only when a key is read, or declared again with another testability.
+     * `effective()`), so declaring a key never reads the authentication
+     * context: a key declared again with another testability before the
+     * assurance keys are read is judged at their first read (see
+     * `assurance()`), and one declared after it at once.
      *
      * @param  string  $path
      * @param  \SineMacula\Laravel\Authorization\Enums\ContextKeyType  $type
@@ -231,10 +249,16 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
     {
         $declared = $this->keys[$path] ?? null;
 
-        if ($declared !== null && ($declared->type !== $type || ($declared->isTestable !== $isTestable && !$this->assurance()->matches($path)))) {
-            $shown = $this->effective($declared);
+        if ($declared !== null && $declared->type !== $type) {
+            throw self::alreadyDeclared($declared);
+        }
 
-            throw new \InvalidArgumentException("Context key '{$path}' is already declared as {$shown->type->value}" . ($shown->isTestable ? '' : ', untestable') . '.');
+        if ($declared !== null && $declared->isTestable !== $isTestable) {
+            $this->retestable[$path] = $declared;
+
+            if ($this->assurance !== null) {
+                self::assertRetestable($declared, $this->assurance);
+            }
         }
 
         $this->keys[$path] = $declared ?? new ContextKey($path, $type, $isTestable);
@@ -254,13 +278,57 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
 
     /**
      * Return the authentication context's assurance keys, read at the first
-     * call and kept. A read that fails is not kept, so every use fails closed.
+     * call and kept, once every key declared again with another testability
+     * before it is found to be an assurance key. A read that fails, or finds
+     * such a key that is not one, is not kept, so every use fails closed.
      *
      * @return \SineMacula\Laravel\Authorization\Context\AssuranceKeys
+     *
+     * @throws \InvalidArgumentException
      */
     private function assurance(): AssuranceKeys
     {
-        return $this->assurance ??= ($this->assuranceSource)();
+        if ($this->assurance === null) {
+            $assurance = ($this->assuranceSource)();
+
+            foreach ($this->retestable as $declared) {
+                self::assertRetestable($declared, $assurance);
+            }
+
+            $this->assurance = $assurance;
+        }
+
+        return $this->assurance;
+    }
+
+    /**
+     * Refuse a key declared again with another testability unless it is one of
+     * the assurance keys, which are untestable either way.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Context\ContextKey  $declared
+     * @param  \SineMacula\Laravel\Authorization\Context\AssuranceKeys  $assurance
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function assertRetestable(ContextKey $declared, AssuranceKeys $assurance): void
+    {
+        if (!$assurance->matches($declared->path)) {
+            throw self::alreadyDeclared($declared);
+        }
+    }
+
+    /**
+     * Return the refusal of a key declared again, stating it as first declared.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Context\ContextKey  $declared
+     * @return \InvalidArgumentException
+     */
+    private static function alreadyDeclared(ContextKey $declared): \InvalidArgumentException
+    {
+        $testability = $declared->isTestable ? '' : ', untestable';
+
+        return new \InvalidArgumentException("Context key '{$declared->path}' is already declared as {$declared->type->value}{$testability}.");
     }
 
     /**

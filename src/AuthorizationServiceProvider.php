@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization;
 
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernelContract;
@@ -572,18 +573,32 @@ final class AuthorizationServiceProvider extends ServiceProvider
      *
      * `rebinding()` resolves an abstract that is already bound, and nothing may
      * be resolved while the provider registers. An abstract not bound yet is
-     * watched at once; one already bound, by a sibling package or the
-     * application before the package registered, or by the package itself on a
-     * second registration, is watched from its first resolution, the earliest a
-     * rebinding could change anything the memo holds.
+     * watched at once, on the application, and every Octane sandbox cloned from
+     * it keeps the watch. One already bound, by a sibling package or the
+     * application before the package registered, `instance()` included, is
+     * watched from its first resolution in each container that resolves it, the
+     * earliest a rebinding could change anything that container's memo holds:
+     * the watch is added before the resolution, on the container resolving it,
+     * so a sandbox is watched in its own right and nothing is built on the
+     * application it was cloned from. Only the abstract itself starts the
+     * watch, never a class that implements it, and only when resolved without
+     * parameters, since starting it resolves the abstract again without them.
+     *
+     * The memo emptied is the one of the container rebinding the abstract, and
+     * only once that container has resolved it, so a rebinding never builds a
+     * memo.
      *
      * @param  string  $abstract
      * @return void
      */
     private function forgetResolutionsOnRebinding(string $abstract): void
     {
-        $forget = static function (): void {
-            ResolutionCache::instance()?->tenantChanged();
+        $forget = static function (Container $container): void {
+            if (!$container->resolved(ResolutionCache::class)) {
+                return;
+            }
+
+            $container->make(ResolutionCache::class)->tenantChanged();
         };
 
         if (!$this->app->bound($abstract)) {
@@ -593,18 +608,17 @@ final class AuthorizationServiceProvider extends ServiceProvider
             return;
         }
 
-        $app       = $this->app;
-        $isWatched = false;
+        /** @var \WeakMap<\Illuminate\Container\Container, true> $watched */
+        $watched = new \WeakMap;
 
-        $app->afterResolving($abstract, static function () use ($app, $abstract, $forget, &$isWatched): void {
-            if ($isWatched) {
+        $this->app->beforeResolving($abstract, static function (string $resolving, array $parameters, Container $container) use ($abstract, $forget, $watched): void {
+            if ($resolving !== $abstract || $parameters !== [] || isset($watched[$container])) {
                 return;
             }
 
-            $isWatched = true;
+            $watched[$container] = true;
 
-            // @phpstan-ignore staticMethod.dynamicCall
-            $app->rebinding($abstract, $forget);
+            $container->rebinding($abstract, $forget);
         });
     }
 
