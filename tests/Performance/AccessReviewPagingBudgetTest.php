@@ -50,8 +50,13 @@ final class AccessReviewPagingBudgetTest extends TestCase
     /** @var int How many rows a page or a chunk holds. */
     private const int PAGE = 250;
 
-    /** @var int How many rows a page may read beyond those after its keyset: the one beyond its last, and the index entries it seeks by. */
-    private const int SEEK = 6;
+    // A page may also read the index entries it seeks by and, on MySQL, the
+    // reads its handler counters add for the server's own bookkeeping, which
+    // vary by version; a fifth of a page allows for them, and a page that read
+    // even one page from before its keyset still fails.
+
+    /** @var int How many rows a page may read beyond those after its keyset, a fifth of a page. */
+    private const int SEEK = self::PAGE / 5;
 
     /**
      * Every page of the holders of the top role and of the permission it
@@ -126,7 +131,8 @@ final class AccessReviewPagingBudgetTest extends TestCase
         self::assertSame($held, $rows);
         self::assertCount((int) \ceil($held / self::PAGE), $reads);
         // A page reads the rows it returns, the one beyond to know whether more
-        // are left, and a few index entries to seek to its keyset.
+        // are left, the index entries it seeks by and, on MySQL, the server's
+        // own bookkeeping reads, all well short of a page.
         self::assertLessThanOrEqual(2 * self::PAGE + self::SEEK, \end($reads), "The last page read from before where it starts: {$read}.");
 
         foreach ($reads as $page => $count) {
