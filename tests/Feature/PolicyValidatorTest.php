@@ -726,6 +726,93 @@ final class PolicyValidatorTest extends TestCase
     }
 
     /**
+     * Provide documents testing or referencing an assurance key the
+     * authentication context declares, with the key refused.
+     *
+     * @return iterable<string, array{list<array<string, mixed>>, string}>
+     */
+    public static function declaredAssuranceKeyProvider(): iterable
+    {
+        yield 'a condition on an exact name' => [
+            [['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['bool' => ['mfa.recovery_code' => true]]]],
+            'condition key \'mfa.recovery_code\'',
+        ];
+        yield 'a condition on a prefixed name' => [
+            [['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['sso.provider_name' => 'corporate']]]],
+            'condition key \'sso.provider_name\'',
+        ];
+        yield 'a condition on an exact name under authentication' => [
+            [['effect' => 'deny', 'actions' => ['posts:read'], 'conditions' => ['gte' => ['authentication.level' => 2]]]],
+            'condition key \'authentication.level\'',
+        ];
+        yield 'a reference in an operand' => [
+            [['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['input.level' => '${mfa.level}']]]],
+            'reference \'${mfa.level}\' names \'mfa.level\'',
+        ];
+        yield 'a reference in a resource pattern' => [
+            [['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['post:${sso.provider_id}']]],
+            'reference \'${sso.provider_id}\' names \'sso.provider_id\'',
+        ];
+    }
+
+    /**
+     * A condition on, or a reference to, a key the authentication context
+     * declares an assurance key is refused and pointed at the requirement
+     * operator, as one under a fixed name is, even when the catalogue would
+     * permit it.
+     *
+     * @param  list<array<string, mixed>>  $statements
+     * @param  string  $refused
+     * @return void
+     */
+    #[DataProvider('declaredAssuranceKeyProvider')]
+    public function testRefusesDeclaredAssuranceKeys(array $statements, string $refused): void
+    {
+        $this->app?->instance(AuthenticationContext::class, new ContributingAuthenticationContext(['mfa', 'sso'], ['recovery_code', 'level', 'provider_*']));
+
+        $errors = self::validator()->errors(self::document($statements));
+
+        self::assertCount(1, $errors);
+        self::assertStringContainsString($refused, $errors[0]);
+        self::assertStringContainsString('authentication_requirement', $errors[0]);
+    }
+
+    /**
+     * A key that only resembles a declared name, or is under a namespace the
+     * context does not contribute, is judged by the catalogue alone.
+     *
+     * @return void
+     */
+    public function testAcceptsKeysThatAreNotDeclaredAssuranceKeys(): void
+    {
+        $this->app?->instance(AuthenticationContext::class, new ContributingAuthenticationContext(['mfa', 'sso'], ['recovery_code', 'provider_*']));
+
+        $document = self::document([['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => [
+            'bool' => ['mfa.recovery_codes_left' => true, 'input.recovery_code' => true],
+            'eq'   => ['sso.tenant_provider' => 'corporate'],
+        ]]]);
+
+        self::assertSame([], self::validator()->errors($document));
+    }
+
+    /**
+     * An authentication context whose assurance key declaration is malformed
+     * fails closed: every document is refused with the reason, whatever it
+     * reads.
+     *
+     * @return void
+     */
+    public function testAMalformedDeclarationRefusesEveryDocument(): void
+    {
+        $this->app?->instance(AuthenticationContext::class, new ContributingAuthenticationContext(['mfa'], ['provider_*_id']));
+
+        $reason = 'Authentication context \'' . ContributingAuthenticationContext::class . '\' declares the assurance key \'provider_*_id\', '
+            . 'which must be a name with no \'.\', or a name followed by one trailing \'*\'.';
+
+        self::assertSame([$reason], self::validator()->errors(self::document([['effect' => 'allow', 'actions' => ['posts:read']]])));
+    }
+
+    /**
      * Without a contributing authentication context only `authentication` holds
      * assurance keys, so a key of the same name elsewhere is judged by the
      * catalogue alone.

@@ -294,6 +294,10 @@ How they decide:
   source answers null for a machine, the check is capped by an empty cap in their place, named `credential:missing`,
   so it is denied as `session_policy` whatever it holds and whatever explicit caps are passed: `capped()` never stands
   in for the missing scopes, it only narrows them. A credential answering `[]` for a machine allows nothing either.
+- **Admission is not capped (N105).** Whether a principal may use an application (`ApplicationAccess::mayUse()`) is
+  decided through the manager's `withoutSessionCaps()`, for people and machines alike: the source is not asked, so
+  neither the request's credential scopes nor a machine's missing ones cap it, while the explicit caps, every deny,
+  guardrail and boundary still apply. Every other check, once the session exists, keeps its session caps.
 - **A machine is never a person.** The grants of a subject's identity, its roles, its permissions and the allow
   statements of its policies, reach the subject only when the subject and the identity are both machines or neither is
   (`SubjectGrants::grantingIdentity()`), so a person's grants never reach a machine principal acting for them and a

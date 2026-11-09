@@ -199,6 +199,69 @@ final class ContextBindingsTest extends TestCase
     }
 
     /**
+     * The catalogue makes the keys the bound authentication context declares as
+     * assurance keys untestable, exact names and prefixes alike.
+     *
+     * @return void
+     */
+    public function testTheCatalogueKnowsTheDeclaredAssuranceKeys(): void
+    {
+        $this->config()->set('authorization.context.keys', ['mfa' => ['recovery_code' => 'bool', 'enrolled' => 'bool'], 'sso' => ['provider_name' => 'string']]);
+        $this->application()->instance(AuthenticationContext::class, new ContributingAuthenticationContext(['mfa', 'sso'], ['recovery_code', 'provider_*']));
+
+        $catalogue = ContextBindings::catalogue($this->application());
+
+        self::assertFalse($catalogue->permits('mfa.recovery_code', 'bool'));
+        self::assertFalse($catalogue->permits('sso.provider_name', 'eq'));
+        self::assertTrue($catalogue->permits('mfa.enrolled', 'bool'));
+    }
+
+    /**
+     * Building the catalogue never resolves the authentication context, so the
+     * context bound after it is built, by a provider registering later, is the
+     * one whose namespaces and assurance keys it reads, at its first use.
+     *
+     * @return void
+     */
+    public function testTheCatalogueReadsTheContextBoundAfterItIsBuilt(): void
+    {
+        $resolved = 0;
+
+        $this->config()->set('authorization.context.keys', ['mfa' => ['level' => 'number']]);
+        $this->application()->resolving(AuthenticationContext::class, static function () use (&$resolved): void {
+            $resolved++;
+        });
+
+        $catalogue = ContextBindings::catalogue($this->application());
+
+        self::assertSame(0, $resolved);
+
+        $this->application()->instance(AuthenticationContext::class, new ContributingAuthenticationContext(['mfa'], ['level']));
+
+        self::assertFalse($catalogue->permits('mfa.level', 'eq'));
+        self::assertTrue($catalogue->permits('mfa.level'));
+    }
+
+    /**
+     * Without an authentication context bound, only `authentication` holds
+     * assurance keys, under the fixed names.
+     *
+     * @return void
+     */
+    public function testTheCatalogueReadsNoContextWhenNoneIsBound(): void
+    {
+        $this->config()->set('authorization.context.keys', ['mfa' => ['amr' => 'list'], 'authentication' => ['amr' => 'list']]);
+
+        unset($this->application()[AuthenticationContext::class]);
+
+        $catalogue = ContextBindings::catalogue($this->application());
+
+        self::assertTrue($catalogue->permits('mfa.amr', 'any_value_in'));
+        self::assertFalse($catalogue->permits('authentication.amr', 'any_value_in'));
+        self::assertTrue($catalogue->permits('authentication.amr'));
+    }
+
+    /**
      * The factory judges each check's requirements with the bound checker.
      *
      * @return void

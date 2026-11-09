@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Config;
 
 use Illuminate\Contracts\Container\Container;
+use SineMacula\Laravel\Authorization\Context\AssuranceKeys;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
@@ -26,7 +27,13 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * The bound `AuthenticationContext` is resolved too, to read the namespaces it
  * contributes beside `authentication`: each must be a name, not reserved and
  * listed once, and no source may claim one, so a clash is refused at boot
- * rather than on the first check.
+ * rather than on the first check. The assurance keys it declares must each be a
+ * name with no `.`, or a name followed by one trailing `*`, or boot fails
+ * closed (N104).
+ *
+ * It runs at boot, after every service provider has registered, so the
+ * authentication context read is the one bound last, whichever provider bound
+ * it (N104).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -135,9 +142,9 @@ final class ContextConfigValidator
     /**
      * Return each namespace the bound authentication context contributes beside
      * `authentication`, mapped to the context's class, refusing one that is not
-     * a name, is reserved or is listed twice. A container with no
-     * authentication context bound, as in library-mode embedding, contributes
-     * none.
+     * a name, is reserved or is listed twice, and refusing a malformed
+     * declaration of its assurance keys. A container with no authentication
+     * context bound, as in library-mode embedding, contributes none.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @return array<string, string>
@@ -153,6 +160,12 @@ final class ContextConfigValidator
         /** @var \SineMacula\Laravel\Authorization\Contracts\AuthenticationContext $authentication */
         $authentication = $container->make(AuthenticationContext::class);
         $claimed        = [];
+
+        try {
+            AssuranceKeys::of($authentication);
+        } catch (\InvalidArgumentException $exception) {
+            throw new InvalidAuthorizationConfigException('authorization.context', $exception->getMessage());
+        }
 
         foreach (\array_diff($authentication->namespaces(), ['authentication']) as $namespace) {
             if (!self::isClaimable($namespace) || isset($claimed[$namespace])) {

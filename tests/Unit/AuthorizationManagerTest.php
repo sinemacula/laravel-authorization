@@ -1758,6 +1758,17 @@ final class AuthorizationManagerTest extends TestCase
             }
 
             /**
+             * Declare no assurance keys of its own.
+             *
+             * @return list<string>
+             */
+            #[\Override]
+            public function assuranceKeys(): array
+            {
+                return [];
+            }
+
+            /**
              * Return no values.
              *
              * @return array<string, array<string, mixed>>

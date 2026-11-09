@@ -62,6 +62,17 @@ final class GuardAuthenticationContextTest extends TestCase
     }
 
     /**
+     * The context declares no assurance keys of its own, so only the fixed
+     * names make a key of `authentication` an assurance key.
+     *
+     * @return void
+     */
+    public function testDeclaresNoAssuranceKeysOfItsOwn(): void
+    {
+        self::assertSame([], $this->context()->assuranceKeys());
+    }
+
+    /**
      * With nobody signed in, only the default guard's name is present.
      *
      * @return void
