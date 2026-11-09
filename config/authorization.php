@@ -445,6 +445,12 @@ return [
     | grant made for that application counts; grant it through the roles that
     | should get in. An application not named here is open to every principal.
     |
+    | Admission is decided without session caps, for people and machines alike:
+    | the principal holds no session yet, so neither the request's credential
+    | scopes nor a machine's missing ones refuse it, while its denies,
+    | guardrails and permission boundaries still do. Once the session exists,
+    | its caps apply to every check.
+    |
     */
 
     'application_access' => [],

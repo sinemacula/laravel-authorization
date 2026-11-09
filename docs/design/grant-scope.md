@@ -56,7 +56,9 @@ the hook runs in a grant call.
 7. **Two questions, not two decision paths (D22).** The answers differ on purpose: a subtree grant made in an ancestor
    makes `hasGrantIn($principal, $child)` `PRESENT` and `forIdentity($identity, $child)` `OUTSIDE`. Neither authorises
    anything, says whether a principal is a member of a tenant, or whether it may act there or use an application;
-   `check()` stays the one decision path, and `ApplicationAccess` its adapter for application access.
+   `check()` stays the one decision path, and `ApplicationAccess` its adapter for application access, which decides
+   without session caps (N105): a principal being admitted holds no session yet, so neither the request's credential
+   scopes nor a machine's missing ones refuse it, while its denies, guardrails and boundaries still do.
 
 8. **A trusted service.** Even the bare status reveals a fact about other tenants, so the service is for trusted
    integration code, never an endpoint for users. It returns the status alone, never tenant ids, grant names, counts

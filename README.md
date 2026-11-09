@@ -217,6 +217,16 @@ only from it: without a tenant, only platform-wide roles and permissions are vis
 'subject_resolver' => App\Authorization\CurrentSubject::class,
 ```
 
+Every seam the package gives a default for can also be bound directly on its contract, from any service provider: the
+subject resolver, the tenant tree, the identity directory, the grant hook, the console subject resolver, the resource
+tenant resolver, the policy store, the policy resolver, the action catalogue, the context key catalogue, the
+authentication requirement checker, the session policy source and the authentication, request and environment
+contexts. The package binds its default only when nothing is bound to the contract yet, so a binding made before it
+registers, by a sibling package or by your application, `instance()` included, stands, and a binding made afterwards
+replaces the default. The order your providers register in never decides which binding wins. A binding of your own is
+kept as you bound it across the reset between queue jobs and Octane requests, while the package's defaults, the context
+key catalogue aside, are built afresh for each.
+
 List the enums whose cases are the application's permissions, and any permission providers; the Gate asks the package
 about every permission either declares:
 
@@ -472,7 +482,11 @@ not named there is open to every principal:
 ```
 
 The check is the full decision, made on the application asked about and in the tenant given, so a grant made for that
-application counts and policies can add conditions or denies.
+application counts and policies can add conditions or denies. It is made without session caps, for people and machines
+alike: a principal being admitted holds no session yet, so the scopes of the request's credential, which belong to
+whoever made the request, never cap it, and a machine is not refused for lacking scopes it has yet to be given. Its
+denies, guardrails and permission boundaries still refuse it. Once the session exists, its caps apply to every check
+(see [Session caps and machines](#session-caps-and-machines)).
 
 A role takes only the platform's permissions and parent roles, its own tenant's and its tenant's ancestors', so a
 platform role takes only the platform's; anything else is refused with `OwnerMismatchException`. Guards follow the same
@@ -1058,7 +1072,9 @@ the subject's own or its roles' policies, and a resource policy's allow naming t
 the check's policies alone, so the caps still apply. An action a cap refuses is never a step-up: the denial is
 `session_policy`, never `insufficient_authentication`. A cap has no deny statements, so it adds nothing to the deny
 stage, and a deny decides before any cap is weighed. The credential's scopes cap every check about the subject: the
-Gate, the `permission:` and `authorize:` middleware, the permission directives and `permissionsFor()` included.
+Gate, the `permission:` and `authorize:` middleware, the permission directives and `permissionsFor()` included. The one
+exception is whether a principal may use an application, which is asked before it holds a session (see
+[Managing roles, permissions and grants](#managing-roles-permissions-and-grants)).
 An explicit cap caps only the checks made through the manager `capped()` returned, so the Gate and the middleware never
 see it. `hasPermission()`, `hasRole()`, the `role:` middleware and `@role` report what is granted, not what a cap lets
 through, so a cap never stops a role check.
@@ -1120,7 +1136,8 @@ listed on its own, since PHP turns such a key into an integer.
 principal: a service account, an integration, a client acting for no person. Its grants work as a person's, capped by
 its credential's scopes, which it must have: when the source answers null for a machine, the check is denied as
 `session_policy` (`[session] credential:missing: refused`), whatever it holds, and `capped()` never stands in for the
-missing scopes, it only narrows them further. With the default source, a machine is therefore allowed nothing.
+missing scopes, it only narrows them further. With the default source, a machine is therefore allowed nothing, though
+it is still admitted to an application whose permission it holds, which is decided without session caps.
 
 ```php
 use Illuminate\Database\Eloquent\Model;
@@ -1894,8 +1911,9 @@ your `AuthenticationContext` adds are refused at boot. The trusted namespaces ar
 their own contracts. To supply `authentication` from your authentication layer, along with any namespace it adds
 beside it such as `mfa` or `sso`, bind your own `AuthenticationContext`. Its `namespaces()` lists every namespace it
 supplies and `values()` returns their values keyed by namespace; declare the keys of any namespace it adds in the
-catalogue. It is resolved at boot, which refuses a namespace it adds that is not a name, is reserved or is listed twice.
-Bind it in a service provider's `register()`:
+catalogue. `assuranceKeys()` declares the names that make a key of those namespaces an assurance key (see
+[Assurance keys](#assurance-keys)). It is resolved at boot, which refuses a namespace it adds that is not a name, is
+reserved or is listed twice, and a malformed assurance key name. Bind it in a service provider's `register()`:
 
 ```php
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
@@ -1905,6 +1923,12 @@ $this->app->scoped(AuthenticationContext::class, App\Authorization\SessionAuthen
 
 `RequestContext` and `EnvironmentContext` are rebound the same way. The defaults are built per request or job, so queue
 workers and Octane read the request and the user they are serving; a binding of your own is kept as you bound it.
+
+`namespaces()` and `assuranceKeys()` must answer the same for the life of the process, since the package reads them
+once and keeps what they said: at boot, to validate them, and at the context key catalogue's first use, not when the
+catalogue is built. A context bound in any provider's `register()` is therefore the one read, whichever provider
+registers first, even when another resolves the catalogue while it registers. Register keys from `boot()`, as above, so
+the catalogue's first use comes after every provider has registered.
 
 ### Subject and resource attributes
 
@@ -2187,7 +2211,28 @@ namespace is `assurance_level`, `auth_time`, `seconds_since_step_up`, `last_veri
 `multifactor` or `amr`, so `authentication.amr` and `mfa.multifactor.enabled` both are. The package declares none of
 them, and whatever the declaring context or configuration says, the catalogue declares each one untestable. A policy
 with a condition on one, or a `${…}` reference to one in an operand or a resource pattern, is refused when it is
-saved, with a reason that points at `authentication_requirement`.
+saved, and when `authorization:policy:validate` reads it, with a reason that points at `authentication_requirement`.
+
+Your `AuthenticationContext` declares its own assurance key names in `assuranceKeys()`, beside these fixed ones, which
+it can never remove. Each is either an exact name, or a name followed by one trailing `*`, which matches every segment
+starting with what comes before it; nothing else is accepted. A name that is not a string, is empty, holds a `.` or
+has a `*` anywhere but at its end is refused at boot, and a policy write fails closed on it. A sibling package that
+supplies verification proofs and the identity providers a session came through might declare:
+
+```php
+public function namespaces(): array
+{
+    return ['authentication', 'verification', 'federation'];
+}
+
+public function assuranceKeys(): array
+{
+    return ['recovery_code', 'level', 'factor_types', 'last_verification_age_seconds', 'provider_*'];
+}
+```
+
+`verification.level`, `verification.factors.recovery_code` and `federation.provider_name` are then assurance keys,
+and no condition may test them; `verification.enrolled` is not. The shipped `GuardAuthenticationContext` declares none.
 
 ### Listening to events
 

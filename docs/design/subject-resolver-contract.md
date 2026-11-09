@@ -26,9 +26,16 @@ and `forUser()` scopes, and how the Gate, middleware, Blade directives and tenan
 
 5. **Nothing outlives the request or job.** The package's default resolver and the tenant it resolves are bound with
    `scoped()`, so the queue worker and Octane build them afresh for each job or request (AUTHZ-12.5). A resolver the
-   application binds itself, with `instance()`, `singleton()` or `bind()`, is kept across that reset.
+   application binds itself, with `instance()`, `singleton()`, `scoped()` or `bind()`, is kept across that reset.
 
-6. **Configuration fails closed.** `authorization.subject_resolver` must name a class implementing the contract. Null,
+6. **A binding made first stands (N103).** The contract is bound to the package's default only when nothing is bound
+   to it yet (`bindIf()`), so a resolver a sibling package or the application binds before the package registers
+   stands, `instance()` included, and one bound afterwards replaces the default; the default stays reachable under its
+   package-owned key. The same holds for every seam the package gives a default for. Rebinding the resolver still
+   empties the resolution cache's memo: one bound before the package registered is watched from its first resolution,
+   since watching it sooner would resolve it while providers register.
+
+7. **Configuration fails closed.** `authorization.subject_resolver` must name a class implementing the contract. Null,
    a missing class or a class that does not implement it is refused at boot (AUTHZ-17.2).
 
 ## Contract
@@ -156,7 +163,8 @@ rather than asking the resolver again without end.
   `DecidesThroughAuthorizationTest` -- a policy class's user translated, and a guest denied.
 - `TenantScopeTest` and `ResolvedTenantTest` -- the subject's tenant scopes the rows; no subject or tenant means
   platform rows only.
-- `AuthorizationServiceProviderTest` -- the resolver and tenant rebuilt per job; an application's own binding kept.
+- `AuthorizationServiceProviderTest` -- the resolver and tenant rebuilt per job; an application's own binding kept; a
+  binding made before registration standing, by `bind`, `singleton`, `scoped` or `instance`, for every seam.
 - `ConfigValidatorTest` -- the refusals of `subject_resolver`.
 
 ## Change Triggers

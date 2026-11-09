@@ -297,6 +297,36 @@ final class DecisionPipelineTest extends TestCase
     }
 
     /**
+     * A pipeline without session caps, a new one, never asks the source for the
+     * credential's scopes and never caps a machine for lacking them, while the
+     * explicit caps still apply and the original pipeline is still capped.
+     *
+     * @return void
+     */
+    public function testAPipelineWithoutSessionCapsReadsNoCredential(): void
+    {
+        $machine = \Mockery::mock(AuthorizableIdentity::class, AuthorizableMachine::class);
+
+        $machine->shouldReceive('getPermissions')->andReturn(['*']);
+        $machine->shouldReceive('getPolicies')->andReturn([]);
+        $machine->shouldReceive('isAuthorizationActive')->andReturn(true);
+
+        $subject  = new Subject($machine, $machine);
+        $source   = new StubSessionPolicySource(['posts:*']);
+        $pipeline = new DecisionPipeline(new PolicyEvaluator, new DefaultPolicyResolver, sessionCaps: new SessionCapResolver($source));
+        $without  = $pipeline->withoutSessionCaps();
+
+        self::assertNotSame($pipeline, $without);
+        self::assertTrue($without->decide($subject, 'users:read', null, [])->isAllowed());
+        self::assertCount(0, $source->calls);
+        self::assertSame(DecisionReason::SESSION_POLICY, $without->capped(['posts:*'])->decide($subject, 'users:read', null, [])->reason);
+        self::assertTrue($without->capped(['users:*'])->decide($subject, 'users:read', null, [])->isAllowed());
+        self::assertSame(DecisionReason::SESSION_POLICY, $pipeline->decide($subject, 'users:read', null, [])->reason);
+        self::assertCount(1, $source->calls);
+        self::assertTrue((new DecisionPipeline(new PolicyEvaluator, new DefaultPolicyResolver))->withoutSessionCaps()->decide($subject, 'users:read', null, [])->isAllowed());
+    }
+
+    /**
      * A policy document that cannot be read denies as an invalid policy at the
      * deny stage, even when the subject holds the permission.
      *

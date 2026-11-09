@@ -102,8 +102,8 @@ final class BuildsScopedManagersTest extends TestCase
 
     /**
      * A preview cannot change its target, nor decide through hypothetical
-     * policies, and a manager carrying a policy override cannot be previewed
-     * from.
+     * policies or without the target's session caps, and a manager carrying a
+     * policy override cannot be previewed from.
      *
      * @return void
      *
@@ -118,11 +118,12 @@ final class BuildsScopedManagersTest extends TestCase
         $policies = [EvaluationPolicy::fromArray(['name' => 'anything', 'statements' => [['effect' => 'allow', 'actions' => ['*']]]])];
 
         $refusals = [
-            'for'          => static fn (): mixed => $preview->for($caller),
-            'forUser'      => static fn (): mixed => $preview->forUser($caller),
-            'previewFor'   => static fn (): mixed => $preview->previewFor($caller),
-            'withPolicies' => static fn (): mixed => $preview->withPolicies($policies),
-            'overridden'   => static fn (): mixed => $manager->withPolicies($policies)->previewFor($target),
+            'for'                => static fn (): mixed => $preview->for($caller),
+            'forUser'            => static fn (): mixed => $preview->forUser($caller),
+            'previewFor'         => static fn (): mixed => $preview->previewFor($caller),
+            'withPolicies'       => static fn (): mixed => $preview->withPolicies($policies),
+            'withoutSessionCaps' => static fn (): mixed => $preview->withoutSessionCaps(),
+            'overridden'         => static fn (): mixed => $manager->withPolicies($policies)->previewFor($target),
         ];
 
         foreach ($refusals as $name => $refusal) {

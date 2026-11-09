@@ -380,6 +380,17 @@ final class CheckContextFactoryTest extends TestCase
                 }
 
                 /**
+                 * Declare no assurance keys of its own.
+                 *
+                 * @return list<string>
+                 */
+                #[\Override]
+                public function assuranceKeys(): array
+                {
+                    return [];
+                }
+
+                /**
                  * Return no values.
                  *
                  * @return array<string, array<string, mixed>>
@@ -515,6 +526,17 @@ final class CheckContextFactoryTest extends TestCase
             public function namespaces(): array
             {
                 return $this->namespaces;
+            }
+
+            /**
+             * Declare no assurance keys of its own.
+             *
+             * @return list<string>
+             */
+            #[\Override]
+            public function assuranceKeys(): array
+            {
+                return [];
             }
 
             /**
