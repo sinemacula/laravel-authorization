@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
 use SineMacula\Laravel\Authorization\Usage\RecordGrantUsage;
+use Tests\Concerns\MeasuresTime;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Concerns\TracksGrantUsage;
 use Tests\Feature\Stubs\StubSecondIdentity;
@@ -32,7 +33,7 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationManager::class)]
 final class GrantUsageBudgetTest extends TestCase
 {
-    use ReviewsAccess, TracksGrantUsage;
+    use MeasuresTime, ReviewsAccess, TracksGrantUsage;
 
     /**
      * A tracked check reads, cold, exactly the queries an untracked one reads,
@@ -83,7 +84,7 @@ final class GrantUsageBudgetTest extends TestCase
         $elapsed = \microtime(true) - $start;
 
         self::assertSame(0, $queries);
-        self::assertLessThan(0.5, $elapsed, "Tracked check budget exceeded ({$elapsed}s for 1,000 checks).");
+        $this->assertWithinBudget(0.5, $elapsed, "Tracked check budget exceeded ({$elapsed}s for 1,000 checks).");
         self::assertCount(3, $this->keysObserved());
     }
 

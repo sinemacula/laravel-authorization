@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
+use Tests\Concerns\MeasuresTime;
 
 /**
  * Performance budget for `Policy::fromArray()`.
@@ -22,9 +23,9 @@ use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
  * Budget is set generously — the PHPBench suite tracks the actual micro-trend,
  * this test is the safety net. The policy language checks every operand,
  * address and pattern as it parses, and each statement notes the `${…}`
- * references it may read. CI runs the suite under PCOV coverage, where the loop
- * takes about one and a half seconds, so the budget allows three: about twice
- * that, which still catches a parse path that has doubled.
+ * references it may read, so the budget allows one and a half seconds, which
+ * still catches a parse path that has doubled. The budget is enforced outside
+ * coverage runs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,10 +38,12 @@ use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 #[CoversClass(PolicyObserver::class)]
 final class PolicyParseBudgetTest extends TestCase
 {
+    use MeasuresTime;
+
     /**
      * Parsing a 20-statement policy document (each with 5 actions, 3 resources,
-     * and 2 conditions) 1,000 times must complete in under three seconds under
-     * coverage on CI.
+     * and 2 conditions) 1,000 times must complete in under one and a half
+     * seconds.
      *
      * @return void
      */
@@ -56,8 +59,8 @@ final class PolicyParseBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(
-            3.0,
+        $this->assertWithinBudget(
+            1.5,
             $elapsed,
             "Policy::fromArray() parse budget exceeded ({$elapsed}s for 1,000 iterations).",
         );

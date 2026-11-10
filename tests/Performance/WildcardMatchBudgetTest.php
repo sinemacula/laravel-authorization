@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
+use Tests\Concerns\MeasuresTime;
 
 /**
  * Performance budget for the `fnmatch`-based wildcard hot path.
@@ -28,12 +29,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 #[CoversClass(Statement::class)]
 final class WildcardMatchBudgetTest extends TestCase
 {
+    use MeasuresTime;
+
     /**
      * 100 wildcard matches against a shallow prefix pattern must complete in
-     * under 20ms. Observed ~63μs for 100 calls on the reference machine
-     * (~0.63μs each). The CI job that collects coverage runs it under PCOV on a
-     * shared runner, where it has taken over 8ms, so the budget allows 20ms:
-     * still about 300× the reference figure.
+     * under 5ms. Observed ~63μs for 100 calls on the reference machine (~0.63μs
+     * each); the budget is generous to tolerate runner variance, and is
+     * enforced outside coverage runs.
      *
      * @return void
      */
@@ -52,8 +54,8 @@ final class WildcardMatchBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(
-            0.02,
+        $this->assertWithinBudget(
+            0.005,
             $elapsed,
             "Wildcard match budget (shallow prefix) exceeded ({$elapsed}s for 100 iterations).",
         );
@@ -82,7 +84,7 @@ final class WildcardMatchBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(
+        $this->assertWithinBudget(
             0.01,
             $elapsed,
             "Wildcard match budget (deep pattern) exceeded ({$elapsed}s for 100 iterations).",

@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use Tests\Concerns\MeasuresTime;
 use Tests\Performance\Support\CountedBenchTenant;
 use Tests\Performance\Support\CountingSubjectResolver;
 use Tests\TestCase;
@@ -38,6 +39,8 @@ use Tests\TestCase;
 #[CoversClass(TenantScope::class)]
 final class TenantScopeBudgetTest extends TestCase
 {
+    use MeasuresTime;
+
     /**
      * The memoisation tier must cap the resolver to a single call across
      * repeated apply invocations within the same container — the core
@@ -117,7 +120,7 @@ final class TenantScopeBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(
+        $this->assertWithinBudget(
             0.25,
             $elapsed,
             "TenantScope warm-apply budget exceeded ({$elapsed}s for 1,000 iterations).",

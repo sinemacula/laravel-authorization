@@ -7,6 +7,7 @@ namespace Tests\Performance;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
+use Tests\Concerns\MeasuresTime;
 
 /**
  * Performance budget for `ContextInterpolator::interpolate()`.
@@ -28,6 +29,8 @@ use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 #[CoversClass(ContextInterpolator::class)]
 final class ContextInterpolatorBudgetTest extends TestCase
 {
+    use MeasuresTime;
+
     /**
      * Interpolating a 20-token pattern must stay under ~500μs on the reference
      * machine. The PHPBench suite tracks the actual micro-trend (~52μs on the
@@ -53,7 +56,7 @@ final class ContextInterpolatorBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(
+        $this->assertWithinBudget(
             0.5,
             $elapsed,
             "ContextInterpolator budget exceeded ({$elapsed}s for 1,000 iterations of a 20-token pattern).",

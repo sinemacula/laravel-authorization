@@ -9,6 +9,7 @@ use Illuminate\Cache\Repository as CacheRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use Tests\Concerns\MeasuresTime;
 use Tests\TestCase;
 
 /**
@@ -33,6 +34,8 @@ use Tests\TestCase;
 #[CoversClass(ResolutionCache::class)]
 final class ResolutionCacheBudgetTest extends TestCase
 {
+    use MeasuresTime;
+
     /** @var string Permission name shared by the memo-hit and round-trip subjects. */
     private const string PERMISSION = 'posts:create';
 
@@ -41,11 +44,10 @@ final class ResolutionCacheBudgetTest extends TestCase
 
     /**
      * A primed memo-tier read must stay cheap. Observed about 0.5μs per call on
-     * the reference machine (5ms for the loop). The CI job that collects
-     * coverage runs it under PCOV, where it takes about 0.1s and has gone to
-     * 0.13s on a slow runner, so the budget is 0.25s: still about 50× the
-     * reference figure, which a runaway `in_array` or an accidental store
-     * lookup per read would exceed.
+     * the reference machine (5ms for the loop), so the budget is 0.1s: about
+     * 20× the reference figure, which a runaway `in_array` or an accidental
+     * store lookup per read would exceed. The budget is enforced outside
+     * coverage runs.
      *
      * @return void
      */
@@ -66,8 +68,8 @@ final class ResolutionCacheBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(
-            0.25,
+        $this->assertWithinBudget(
+            0.1,
             $elapsed,
             "ResolutionCache memo-tier read budget exceeded ({$elapsed}s for 10,000 hits).",
         );
