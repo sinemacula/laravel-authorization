@@ -24,8 +24,11 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
  */
 final class CheckConfigurationCommand extends Command
 {
+    /** @var string The console command's name. */
+    public const string NAME = 'authorization:check';
+
     /** @var string The console command signature. */
-    protected $signature = 'authorization:check';
+    protected $signature = self::NAME;
 
     /** @var string The console command description. */
     protected $description = 'Report the authorization configuration the application runs with';

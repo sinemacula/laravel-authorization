@@ -69,6 +69,8 @@ carry references, names and ids, never a value the decision read, and are dispat
    `Auth::user()` or the subject resolver. Every grant row the call writes records it in `granted_by_type` and
    `granted_by_id`. The commands that write take `--actor={morphType}:{key}`. A delegated call's decisions name the
    operation resource `authorization:operation:{operation id}`, so a decision and the write it allowed share the id.
+   The operation an event carries never has a client: its `ip` and `userAgent` are null, since the client is personal
+   data handed to the grant hook alone (see `docs/design/grant-scope.md`).
 
 5. **One operation per call.** Every event one service call dispatches carries the same `operation->id`, a UUID, and
    `operation->at`, when the call was made. A write made through a model outside the services is an operation of its

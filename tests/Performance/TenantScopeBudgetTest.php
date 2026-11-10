@@ -79,9 +79,11 @@ final class TenantScopeBudgetTest extends TestCase
     }
 
     /**
-     * 1,000 warm applies must complete under 250ms on the reference machine.
-     * The bench reports ~85μs per call (~85ms total); the budget gives ~3×
-     * headroom so normal CI variance never trips it.
+     * 1,000 warm applies must complete under half a second. They take about
+     * 20ms on the reference machine; the CI job that collects coverage runs
+     * them under PCOV on a shared runner, where they have taken over 0.26s, so
+     * the budget allows twice that, still catching an apply that does several
+     * times the work.
      *
      * @return void
      */
@@ -118,7 +120,7 @@ final class TenantScopeBudgetTest extends TestCase
         $elapsed = \microtime(true) - $start;
 
         self::assertLessThan(
-            0.25,
+            0.5,
             $elapsed,
             "TenantScope warm-apply budget exceeded ({$elapsed}s for 1,000 iterations).",
         );

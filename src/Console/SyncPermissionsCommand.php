@@ -50,6 +50,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  */
 final class SyncPermissionsCommand extends Command
 {
+    /** @var string The console command's name. */
+    public const string NAME = 'authorization:sync';
+
     /** @var int Exit code when a dry run finds something to change. */
     private const int EXIT_DRIFT = 1;
 
@@ -63,8 +66,8 @@ final class SyncPermissionsCommand extends Command
     private const array ACTIONS = ['add', 'update', 'stale', 'prune', 'protected', 'unchanged'];
 
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:sync
+    protected $signature = self::NAME . <<<'EOD'
+
                                     {--dry-run : Report what would change without writing}
                                     {--format=table : Output format: table or json}
                                     {--prune : Delete stale permissions that are not marked system}

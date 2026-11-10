@@ -77,6 +77,19 @@ final class WhyCommandTest extends TestCase
     private const string RESOURCE = 'The resource must be in the format {morphType}:{key} or {morphType}:* (e.g. post:42), or be given with --opaque.';
 
     /**
+     * The command is registered under its `NAME` constant, the name its
+     * signature declares.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:why', WhyCommand::NAME);
+        self::assertInstanceOf(WhyCommand::class, Artisan::all()[WhyCommand::NAME] ?? null);
+        self::assertSame(WhyCommand::NAME, Artisan::all()[WhyCommand::NAME]->getName());
+    }
+
+    /**
      * An allowed check is explained as text after the preamble and exits 0.
      *
      * @return void
@@ -957,12 +970,12 @@ final class WhyCommandTest extends TestCase
     /**
      * Run the command, returning its exit code and everything it wrote.
      *
-     * @param  array<string, string>  $parameters
+     * @param  array<string, bool|string|null>  $parameters
      * @return array{int, string}
      */
     private static function why(array $parameters): array
     {
-        $code = Artisan::call('authorization:why', $parameters);
+        $code = Artisan::call(WhyCommand::NAME, $parameters);
 
         return [$code, Artisan::output()];
     }

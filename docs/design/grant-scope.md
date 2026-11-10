@@ -110,7 +110,9 @@ the hook runs in a grant call.
     resolves the bound hook only when it was resolved before and a callback watches the contract for rebinding, which
     Laravel hands the wrapped hook. A wrapped hook is never wrapped again, so registering the package twice runs the
     listed hooks once. `Registrars\SeamBindings` binds the default and registers the extender. With none listed nothing
-    is extended, and the bound hook stands alone.
+    is extended, and the bound hook stands alone. The widening also carries the operation's client, `ip` and
+    `userAgent`, both nullable, the last two constructor arguments with defaults, so a widening built by hand without
+    them still builds (see invariant 16).
 
 13. **Veto only.** A hook refuses by throwing, `Exceptions\GrantRefusedException` or anything else: the call rolls back
     with nothing written and no event, and is not tried again, unless what it threw is a concurrency error
@@ -145,6 +147,19 @@ the hook runs in a grant call.
     (`OperationScope::retriedInPlace()`). Grant calls made one after another in the application's own transaction are
     each a call of their own; `authorization:migrate-spatie` commits its catalogue, then makes each grant as one.
     A binding of the contract to anything that is not a `GrantHook` is refused, never taken as none.
+
+16. **The client is personal data, for the hook alone (BL-74).** `Support\Operation` and `Hooks\GrantWidening` carry
+    the IP address and the user agent of the call. `Operation::begin()` takes a client the caller passes as it is;
+    otherwise a delegated operation reads the routed request it is begun in through `Support\RequestClient` (the IP
+    behind the trusted proxies), and a trusted one, or any begun with no routed request (console, queue), has none. The
+    grant service hands `WideningPhase::before()` the operation as begun, with its client, while `OperationScope`
+    gives the call's work, and so every event it dispatches and every write its observers report, the operation
+    without it (`Operation::withoutClient()`). The client is never put in a cache key, a decision event, a log or a
+    stored grant row. No service takes a client: each begins its own operation with none given, so a service grant
+    reaches the hook with the client of the routed request of a delegated call, or with none for a trusted, console
+    or queued call. An explicit client applies only to an `Operation` or a `GrantWidening` a caller builds itself, such
+    as a hook's own tests, and is the client of a routed request or none, never one read from the request Laravel
+    binds for the console and the queue.
 
 ## Success Path
 
@@ -243,6 +258,10 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
   lock, and the coverage check's locks last in the lock order.
 - `Feature\Hooks\GrantHooksTest`, `Unit\Config\GrantHookConfigValidatorTest` and `Feature\OperationScopeTest` -- the
   composite's order and stop, its validation, the guard and the trusted retry.
+- `Unit\Support\OperationTest`, `Unit\Support\RequestClientTest`, `Unit\Hooks\GrantWideningTest`,
+  `Feature\OperationScopeTest` and `GrantServiceTest::testTheHookAloneIsHandedTheRequestsClient` -- the client read
+  from a routed request for a delegated operation, none for trusted, console and queued work, an explicit client kept,
+  the work and its events given the operation without it, and the hook handed it.
 - `Feature\Hooks\ListedGrantHooksTest` -- the listed hooks run before whatever the contract resolves to (N108): a hook
   bound before or after the package registered, every way of binding it, a deferred provider's, the default without
   running twice, and an earlier extender's decoration, either refusing; a wrapped hook not wrapped again and a later
@@ -266,6 +285,7 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
 - Returning anything beyond the status breaks invariant 8.
 - A per-grant or per-tenant query, or loading a subtree's ids, breaks invariant 9.
 - Caching an answer needs invalidation across every principal of an identity.
+- Handing the client to anything but the grant hook (an event, a cache key, a log or a stored row) breaks invariant 16.
 - Classifying from anything but the identity and every principal the directory lists, or skipping the hook in doubt,
   breaks invariants 10 and 11.
 - Letting a hook change the grant, or a service run while a hook does, breaks invariant 13 and N80.

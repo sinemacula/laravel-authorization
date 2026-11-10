@@ -8,6 +8,8 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Http\Request;
+use Illuminate\Routing\Route;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -2305,6 +2307,48 @@ final class GrantServiceTest extends TestCase
 
             $hook->widenings = [];
         }
+    }
+
+    /**
+     * A delegated grant and sync made in a routed request hand the hook the
+     * request's IP address and user agent, while every event they dispatch
+     * carries the operation without them; a trusted grant, and a delegated one
+     * made outside a routed request, as console and queued work is, hand the
+     * hook none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheHookAloneIsHandedTheRequestsClient(): void
+    {
+        $actor = self::administrator(['authorization:*', 'posts:*']);
+
+        [, [$first, $second]] = $this->principals();
+
+        $hook    = $this->hook();
+        $request = Request::create('/grants', 'POST', [], [], [], ['REMOTE_ADDR' => '203.0.113.9', 'HTTP_USER_AGENT' => 'Browser/1.0']);
+
+        $request->setRouteResolver(static fn (): Route => new Route('POST', '/grants', static fn (): null => null));
+
+        Event::fake([RoleAssigned::class]);
+
+        $this->app?->instance('request', $request);
+
+        self::service()->grantRole($first, self::role('delegated-grant'), actor: $actor, tenant: self::tenant('acct1'));
+        self::service()->syncRoles($second, [self::role('delegated-sync')], actor: $actor, tenant: self::tenant('acct2'));
+        self::service()->grantRole($first, self::role('trusted-grant'), tenant: self::tenant('acct3'));
+
+        $this->app?->instance('request', Request::create('/grants', 'POST', [], [], [], ['REMOTE_ADDR' => '203.0.113.9', 'HTTP_USER_AGENT' => 'Browser/1.0']));
+
+        self::service()->grantRole($second, self::role('console-grant'), actor: $actor, tenant: self::tenant('acct4'));
+
+        $clients = \array_map(static fn (GrantWidening $widening): array => [$widening->isTrusted, $widening->ip, $widening->userAgent], $hook->widenings);
+
+        self::assertSame([[false, '203.0.113.9', 'Browser/1.0'], [false, '203.0.113.9', 'Browser/1.0'], [true, null, null], [false, null, null]], $clients);
+
+        Event::assertDispatchedTimes(RoleAssigned::class, 4);
+        Event::assertNotDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->operation->ip !== null || $event->operation->userAgent !== null);
     }
 
     /**

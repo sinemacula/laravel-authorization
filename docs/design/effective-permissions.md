@@ -39,7 +39,9 @@ action through the one decision path rather than computing allows less denies, a
    is named as `for()` names it (`currentSubject()->withSubject()`), so it has no session and meets no authentication
    requirement. Null is the manager's current subject, exactly as `check()` takes it: the request's on the facade, the
    named one on `Authorization::for($user)`, and a guest, allowed nothing, on `Authorization::forUser(null)` or when the
-   request has none. The subject is resolved before the scope is entered.
+   request has none. The subject is resolved before the scope is entered. On a manager from `for()` of a `Subject`
+   naming a tenant or an application (N109), the listing's scope still wins: it is listed in the scope given, as it is
+   inside `AuthorizationScope::within()`, never in the one the subject names.
 
 6. **Introspection records nothing (N70).** The batch is made with both `isDispatching` and `isStoring` false, two
    switches on the shared path rather than a copy of the decision loop: it stores no last decision and dispatches no

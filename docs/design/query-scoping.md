@@ -32,7 +32,9 @@ evaluates, and refuses whatever it cannot prove (N64).
    the preview again in each scope its classes of rows are decided in, recording and reporting each admission as any
    check (see [Preview](preview.md)). A query taken into another as SQL text (`whereIn()`, `fromSub()`, `joinSub()`,
    `selectSub()`, `withCount()` or `has()` with a count) is compiled once, when it is taken in, and never again when
-   the outer query runs.
+   the outer query runs. A query scoped through `Authorization::for()` of a `Subject` naming a tenant or an
+   application is compiled, each time, inside that scope's `within()`, so its active tenant and application are the
+   subject's, with the request's restored after the compile (N109).
 
 4. **The place, the group and the condition, no bindings.** The macro holds the scope's place on the builder with a
    condition of its own type (`AuthorizedScope`), which the grammar compiles through a macro the registrar adds. When

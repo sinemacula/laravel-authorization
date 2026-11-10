@@ -88,4 +88,16 @@ final class UsageHeartbeatCommandTest extends TestCase
 
         self::assertSame([], $store->batches);
     }
+
+    /**
+     * The command is registered under the name its constant holds.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:usage-heartbeat', UsageHeartbeatCommand::NAME);
+        self::assertInstanceOf(UsageHeartbeatCommand::class, Artisan::all()[UsageHeartbeatCommand::NAME] ?? null);
+        self::assertSame(UsageHeartbeatCommand::NAME, Artisan::all()[UsageHeartbeatCommand::NAME]->getName());
+    }
 }

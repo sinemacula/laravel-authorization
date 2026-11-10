@@ -27,6 +27,19 @@ final class CheckConfigurationCommandTest extends TestCase
     private const string DISABLED = 'Gate hook: disabled (authorization.gate.enabled is false; Laravel decides every ability)';
 
     /**
+     * The command is registered under its `NAME` constant, the name its
+     * signature declares.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:check', CheckConfigurationCommand::NAME);
+        self::assertInstanceOf(CheckConfigurationCommand::class, Artisan::all()[CheckConfigurationCommand::NAME] ?? null);
+        self::assertSame(CheckConfigurationCommand::NAME, Artisan::all()[CheckConfigurationCommand::NAME]->getName());
+    }
+
+    /**
      * With the shipped configuration the command reports the Gate hook enabled,
      * one line per check, and succeeds.
      *

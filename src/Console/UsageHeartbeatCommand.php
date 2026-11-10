@@ -25,8 +25,11 @@ use SineMacula\Laravel\Authorization\Usage\UsageTracking;
  */
 final class UsageHeartbeatCommand extends Command
 {
+    /** @var string The console command's name. */
+    public const string NAME = 'authorization:usage-heartbeat';
+
     /** @var string The console command signature. */
-    protected $signature = 'authorization:usage-heartbeat';
+    protected $signature = self::NAME;
 
     /** @var string The console command description. */
     protected $description = 'Extend the coverage of grant usage tracking to now, so a quiet site stays covered';
