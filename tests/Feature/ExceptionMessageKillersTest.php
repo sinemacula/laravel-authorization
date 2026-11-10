@@ -38,11 +38,11 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPermissionEnumsScalarMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', 'not-an-array');
 
         try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            ConfigValidator::validate($this->authorizationConfig(), $this->container());
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
             self::assertStringContainsString('authorization.permission_enums', $exception->getMessage());
@@ -59,11 +59,11 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPermissionEnumsUnknownClassMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', ['App\NoSuch\ClassX']);
 
         try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            ConfigValidator::validate($this->authorizationConfig(), $this->container());
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
             self::assertStringContainsString('class \'App\NoSuch\ClassX\' does not exist.', $exception->getMessage());
@@ -79,11 +79,11 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPermissionEnumsNonContractMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', [\stdClass::class]);
 
         try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            ConfigValidator::validate($this->authorizationConfig(), $this->container());
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
             self::assertStringContainsString('class \'stdClass\' does not implement', $exception->getMessage());
@@ -100,11 +100,11 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPermissionEnumsEmptyEntryMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', ['']);
 
         try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            ConfigValidator::validate($this->authorizationConfig(), $this->container());
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
             self::assertStringContainsString('authorization.permission_enums.0', $exception->getMessage());
@@ -121,11 +121,11 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPermissionProvidersScalarMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_providers', 42);
 
         try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            ConfigValidator::validate($this->authorizationConfig(), $this->container());
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
             self::assertStringContainsString('authorization.permission_providers', $exception->getMessage());
@@ -142,11 +142,11 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPermissionProvidersUnknownClassMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_providers', ['App\NoSuch\ProviderX']);
 
         try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            ConfigValidator::validate($this->authorizationConfig(), $this->container());
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
             self::assertStringContainsString('class \'App\NoSuch\ProviderX\' does not exist.', $exception->getMessage());
@@ -161,11 +161,11 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testCacheStoreNonStringMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.cache.store', 42);
 
         try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            ConfigValidator::validate($this->authorizationConfig(), $this->container());
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
             self::assertStringContainsString('authorization.cache.store', $exception->getMessage());
@@ -211,11 +211,11 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testSubjectResolverNonStringMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.subject_resolver', 42);
 
         try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            ConfigValidator::validate($this->authorizationConfig(), $this->container());
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
             self::assertStringContainsString('authorization.subject_resolver', $exception->getMessage());

@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
-use Illuminate\Foundation\Application;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Config\SessionConfigValidator;
@@ -170,17 +169,5 @@ final class SessionConfigValidatorTest extends TestCase
         $this->expectExceptionMessage('the scope \'editor\' names \'posts:create\', which covers no declared permission.');
 
         SessionConfigValidator::validate(['scopes' => ['editor' => ['posts:create']]], $this->container());
-    }
-
-    /**
-     * Return the application the tests validate against.
-     *
-     * @return \Illuminate\Foundation\Application
-     *
-     * @throws \LogicException
-     */
-    private function container(): Application
-    {
-        return $this->app ?? throw new \LogicException('The application has not been created.');
     }
 }

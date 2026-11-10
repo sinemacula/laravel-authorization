@@ -652,7 +652,7 @@ final class ActingContextTest extends TestCase
     private function withCredential(array $scopes): void
     {
         $this->app?->instance(SessionPolicySource::class, new StubSessionPolicySource($scopes));
-        $this->app?->make(ConfigRepository::class)->set('authorization.session.scopes', []); // @phpstan-ignore method.nonObject
+        $this->container()->make(ConfigRepository::class)->set('authorization.session.scopes', []);
         $this->app?->forgetInstance(SessionScopes::class);
         $this->forgetTheManager();
     }

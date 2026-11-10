@@ -59,7 +59,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         $resolver = new DefaultPolicyResolver;
 
-        $policies = $resolver->policiesFor($user->fresh());
+        $policies = $resolver->policiesFor($user->refresh());
 
         self::assertCount(1, $policies);
         self::assertSame('allow-x', $policies[0]->name);
@@ -118,7 +118,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         $resolver = new DefaultPolicyResolver(store: $store);
 
-        $policies = $resolver->policiesFor($user->fresh());
+        $policies = $resolver->policiesFor($user->refresh());
         $names    = \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $policies);
 
         self::assertCount(2, $policies);
@@ -140,8 +140,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['fixed:act']]],
         ]);
 
-        $this->app->instance(PolicyResolver::class, new class ($fixed) implements PolicyResolver { // @phpstan-ignore method.nonObject
-
+        $this->container()->instance(PolicyResolver::class, new class ($fixed) implements PolicyResolver {
             /**
              * Create a new resolver wrapping a fixed policy.
              *
@@ -167,8 +166,8 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
             }
         });
 
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+        $this->container()->forgetInstance('authorization');
+        $this->container()->forgetInstance(AuthorizationManager::class);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
@@ -315,9 +314,9 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         $resolver = new StubSubjectResolver($user);
 
-        $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+        $this->container()->instance(SubjectResolver::class, $resolver);
+        $this->container()->forgetInstance('authorization');
+        $this->container()->forgetInstance(AuthorizationManager::class);
 
         return $user;
     }

@@ -265,7 +265,7 @@ final class RolePermissionTest extends TestCase
     public function testBaseRoleWithConfiguredSubclassIsUsedAsInMemoryParent(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.models.role', CustomRole::class);
 
         $role       = $this->makeRole('api');
@@ -510,7 +510,7 @@ final class RolePermissionTest extends TestCase
     private function configurePermissionSubclass(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.models.permission', CustomPermission::class);
     }
 

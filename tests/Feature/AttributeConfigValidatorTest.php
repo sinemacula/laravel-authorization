@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Foundation\Application;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Config\AttributeConfigValidator;
@@ -253,17 +252,5 @@ final class AttributeConfigValidatorTest extends TestCase
         $config = (array) $this->container()->make('config')->get('authorization');
 
         ConfigValidator::validate(['attributes' => ['resources' => ['post' => 'App\Missing']]] + $config, $this->container());
-    }
-
-    /**
-     * Return the application container.
-     *
-     * @return \Illuminate\Foundation\Application
-     *
-     * @throws \LogicException
-     */
-    private function container(): Application
-    {
-        return $this->app ?? throw new \LogicException('The application has not been created.');
     }
 }

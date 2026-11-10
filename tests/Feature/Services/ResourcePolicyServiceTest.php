@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -493,6 +494,8 @@ final class ResourcePolicyServiceTest extends TestCase
             'resources'  => [OperationResource::TYPE . ':*'],
             'conditions' => ['eq' => ['resource.grantee_type' => 'posts', 'resource.grantee_id' => '7']],
         ];
+
+        self::assertInstanceOf(Model::class, $admin->subject->subject);
 
         GrantService::instance()?->attachPolicy($admin->subject->subject, self::policy('detacher', [$statement]));
 

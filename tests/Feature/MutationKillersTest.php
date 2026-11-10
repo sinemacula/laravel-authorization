@@ -245,7 +245,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testAuthorizeWritesLastDecisionOnBothOutcomes(): void
     {
-        $this->app->make(LastDecisionStore::class)->forget(); // @phpstan-ignore method.nonObject
+        $this->container()->make(LastDecisionStore::class)->forget();
 
         // Deny path — authorize() throws, lastDecision captures the decision.
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard' => 'web']);
@@ -265,7 +265,7 @@ final class MutationKillersTest extends TestCase
         $role->givePermission($permission);
         $user->assignRole($role);
 
-        Authorization::for($user->fresh())->authorize('allow:me');
+        Authorization::for($user->refresh())->authorize('allow:me');
 
         $last = Authorization::lastDecision();
         self::assertNotNull($last);

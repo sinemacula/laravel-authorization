@@ -41,13 +41,13 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     public function testPermissionEnumsMustBeArray(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', 'nope');
 
         $this->expectException(InvalidAuthorizationConfigException::class);
         $this->expectExceptionMessageMatches('/expected an array of enum class names/');
 
-        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+        ConfigValidator::validate($this->authorizationConfig(), $this->container());
     }
 
     /**
@@ -59,13 +59,13 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     public function testPermissionProvidersMustBeArray(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_providers', 'nope');
 
         $this->expectException(InvalidAuthorizationConfigException::class);
         $this->expectExceptionMessageMatches('/expected an array of class names/');
 
-        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+        ConfigValidator::validate($this->authorizationConfig(), $this->container());
     }
 
     /**
@@ -76,13 +76,13 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     public function testPermissionProviderEntryMustBeNonEmptyString(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_providers', ['']);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
         $this->expectExceptionMessageMatches('/non-empty class-string/');
 
-        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+        ConfigValidator::validate($this->authorizationConfig(), $this->container());
     }
 
     /**
@@ -94,13 +94,13 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     public function testCacheStoreMustBeString(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.cache.store', 42);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
         $this->expectExceptionMessageMatches('/expected a cache-store name string/');
 
-        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+        ConfigValidator::validate($this->authorizationConfig(), $this->container());
     }
 
     /**
@@ -133,13 +133,13 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     public function testSubjectResolverMustBeString(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.subject_resolver', 123);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
         $this->expectExceptionMessageMatches('/expected a class-string/');
 
-        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+        ConfigValidator::validate($this->authorizationConfig(), $this->container());
     }
 
     /**
@@ -151,11 +151,11 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     public function testDescribeHandlesNonScalarValues(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.gate.enabled', new \stdClass);
 
         try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            ConfigValidator::validate($this->authorizationConfig(), $this->container());
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
             self::assertStringContainsString(\stdClass::class, $exception->getMessage());

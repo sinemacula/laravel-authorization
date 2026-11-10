@@ -267,13 +267,13 @@ final class TemporalGrantsTest extends TestCase
         // Wire a persistent array-backed cache so the entry survives a memo
         // reset and the TTL bound is the only thing governing visibility.
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make('config');
         $config->set('authorization.cache.store', 'array');
         $config->set('authorization.cache.ttl', 3600);
         $config->set('authorization.cache.prefix', 'authorization-temporal');
 
-        $this->app->forgetInstance(ResolutionCache::class); // @phpstan-ignore method.nonObject
-        (new AuthorizationServiceProvider($this->app))->register();
+        $this->container()->forgetInstance(ResolutionCache::class);
+        (new AuthorizationServiceProvider($this->container()))->register();
 
         Role::create([
             'id'    => (string) Str::uuid(),
@@ -302,8 +302,8 @@ final class TemporalGrantsTest extends TestCase
 
         // Wipe the cache's in-memory memo that was primed at t=12:00 — the
         // persistent tier is the one under test.
-        $this->app->forgetInstance(ResolutionCache::class); // @phpstan-ignore method.nonObject
-        (new AuthorizationServiceProvider($this->app))->register();
+        $this->container()->forgetInstance(ResolutionCache::class);
+        (new AuthorizationServiceProvider($this->container()))->register();
 
         self::assertSame([], $fresh->getRoles());
     }

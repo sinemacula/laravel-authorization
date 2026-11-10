@@ -125,7 +125,7 @@ final class ConfigValidatorTest extends TestCase
 
         unset($config['models']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $this->expectNotToPerformAssertions();
     }
@@ -142,13 +142,13 @@ final class ConfigValidatorTest extends TestCase
             $config                 = $this->authorizationConfig();
             $config['cache']['ttl'] = $ttl;
 
-            ConfigValidator::validate($config, $this->app);
+            ConfigValidator::validate($config, $this->container());
         }
 
         $config = $this->authorizationConfig();
         unset($config['cache']['ttl']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $this->expectNotToPerformAssertions();
     }
@@ -166,7 +166,7 @@ final class ConfigValidatorTest extends TestCase
             $config['cache']['ttl'] = $ttl;
 
             $this->assertRejected(
-                fn () => ConfigValidator::validate($config, $this->app),
+                fn () => ConfigValidator::validate($config, $this->container()),
                 'authorization.cache.ttl',
                 "expected a whole number of seconds of at least 1, got {$described}.",
             );
@@ -176,7 +176,7 @@ final class ConfigValidatorTest extends TestCase
         $config['cache']['ttl'] = '300';
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($config, $this->app),
+            fn () => ConfigValidator::validate($config, $this->container()),
             'authorization.cache.ttl',
             'expected a whole number of seconds of at least 1, got \'300\' (string).',
         );
@@ -193,16 +193,16 @@ final class ConfigValidatorTest extends TestCase
         $config                       = $this->authorizationConfig();
         $config['policies']['limits'] = ['document_bytes' => 1, 'statements' => 1, 'conditions' => 1, 'pattern_length' => 1];
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         unset($config['policies']['limits']['statements']);
         $config['policies']['limits']['conditions'] = null;
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         unset($config['policies']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $this->expectNotToPerformAssertions();
     }
@@ -239,7 +239,7 @@ final class ConfigValidatorTest extends TestCase
         $config['policies']['limits'][$key] = $limit;
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($config, $this->app),
+            fn () => ConfigValidator::validate($config, $this->container()),
             "authorization.policies.limits.{$key}",
             "expected a whole number of at least 1, got {$described}.",
         );
@@ -256,7 +256,7 @@ final class ConfigValidatorTest extends TestCase
         $config['policies']['limits'] = 100;
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($config, $this->app),
+            fn () => ConfigValidator::validate($config, $this->container()),
             'authorization.policies.limits',
             'expected an array of limits, got 100 (int).',
         );
@@ -274,12 +274,12 @@ final class ConfigValidatorTest extends TestCase
 
         self::assertSame(['max_anchors' => 64, 'max_scopes' => 16, 'max_attachments' => 64], $config['query_scoping']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $config['query_scoping']['max_scopes'] = 0;
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($config, $this->app),
+            fn () => ConfigValidator::validate($config, $this->container()),
             'authorization.query_scoping.max_scopes',
             'expected a whole number of at least 1, got 0 (int).',
         );
@@ -297,12 +297,12 @@ final class ConfigValidatorTest extends TestCase
 
         self::assertSame(['chunk_size' => 500], $config['bulk']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $config['bulk']['chunk_size'] = 0;
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($config, $this->app),
+            fn () => ConfigValidator::validate($config, $this->container()),
             'authorization.bulk.chunk_size',
             'expected a whole number of at least 1, got 0 (int).',
         );
@@ -321,7 +321,7 @@ final class ConfigValidatorTest extends TestCase
 
         self::assertSame(['max_impact' => 1000, 'retries' => 2], $config['administration']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $impact = $config;
         $tries  = $config;
@@ -330,12 +330,12 @@ final class ConfigValidatorTest extends TestCase
         $tries['administration']['retries']     = -1;
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($impact, $this->app),
+            fn () => ConfigValidator::validate($impact, $this->container()),
             'authorization.administration.max_impact',
             'expected a whole number of at least 1, got 0 (int).',
         );
         $this->assertRejected(
-            fn () => ConfigValidator::validate($tries, $this->app),
+            fn () => ConfigValidator::validate($tries, $this->container()),
             'authorization.administration.retries',
             'expected a whole number of at least 0, got -1 (int).',
         );
@@ -354,7 +354,7 @@ final class ConfigValidatorTest extends TestCase
 
         self::assertSame(['limit' => 1000], $config['reviews']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $zero = $config;
         $text = $config;
@@ -363,12 +363,12 @@ final class ConfigValidatorTest extends TestCase
         $text['reviews']['limit'] = '100';
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($zero, $this->app),
+            fn () => ConfigValidator::validate($zero, $this->container()),
             'authorization.reviews.limit',
             'expected a whole number of at least 1, got 0 (int).',
         );
         $this->assertRejected(
-            fn () => ConfigValidator::validate($text, $this->app),
+            fn () => ConfigValidator::validate($text, $this->container()),
             'authorization.reviews.limit',
             'expected a whole number of at least 1, got \'100\' (string).',
         );
@@ -415,18 +415,18 @@ final class ConfigValidatorTest extends TestCase
 
         self::assertSame([], $config['grant_hooks']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $missing = $config;
 
         unset($missing['grant_hooks']);
 
-        ConfigValidator::validate($missing, $this->app);
+        ConfigValidator::validate($missing, $this->container());
 
         $config['grant_hooks'] = [\stdClass::class];
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($config, $this->app),
+            fn () => ConfigValidator::validate($config, $this->container()),
             'authorization.grant_hooks.0',
             'class \'stdClass\' does not implement ' . GrantHook::class . '.',
         );
@@ -443,7 +443,7 @@ final class ConfigValidatorTest extends TestCase
         $config['models'] = 'role';
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($config, $this->app),
+            fn () => ConfigValidator::validate($config, $this->container()),
             'authorization.models',
             'expected an array of model class names, got \'role\' (string).',
         );
@@ -492,11 +492,11 @@ final class ConfigValidatorTest extends TestCase
     public function testInvalidModelEntryFailsBoot(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.models.role', \stdClass::class);
 
         $this->assertRejected(
-            fn () => (new AuthorizationServiceProvider($this->app))->boot(),
+            fn () => (new AuthorizationServiceProvider($this->container()))->boot(),
             'authorization.models.role',
             'class \'stdClass\' is neither ' . Role::class . ' nor a subclass of it.',
         );
@@ -595,11 +595,11 @@ final class ConfigValidatorTest extends TestCase
     public function testIntBackedPermissionEnumFailsBoot(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', [IntBackedPermissionEnum::class]);
 
         $this->assertRejected(
-            fn () => (new AuthorizationServiceProvider($this->app))->boot(),
+            fn () => (new AuthorizationServiceProvider($this->container()))->boot(),
             'authorization.permission_enums.0',
             'enum \'' . IntBackedPermissionEnum::class . '\' must be backed by strings, since each case\'s value is a permission name.',
         );
@@ -665,12 +665,12 @@ final class ConfigValidatorTest extends TestCase
         foreach ([[], ['admin' => 'admin:access', 'mobile' => 'mobile:access']] as $access) {
             $config['application_access'] = $access;
 
-            ConfigValidator::validate($config, $this->app);
+            ConfigValidator::validate($config, $this->container());
         }
 
         unset($config['application_access']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $this->expectNotToPerformAssertions();
     }
@@ -704,7 +704,7 @@ final class ConfigValidatorTest extends TestCase
         $config                       = $this->authorizationConfig();
         $config['application_access'] = $access;
 
-        $this->assertRejected(fn () => ConfigValidator::validate($config, $this->app), 'authorization.application_access', $reason);
+        $this->assertRejected(fn () => ConfigValidator::validate($config, $this->container()), 'authorization.application_access', $reason);
     }
 
     /**
@@ -753,7 +753,7 @@ final class ConfigValidatorTest extends TestCase
         $config = $this->authorizationConfig();
         unset($config['tenant_tree']);
 
-        $this->assertRejected(fn () => ConfigValidator::validate($config, $this->app), 'authorization.tenant_tree', $reason);
+        $this->assertRejected(fn () => ConfigValidator::validate($config, $this->container()), 'authorization.tenant_tree', $reason);
     }
 
     /**
@@ -769,12 +769,12 @@ final class ConfigValidatorTest extends TestCase
         self::assertSame(RefusingRequirementChecker::class, $config['requirement_checker']);
 
         foreach ([RefusingRequirementChecker::class, StubRequirementChecker::class] as $checker) {
-            ConfigValidator::validate(['requirement_checker' => $checker] + $config, $this->app);
+            ConfigValidator::validate(['requirement_checker' => $checker] + $config, $this->container());
         }
 
         unset($config['requirement_checker']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $this->addToAssertionCount(3);
     }
@@ -790,12 +790,12 @@ final class ConfigValidatorTest extends TestCase
         $config = $this->authorizationConfig();
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate(['requirement_checker' => null] + $config, $this->app),
+            fn () => ConfigValidator::validate(['requirement_checker' => null] + $config, $this->container()),
             'authorization.requirement_checker',
             'a requirement checker class is required; set it to \\' . RefusingRequirementChecker::class . ' to meet no requirement.',
         );
         $this->assertRejected(
-            fn () => ConfigValidator::validate(['requirement_checker' => \stdClass::class] + $config, $this->app),
+            fn () => ConfigValidator::validate(['requirement_checker' => \stdClass::class] + $config, $this->container()),
             'authorization.requirement_checker',
             'class \'stdClass\' does not implement ' . AuthenticationRequirementChecker::class . '.',
         );
@@ -814,12 +814,12 @@ final class ConfigValidatorTest extends TestCase
         self::assertSame(GuardUserIdentityDirectory::class, $config['identity_directory']);
 
         foreach ([GuardUserIdentityDirectory::class, ListedIdentityDirectory::class] as $directory) {
-            ConfigValidator::validate(['identity_directory' => $directory] + $config, $this->app);
+            ConfigValidator::validate(['identity_directory' => $directory] + $config, $this->container());
         }
 
         unset($config['identity_directory']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $this->addToAssertionCount(3);
     }
@@ -835,12 +835,12 @@ final class ConfigValidatorTest extends TestCase
         $config = $this->authorizationConfig();
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate(['identity_directory' => null] + $config, $this->app),
+            fn () => ConfigValidator::validate(['identity_directory' => null] + $config, $this->container()),
             'authorization.identity_directory',
             'an identity directory class is required; set it to \\' . GuardUserIdentityDirectory::class . ' for the default.',
         );
         $this->assertRejected(
-            fn () => ConfigValidator::validate(['identity_directory' => \stdClass::class] + $config, $this->app),
+            fn () => ConfigValidator::validate(['identity_directory' => \stdClass::class] + $config, $this->container()),
             'authorization.identity_directory',
             'class \'stdClass\' does not implement ' . IdentityDirectory::class . '.',
         );
@@ -860,14 +860,14 @@ final class ConfigValidatorTest extends TestCase
 
         self::assertSame(['source' => NoSessionPolicy::class, 'scopes' => []], $config['session']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         unset($config['session']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate(['session' => ['source' => \stdClass::class]] + $config, $this->app),
+            fn () => ConfigValidator::validate(['session' => ['source' => \stdClass::class]] + $config, $this->container()),
             'authorization.session.source',
             'class \'stdClass\' does not implement ' . SessionPolicySource::class . '.',
         );
@@ -875,7 +875,7 @@ final class ConfigValidatorTest extends TestCase
         $this->app?->instance(ActionCatalogue::class, new EmptyActionCatalogue);
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate(['session' => ['scopes' => ['editor' => ['posts:*']]]] + $config, $this->app),
+            fn () => ConfigValidator::validate(['session' => ['scopes' => ['editor' => ['posts:*']]]] + $config, $this->container()),
             'authorization.session.scopes',
             'the scope \'editor\' names \'posts:*\', which covers no declared permission.',
         );
@@ -938,7 +938,7 @@ final class ConfigValidatorTest extends TestCase
         unset($config['resource_tenant_resolver']);
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($config, $this->app),
+            fn () => ConfigValidator::validate($config, $this->container()),
             'authorization.resource_tenant_resolver',
             self::RESOURCE_TENANT_RESOLVER_REQUIRED,
         );
@@ -952,11 +952,11 @@ final class ConfigValidatorTest extends TestCase
     public function testNullResourceTenantResolverFailsBoot(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.resource_tenant_resolver', null);
 
         $this->assertRejected(
-            fn () => (new AuthorizationServiceProvider($this->app))->boot(),
+            fn () => (new AuthorizationServiceProvider($this->container()))->boot(),
             'authorization.resource_tenant_resolver',
             self::RESOURCE_TENANT_RESOLVER_REQUIRED,
         );
@@ -970,18 +970,18 @@ final class ConfigValidatorTest extends TestCase
      */
     public function testTheAttributesConfigIsValidatedAtBoot(): void
     {
-        ConfigValidator::validate($this->authorizationConfig(), $this->app);
+        ConfigValidator::validate($this->authorizationConfig(), $this->container());
 
         $this->app?->instance(ConflictingResourceAttributes::class, new ConflictingResourceAttributes(['id' => 'string']));
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.attributes.resources', ['post' => ConflictingResourceAttributes::class]);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
         $this->expectExceptionMessage('Invalid authorization config at \'authorization.attributes\'');
 
-        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+        (new AuthorizationServiceProvider($this->container()))->boot();
     }
 
     /**
@@ -992,14 +992,14 @@ final class ConfigValidatorTest extends TestCase
      */
     public function testTheContextConfigIsValidatedAtBoot(): void
     {
-        ConfigValidator::validate($this->authorizationConfig(), $this->app);
+        ConfigValidator::validate($this->authorizationConfig(), $this->container());
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.context.sources', [ReservedContextSource::class]);
 
         $this->assertRejected(
-            fn () => (new AuthorizationServiceProvider($this->app))->boot(),
+            fn () => (new AuthorizationServiceProvider($this->container()))->boot(),
             'authorization.context.sources.0',
             'source \'' . ReservedContextSource::class . '\' supplies the namespace \'request\', which is not a name or is reserved'
                 . ' (authentication, request, environment, input, subject, resource).',
@@ -1049,7 +1049,7 @@ final class ConfigValidatorTest extends TestCase
         unset($config['subject_resolver']);
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($config, $this->app),
+            fn () => ConfigValidator::validate($config, $this->container()),
             'authorization.subject_resolver',
             'a subject resolver class is required; set it to \\' . AuthGuardSubjectResolver::class . ' to decide about the user Laravel authenticated.',
         );
@@ -1063,11 +1063,11 @@ final class ConfigValidatorTest extends TestCase
     public function testNullSubjectResolverFailsBoot(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.subject_resolver', null);
 
         $this->assertRejected(
-            fn () => (new AuthorizationServiceProvider($this->app))->boot(),
+            fn () => (new AuthorizationServiceProvider($this->container()))->boot(),
             'authorization.subject_resolver',
             'a subject resolver class is required; set it to \\' . AuthGuardSubjectResolver::class . ' to decide about the user Laravel authenticated.',
         );
@@ -1088,7 +1088,7 @@ final class ConfigValidatorTest extends TestCase
         $config = $this->authorizationConfig();
         unset($config['gate']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
 
         $this->expectNotToPerformAssertions();
     }
@@ -1126,10 +1126,10 @@ final class ConfigValidatorTest extends TestCase
         $this->assertRejected(fn () => $this->validateWithGate(['enabled' => $enabled]), 'authorization.gate.enabled', $reason);
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.gate.enabled', $enabled);
 
-        $this->assertRejected(fn () => (new AuthorizationServiceProvider($this->app))->boot(), 'authorization.gate.enabled', $reason);
+        $this->assertRejected(fn () => (new AuthorizationServiceProvider($this->container()))->boot(), 'authorization.gate.enabled', $reason);
     }
 
     /**
@@ -1154,7 +1154,7 @@ final class ConfigValidatorTest extends TestCase
         $config         = $this->authorizationConfig();
         $config['gate'] = $gate;
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
     }
 
     /**
@@ -1169,7 +1169,7 @@ final class ConfigValidatorTest extends TestCase
         $config                     = $this->authorizationConfig();
         $config['subject_resolver'] = $resolver;
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
     }
 
     /**
@@ -1184,7 +1184,7 @@ final class ConfigValidatorTest extends TestCase
         $config                             = $this->authorizationConfig();
         $config['resource_tenant_resolver'] = $resolver;
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
     }
 
     /**
@@ -1198,7 +1198,7 @@ final class ConfigValidatorTest extends TestCase
         $config                = $this->authorizationConfig();
         $config['tenant_tree'] = $tree;
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
     }
 
     /**
@@ -1213,7 +1213,7 @@ final class ConfigValidatorTest extends TestCase
         $config                     = $this->authorizationConfig();
         $config['permission_enums'] = $enums;
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
     }
 
     /**
@@ -1227,7 +1227,7 @@ final class ConfigValidatorTest extends TestCase
         $config               = $this->authorizationConfig();
         $config['connection'] = $connection;
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->container());
     }
 
     /**
@@ -1241,21 +1241,7 @@ final class ConfigValidatorTest extends TestCase
         $config           = $this->authorizationConfig();
         $config['models'] = $models;
 
-        ConfigValidator::validate($config, $this->app);
-    }
-
-    /**
-     * Return the merged package config.
-     *
-     * @return array<string, mixed>
-     */
-    private function authorizationConfig(): array
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-
-        /** @var array<string, mixed> */
-        return (array) $config->get('authorization');
+        ConfigValidator::validate($config, $this->container());
     }
 
     /**

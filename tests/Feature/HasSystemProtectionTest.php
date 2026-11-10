@@ -541,14 +541,14 @@ final class HasSystemProtectionTest extends TestCase
     {
         $saved   = $this->makeSystemRole('super-admin');
         $deleted = $this->makeSystemRole('auditor');
-        $failing = new \ArrayObject;
+        $failing = new \ArrayObject([$saved->id => false, $deleted->id => false]);
 
         Role::updated(static function (Role $role) use ($failing): void {
-            if (!$failing->offsetExists($role->id)) {
+            if (!$failing->offsetExists($role->id) || !$failing->offsetGet($role->id)) {
                 return;
             }
 
-            $failing->offsetUnset($role->id);
+            $failing->offsetSet($role->id, false);
 
             throw new \RuntimeException('The write failed.');
         });
@@ -558,7 +558,7 @@ final class HasSystemProtectionTest extends TestCase
 
             rescue(static fn (): bool => $role->forceSystem()->update(['is_system' => false]), null, false);
 
-            self::assertFalse($failing->offsetExists($role->id));
+            self::assertFalse($failing->offsetGet($role->id));
 
             $role->refresh();
         }

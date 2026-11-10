@@ -116,7 +116,10 @@ final class StoredRowsTest extends TestCase
 
         foreach ($rows as $index => $row) {
             self::assertStringStartsWith(\strlen($sources[$index]) . ':' . $sources[$index] . '|', $row->sourceKey);
-            self::assertSame([$row->sourceKey], \array_column($row->toArray()['supporting_grants'], 'source_key'));
+            $supporting = $row->toArray()['supporting_grants'];
+
+            self::assertIsArray($supporting);
+            self::assertSame([$row->sourceKey], \array_column($supporting, 'source_key'));
         }
     }
 

@@ -218,6 +218,7 @@ final class HoldingRoutesTest extends TestCase
 
         $this->app?->make('events')->forget(QueryExecuted::class);
 
+        self::assertNotEmpty($bindings);
         self::assertLessThanOrEqual(GrantRows::CHUNK + 16, \max($bindings));
         self::assertSame(
             [

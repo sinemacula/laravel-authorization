@@ -701,7 +701,7 @@ final class GuardrailServiceTest extends TestCase
 
             return;
         } catch (\Throwable $exception) {
-            self::assertInstanceOf($refusal, $exception);
+            self::assertTrue(\is_a($exception, $refusal), 'The call was refused with ' . $exception::class . '.');
 
             return;
         }

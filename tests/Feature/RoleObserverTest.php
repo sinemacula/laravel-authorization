@@ -71,7 +71,7 @@ final class RoleObserverTest extends TestCase
         parent::setUp();
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.models.role', CustomRole::class);
     }
 

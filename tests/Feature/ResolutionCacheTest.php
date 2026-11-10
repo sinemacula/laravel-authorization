@@ -800,6 +800,7 @@ final class ResolutionCacheTest extends TestCase
 
         self::assertIsArray($entry);
         self::assertSame([['id' => 'policy-key', 'document' => $policy->toArray(), 'resource' => 'posts:7']], $entry['value']);
+        self::assertIsArray($entry['versions']);
         self::assertSame([$this->versions()->resourcePoliciesKey(), $this->versions()->resourcePoliciesKey('posts')], \array_keys($entry['versions']));
 
         $read = $this->request()->rememberResourcePolicies('posts', '7', fn (): Resolution => $this->resolve([]));
@@ -833,6 +834,7 @@ final class ResolutionCacheTest extends TestCase
 
         self::assertIsArray($entry);
         self::assertSame([['id' => 'rail-key', 'document' => $policy->toArray(), 'resource' => null]], $entry['value']);
+        self::assertIsArray($entry['versions']);
         self::assertSame([$this->versions()->guardrailsKey()], \array_keys($entry['versions']));
 
         $read = $this->request()->rememberGuardrails(fn (): Resolution => $this->resolve([]));
@@ -966,6 +968,7 @@ final class ResolutionCacheTest extends TestCase
         $entry = $this->store->get('authorization-test:role-keys:user:1:platform:every');
 
         self::assertIsArray($entry);
+        self::assertIsArray($entry['versions']);
         self::assertContains($this->versions()->granteeKey($grantee), \array_keys($entry['versions']));
     }
 
@@ -1038,7 +1041,7 @@ final class ResolutionCacheTest extends TestCase
 
         $this->store->setEventDispatcher($events);
 
-        $resolve = fn (ResolutionPins $pins, array $missing): array => $this->resolveEach($pins, $missing);
+        $resolve = $this->resolveEach(...);
         $counted = function (array $ids) use ($operations, $resolve): array {
             $operations->exchangeArray([]);
 
@@ -1090,7 +1093,7 @@ final class ResolutionCacheTest extends TestCase
     public function testACorruptEntryReadInBulkIsResolvedAgain(): void
     {
         $logger  = $this->recordLogs();
-        $resolve = fn (ResolutionPins $pins, array $missing): array => $this->resolveEach($pins, $missing);
+        $resolve = $this->resolveEach(...);
 
         $this->request()->rememberResourcePoliciesMany('posts', ['1', '2'], $resolve);
 
