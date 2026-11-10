@@ -4416,6 +4416,10 @@ composer format             # format the codebase
 composer smells             # advisory code smells (duplication, complexity)
 ```
 
+The performance suite holds query, row and memory budgets in every run. Its wall-clock budgets are compared only when
+code coverage is not being collected, since a coverage driver slows the code it measures: `composer test:performance`
+enforces them, and a run with coverage still runs those tests but skips their timing comparisons.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for a list of notable changes.

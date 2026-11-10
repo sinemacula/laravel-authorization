@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use Tests\Concerns\MeasuresTime;
 
 /**
  * Performance tests codifying lightweight budgets on the evaluator hot path.
@@ -26,6 +27,8 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 #[CoversClass(PolicyEvaluator::class)]
 final class EvaluatorThroughputTest extends TestCase
 {
+    use MeasuresTime;
+
     /**
      * The evaluator can walk a 100-statement policy 1,000 times in under half a
      * second on a reference machine.
@@ -51,6 +54,6 @@ final class EvaluatorThroughputTest extends TestCase
 
         $elapsed = microtime(true) - $start;
 
-        self::assertLessThan(0.5, $elapsed, "Evaluator budget exceeded ({$elapsed}s).");
+        $this->assertWithinBudget(0.5, $elapsed, "Evaluator budget exceeded ({$elapsed}s).");
     }
 }

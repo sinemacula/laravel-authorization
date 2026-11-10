@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Concerns\MeasuresTime;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
@@ -40,6 +41,8 @@ use Tests\TestCase;
 #[CoversClass(RequirePermission::class)]
 final class MiddlewareBudgetTest extends TestCase
 {
+    use MeasuresTime;
+
     /**
      * 500 admit-path invocations of `RequireRole::handle()` must complete in
      * under 250ms on the reference machine (~25μs per call observed; ~10×
@@ -69,7 +72,7 @@ final class MiddlewareBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(
+        $this->assertWithinBudget(
             0.25,
             $elapsed,
             "RequireRole admit-path budget exceeded ({$elapsed}s for 500 iterations).",
@@ -113,7 +116,7 @@ final class MiddlewareBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(
+        $this->assertWithinBudget(
             0.5,
             $elapsed,
             "RequirePermission admit-path budget exceeded ({$elapsed}s for 500 iterations).",
