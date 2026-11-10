@@ -209,7 +209,13 @@ final class AuthorizationServiceProvider extends ServiceProvider
     {
         $concrete = $container->getBindings()[$contract]['concrete'] ?? null;
 
-        return $concrete instanceof \Closure && (new \ReflectionFunction($concrete))->getClosureScopeClass()?->getName() === self::class;
+        // An instance held over the default leaves the binding beneath it in
+        // place, and Laravel offers no public way to tell, so the instances are
+        // read in the container's own scope; the package's defaults are never
+        // shared, so any instance held under the contract is someone's.
+        $isHeld = \Closure::bind(static fn (Container $container): bool => isset($container->instances[$contract]), null, Container::class);
+
+        return !$isHeld($container) && $concrete instanceof \Closure && (new \ReflectionFunction($concrete))->getClosureScopeClass()?->getName() === self::class;
     }
 
     /**

@@ -1952,6 +1952,14 @@ final class AuthorizationServiceProviderTest extends TestCase
         self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, SubjectResolver::class), 'A configured class is not the default.');
         self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, 'authorization.nothing-bound-here'));
 
+        $app->instance(TenantTree::class, new StubTenantTree);
+
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, TenantTree::class), 'An instance held over the default is not the default.');
+
+        $app->forgetInstance(TenantTree::class);
+
+        self::assertTrue(AuthorizationServiceProvider::isPackageDefault($app, TenantTree::class));
+
         $app->bind(TenantTree::class, StubTenantTree::class);
 
         self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, TenantTree::class));
