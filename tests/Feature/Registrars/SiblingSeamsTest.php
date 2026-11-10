@@ -105,7 +105,7 @@ final class SiblingSeamsTest extends TestCase
      * Name a subject resolver in the configuration for the test that asks the
      * application's choice to stand, before any provider registers.
      *
-     * @param  mixed  $app
+     * @param  \Illuminate\Foundation\Application  $app
      * @return void
      */
     #[\Override]
