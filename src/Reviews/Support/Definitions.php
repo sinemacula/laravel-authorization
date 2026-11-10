@@ -4,10 +4,10 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Reviews\Support;
 
-use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Str;
+use SineMacula\Laravel\Authorization\Database\KeyAsText;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -94,10 +94,7 @@ final class Definitions
      */
     public static function keyAsText(Builder $query, string $column): string
     {
-        $wrapped    = $query->getGrammar()->wrap($column);
-        $connection = $query->getConnection();
-
-        return $connection instanceof Connection && $connection->getDriverName() === 'pgsql' ? "cast({$wrapped} as text)" : $wrapped;
+        return (new KeyAsText($column))->getValue($query->getGrammar());
     }
 
     /**

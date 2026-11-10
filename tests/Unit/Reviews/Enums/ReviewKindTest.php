@@ -29,6 +29,6 @@ final class ReviewKindTest extends TestCase
     {
         $values = \array_map(static fn (ReviewKind $case): string => $case->value, ReviewKind::cases());
 
-        self::assertSame(['holders', 'holdings', 'expiring', 'granted_by'], $values);
+        self::assertSame(['holders', 'holdings', 'expiring', 'granted_by', 'unused'], $values);
     }
 }

@@ -87,6 +87,7 @@ final class ConfigValidator
         BulkConfigValidator::validate($config['bulk'] ?? []);
         AdministrationConfigValidator::validate($config['administration'] ?? []);
         ReviewConfigValidator::validate($config['reviews'] ?? []);
+        UsageConfigValidator::validateIn($config);
         GrantHookConfigValidator::validate(\array_key_exists('grant_hooks', $config) ? $config['grant_hooks'] : []);
     }
 

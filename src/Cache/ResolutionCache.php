@@ -8,10 +8,10 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
-use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Usage\RouteMap;
 
 /**
  * Two-tier cache (in-memory memo plus optional persistent store) for what a
@@ -44,8 +44,8 @@ final readonly class ResolutionCache
 {
     use HasContainerInstance;
 
-    /** @var list<string> The kinds of entry that hold policy documents, hydrated under the policy limits. */
-    private const array POLICY_KINDS = ['policies', 'boundaries', 'resource-policies', 'resource-type-policies', 'guardrails'];
+    /** @var string The prefix of the memo key the routes behind an entry are kept under. */
+    private const string ROUTES = 'routes:';
 
     /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionMemo In-memory tier, keyed by full cache key. */
     private ResolutionMemo $memo;
@@ -59,6 +59,7 @@ final readonly class ResolutionCache
      * @param  \Illuminate\Contracts\Cache\Repository|null  $store
      * @param  int  $ttl
      * @param  string  $prefix
+     * @param  bool  $isTrackingUsage
      */
     public function __construct(
 
@@ -70,6 +71,9 @@ final readonly class ResolutionCache
 
         /** Namespace prefix for every key written by this cache. */
         private string $prefix = 'authorization',
+
+        /** Whether grant usage is tracked, so a grantee's permissions and policies are kept with the routes of the grants behind them. */
+        private bool $isTrackingUsage = false,
     ) {
         $this->memo  = new ResolutionMemo(static fn (): string => TenantScope::scopeKey());
         $this->store = $store === null ? null : new VersionedStore($store, $prefix);
@@ -219,7 +223,7 @@ final readonly class ResolutionCache
                 continue;
             }
 
-            $stored[] = [$id, $memoKey, $this->key('resource-policies', $record)];
+            $stored[] = [$id, $memoKey, PrincipalCacheKey::entry($this->prefix, 'resource-policies', $record)];
         }
 
         $entries = $this->store?->entries(\array_column($stored, 2)) ?? [];
@@ -274,6 +278,31 @@ final readonly class ResolutionCache
     {
         /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
         return $this->remember('guardrails', new Reference('guardrails', '*'), $resolve, ResolutionCodec::policies(...), ResolutionCodec::encodePolicy(...), false);
+    }
+
+    /**
+     * Return the routes of the stored grants behind each of the grantee's
+     * permissions, by its name, or each of its policies, by its key, as the
+     * entry of the kind its resolution kept holds them while grant usage is
+     * tracked (see `Usage\RouteSources`); null when the memo holds none, as
+     * when usage is not tracked, the grantee's grants were not resolved in the
+     * current scope, or its resolution could not say.
+     *
+     * The routes are kept beside the entry, in the memo and the store alike,
+     * for as long as it lives, so a check finds those behind its decision with
+     * no query once the entry is warm.
+     *
+     * @param  string  $kind
+     * @param  object  $grantee
+     * @return \SineMacula\Laravel\Authorization\Usage\RouteMap|null
+     *
+     * @phpstan-impure
+     */
+    public function routesOf(string $kind, object $grantee): ?RouteMap
+    {
+        $routes = $this->memo->get(self::ROUTES . ResolutionCodec::kindOf($kind, $this->isTrackingUsage) . ':' . PrincipalCacheKey::for($grantee))[0] ?? null;
+
+        return $routes instanceof RouteMap ? $routes : null;
     }
 
     /**
@@ -432,16 +461,22 @@ final readonly class ResolutionCache
      */
     private function remember(string $kind, object $grantee, \Closure $resolve, \Closure $decode, ?\Closure $encode = null, bool $isGrantee = true): array
     {
+        // Every check reads through here, so the kind is renamed for routed
+        // entries only while usage is tracked, at no cost when it is not.
+        if ($this->isTrackingUsage) {
+            $kind = ResolutionCodec::kindOf($kind, true);
+        }
+
         $memoKey = $kind . ':' . PrincipalCacheKey::for($grantee);
 
         /** @var list<mixed>|null $memoised */
-        $memoised = $this->memo->get($memoKey) ?? $this->read($memoKey, $this->key($kind, $grantee), $decode);
+        $memoised = $this->memo->get($memoKey) ?? $this->read($memoKey, PrincipalCacheKey::entry($this->prefix, $kind, $grantee), $decode);
 
         if ($memoised !== null) {
             return $memoised;
         }
 
-        $pins = new ResolutionPins($this->store);
+        $pins = new ResolutionPins($this->store, ResolutionCodec::isRouted($kind));
 
         if ($isGrantee) {
             $pins->grantee($grantee);
@@ -472,18 +507,24 @@ final readonly class ResolutionCache
     private function keep(string $kind, object $grantee, Resolution $resolution, ResolutionPins $pins, bool $held, ?\Closure $encode, ?array &$writes = null): array
     {
         $lifetime = $resolution->expiresIn === null ? $this->ttl : \min($this->ttl, $resolution->expiresIn - 1);
+        $memoKey  = $kind . ':' . PrincipalCacheKey::for($grantee);
 
-        $this->memo->put($kind . ':' . PrincipalCacheKey::for($grantee), $resolution->value, $lifetime);
+        $this->memo->put($memoKey, $resolution->value, $lifetime);
+
+        if ($resolution->routes !== null) {
+            $this->memo->put(self::ROUTES . $memoKey, [$resolution->routes], $lifetime);
+        }
 
         if ($this->store === null || !$resolution->stable || !$held || !$pins->isComplete()) {
             return $resolution->value;
         }
 
-        $key   = $this->key($kind, $grantee);
+        $key   = PrincipalCacheKey::entry($this->prefix, $kind, $grantee);
         $entry = [
             'versions' => $pins->tokens(),
             'value'    => $encode === null ? $resolution->value : \array_map($encode, $resolution->value),
             'until'    => Carbon::now()->getTimestamp() + $lifetime,
+            ...ResolutionCodec::encodeRoutes($resolution->routes),
         ];
 
         if ($writes === null) {
@@ -520,44 +561,26 @@ final readonly class ResolutionCache
         }
 
         try {
-            $value = $decode($entry['value']);
+            $value  = $decode($entry['value']);
+            $routes = \array_key_exists('routes', $entry) ? ResolutionCodec::routes($entry['routes']) : null;
         } catch (\Throwable $exception) {
             AuthorizationLog::warning("Authorization: discarding corrupt resolution-cache entry '{$key}' — " . $exception->getMessage(), [
                 'cache_key' => $key,
                 'reason'    => $exception->getMessage(),
             ]);
 
-            $value = null;
+            $value  = null;
+            $routes = null;
         }
 
         if ($value !== null) {
             $this->memo->put($memoKey, $value, $entry['until'] - Carbon::now()->getTimestamp());
         }
 
-        return $value;
-    }
+        if ($value !== null && $routes !== null) {
+            $this->memo->put(self::ROUTES . $memoKey, [$routes], $entry['until'] - Carbon::now()->getTimestamp());
+        }
 
-    /**
-     * Return the key of the kind's entry for the grantee under the tenant the
-     * tenant scope applies, and whether it decides just below that tenant, and
-     * the subject's application.
-     *
-     * A policies entry, a grantee's or a resource's, is also keyed by the
-     * policy limits it was hydrated under. Its documents were checked against
-     * the limits when they were read from the database, and are not checked
-     * again when read from the store, so a change to any limit makes every
-     * entry built under the old limits miss, and the policies are read again
-     * and checked against the new ones. The memo, which lasts one request or
-     * job, is keyed without them, so a memo hit costs nothing more.
-     *
-     * @param  string  $kind
-     * @param  object  $grantee
-     * @return string
-     */
-    private function key(string $kind, object $grantee): string
-    {
-        return "{$this->prefix}:{$kind}:" . PrincipalCacheKey::for($grantee)
-            . ':' . TenantScope::scopeKey()
-            . (\in_array($kind, self::POLICY_KINDS, true) ? ':limits:' . PolicyLimits::fromConfig()->fingerprint() : '');
+        return $value;
     }
 }

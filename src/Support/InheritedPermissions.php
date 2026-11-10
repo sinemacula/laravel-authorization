@@ -7,7 +7,8 @@ namespace SineMacula\Laravel\Authorization\Support;
 /**
  * The names of the permissions a set of roles carries, and the seconds until
  * the nearest of those grants expires, so a resolution built from them is
- * cached no longer than it holds.
+ * cached no longer than it holds, and, read for grant usage tracking, which
+ * role carries which permission.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -19,6 +20,7 @@ final readonly class InheritedPermissions
      *
      * @param  list<string>  $names
      * @param  int|null  $expiresIn
+     * @param  array<string, list<array{id: string, name: string}>>|null  $byRole
      */
     public function __construct(
 
@@ -27,5 +29,8 @@ final readonly class InheritedPermissions
 
         /** The seconds until the nearest grant expires; null when none does. */
         public ?int $expiresIn,
+
+        /** Each permission's key and name, by the key of each role carrying it; null when not read. */
+        public ?array $byRole = null,
     ) {}
 }

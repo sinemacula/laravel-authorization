@@ -33,7 +33,15 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   dropped, so a bound with a fraction is compared as the next whole second,
  *   which selects exactly the stored expiries within the window;
  * - `grantedBy()`: the stored grants whose `granted_by` pair is exactly the
- *   actor's, the last actor to grant or change each (N95).
+ *   actor's, the last actor to grant or change each (N95);
+ * - `unused()`: the live stored grants (roles and permissions granted, policies
+ *   attached to grantees) with no observed use since the instant (N94): each
+ *   row's `usage` says `unused` when grant usage tracking covered the whole
+ *   window, from the later of the instant and the grant's creation to the
+ *   review's instant, and `unknown` when it did not, or the grant's source
+ *   cannot report its use. A grant observed in use within the window is left
+ *   out. Usage is recorded only while tracking is on (see
+ *   `Usage\UsageTracking`), so with it off every grant reads `unknown`.
  *
  * Every input is a plain value, a model or a resolved subject: nothing is read
  * from a request (D22). Every review is bounded: it returns at most its limit
@@ -86,7 +94,7 @@ final readonly class ReviewQuery
         /** Whether only the target's direct grants are listed, no route through a role. */
         public bool $isDirectOnly = false,
 
-        /** The start of the expiry window, in UTC, inclusive. */
+        /** The start of the expiry window, or the instant a review of unused grants looks back to, in UTC, inclusive. */
         public ?CarbonImmutable $from = null,
 
         /** The end of the expiry window, in UTC, exclusive. */
@@ -184,6 +192,31 @@ final readonly class ReviewQuery
     public static function grantedBy(Model|Reference $actor, ReviewScope $scope): self
     {
         return new self(ReviewKind::GRANTED_BY, $scope, self::defaultLimit(), actor: self::named($actor));
+    }
+
+    /**
+     * Return the review of the live stored grants in the scope with no observed
+     * use since the instant, taken in UTC whatever zone it is given in.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewScope  $scope
+     * @param  \DateTimeInterface  $since
+     * @return self
+     */
+    public static function unused(ReviewScope $scope, \DateTimeInterface $since): self
+    {
+        return new self(ReviewKind::UNUSED, $scope, self::defaultLimit(), from: CarbonImmutable::instance($since)->utc());
+    }
+
+    /**
+     * Return the instant a review of unused grants looks back to, in UTC; null
+     * for any other review, whose rows' use is read since each grant's
+     * creation.
+     *
+     * @return \Carbon\CarbonImmutable|null
+     */
+    public function since(): ?CarbonImmutable
+    {
+        return $this->kind === ReviewKind::UNUSED ? $this->from : null;
     }
 
     /**

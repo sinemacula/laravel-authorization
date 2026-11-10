@@ -105,9 +105,10 @@ final class ReviewCommandTest extends TestCase
 
     /**
      * Every query and scope option reads the review it names: the direct
-     * holders, a saved subject's holdings, what expires in a window and an
-     * actor's grants, applying in a tenant or the platform, rooted within a
-     * tenant or everywhere, in the application selected.
+     * holders, a saved subject's holdings, what expires in a window, an actor's
+     * grants and the grants unused since an instant, applying in a tenant or
+     * the platform, rooted within a tenant or everywhere, in the application
+     * selected.
      *
      * @return void
      *
@@ -156,6 +157,10 @@ final class ReviewCommandTest extends TestCase
             [
                 ['query' => 'granted_by', '--actor' => 'user:writer', '--everywhere' => true, '--application' => 'any'],
                 ReviewQuery::grantedBy(new Reference('user', 'writer'), ReviewScope::everywhere()),
+            ],
+            [
+                ['query' => 'unused', '--since' => now()->subDay()->toIso8601String(), '--everywhere' => true],
+                ReviewQuery::unused(ReviewScope::everywhere(), now()->subDay()),
             ],
         ];
 
@@ -228,7 +233,7 @@ final class ReviewCommandTest extends TestCase
         $refusals = [
             [['query' => 'holders', '--secret' => 'sentinel-value'], 'The "--secret" option does not exist.'],
             [[], 'Not enough arguments (missing: "query").'],
-            [['query' => 'sentinel-value'], 'The query must be holders, holdings, expiring or granted_by.'],
+            [['query' => 'sentinel-value'], 'The query must be holders, holdings, expiring, granted_by or unused.'],
             [['query' => 'holders', 'reference' => 'role:x', '--from' => 'sentinel-value'], 'The --from option is taken by the expiring query alone.'],
             [
                 ['query' => 'holders', 'reference' => 'role:x', '--everywhere' => true, '--tenant' => 'team:sentinel-value'],
@@ -261,6 +266,13 @@ final class ReviewCommandTest extends TestCase
 
         self::assertSame(2, $kernel->handle($line, $out));
         self::assertStringContainsString('The --tenant option must be given a value.', $out->fetch());
+
+        foreach ([['holders', 'role:x'], ['unused', '--everywhere']] as $arguments) {
+            $out = new BufferedOutput;
+
+            self::assertSame(2, $kernel->handle(new ArgvInput(['artisan', 'authorization:review', ...$arguments, '--since']), $out));
+            self::assertStringContainsString('The --since option must be given a value.', $out->fetch());
+        }
     }
 
     /**

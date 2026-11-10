@@ -15,7 +15,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 /**
  * Export an access review as JSON Lines (AUTHZ-11.6, N96, N97): who holds a
  * role, permission or policy, what a saved subject holds, what expires within a
- * window, or what an actor last granted, in the scope the options name.
+ * window, what an actor last granted, or which grants show no observed use
+ * since an instant (N94), in the scope the options name.
  *
  * The review runs on the trusted path (`AccessReview::trustedExport()`), as
  * scheduled system work, never as whoever is signed in to the console: the
@@ -49,12 +50,12 @@ final class ReviewCommand extends Command
     public const string NAME = 'authorization:review';
 
     /** @var list<string> The options that take a value, refused when given without one. */
-    private const array VALUED = ['tenant', 'rooted-within', 'application', 'from', 'until', 'actor', 'output'];
+    private const array VALUED = ['tenant', 'rooted-within', 'application', 'from', 'until', 'actor', 'since', 'output'];
 
     /** @var string The console command signature. */
     protected $signature = self::NAME . <<<'EOD'
 
-                                    {query : The review: holders, holdings, expiring or granted_by}
+                                    {query : The review: holders, holdings, expiring, granted_by or unused}
                                     {reference? : For holders, the role, permission or policy as type:key (e.g. role:1); for holdings, the saved subject as morphType:key}
                                     {--tenant= : Review what applies in the tenant, as morphType:key; the platform when no scope option is given}
                                     {--rooted-within= : Review the grants made in the tenant or below it, as morphType:key}
@@ -63,6 +64,7 @@ final class ReviewCommand extends Command
                                     {--from= : For expiring, the start of the window, inclusive}
                                     {--until= : For expiring, the end of the window, exclusive}
                                     {--actor= : For granted_by, the actor as morphType:key}
+                                    {--since= : For unused, the instant to look back to}
                                     {--direct-only : For holders, list the direct grants alone}
                                     {--output= : Write the JSON Lines to the file rather than the standard output}
                                     {--force : Overwrite the --output file when it exists}

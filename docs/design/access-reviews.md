@@ -2,11 +2,12 @@
 
 ## Purpose
 
-Periodic access reviews and their sign-off need four lists no check gives (AUTHZ-11.6): who holds a role, permission or
-policy in a scope, what a subject holds and where, which grants expire within a window, and which grants an actor last
-granted or changed. This note explains what a review means by "holds" (N93), the typed query and its scope selections,
-the rows and their order, how a review is admitted (N96), how it is paged, streamed and exported (part 2 of BL-69,
-N97, N98), and what is still left out.
+Periodic access reviews and their sign-off need five lists no check gives (AUTHZ-11.6): who holds a role, permission or
+policy in a scope, what a subject holds and where, which grants expire within a window, which grants an actor last
+granted or changed, and which grants show no use. This note explains what a review means by "holds" (N93), the typed
+query and its scope selections, the rows and their order, how a review is admitted (N96), how it is paged, streamed and
+exported (part 2 of BL-69, N97, N98), how grant usage is tracked and reported (part 3, N94, N100 to N102), and what is
+still left out.
 
 ## Invariants
 
@@ -67,7 +68,8 @@ N97, N98), and what is still left out.
 7. **Reference-only, versioned rows.** A `ReviewRow` names references alone (a morph type and a string key) and plain
    values, never a name, email, description, document or value. Its shape is `version: 1`: `row_key`, `subject`,
    `grantee`, `target`, `source_kind`, `source_key`, `origin_scope`, `via_identity`, `role_path`, `supporting_grants`,
-   `created_at`, `updated_at`, `expires_at`, `route_expires_at`, `granted_by`, `grant_state` and `subject_state`. A
+   `created_at`, `updated_at`, `expires_at`, `route_expires_at`, `granted_by`, `grant_state`, `subject_state` and
+   `usage` (invariant 27). A
    stored row's key is built from the columns that make it unique (target, grantee, tenant and application; role and
    permission for an edge), each part length-prefixed so no two lists of parts share one. A subject is `inactive` when
    it, or the identity of a resolved subject, reports itself inactive or is deleted softly, `unknown` when its record
@@ -233,6 +235,91 @@ N97, N98), and what is still left out.
     actor match; only the sort's top rows are bounded by the page. A grantee's holdings are read on its morph index. The
     migration honours the configured table names and connection.
 
+21. **Usage tracking is opt-in and free when off (N94).** `authorization.usage.enabled` is false by default. While it is
+    off, no listener is registered, no usage table is read, the resolution cache keeps no routes, the manager hands its
+    checks to no tracking pipeline, and the decision path costs what it did before (`SingleCheckBudgetTest`,
+    `Performance\GrantUsageBudgetTest`); every row's `usage` reads `unknown`.
+
+22. **What counts as use (N100).** Only what a decision rested on counts, by the rules forward resolution applied, and
+    nothing the check did not weigh. An allowed decision a held permission allowed counts every live grant route behind
+    that permission, redundant ones included: the direct grant, and each role grant that carried it with the ancestor
+    role it came through (a `role_permission` route, its `role_grant` route and, for an ancestor, its `role_inherited`
+    route). They are the routes of the grantee whose permission matched (`Usage\WeighedGrants`, noted as
+    `SubjectGrants::permissionFor()` answers): the subject's own, or its granting identity's only when the subject's did
+    not match. A decision one or more statements made, allow or deny, counts every route attaching the policy each
+    belongs to, so a deny-only policy doing its job is used: the subject's attachment when the package's policy resolver
+    read it, and its identity's, an identity of the other kind only for a decision its denies made, since it gives a
+    check its deny statements alone (`Usage\DecisionRoutes`). The everyday checks count: `check()`, `can()`, `cannot()`,
+    `any()`, `all()`, `authorize()`, `checkMany()`, `canEach()`, the Gate, Blade and the middleware, and a delegated
+    change's own check once its administration stage keeps the verdict. Nothing else does, each for a stated reason: a
+    preview and its admission (another subject's decision, N86), an explanation and `authorization:why` (N89),
+    `permissionsFor()` (introspection, N70), `whereAuthorized()` (decides no record), a review's admission and reads
+    (introspection, N94), and the further checks of an administration stage. A permission from a custom
+    `getPermissions()`, and a policy from a policy store, a resource, `withPolicies()`, a guardrail or a boundary, is no
+    grant the package can trace, and counts nothing.
+
+23. **Finding the contributing grants on the hot path.** While tracking is on, `GrantResolver::permissions()` and
+    `policies()` resolve with the routes behind each permission, by its name, and each policy, by its key
+    (`Usage\RouteSources`), read from the same rows in the same queries, each also reading where its grants were made
+    and when (`RoleGraph::chainsWithin()`, `carriedWithin()`, a routed `RolePolicies::heldThrough()`), so they follow
+    the same live and scope rules as the names. They are kept as a `Usage\RouteMap`: each grant and each route once,
+    and each permission or policy the indexes of the routes behind it, so a role's grant and the ancestor it comes
+    through are kept once however much the role carries, and an entry grows with the grants and what they give, never
+    with their product; the routes behind one permission or policy are built only when a decision asks for them.
+    `ResolutionCache` keeps the map beside the entry, in the memo and the store, under a routed kind of its own so an
+    entry kept without it is never read for one; a warm check reads it from the memo with no query
+    (`ResolutionCache::routesOf()`). Finding a decision's routes reads only what the check itself resolved, and never
+    resolves a grantee, so a cold tracked check runs the same queries as an untracked one; `GrantProvenanceResolver`'s
+    explain-only reads are never on this path. A resolution whose hierarchy moved while it ran keeps no routes, and its
+    decisions count none. No step tracking adds ever changes or breaks a check: finding the routes and noting them
+    each write a failure to the log channel and the decision is returned as it was made.
+
+24. **Recording (N101).** `Usage\GrantUsageRecorder`, one for each container that resolves it (a queue worker's or a
+    command's for as long as it runs, an Octane sandbox's for its request), notes each route at most once a bucket
+    (`authorization.usage.interval` seconds, 3600 by default, at least 60, a whole multiple since the epoch in UTC),
+    forgetting what it noted as a bucket begins and past ten batches' worth. It never sends from within a check: once
+    it notes `authorization.usage.batch` observations (250 by default, a job of about 110 KB at worst) it sets them
+    aside as a batch of their own, and sends each batch set aside, and what it noted besides, as a queued
+    `Usage\RecordGrantUsage` job of its own when the container that resolved it terminates and after each queued job,
+    processed or failed (`Registrars\UsageRegistrar` attaches the flush to that container as it resolves the recorder,
+    and holds the containers weakly). Past ten batches set aside it drops the oldest, and the next job names the
+    earliest bucket dropped (`UsageBatch::$lostSince`); a refused dispatch is written to the log channel, its
+    observations dropped, their routes forgotten, and named by the next job the same way. A batch is compact: each
+    stored grant once, and each observation as its route's key, its grant's index and its bucket.
+
+25. **Storage (N102).** `Contracts\GrantUsageStore` (`record()`, `lastObserved()`, `coverage()`), bound to
+    `Usage\DatabaseGrantUsageStore` and rebindable. `authorization_grant_usage` is keyed by the route's key
+    (`Usage\GrantUsageKey`: a SHA-256 digest of the source kind, target, grantee, tenant and application as stored, and
+    the role path, the roles the route runs through; the same key a review row of the route carries), keeps the stored
+    grant's unique columns, its creation when observed and the last bucket; a write is made only when the observation
+    is newer (the grant's creation first, then the bucket), compared in the update itself, so duplicate and
+    out-of-order delivery change nothing. The routes are written in the order of their keys, a hundred to a
+    transaction, the missing rows inserted before any is rewritten and no row read under a lock, so concurrent writers
+    take their locks in one order; a transaction that deadlocks or waits too long for a lock is tried three times in
+    all, and a batch that still fails throws before the coverage is extended. `authorization_usage_coverage` holds the
+    periods tracking was on, each flush extending the latest or opening one when the gap exceeds two intervals; a
+    batch naming a `lostSince` first cuts the coverage back to two intervals and a second before it, so the time lost
+    stays uncovered; `authorization:usage-heartbeat` extends it with no observations, and records nothing while
+    tracking is off. `authorization:usage-prune` removes the usage
+    of routes whose grant no longer exists and the coverage older than `authorization.usage.retention` days.
+
+26. **Regrants.** A grant revoked and made again is a new row created later; an observation through a grant created
+    before the current one is ignored (`ObservedUse::isOf()`), and a regrant's observation replaces the old one in the
+    store. An expiry or reach rewrite (`GrantTable::writeExpiry()`) keeps `created_at`, and neither the expiry nor the
+    reach a grant's `include_subtree` sets is part of the key, so the grant keeps its use.
+
+27. **The unused review and the `usage` field (N94).** `ReviewQuery::unused($scope, $since)` reads the live grants of
+    each kind to grantees through `StoredRows` a fixed chunk at a time, the room the page leaves or `GrantRows::CHUNK`,
+    whichever is more, never fewer for the rows kept, each chunk's routes looked up in one go, keeping the rows with no
+    observed use (`ReviewUsage::isUnobserved()`); it pages, streams and exports as every review does, admitted by
+    `authorization:review.read`. Every row gains `usage { status, last_observed_at, coverage_from, coverage_until }`
+    (`Reviews\RowUsage`), filled in one batched lookup per page, or per chunk for the unused review
+    (`Reviews\Support\ReviewUsage`): `used` when observed in a bucket ending after the window starts, the window running
+    from the later of `since` and the grant's creation to the review's instant; `unused` only when coverage, each period
+    taken to run two intervals past its end, covers the whole window; `unknown` otherwise, while tracking is off, and
+    for a row whose source cannot report. A null `last_observed_at` is never proof of non-use. The row keeps `version:
+    1`, since the package is unreleased.
+
 ## Success Path
 
 ```php
@@ -251,6 +338,8 @@ foreach ($reviews->stream(ReviewQuery::holders($editor, $scope), ActingContext::
 }
 
 $reviews->export(ReviewQuery::holders($editor, $scope), $auditor, \fopen('holders.jsonl', 'xb'));
+
+$unused = $reviews->review(ReviewQuery::unused($scope, now()->subDays(90)), ActingContext::current());
 ```
 
 An auditor allowed `authorization:review.read` in the account reviews who holds `editor` there: the direct grants,
@@ -258,7 +347,8 @@ then the grants of every role below `editor`, each with its role path, the platf
 reaching the account included, nothing granted in a sibling account. A scheduled job lists what expires next month,
 across every tenant, as trusted work. The holders are read 250 at a time, each page admitted again and resumed from the
 cursor the page before returned, streamed a chunk at a time, or exported as JSON Lines by an auditor holding both review
-rights.
+rights. With usage tracking on, the auditor lists the account's grants nobody used in ninety days, each `unused` where
+tracking covered the whole window and `unknown` where it did not.
 
 ## Failure / Edge Cases
 
@@ -286,6 +376,13 @@ rights.
   refused at a later chunk, or failing, ends with no footer; a sink that is neither a stream nor a callback is refused
   with `InvalidArgumentException`, a stream that takes none of a line with `RuntimeException`, and a row holding
   invalid UTF-8 with `JsonException`.
+- A grant created before tracking began, a window a gap of more than two intervals interrupts, a grantee with its own
+  `getPermissions()` or `getPolicies()`, and a role's edge or attachment read `unknown`, never `unused`; a regrant reads
+  as unused until it is used, whatever the grant it replaced did.
+- A queue that refuses the recording job is written to the log, its observations dropped and named by the next job,
+  whose routes then read `unknown` over the time lost, the decision unaffected; a worker's latest observations arrive
+  at the store only when its request, command or job ends. A step tracking adds that fails inside a check is written
+  to the log and the decision returned unchanged.
 - A window that does not end after it starts, a limit below one, a target that is no definition, and a subject that
   names no key are refused with `InvalidArgumentException` when the query is built. A configured limit that is not a
   whole number of at least 1 is refused at boot with `InvalidAuthorizationConfigException`, and so is one changed
@@ -312,10 +409,20 @@ rights.
 - `Reviews\Support\TenantRelations` -- whether role grants and attachments meet in some tenant, in a fixed number of
   queries.
 - `Config\ReviewConfigValidator` -- the boot-time validation of `authorization.reviews`.
-- `Reviews\Support\HolderRoutes`, `HoldingRoutes`, `StoredRows` -- the four queries.
+- `Reviews\Support\HolderRoutes`, `HoldingRoutes`, `StoredRows` -- the five queries.
 - `Reviews\Support\RoleChains`, `RoleCarriers` -- the hierarchy and what roles carry.
 - `Reviews\Support\GrantRows`, `GrantRow`, `RowCollector`, `ReviewOrder`, `SubjectStates`, `Definitions` -- the reads,
   the rows, the bound and the order.
+- `Usage\DecisionRoutes`, `Usage\WeighedGrants`, `Usage\RouteSources`, `Usage\RouteMap`, `Usage\RouteMapBuilder`,
+  `Usage\GrantRoute`, `Usage\StoredGrant`, `Usage\GrantUsageKey` -- what a decision rested on, and the routes a
+  resolution keeps beside the cache entry.
+- `Usage\GrantUsageRecorder`, `Usage\RecordGrantUsage`, `Usage\UsageBatch`, `Registrars\UsageRegistrar`,
+  `Usage\UsageTracking`, `Config\UsageConfigValidator` -- bucketing, flushing and the settings.
+- `Contracts\GrantUsageStore`, `Usage\DatabaseGrantUsageStore`, `Usage\UsagePruner`, `Console\UsageHeartbeatCommand`,
+  `Console\UsagePruneCommand`, `database/migrations/2026_11_09_000001_create_grant_usage_tables.php` -- storage,
+  coverage and pruning.
+- `Reviews\Support\ReviewUsage`, `Reviews\RowUsage`, `Reviews\Enums\UsageStatus`, `StoredRows::unused()` -- the
+  `usage` field and the unused review.
 
 ## Authoritative Tests
 
@@ -352,11 +459,37 @@ rights.
   every database.
 - `Performance\AccessReviewPagingBudgetTest` -- five thousand holders across fifty nested tenants and a deep hierarchy:
   the same queries on every page, none at an offset, and a stream's memory bounded by its chunk.
+- `Usage\AuthorizationManagerTest`, `Usage\DecisionPipelineTest`, `Usage\DecisionRoutesTest` (Feature) -- every
+  route behind the permission that matched, redundant ones included, of the grantee it matched for alone; a deny-only
+  policy; an identity's attachment, one of the other kind only for its denies; a check in a tenant for an application;
+  every everyday form counting and every excluded path counting nothing; a warm check with no query; an administration
+  stage that refuses; a check that tracking never changes or breaks, whichever step it adds fails.
+- `Usage\GrantUsageRecorderTest`, `Usage\UsageRegistrarTest`, `Usage\RecordGrantUsageTest` (Feature) -- bucketing and
+  deduplication, nothing sent from a check, a batch's worth set aside as a job of its own, the oldest batch dropped
+  and named, the remembered routes bounded at their edge, the flush hooks only while tracking is on and on the
+  container that resolved the recorder, and a full job well under a queue's limit.
+- `Usage\DatabaseGrantUsageStoreTest`, `Usage\UsagePrunerTest`, `Usage\UsageHeartbeatCommandTest`,
+  `Usage\UsagePruneCommandTest` (Feature) -- monotonic, idempotent writes, the newest of a batch, a raced insert,
+  writes in key order, a deadlock tried again and one that keeps failing extending no coverage, regrant ordering,
+  coverage periods opening, extending and cut back for a loss, the heartbeat, pruning with the key compared as text on
+  every grammar, on every database.
+- `Usage\AccessReviewTest`, `Usage\ReviewUsageTest` (Feature) -- used, unused and unknown, a window before tracking
+  began, regrants against rewrites, a policy that decided, the unused review paged, streamed and exported with one
+  lookup a chunk, reading on past a chunk of used grants and resuming in the same source, a rebound store, each kind
+  reported only as its grantee resolves it.
+- `Usage\RouteSourcesTest`, `Usage\GrantResolverTest`, `Usage\ResolutionCacheTest` (Feature) -- the routes a
+  resolution keeps match the review's keys, in the same queries, with the tenant, application and creation they were
+  stored with, a role's routes kept once, kept beside the entry and never read from one kept without them.
+- `Performance\GrantUsageBudgetTest` -- a tracked cold check reads what an untracked one does, a subject with a
+  separate identity included, and warm tracked checks read nothing and keep within the single-check budget.
 
 ## Change Triggers
 
 - A change to the row shape or the sort key bumps `ReviewRow::VERSION`, which refuses every cursor issued before it.
 - A snapshot export, or a CSV adapter (N97), would be a mode or sink of its own beside the live JSON Lines.
-- Usage tracking and the unused-grant report (part 3, N94) add a column or store, and must never count a review.
+- A new path that decides without acting on the decision (an introspection or a dry run) must keep its pipeline
+  untracked, as previews, explanations, listings, scoped queries and reviews are.
+- A change to what makes a grant route unique, or to a review row's route, changes `GrantUsageKey`, which forgets every
+  use recorded under the old keys.
 - A paged identity directory would let identity mode stream very large identities.
 - Listing boundaries, guardrails or resource policies would need rows labelled as restrictions, never as holdings.

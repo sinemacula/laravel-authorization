@@ -174,6 +174,51 @@ final class StoredRowsTest extends TestCase
     }
 
     /**
+     * A review of unused grants lists the live grants of each kind to grantees,
+     * never an expired one, a role's edge or a role's attachment; with tracking
+     * off each reads unknown, so every one is listed, and paging through them
+     * returns each once, in the order of a whole read.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testUnusedGrantsResumeAfterTheLastRowOfThePageBefore(): void
+    {
+        self::keyCursors();
+
+        foreach (['ann', 'bob'] as $index => $id) {
+            $grantee = self::identity($id);
+            $role    = self::role('editor-' . $index);
+
+            self::grants()->grantRole($grantee, $role);
+            self::grants()->grantPermission($grantee, self::permission('posts:read-' . $index));
+            self::grants()->attachPolicy($grantee, self::policy('deny-own-' . $index));
+            self::grants()->attachPolicy($role, self::policy('deny-role-' . $index));
+            self::grants()->grantPermission($grantee, self::permission('posts:gone-' . $index), new Carbon('2030-01-01 00:00:01', 'UTC'));
+            self::roles()->grantPermission($role, self::permission('posts:edit-' . $index));
+        }
+
+        Carbon::setTestNow(new Carbon('2030-01-02 00:00:00', 'UTC'));
+
+        $query = ReviewQuery::unused(ReviewScope::everywhere(), new Carbon('2029-01-01 00:00:00', 'UTC'));
+        $whole = self::described(self::trusted($query));
+
+        self::assertSame([
+            'role_grant ann [editor-0] editor-0',
+            'role_grant bob [editor-1] editor-1',
+            'permission_grant ann posts:read-0',
+            'permission_grant bob posts:read-1',
+            'policy_attachment ann deny-own-0',
+            'policy_attachment bob deny-own-1',
+        ], $whole);
+
+        foreach ([1, 2, 4] as $size) {
+            self::assertSame($whole, \array_map(self::describe(...), self::pagedThrough($query, $size)['rows']), "by {$size}");
+        }
+    }
+
+    /**
      * Role permission edges expiring in the window come in the review's order:
      * by their permission first, then by their role.
      *
