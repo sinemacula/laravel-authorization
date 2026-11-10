@@ -30,6 +30,13 @@ use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
  * afterwards still replaces it. The grant hook is the one exception: the hooks
  * the configuration lists run before whatever it resolves to (N108).
  *
+ * The closure each contract is bound to is the service provider's: it is built
+ * by the closure the provider hands the registrar, which the provider declares.
+ * A sibling package reads the binding table to tell the package's default from
+ * the application's own binding, by the class that declares the closure, and
+ * replaces only the package's default, so a closure the registrar declared
+ * itself would be taken for the application's and kept.
+ *
  * Nothing is resolved here, but as Laravel resolves a contract it rebinds or
  * extends for the callbacks that watch it with `rebinding()` or `refresh()`.
  *
@@ -45,11 +52,15 @@ final readonly class SeamBindings
      * Create a new registrar instance.
      *
      * @param  \Illuminate\Contracts\Foundation\Application  $app
+     * @param  \Closure(string): (\Closure(\Illuminate\Contracts\Foundation\Application): mixed)  $resolving
      */
     public function __construct(
 
         /** The application the seams are bound in. */
         private Application $app,
+
+        /** Build the closure a contract is bound to, resolving the package-owned key given; the service provider declares both. */
+        private \Closure $resolving,
     ) {}
 
     /**
@@ -98,7 +109,7 @@ final readonly class SeamBindings
     public function bindDefault(string $contract, \Closure|string $concrete, bool $configured = false): void
     {
         $default = self::DEFAULT_BINDING_PREFIX . $contract;
-        $resolve = static fn (Application $app): mixed => $app->make($default);
+        $resolve = ($this->resolving)($default);
 
         $this->app->scoped($default, $concrete);
 

@@ -126,7 +126,9 @@ use SineMacula\Laravel\Authorization\Support\SessionScopes;
  * the package registers or after (N108). Either way a binding made outside the
  * package is not scoped by it, so an instance it binds survives the reset
  * between jobs. The context key catalogue is bound only when nothing is bound
- * to it yet.
+ * to it yet. The closure a contract is bound to is declared by this provider,
+ * as a sibling package that binds over the package's defaults tells them from
+ * the application's own bindings by that closure's declaring class.
  *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
@@ -261,7 +263,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->forgetResolutionsOnRebinding(SubjectResolver::class);
         $this->forgetResolutionsOnRebinding(TenantTree::class);
 
-        $seams = new SeamBindings($this->app);
+        $seams = $this->seams();
 
         foreach ($defaults as $contract => [$key, $default]) {
             $seams->bindConfigured($contract, $key, $default);
@@ -289,7 +291,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
         $declared = static fn (Application $app): DeclaredResourceTenant => new DeclaredResourceTenant($app->make($class));
 
-        (new SeamBindings($this->app))->bindDefault(ResourceTenantResolver::class, $declared, $class !== NoResourceTenant::class);
+        $this->seams()->bindDefault(ResourceTenantResolver::class, $declared, $class !== NoResourceTenant::class);
     }
 
     /**
@@ -329,7 +331,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             return;
         }
 
-        (new SeamBindings($this->app))->bindDefault(PolicyStore::class, $class, true);
+        $this->seams()->bindDefault(PolicyStore::class, $class, true);
     }
 
     /**
@@ -373,7 +375,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     protected function registerPolicyResolver(): void
     {
-        (new SeamBindings($this->app))->bindDefault(PolicyResolver::class, static fn (Application $app): PolicyResolver => new DefaultPolicyResolver(
+        $this->seams()->bindDefault(PolicyResolver::class, static fn (Application $app): PolicyResolver => new DefaultPolicyResolver(
             store: $app->bound(PolicyStore::class) ? $app->make(PolicyStore::class) : null,
         ));
     }
@@ -419,7 +421,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->app->scoped(PolicyEvaluator::class);
         $this->app->scoped(SessionScopes::class, static fn (Application $app): SessionScopes => SessionScopes::fromConfig($app['config']->get('authorization.session.scopes', [])));
 
-        $seams = new SeamBindings($this->app);
+        $seams = $this->seams();
 
         $seams->bindConfigured(AuthenticationRequirementChecker::class, 'authorization.requirement_checker', RefusingRequirementChecker::class);
         $seams->bindConfigured(SessionPolicySource::class, 'authorization.session.source', NoSessionPolicy::class);
@@ -634,5 +636,21 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
             $container->rebinding($abstract, $forget);
         });
+    }
+
+    /**
+     * Return the registrar of the seams an application may bind itself, handed
+     * the closure that builds the closure each contract is bound to.
+     *
+     * The provider declares that closure, so a sibling package that reads the
+     * binding table tells the package's default from the application's own
+     * binding by its declaring class, this provider, and replaces only the
+     * default.
+     *
+     * @return \SineMacula\Laravel\Authorization\Registrars\SeamBindings
+     */
+    private function seams(): SeamBindings
+    {
+        return new SeamBindings($this->app, static fn (string $key): \Closure => static fn (Application $app): mixed => $app->make($key));
     }
 }

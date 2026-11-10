@@ -6,6 +6,7 @@ namespace Tests\Feature\Registrars;
 
 use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Foundation\Application as ApplicationContract;
 use Illuminate\Foundation\Application;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -65,7 +66,7 @@ final class SeamBindingsTest extends TestCase
     {
         $app = self::application();
 
-        (new SeamBindings($app))->bindDefault(GrantHook::class, RecordingGrantHook::class);
+        self::seams($app)->bindDefault(GrantHook::class, RecordingGrantHook::class);
 
         $first = $app->make(GrantHook::class);
 
@@ -76,6 +77,44 @@ final class SeamBindingsTest extends TestCase
         $app->forgetScopedInstances();
 
         self::assertNotSame($first, $app->make(GrantHook::class));
+    }
+
+    /**
+     * Provide whether the binding is of a configured class, and whether the
+     * deferred provider is then loaded as the package registers.
+     *
+     * @return iterable<string, array{bool}>
+     */
+    public static function configuredProvider(): iterable
+    {
+        yield 'a configured class' => [true];
+        yield 'the default' => [false];
+    }
+
+    /**
+     * The contract is bound to the closure the closure handed to the registrar
+     * builds for the default's key, so the class that declares it, the service
+     * provider in the package, is what a sibling package reads off the binding
+     * table, whether the class is the default or a configured one.
+     *
+     * @param  bool  $configured
+     * @return void
+     */
+    #[DataProvider('configuredProvider')]
+    public function testTheContractIsBoundToTheClosureTheRegistrarIsHanded(bool $configured): void
+    {
+        $app   = self::application();
+        $built = [];
+
+        $resolving = static function (string $key) use (&$built): \Closure {
+            return $built[$key] = static fn (ApplicationContract $app): mixed => $app->make($key);
+        };
+
+        (new SeamBindings($app, $resolving))->bindDefault(GrantHook::class, RecordingGrantHook::class, $configured);
+
+        self::assertSame([self::DEFAULT], \array_keys($built));
+        self::assertSame($built[self::DEFAULT], $app->getBindings()[GrantHook::class]['concrete']);
+        self::assertInstanceOf(RecordingGrantHook::class, $app->make(GrantHook::class));
     }
 
     /**
@@ -92,7 +131,7 @@ final class SeamBindingsTest extends TestCase
 
         $app->instance(GrantHook::class, $earlier);
 
-        (new SeamBindings($app))->bindDefault(GrantHook::class, RecordingGrantHook::class);
+        self::seams($app)->bindDefault(GrantHook::class, RecordingGrantHook::class);
 
         self::assertSame($earlier, $app->make(GrantHook::class));
         self::assertInstanceOf(RecordingGrantHook::class, $app->make(self::DEFAULT));
@@ -115,25 +154,13 @@ final class SeamBindingsTest extends TestCase
 
         $app->instance(GrantHook::class, new RefusingGrantHook);
 
-        (new SeamBindings($app))->bindDefault(GrantHook::class, RecordingGrantHook::class, true);
+        self::seams($app)->bindDefault(GrantHook::class, RecordingGrantHook::class, true);
 
         self::assertInstanceOf(RecordingGrantHook::class, $app->make(GrantHook::class));
 
         $app->instance(GrantHook::class, $later);
 
         self::assertSame($later, $app->make(GrantHook::class));
-    }
-
-    /**
-     * Provide whether the binding is of a configured class, and whether the
-     * deferred provider is then loaded as the package registers.
-     *
-     * @return iterable<string, array{bool}>
-     */
-    public static function configuredProvider(): iterable
-    {
-        yield 'a configured class' => [true];
-        yield 'the default' => [false];
     }
 
     /**
@@ -150,7 +177,7 @@ final class SeamBindingsTest extends TestCase
         $app   = self::application();
         $bound = self::defer($app);
 
-        (new SeamBindings($app))->bindDefault(GrantHook::class, RecordingGrantHook::class, $configured);
+        self::seams($app)->bindDefault(GrantHook::class, RecordingGrantHook::class, $configured);
 
         self::assertSame($configured, $app->providerIsLoaded(DeferredBindingProvider::class));
 
@@ -171,7 +198,7 @@ final class SeamBindingsTest extends TestCase
     {
         $app = self::application();
 
-        (new SeamBindings($app))->bindDefault(GrantHook::class, RecordingGrantHook::class, true);
+        self::seams($app)->bindDefault(GrantHook::class, RecordingGrantHook::class, true);
 
         self::defer($app);
 
@@ -192,7 +219,7 @@ final class SeamBindingsTest extends TestCase
         $app   = self::application();
         $later = new RefusingGrantHook;
 
-        (new SeamBindings($app))->bindDefault(GrantHook::class, RecordingGrantHook::class, true);
+        self::seams($app)->bindDefault(GrantHook::class, RecordingGrantHook::class, true);
 
         $app->instance(GrantHook::class, $later);
         $app->boot();
@@ -232,7 +259,7 @@ final class SeamBindingsTest extends TestCase
 
         $app->instance(GrantHook::class, $earlier);
 
-        (new SeamBindings($app))->bindConfigured(GrantHook::class, 'authorization.hook', RecordingGrantHook::class);
+        self::seams($app)->bindConfigured(GrantHook::class, 'authorization.hook', RecordingGrantHook::class);
 
         self::assertSame(!$replaces, $app->make(GrantHook::class) === $earlier);
         self::assertInstanceOf($class, $app->make(self::DEFAULT));
@@ -248,7 +275,7 @@ final class SeamBindingsTest extends TestCase
     {
         $app = self::application();
 
-        (new SeamBindings($app))->bindConfigured(GrantHook::class, 'authorization.hook', RecordingGrantHook::class);
+        self::seams($app)->bindConfigured(GrantHook::class, 'authorization.hook', RecordingGrantHook::class);
 
         self::assertInstanceOf(RecordingGrantHook::class, $app->make(GrantHook::class));
     }
@@ -264,7 +291,7 @@ final class SeamBindingsTest extends TestCase
         $app     = self::application(['grant_hooks' => []]);
         $earlier = new RefusingGrantHook;
 
-        (new SeamBindings($app))->bindGrantHooks();
+        self::seams($app)->bindGrantHooks();
 
         $default = $app->make(GrantHook::class);
 
@@ -275,13 +302,13 @@ final class SeamBindingsTest extends TestCase
 
         $app->instance(GrantHook::class, $earlier);
 
-        (new SeamBindings($app))->bindGrantHooks();
+        self::seams($app)->bindGrantHooks();
 
         self::assertSame($earlier, $app->make(GrantHook::class));
 
         $app = self::application(['grant_hooks' => [RecordingGrantHook::class]]);
 
-        (new SeamBindings($app))->bindGrantHooks();
+        self::seams($app)->bindGrantHooks();
 
         self::assertInstanceOf(ListedGrantHooks::class, $app->make(GrantHook::class));
     }
@@ -300,6 +327,19 @@ final class SeamBindingsTest extends TestCase
         $app->instance('config', new Repository(['authorization' => $authorization]));
 
         return $app;
+    }
+
+    /**
+     * Return the registrar of the seams in the application, handed a closure
+     * building the closure each contract is bound to, as the service provider
+     * hands it one.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return \SineMacula\Laravel\Authorization\Registrars\SeamBindings
+     */
+    private static function seams(Application $app): SeamBindings
+    {
+        return new SeamBindings($app, static fn (string $key): \Closure => static fn (ApplicationContract $app): mixed => $app->make($key));
     }
 
     /**
