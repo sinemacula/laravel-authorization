@@ -16,10 +16,14 @@ use Illuminate\Contracts\Config\Repository;
  * than read as `web`. Boot checks that the guard names an entry of
  * `auth.guards`; a read pays only a few array lookups and type checks.
  *
+ * Part of the stable API suite packages may use to read the package's settings
+ * the way the package itself does; breaking changes require a major version
+ * bump.
+ *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
- *
- * @internal
  */
 final class DefaultGuard
 {

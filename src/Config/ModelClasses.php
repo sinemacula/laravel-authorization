@@ -17,10 +17,14 @@ use Illuminate\Contracts\Config\Repository;
  * the package's model. Boot checks that each class exists and extends the
  * package's model; a read pays only a few array lookups and type checks.
  *
+ * Part of the stable API suite packages may use to read the package's settings
+ * the way the package itself does; breaking changes require a major version
+ * bump.
+ *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
- *
- * @internal
  */
 final class ModelClasses
 {
