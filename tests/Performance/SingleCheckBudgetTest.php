@@ -19,9 +19,9 @@ use Tests\TestCase;
  * stands, reading nothing ahead and holding nothing for later, so it costs what
  * the decision costs, not the machinery of a bulk check. The budget bounds
  * 1,000 warm checks of each kind well above the observed cost (about 15µs each
- * locally, and up to about 160µs on a CI runner shared with parallel test
- * processes), so it catches a check that does several times the work without
- * failing on runner variance.
+ * locally, and over 500µs on a CI runner shared with parallel test processes
+ * and collecting coverage), so it catches a check that does several times the
+ * work without failing on runner variance.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,7 +33,7 @@ final class SingleCheckBudgetTest extends TestCase
 {
     /**
      * 1,000 warm checks with no resource, and 1,000 on an opaque one, must each
-     * complete in under 500ms.
+     * complete in under a second.
      *
      * @return void
      */
@@ -59,7 +59,7 @@ final class SingleCheckBudgetTest extends TestCase
 
             $elapsed = \microtime(true) - $start;
 
-            self::assertLessThan(0.5, $elapsed, "Single check budget exceeded ({$elapsed}s for 1,000 checks).");
+            self::assertLessThan(1.0, $elapsed, "Single check budget exceeded ({$elapsed}s for 1,000 checks).");
         }
     }
 }

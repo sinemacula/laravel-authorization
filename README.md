@@ -222,17 +222,38 @@ only from it: without a tenant, only platform-wide roles and permissions are vis
 Every seam the package gives a default for can also be bound directly on its contract, from any service provider: the
 subject resolver, the tenant tree, the identity directory, the grant hook, the console subject resolver, the resource
 tenant resolver, the policy store, the policy resolver, the action catalogue, the context key catalogue, the
-authentication requirement checker, the session policy source and the authentication, request and environment
-contexts. The package binds its default only when nothing is bound to the contract yet, so a binding made before it
-registers, by a sibling package or by your application, `instance()` included, stands, and a binding made afterwards
-with `bind()`, `singleton()`, `scoped()` or `instance()` replaces the default. The order your providers register in
-therefore never lets the package's default replace a binding of yours. It still decides between other bindings of the
-same contract: of two bindings made outside the package, by a sibling package and your application for example, the
-later one wins as usual, and a `bindIf()`, `singletonIf()` or `scopedIf()` only fills a contract nothing has bound yet,
-so one made after the package registers is skipped and the package's default stands. To replace a seam whatever order
-providers register in, bind it unconditionally. A binding of your own is kept as you bound it across the reset between
-queue jobs and Octane requests, while the package's defaults, the context key catalogue aside, are built afresh for
-each.
+authentication requirement checker, the session policy source and the authentication, request and environment contexts.
+The package binds its default only when nothing is bound to the contract yet, so a binding made before it registers, by
+a sibling package or by your application, `instance()` included, stands, and a binding made afterwards with `bind()`,
+`singleton()`, `scoped()` or `instance()` replaces the default. A class you name in `config/authorization.php` is
+different: when `subject_resolver`, `tenant_tree`, `identity_directory`, `resource_tenant_resolver`,
+`requirement_checker` or `session.source` names a class other than the package's default, or when `policy_store` names
+any class, the package binds the contract to it even over a binding a sibling package made before it registered, since
+your configuration is the explicit choice. The same holds for a sibling package's deferred provider, which would
+otherwise bind the contract at its first resolution and so replace your class: the package loads that provider before
+binding your class, as it registers when the application already knows of the provider, and otherwise as the application
+boots, since Laravel learns of the deferred providers of your configuration and of package discovery only once every
+eager provider, this package among them, has registered. A value equal to the package's default, or no value, binds
+nothing over an earlier binding. From the highest precedence down, a contract resolves to a binding made after the
+package registers, then the class your configuration names, then a binding made before the package registers, then the
+package's default. Binding your configured class over a contract follows Laravel's rules for any binding: an extender a
+sibling package registered on the contract is applied to your class, so one typed to the sibling's own class fails, and
+when the contract was already resolved, a callback watching it with `rebinding()` or `refresh()` is called, which may
+resolve your class while the package registers. The grant hook is the one exception: hooks only refuse, so when
+`grant_hooks` lists any, the package extends the contract and the listed hooks run before whatever hook it resolves to,
+rather than replacing it (see [Grant hooks](#grant-hooks)). The order your providers register in therefore never lets
+the package's default replace a binding of yours. It still decides between other bindings of the same contract: of two
+bindings made outside the package, by a sibling package and your application for example, the later one wins as usual,
+and a `bindIf()`, `singletonIf()` or `scopedIf()` only fills a contract nothing has bound yet, so one made after the
+package registers is skipped and the package's default, or your configured class, stands. To replace a seam whatever
+order providers register in, bind it unconditionally. A binding of your own is kept as you bound it across the reset
+between queue jobs and Octane requests, while the package's defaults and configured classes, the context key catalogue
+aside, are built afresh for each.
+
+A sibling package that registers after this one and wants to replace only the package's default, never a binding the
+application made, asks `AuthorizationServiceProvider::isPackageDefault($app, $contract)`. It is true only while the
+contract holds the package's own default: a class your configuration names, an instance, any other binding and an
+unbound contract all answer false.
 
 List the enums whose cases are the application's permissions, and any permission providers; the Gate asks the package
 about every permission either declares:
@@ -3275,11 +3296,35 @@ final class ScopeWideningHook implements GrantHook
 }
 ```
 
-**One binding, an ordered composite.** Exactly one hook is bound. The default is `Hooks\GrantHooks`, the composite of
-the classes `grant_hooks` lists in `config/authorization.php`, each built from the container and run in the order
-listed; the first that throws stops the rest. The list is validated at boot: each entry must name a class implementing
-the contract, once. With none listed the composite does nothing, and then nothing is classified at all. An application
-may bind its own hook on the contract instead. There is no way to add a hook at run time.
+**One binding, with the listed hooks before it.** Exactly one hook is bound on the contract. The default is
+`Hooks\GrantHooks` holding no hook, which does nothing; a sibling package or your application may bind its own instead,
+before the package registers or after. The classes `grant_hooks` lists in `config/authorization.php` run before
+whichever hook is bound, each built from the container and run in the order listed, and the first that throws stops
+the rest. The list is validated at boot: each entry must name a class implementing the contract, once. With none listed,
+and the default bound, nothing is classified at all. There is no way to add a hook at run time.
+
+**The listed hooks run before whatever is bound.** When `grant_hooks` lists hooks, the package extends the contract with
+Laravel's `extend()`, so whatever the contract resolves to is wrapped in `Hooks\ListedGrantHooks`: the listed hooks run
+first, in the order listed, then the bound hook, and any of them may refuse, so nothing either would refuse gets
+through. Hooks only refuse, so wrapping a hook is never looser than running it alone. Laravel applies the extender each
+time it builds the contract, so the hook is wrapped however it was bound: before the package registers or after, with
+`bind()`, `singleton()` or `scoped()`, a scoped closure that names the contract by its return type included, by a
+deferred provider, or the package's default when nothing else is bound, which holds none of the listed hooks, so none
+runs twice. An extender a sibling package registered on the contract before the package applies to the bound hook first,
+and the listed hooks run before the hook it returns; an extender registered after the package receives the wrapped hook,
+`ListedGrantHooks`, so one typed to another class fails. Laravel applies no extender to an instance it is handed later,
+so the grant service wraps the hook it calls as well, unless it already is wrapped: a hook bound with `instance()` after
+the package registers, and a hook bound in any way after an instance the package wrapped when it registered, run after
+the listed hooks too. When an extender registered after the package decorates the wrapped hook and the grant service
+wraps the decoration again, the listed hooks still run once, first. With no hook listed nothing is extended, and the
+bound hook stands alone.
+
+The wrapped hook builds the listed hooks from its container at its first use and keeps them, so registering the package
+builds none of them, and they share the bound hook's lifetime: built afresh for each queue job and in each Octane
+sandbox when it is scoped, bound with `bind()` or the default, and kept with it when it is a singleton or an instance.
+The package resolves the bound hook while it registers only when the hook was resolved before and a callback watches
+the contract with `rebinding()` or `refresh()`: Laravel then hands that callback the wrapped hook. Registering the
+package again in the same container wraps nothing twice.
 
 ```php
 'grant_hooks' => [
