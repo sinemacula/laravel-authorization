@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPolicy;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
@@ -45,7 +46,7 @@ use Tests\TestCase;
 #[CoversClass(PolicyService::class)]
 final class PolicyServiceTest extends TestCase
 {
-    use ComparesReferences, UsesAnAuthorizationConnection;
+    use ComparesReferences, RefusesThePackage, UsesAnAuthorizationConnection;
 
     /** @var array{statements: list<array<string, mixed>>} An allow on reading posts. */
     private const array READ = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['*']]]];
@@ -359,6 +360,33 @@ final class PolicyServiceTest extends TestCase
         self::assertSame(['tenant', 'acme'], [$owned->tenant_type, $owned->tenant_id]);
         self::assertSame('acme', Policy::query()->withoutGlobalScopes()->whereKey($owned->getKey())->firstOrFail()->tenant_id);
         self::assertNull(self::service()->create('writers', ['statements' => []])->tenant_type);
+    }
+
+    /**
+     * Once the package refuses, every operation of the service refuses by its
+     * own guard, before it reads or writes anything.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryOperationRefusesOnceThePackageRefuses(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $policy  = new Policy(['name' => 'unsaved']);
+        $service = $this->container()->make(PolicyService::class);
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'create'       => static fn () => $service->create('reader', ['version' => 1, 'statements' => []]),
+            'createInline' => static fn () => $service->createInline($user, 'reader', ['version' => 1, 'statements' => []]),
+            'rename'       => static fn () => $service->rename($policy, 'author'),
+            'describe'     => static fn () => $service->describe($policy, 'Reads'),
+            'rewrite'      => static fn () => $service->rewrite($policy, ['version' => 1, 'statements' => []]),
+            'delete'       => static fn () => $service->delete($policy),
+            'list'         => static fn () => $service->list(),
+        ]);
     }
 
     /**

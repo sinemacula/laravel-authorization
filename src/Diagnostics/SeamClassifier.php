@@ -25,7 +25,9 @@ use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
  * - the package's own closure is its default, or the configured class;
  * - the closure or the instance held before the package registered is an
  *   earlier binding, and so is the decorator running the configured grant hooks
- *   that replaced such an instance at once, shown by the instance it decorates;
+ *   that replaced such an instance, shown by the instance it decorates; one
+ *   that replaced an instance handed the container after the package registered
+ *   is a later binding, shown by that instance too;
  * - whatever binds the contract once a deferred provider the package left
  *   standing as it registered has loaded is that provider's binding;
  * - anything else is a later binding.
@@ -46,7 +48,7 @@ use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
  */
 final readonly class SeamClassifier
 {
-    /** @var string How the configured grant hooks applied at once to the instance held as the package registered are shown among the extenders. */
+    /** @var string How the configured grant hooks applied to the instance held as the application booted are shown among the extenders. */
     public const string APPLIED = GrantHookConfigValidator::KEY . ' (applied to the held instance)';
 
     /**

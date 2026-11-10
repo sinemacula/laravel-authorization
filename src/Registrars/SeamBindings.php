@@ -290,11 +290,15 @@ final readonly class SeamBindings
      * of the class the configuration names in its place as a step to run as the
      * application boots, keeping the name as the configuration gives it.
      *
-     * When the configuration names a class other than the default, the contract
-     * is bound now, when nothing is bound to it yet, through a closure this
-     * class declares, not the provider, so a sibling package reading the
-     * binding table leaves it to the application's choice, as it left the class
-     * bound at once; it resolves the default until the step runs.
+     * When the configuration names a class other than the default, and there is
+     * a default, the contract is bound now, when nothing is bound to it yet,
+     * through a closure this class declares, not the provider, so a sibling
+     * package reading the binding table leaves it to the application's choice,
+     * as it left the class bound at once; it resolves the default until the
+     * step runs. A contract with no default, the policy store's, is left as it
+     * is until the step runs, unbound when nothing was bound to it, so nothing
+     * resolves it to a class that is not there, and a boot that refuses leaves
+     * it so.
      *
      * The step binds only when the contract is bound as it was when the package
      * registered, so a binding made after the package registered stands, as it
@@ -332,9 +336,8 @@ final readonly class SeamBindings
 
         if ($default !== null) {
             $this->app->scoped($target, $build($default));
+            $this->app->bindIf($contract, $chosen);
         }
-
-        $this->app->bindIf($contract, $chosen);
 
         $registered = $this->bindingOf($contract);
 
@@ -371,8 +374,8 @@ final readonly class SeamBindings
     /**
      * Bind the contract as when the configuration names no class for it, in
      * place of the closure bound for the class it named, when it is still bound
-     * to that closure: to the package's default, or to nothing when there is
-     * none.
+     * to that closure: to the package's default. A contract with no default was
+     * never bound to the closure, so it is left as it is.
      *
      * @param  class-string  $contract
      * @param  \Closure(\Illuminate\Contracts\Foundation\Application): mixed  $chosen
@@ -384,15 +387,6 @@ final readonly class SeamBindings
     private function bindDefaultOver(string $contract, \Closure $chosen, string $key, ?string $default, array $earlier): void
     {
         if (ContainerState::concrete($this->app, $contract) !== $chosen) {
-            return;
-        }
-
-        if ($default === null) {
-            $app = $this->app;
-
-            unset($app[$contract]);
-            BindingRegistry::of($this->app)->forget($contract);
-
             return;
         }
 
@@ -450,8 +444,14 @@ final readonly class SeamBindings
     /**
      * Extend the grant hook so the hooks the configuration lists run before
      * whatever it resolves to, recording the decorator that replaced an
-     * instance held, and, given where the package registered its extender among
-     * the contract's, place it there, before any registered after it.
+     * instance held, with that instance, and, given where the package
+     * registered its extender among the contract's, place it there, before any
+     * registered after it.
+     *
+     * An instance held is wrapped as the extending runs, so, given the steps,
+     * one a provider handed the container after the package registered is
+     * wrapped too, as the application boots; the grant service wraps the hook
+     * it calls again anyway, so the configured hooks ran before it either way.
      *
      * @param  \SineMacula\Laravel\Authorization\Diagnostics\SeamRecord  $record
      * @param  int|null  $position
@@ -476,7 +476,7 @@ final readonly class SeamBindings
             return;
         }
 
-        $this->record($record->wrappedBy($wrapper));
+        $this->record($record->wrappedBy($wrapper, $held));
     }
 
     /**

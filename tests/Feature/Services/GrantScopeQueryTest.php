@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubMachine;
@@ -53,6 +54,8 @@ use Tests\TestCase;
 #[CoversClass(GrantScopeQuery::class)]
 final class GrantScopeQueryTest extends TestCase
 {
+    use RefusesThePackage;
+
     /** @var string The tenants' morph type. */
     private const string TENANT = 'tenant';
 
@@ -659,6 +662,32 @@ final class GrantScopeQueryTest extends TestCase
         self::grant($principal, 'role', self::tenant('acct1'));
 
         self::assertSame(GrantPresence::PRESENT, self::scopes()->hasGrantIn($subject, self::tenant('acct1')));
+    }
+
+    /**
+     * Once the package refuses, both questions refuse by their own guard,
+     * before the tenant is read, a seam resolved or a grant queried.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testBothQuestionsRefuseOnceThePackageRefuses(): void
+    {
+        $user     = self::identity('user-1');
+        $resolved = [];
+
+        $this->refuseThePackage();
+        $this->container()->beforeResolving(static function (string $abstract) use (&$resolved): void {
+            $resolved[] = $abstract;
+        });
+
+        $this->assertEachRefused([
+            'forIdentity' => static fn () => self::scopes()->forIdentity(new Reference('stub_identity', 'user-1'), self::tenant('t1')),
+            'hasGrantIn'  => static fn () => self::scopes()->hasGrantIn($user, self::tenant('t1')),
+        ]);
+
+        self::assertSame([], \array_values(\array_intersect($resolved, [SubjectResolver::class, IdentityDirectory::class, TenantTree::class])));
     }
 
     /**

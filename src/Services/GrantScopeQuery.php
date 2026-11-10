@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantPresence;
 use SineMacula\Laravel\Authorization\Enums\GrantScopeStatus;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -43,6 +44,9 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * many grants and principals there are and however deep the tree, plus the
  * tree's own reads and the identity directory's; only when the tree's subtree
  * query fails as it runs is a second read, for the platform-wide grants, made.
+ *
+ * Each answer refuses, before the tenant is read or a seam resolved, while the
+ * package is not healthy (see `PackageState`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,10 +83,13 @@ final readonly class GrantScopeQuery
      * @return \SineMacula\Laravel\Authorization\Enums\GrantScopeStatus
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      * @throws \Throwable
      */
     public function forIdentity(Reference $identity, AuthorizableTenant|Model|Reference $tenant): GrantScopeStatus
     {
+        PackageState::guard($this->container);
+
         $scope      = self::referenceTo($tenant);
         $principals = $this->directory()->principalsOf($identity);
         $status     = self::placed(new GrantRoots([$identity, ...$principals->principals]), $scope);
@@ -116,9 +123,12 @@ final readonly class GrantScopeQuery
      * @return \SineMacula\Laravel\Authorization\Enums\GrantPresence
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public function hasGrantIn(object $principal, AuthorizableTenant|Model|Reference $tenant, ?string $application = null): GrantPresence
     {
+        PackageState::guard($this->container);
+
         $scope   = self::referenceTo($tenant);
         $subject = $principal instanceof Subject ? $principal : $this->resolver()->forUser($principal);
         $chain   = self::chainOf($scope);

@@ -23,6 +23,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Concerns\ChecksGrantsByName;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -40,7 +41,7 @@ use Tests\TestCase;
 #[CoversTrait(HasRoles::class)]
 final class HasRolesTest extends TestCase
 {
-    use ChecksGrantExpiry, ChecksGrantsByName;
+    use ChecksGrantExpiry, ChecksGrantsByName, RefusesThePackage;
 
     /**
      * Reset the clock.
@@ -305,6 +306,33 @@ final class HasRolesTest extends TestCase
         self::assertRefusedAsNothingAllowed(static fn () => $user->syncRoles(['editor'], actor: $actor));
         self::assertRefusedAsNothingAllowed(static fn () => $user->removeRole('editor', $actor));
         self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', 'user-actor')->count());
+    }
+
+    /**
+     * Once the package refuses, the role checks refuse by their own guard
+     * though the resolution cache holds the answer, reading nothing.
+     *
+     * @return void
+     */
+    public function testTheRoleChecksRefuseWithAWarmCacheOnceThePackageRefuses(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $editor = Role::create(['name' => 'editor', 'rank' => 1]);
+        $viewer = Role::create(['name' => 'viewer', 'rank' => 2]);
+
+        $user->assignRole($editor);
+
+        self::assertTrue($user->hasRole('editor'));
+        self::assertSame(['editor'], $user->getRoles());
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'hasRole'                => static fn () => $user->hasRole('editor'),
+            'getRoles'               => static fn () => $user->getRoles(),
+            'getRoles through names' => static fn () => $user->getRoleNames(),
+            'canActOn'               => static fn () => $user->canActOn($viewer),
+        ]);
     }
 
     /**

@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Registrars\QueryScopeRegistrar;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
@@ -44,7 +45,7 @@ use Tests\TestCase;
 #[CoversClass(QueryScopeRegistrar::class)]
 final class QueryScopeRegistrarTest extends TestCase
 {
-    use ScopesQueries;
+    use RefusesThePackage, ScopesQueries;
 
     /**
      * The macro is registered on every Eloquent builder, and keeps the rows the
@@ -547,6 +548,23 @@ final class QueryScopeRegistrarTest extends TestCase
         } finally {
             Container::setInstance($container);
         }
+    }
+
+    /**
+     * Once the package refuses, the query macro, still registered, refuses by
+     * its own guard before the manager is asked, as does the scope it applies
+     * when called directly.
+     *
+     * @return void
+     */
+    public function testTheMacroRefusesOnceThePackageRefuses(): void
+    {
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'scope through the macro' => static fn () => StubIdentity::query()->whereAuthorized('posts:read'),
+            'scope'                   => static fn () => QueryScopeRegistrar::scope(StubIdentity::query(), 'posts:read'),
+        ]);
     }
 
     /**

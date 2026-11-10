@@ -16,6 +16,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\GrantUsageStore;
 use SineMacula\Laravel\Authorization\Diagnostics\BindingRegistry;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Registrars\UsageRegistrar;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -24,6 +25,7 @@ use SineMacula\Laravel\Authorization\Usage\GrantRoute;
 use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
 use SineMacula\Laravel\Authorization\Usage\RecordGrantUsage;
 use SineMacula\Laravel\Authorization\Usage\StoredGrant;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Fixtures\Usage\CountingUsageStore;
 use Tests\TestCase;
 
@@ -42,6 +44,8 @@ use Tests\TestCase;
 #[CoversClass(UsageRegistrar::class)]
 final class UsageRegistrarTest extends TestCase
 {
+    use RefusesThePackage;
+
     /**
      * The package's store is bound by default, and a store the application
      * binds replaces it; the recorder is one per worker.
@@ -190,6 +194,36 @@ final class UsageRegistrarTest extends TestCase
         self::assertSame(DatabaseGrantUsageStore::class, BindingRegistry::of($plain)->get(GrantUsageStore::class)?->class);
 
         Container::setInstance($this->application());
+    }
+
+    /**
+     * The recorder and the package's usage store are built while the package is
+     * pending, as what the boot validates may need them, and refuse, as the
+     * container builds them, once it refuses.
+     *
+     * @return void
+     */
+    public function testTheBindingsRefuseOnlyOnceThePackageRefuses(): void
+    {
+        $app = $this->container();
+
+        $app->forgetInstance(GrantUsageRecorder::class);
+        $app->forgetScopedInstances();
+
+        PackageState::of($app)?->pending();
+
+        self::assertInstanceOf(GrantUsageRecorder::class, $app->make(GrantUsageRecorder::class));
+        self::assertInstanceOf(DatabaseGrantUsageStore::class, $app->make(GrantUsageStore::class));
+
+        $app->forgetInstance(GrantUsageRecorder::class);
+        $app->forgetScopedInstances();
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            '{closure} building the recorder' => static fn () => $app->make(GrantUsageRecorder::class),
+            '{closure} building the store'    => static fn () => $app->make(GrantUsageStore::class),
+        ]);
     }
 
     /**

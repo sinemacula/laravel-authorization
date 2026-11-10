@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Unit\Diagnostics;
 
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Container\Container as ContainerContract;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Diagnostics\BootCheck;
@@ -45,7 +46,7 @@ final class PackageStateTest extends TestCase
 
         self::assertSame($state, PackageState::of($container));
         self::assertSame(PackageStatus::PENDING, $state->status());
-        self::assertFalse($state->isHealthy());
+        self::assertSame(IssueCode::INTERNAL, self::refusalOf($state->ensureHealthy(...))->getIssue());
         self::assertFalse($state->isDecided());
     }
 
@@ -69,7 +70,6 @@ final class PackageStateTest extends TestCase
 
         self::assertSame($state, PackageState::start($container));
         self::assertSame(PackageStatus::HEALTHY, $state->status());
-        self::assertTrue($state->isHealthy());
         self::assertFalse($state->isDecided());
         self::assertSame($findings, $state->findings());
         self::assertSame($checks, $state->bootChecks());
@@ -99,7 +99,6 @@ final class PackageStateTest extends TestCase
         $state->ensureHealthy();
 
         self::assertSame(PackageStatus::HEALTHY, $state->status());
-        self::assertTrue($state->isHealthy());
         self::assertNull($state->findings());
     }
 
@@ -217,8 +216,97 @@ final class PackageStateTest extends TestCase
         $state->pending();
 
         self::assertSame(PackageStatus::PENDING, $state->status());
-        self::assertFalse($state->isHealthy());
+        self::assertSame(IssueCode::INTERNAL, self::refusalOf($state->ensureHealthy(...))->getIssue());
         self::assertSame($findings, $state->findings());
+    }
+
+    /**
+     * What is built for an operation, and what the boot's validation builds,
+     * refuses only while the package refuses: a pending package lets it
+     * through, handing back the state, and a container without the package
+     * refuses nothing.
+     *
+     * @return void
+     */
+    public function testBuildingRefusesOnlyWhileThePackageRefuses(): void
+    {
+        $container = new Container;
+
+        self::assertNull(PackageState::guardBuild(new Container));
+
+        $state = PackageState::start($container);
+
+        self::assertSame($state, PackageState::guardBuild($container));
+
+        $state->refuse(new ConfigFindings([new ConfigIssue('authorization.cache.ttl', IssueCode::OUT_OF_RANGE)], []));
+
+        self::assertSame('authorization.cache.ttl', self::refusalOf(static fn () => PackageState::guardBuild($container))->getConfigKey());
+
+        $state->healthy();
+
+        self::assertSame($state, PackageState::guardBuild($container));
+    }
+
+    /**
+     * A container known only by its contract is read through what it binds:
+     * nothing refuses when it binds no state, or something that is none, and
+     * the state it binds is the one read and guarded.
+     *
+     * @return void
+     */
+    public function testAContainerKnownByItsContractIsReadThroughItsBindings(): void
+    {
+        $state = PackageState::start(new Container);
+        $held  = [
+            'nothing'   => [false, null],
+            'something' => [true, new \stdClass],
+            'a state'   => [true, $state],
+        ];
+
+        foreach ($held as $kind => [$isBound, $instance]) {
+            $container = self::createStub(ContainerContract::class);
+
+            $container->method('bound')->willReturn($isBound);
+            $container->method('make')->willReturn($instance);
+
+            self::assertSame($instance instanceof PackageState ? $instance : null, PackageState::of($container), $kind);
+        }
+
+        $container = self::createStub(ContainerContract::class);
+
+        $container->method('bound')->willReturn(true);
+        $container->method('make')->willReturn($state);
+
+        self::assertSame(IssueCode::INTERNAL, self::refusalOf(static fn () => PackageState::guard($container))->getIssue());
+
+        $container = self::createStub(ContainerContract::class);
+
+        $container->method('bound')->willReturn(false);
+
+        self::assertNull(PackageState::guard($container));
+    }
+
+    /**
+     * Reading a container's state never resolves it, so nothing watching the
+     * container's resolutions sees it read.
+     *
+     * @return void
+     */
+    public function testReadingTheStateResolvesNothing(): void
+    {
+        $container = new Container;
+        $resolved  = [];
+
+        PackageState::start($container);
+
+        $container->afterResolving(PackageState::class, static function () use (&$resolved): void {
+            $resolved[] = PackageState::class;
+        });
+
+        PackageState::of($container);
+        PackageState::guardBuild($container);
+
+        self::assertSame([], $resolved);
     }
 
     /**

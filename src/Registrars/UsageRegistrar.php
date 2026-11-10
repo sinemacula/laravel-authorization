@@ -61,7 +61,7 @@ final readonly class UsageRegistrar
     /**
      * Bind the usage store, as a seam an application may bind itself (see
      * `SeamBindings`), and the recorder, each refusing, before anything it
-     * needs is built, while the package is not healthy (see `PackageState`).
+     * needs is built, while the package refuses (see `PackageState`).
      *
      * @param  \SineMacula\Laravel\Authorization\Registrars\SeamBindings  $seams
      * @return void
@@ -69,13 +69,13 @@ final readonly class UsageRegistrar
     public function register(SeamBindings $seams): void
     {
         $seams->bindDefault(GrantUsageStore::class, static function (Application $app): GrantUsageStore {
-            PackageState::guard($app);
+            PackageState::guardBuild($app);
 
             return $app->make(DatabaseGrantUsageStore::class);
         }, builds: DatabaseGrantUsageStore::class);
 
         $this->app->singleton(GrantUsageRecorder::class, static function (Application $app): GrantUsageRecorder {
-            PackageState::guard($app);
+            PackageState::guardBuild($app);
 
             return new GrantUsageRecorder($app->make(BusDispatcher::class));
         });

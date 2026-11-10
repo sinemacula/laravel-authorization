@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\GrantUsageStore;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
@@ -31,6 +32,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantPruner;
+use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
@@ -280,7 +282,7 @@ final class RefusingStateTest extends TestCase
      * Application access refuses on the path that allows an application no
      * permission is named for without deciding, every management service
      * refuses before it reads or writes, as a write through a model trait does,
-     * and so do the access reviews and the pruner.
+     * and so do the grant scope query, the access reviews and the pruner.
      *
      * @return void
      *
@@ -294,10 +296,10 @@ final class RefusingStateTest extends TestCase
         $unused   = ReviewQuery::unused(ReviewScope::everywhere(), Carbon::now());
         $services = \array_map(fn (string $service): object => $this->container()->make($service), [
             ApplicationAccess::class, RoleService::class, PermissionService::class, PolicyService::class, GrantService::class,
-            ResourcePolicyService::class, BoundaryService::class, GuardrailService::class, AccessReview::class, GrantPruner::class,
+            ResourcePolicyService::class, BoundaryService::class, GuardrailService::class, AccessReview::class, GrantPruner::class, GrantScopeQuery::class,
         ]);
 
-        [$access, $roles, $permissions, $policies, $grants, $resourcePolicies, $boundaries, $guardrails, $review, $pruner] = $services;
+        [$access, $roles, $permissions, $policies, $grants, $resourcePolicies, $boundaries, $guardrails, $review, $pruner, $scopes] = $services;
 
         $this->refuse();
 
@@ -320,6 +322,8 @@ final class RefusingStateTest extends TestCase
             'an export'                              => static fn () => $review->export($unused, $actor, static fn (): null => null),
             'a trusted export'                       => static fn () => $review->trustedExport($unused, static fn (): null => null),
             'a prune'                                => static fn () => $pruner->prune(100),
+            'an identity\'s grant scope'             => static fn () => $scopes->forIdentity(new Reference('stub_identity', 'user-1'), new Reference('stub_tenant', 't1')),
+            'a grant in a tenant'                    => static fn () => $scopes->hasGrantIn($user, new Reference('stub_tenant', 't1')),
         ]);
 
         $this->assertNothingRead();
@@ -327,8 +331,9 @@ final class RefusingStateTest extends TestCase
 
     /**
      * The grant usage recorder and the package's usage store refuse when the
-     * container builds them, and the permission catalogue refuses before any
-     * provider declares a permission.
+     * container builds them, and the permission catalogue, read directly or
+     * through the action catalogue, as setting a policy's document on the model
+     * does, refuses before any provider declares a permission.
      *
      * @return void
      */
@@ -339,12 +344,24 @@ final class RefusingStateTest extends TestCase
         $app['config']->set('authorization.permission_providers', [RecordingPermissionProvider::class]);
         $app->forgetInstance(GrantUsageRecorder::class);
 
+        // The suite's permissive action catalogue gives way to the package's.
+        $app->forgetExtenders(ActionCatalogue::class);
+        $app->forgetScopedInstances();
+
+        $policy   = new Policy(['name' => 'probe']);
+        $document = ['version' => 1, 'statements' => [['effect' => 'allow', 'actions' => ['reports:export'], 'resources' => ['*']]]];
+
         $this->refuse();
 
         self::assertEachRefused([
-            'the recorder'  => static fn () => $app->make(GrantUsageRecorder::class),
-            'the store'     => static fn () => $app->make(GrantUsageStore::class),
-            'the catalogue' => static fn () => $app->make(PermissionCatalogue::class)->definitions(),
+            'the recorder'             => static fn () => $app->make(GrantUsageRecorder::class),
+            'the store'                => static fn () => $app->make(GrantUsageStore::class),
+            'the catalogue'            => static fn () => $app->make(PermissionCatalogue::class)->definitions(),
+            'what is declared'         => static fn () => $app->make(PermissionCatalogue::class)->declared(),
+            'the action catalogue'     => static fn () => $app->make(ActionCatalogue::class)->covers('reports:*'),
+            'a policy\'s document set' => static function () use ($policy, $document): void {
+                $policy->document = $document;
+            },
         ]);
 
         self::assertSame(0, RecordingPermissionProvider::$reads);

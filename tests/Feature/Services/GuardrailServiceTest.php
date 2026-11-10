@@ -35,6 +35,7 @@ use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -53,7 +54,7 @@ use Tests\TestCase;
 #[CoversClass(GuardrailService::class)]
 final class GuardrailServiceTest extends TestCase
 {
-    use ActsAsTenant, ComparesReferences, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks;
+    use ActsAsTenant, ComparesReferences, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage;
 
     /**
      * The service is bound once in the container.
@@ -689,6 +690,29 @@ final class GuardrailServiceTest extends TestCase
 
             DB::table('guardrails')->insertOrIgnore($row);
         }
+    }
+
+    /**
+     * Once the package refuses, every operation of the service refuses by its
+     * own guard, before it reads or writes anything.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryOperationRefusesOnceThePackageRefuses(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $policy  = new Policy(['name' => 'unsaved']);
+        $service = $this->container()->make(GuardrailService::class);
+        $actor   = ActingContext::for($user);
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'set'    => static fn () => $service->set($policy, null, $actor),
+            'remove' => static fn () => $service->remove($policy, null, $actor),
+        ]);
     }
 
     /**

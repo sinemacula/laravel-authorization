@@ -399,7 +399,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->forgetResolutionsOnRebinding(ResolvedTenant::class);
 
         $this->app->scoped(ResolvedTenant::class, static function (Container $app): ResolvedTenant {
-            PackageState::guard($app);
+            PackageState::guardBuild($app);
 
             /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
             $resolver = $app->make(SubjectResolver::class);
@@ -533,7 +533,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
     protected function registerAuthorizationManager(): void
     {
         $this->app->scoped('authorization', static fn (Application $app): AuthorizationManager => new AuthorizationManager(
-            state: PackageState::guard($app),
+            state: PackageState::guardBuild($app),
             evaluator: $app->make(PolicyEvaluator::class),
             subjectResolver: $app->make(SubjectResolver::class),
             policyResolver: $app->make(PolicyResolver::class),

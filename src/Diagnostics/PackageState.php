@@ -24,9 +24,18 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * A container that holds none never registered the package: nothing refuses
  * there, so a class built directly, as a test or an embedding application may
  * build one, runs as it always has. A container whose provider registered but
- * did not finish validating refuses, so an application whose boot threw, and
- * which goes on to serve another request or command without booting again, runs
- * nothing unvalidated.
+ * did not finish validating refuses every operation, so an application whose
+ * boot threw, and which goes on to serve another request or command without
+ * booting again, runs nothing unvalidated, and so does a provider that boots
+ * before the package's own and asks it to decide.
+ *
+ * Building is told apart from running: what the container builds for an
+ * operation (the manager, the resolved tenant, the usage recorder and store),
+ * and what the boot's own validation builds and reads (the context sources, the
+ * action catalogue and the permissions declared), refuse only while the package
+ * refuses, never while it is pending, so a valid configuration whose context
+ * source is handed one of them as it is built boots healthy (see
+ * `guardBuild()`).
  *
  * The operations that refuse, each before it resolves a seam, reads a cache or
  * returns early, are exactly these:
@@ -44,10 +53,14 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  *   tenant's factory and binding;
  * - `ApplicationAccess::mayUse()`, on every path;
  * - the management services (roles, permissions, policies, grants, resource
- *   policies, boundaries and guardrails), the access reviews and the pruner;
+ *   policies, boundaries and guardrails), the grant scope query, the access
+ *   reviews and the pruner;
  * - the grant usage recorder and the package's usage store, as the container
  *   builds them; one held by outside code is outside this guarantee;
- * - `PermissionCatalogue::definitions()`, which runs the configured providers.
+ * - `PermissionCatalogue::definitions()`, which runs the configured providers,
+ *   and, while the package refuses, `PermissionCatalogue::declared()` and the
+ *   declared action catalogue, which run them too, so a policy's document set
+ *   on the model refuses rather than run them.
  *
  * Eloquent relations and models read directly (`roles()`, `permissions()` and
  * the like) read rows rather than decide, and are outside it.
@@ -144,9 +157,9 @@ final class PackageState
     }
 
     /**
-     * Refuse when the container's package is not healthy, and return its state,
-     * for an object the container builds to hold; do nothing, and return null,
-     * when the package never registered in it.
+     * Refuse when the container's package is not healthy, before an operation
+     * runs, and return its state; do nothing, and return null, when the package
+     * never registered in it.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @return self|null
@@ -163,13 +176,25 @@ final class PackageState
     }
 
     /**
-     * Determine whether every operation runs.
+     * Refuse while the container's package refuses, and return its state, for
+     * what the container builds, and what the boot's own validation builds and
+     * reads, as the configuration is validated; let a pending package through,
+     * and do nothing, returning null, when the package never registered in it.
      *
-     * @return bool
+     * @param  \Illuminate\Contracts\Container\Container  $container
+     * @return self|null
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    public function isHealthy(): bool
+    public static function guardBuild(Container $container): ?self
     {
-        return $this->isHealthy;
+        $state = self::of($container);
+
+        if ($state?->status === PackageStatus::REFUSING) {
+            throw $state->refusal();
+        }
+
+        return $state;
     }
 
     /**

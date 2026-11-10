@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
@@ -43,6 +44,8 @@ use Tests\TestCase;
 #[CoversClass(InvalidTenantException::class)]
 final class TenantScopeTest extends TestCase
 {
+    use RefusesThePackage;
+
     /**
      * Reset the switchable tenant.
      *
@@ -818,6 +821,37 @@ final class TenantScopeTest extends TestCase
 
         self::assertSame('platform:every', TenantScope::scopeKey());
         self::assertSame('platform:every', $resolver->key);
+    }
+
+    /**
+     * Once the package refuses, a scoped model's query, `within()`, before its
+     * callback runs, and every getter of the tenant refuse by the scope's own
+     * guard, before the subject resolver is resolved.
+     *
+     * @return void
+     */
+    public function testTheScopeRefusesOnceThePackageRefuses(): void
+    {
+        $resolved = [];
+
+        $this->container()->forgetInstance(ResolvedTenant::class);
+        $this->refuseThePackage();
+        $this->container()->beforeResolving(SubjectResolver::class, static function (string $abstract) use (&$resolved): void {
+            $resolved[] = $abstract;
+        });
+
+        $this->assertEachRefused([
+            'within'                                 => static fn () => TenantScope::within(null, null, static fn () => self::fail('The callback ran.')),
+            'whileResolving through a model query'   => static fn () => Role::query()->count(),
+            'whileResolving through currentTenant'   => TenantScope::currentTenant(...),
+            'whileResolving through isBelowTenant'   => TenantScope::isBelowTenant(...),
+            'whileResolving through the application' => TenantScope::currentApplication(...),
+            'whileResolving through scopeKey'        => TenantScope::scopeKey(...),
+            'whileResolving through currentChain'    => TenantScope::currentChain(...),
+            'whileResolving through refreshChain'    => TenantScope::refreshChain(...),
+        ]);
+
+        self::assertSame([], $resolved);
     }
 
     /**

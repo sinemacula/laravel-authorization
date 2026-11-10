@@ -258,10 +258,19 @@ names alone: it loads no class, loads no deferred provider, binds no configured 
 no contract. All of that runs as the application boots, in a `booting()` callback, after every provider has registered
 and before any boots, so a provider registered after the package counts exactly as one registered before it, and the
 precedence above holds whatever order providers register in. Until then, each contract a configured class will be
-bound to resolves to the package's default, so a provider that resolves a seam in its own `register()` gets the
-package's default rather than your class; resolve seams in `boot()`, or later, as Laravel advises. When the
-application boots for `authorization:check` on a refused configuration, none of this runs (see
-[The diagnostic boot](#the-diagnostic-boot)).
+bound to resolves to the package's default, and a contract with no default, the policy store's, stays unbound, so a
+provider that resolves a seam in its own `register()` gets the package's default, or nothing, rather than your class;
+resolve seams in `boot()`, or later, as Laravel advises. When the application boots for `authorization:check` on a
+refused configuration, none of this runs (see [The diagnostic boot](#the-diagnostic-boot)), and the policy store stays
+unbound.
+
+**When the package decides.** Resolving a seam is not deciding. In an application where this package's provider
+registered, every operation the package offers (each listed under [The diagnostic boot](#the-diagnostic-boot)) refuses
+until the provider's own `boot()` has validated the configuration, even a valid one. A provider that boots before it,
+or an application `booting()` callback, therefore cannot make an authorization decision in its own `boot()`: defer
+that work with `$app->booted(...)`, or to a later point such as a request or a command. What the container builds for
+those operations, such as the manager or the resolved tenant, can still be built before then; only its operations
+refuse.
 
 A sibling package that registers after this one and wants to replace only the package's default, never a binding the
 application made, asks `AuthorizationServiceProvider::isPackageDefault($app, $contract)`. It is true only while the
@@ -3592,12 +3601,14 @@ time it builds the contract, so the hook is wrapped however it was bound: before
 deferred provider, or the package's default when nothing else is bound, which holds none of the listed hooks, so none
 runs twice. An extender a sibling package registered on the contract before the package applies to the bound hook first,
 and the listed hooks run before the hook it returns; an extender registered after the package receives the wrapped hook,
-`ListedGrantHooks`, so one typed to another class fails. Laravel applies no extender to an instance it is handed later,
-so the grant service wraps the hook it calls as well, unless it already is wrapped: a hook bound with `instance()` after
-the application boots, and a hook bound in any way after an instance the package wrapped as the application booted, run
-after the listed hooks too. When an extender registered after the package decorates the wrapped hook and the grant
-service wraps the decoration again, the listed hooks still run once, first. With no hook listed nothing is extended, and
-the bound hook stands alone.
+`ListedGrantHooks`, so one typed to another class fails. A `GrantHook` instance a provider binds after this package
+registers, but before the application boots, is wrapped by the listed hooks as the application boots; before, the grant
+service wrapped it at use instead, and the listed hooks ran first either way. Laravel applies no extender to an instance
+it is handed later, so the grant service wraps the hook it calls as well, unless it already is wrapped: a hook bound
+with `instance()` after the application boots, and a hook bound in any way after an instance the package wrapped as the
+application booted, run after the listed hooks too. When an extender registered after the package decorates the wrapped
+hook and the grant service wraps the decoration again, the listed hooks still run once, first. With no hook listed
+nothing is extended, and the bound hook stands alone.
 
 The wrapped hook builds the listed hooks from its container at its first use and keeps them, so registering the package
 builds none of them, and they share the bound hook's lifetime: built afresh for each queue job and in each Octane
@@ -4303,7 +4314,9 @@ It reports:
   to, so an instance handed over any binding is shown by its class, as the binding that supplies the contract. A grant
   hook held as an instance before the package registered, which the configured grant hooks wrap as the application
   boots, is still the earlier binding, shown by the hook it wraps, with the configured hooks listed as
-  `authorization.grant_hooks (applied to the held instance)`. A deferred provider the application knew of as the package
+  `authorization.grant_hooks (applied to the held instance)`. One a provider bound after the package registered, which
+  the configured hooks wrap as the application boots too, is a later binding, shown by its own class and decorated by
+  the configured hooks, listed the same way. A deferred provider the application knew of as the package
   registered, which the package then left the contract to, is `deferred_loaded` once it has loaded. A seam bound to a
   closure whose class is decided when it is first resolved is shown by the closure's file and line, `supplied by custom
   code`; that is a note, and never fails the check. An optional contract nothing binds, such as `PolicyStore` or
@@ -4471,9 +4484,12 @@ before any boots, and it is on only when:
 - the process runs in the console and the command its arguments name is `authorization:check`, or a command a sibling
   package declared as running it in the same process. The arguments are read as the console reads them: Symfony's
   global options and Laravel's `--env` (`--env=staging` or `--env staging`) may come before the command, and `--`
-  ends the options. `--help` or `--version` anywhere before `--`, an option the console does not know, or a value
-  given to an option that takes none means no command runs, and an abbreviated name is never matched, so none of them
-  turns it on;
+  ends the options. A valid option given before the command's name, with its value after `=`, still runs the
+  diagnostic boot, as the console reads past it to the name: the command's own option, as in
+  `php artisan --format=json authorization:check`, or a global option your application adds as the console starts.
+  `--help` or `--version` anywhere before `--`, any other option the console's global options do not define, such as
+  one given its value apart (`--format json`), or a value given to an option that takes none means no command runs as
+  named, and an abbreviated name is never matched, so none of them turns it on;
 - or the explicit switch is on (see below).
 
 A flag a sibling package sets once its own check is running, after the application has booted, comes too late to
@@ -4518,7 +4534,9 @@ the package refuses every operation and runs none of the registration work it le
 is loaded or bound, no deferred provider is loaded for it, and the grant hooks do not extend the contract. Otherwise
 that work runs as on any boot, then the checks that build what the configuration names (the authentication context and
 the context sources, the attribute providers, the session scopes' catalogue and the cache store), each recording
-whether it passed, failed or did not run. The package is healthy, and boots exactly as it otherwise would, only when
+whether it passed, failed or did not run. The configured permission providers may run there, as the session scopes
+are checked against the actions they declare while the configuration is validated, never as the report is written,
+which shows what the boot recorded. The package is healthy, and boots exactly as it otherwise would, only when
 every check passed; any issue, including a check that failed in a way the package did not foresee, refuses.
 
 In the refusing state the package registers `authorization:check` alone among its commands (none that writes grants or
@@ -4539,12 +4557,20 @@ seam, reads a cache or returns early:
 - the model traits' decisions: `hasPermission()`, `getPermissions()`, `hasRole()` and the other role and permission
   checks, `canActOn()` and the rank comparisons;
 - `TenantScope`'s `apply()`, `within()` and tenant getters, and the `ResolvedTenant` factory;
-- `ApplicationAccess::mayUse()`, on every path;
+- `ApplicationAccess::mayUse()`, on every path, and `GrantScopeQuery`'s `forIdentity()` and `hasGrantIn()`;
 - the management services: grants, revocations, roles, permissions, policies, resource policies, boundaries and
   guardrails;
 - the access reviews' public methods and the grant pruner;
 - the grant usage recorder and the package's usage store, when the container builds them;
-- `PermissionCatalogue::definitions()`, which runs the permission providers.
+- `PermissionCatalogue::definitions()`, which runs the permission providers, and `PermissionCatalogue::declared()` and
+  the package's `ActionCatalogue`, which run them too, so setting a `Policy` model's document refuses rather than run
+  them.
+
+What the container builds for these operations (the manager, the `ResolvedTenant`, the grant usage recorder and
+store), and what the boot's own checks build and read (the context sources, the declared permissions and the action
+catalogue), refuse as they are built only in the refusing state. While the package is pending, as it is until its
+configuration has been validated, they are built, so a context source handed one of them as the boot validates it
+still boots healthy, and only the operations refuse.
 
 **What does not.** The guarantee covers what the package itself runs:
 
@@ -4560,8 +4586,11 @@ seam, reads a cache or returns early:
 **Outside the diagnostic boot.** Boot refuses as before: the first refusal is thrown and the application does not
 boot. Should that application go on to serve another request or command anyway, as a long-lived worker might, since
 Laravel marks the providers booted before it boots them, every operation in the list above refuses rather than run on
-a configuration that was never validated. An application whose provider never registered the package, as when a test
-builds the package's classes directly, refuses nothing.
+a configuration that was never validated. The same holds on a valid configuration until the package's provider has
+booted: a provider that boots before it, or an application `booting()` callback, gets a refusal from any operation in
+the list, and defers such work with `$app->booted(...)` (see [When the package decides](#configuration)). An
+application whose provider never registered the package, as when a test builds the package's classes directly,
+refuses nothing.
 
 #### Explaining a check from the console
 

@@ -76,6 +76,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
@@ -116,7 +117,7 @@ use Tests\TestCase;
 #[CoversTrait(HasPolicies::class)]
 final class AuthorizationManagerTest extends TestCase
 {
-    use ReadsDispatchedEvents;
+    use ReadsDispatchedEvents, RefusesThePackage;
 
     /**
      * A role granted in an organisation allows in an account below it and not
@@ -3739,6 +3740,48 @@ final class AuthorizationManagerTest extends TestCase
         self::assertTrue(Authorization::checkMany(['one' => new CheckInput('posts:read', 'posts:1')])['one']->isAllowed());
         self::assertSame(['posts:1' => true], Authorization::canEach('posts:read', ['posts:1' => 'posts:1']));
         self::assertSame([1 => 'posts:2'], Authorization::filterAuthorized('posts:read', [1 => 'posts:2']));
+    }
+
+    /**
+     * Once the package refuses, every operation of a manager obtained while it
+     * was healthy refuses by its own guard, before it resolves the subject,
+     * reads a cache or the database, or hands over to another operation.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryOperationRefusesByItsOwnGuardOnceThePackageRefuses(): void
+    {
+        $user     = StubIdentity::create(['id' => 'user-1']);
+        $manager  = $this->container()->make(AuthorizationManager::class);
+        $decision = $manager->check('posts:read');
+        $resolved = [];
+
+        $this->refuseThePackage();
+        $this->container()->beforeResolving(SubjectResolver::class, static function (string $abstract) use (&$resolved): void {
+            $resolved[] = $abstract;
+        });
+
+        $this->assertEachRefused([
+            'any'               => static fn () => $manager->any(['posts:read'], $user),
+            'all'               => static fn () => $manager->all(['posts:read'], $user),
+            'authorize'         => static fn () => $manager->authorize('posts:read', $user),
+            'furtherChecks'     => static fn () => $manager->furtherChecks(),
+            'reportRefusal'     => static fn () => $manager->reportRefusal('posts:read', $user, $decision),
+            'check'             => static fn () => $manager->check('posts:read'),
+            'check through can' => static fn () => $manager->can('posts:read'),
+            'checkMany'         => static fn () => $manager->checkMany([new CheckInput('posts:read')]),
+            'canEach'           => static fn () => $manager->canEach('posts:read', [$user]),
+            'filterAuthorized'  => static fn () => $manager->filterAuthorized('posts:read', new Collection([$user])),
+            'queryScope'        => static fn () => $manager->queryScope($user, 'posts:read'),
+            'lastDecision'      => static fn () => $manager->lastDecision(),
+            'explain'           => static fn () => $manager->explain('posts:read'),
+            'permissionsFor'    => static fn () => $manager->permissionsFor(null, AuthorizationScope::platform()),
+            'currentSubject'    => static fn () => $manager->currentSubject(),
+        ]);
+
+        self::assertSame([], $resolved);
     }
 
     /**

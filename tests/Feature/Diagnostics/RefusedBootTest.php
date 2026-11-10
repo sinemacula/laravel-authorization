@@ -24,9 +24,13 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Diagnostics\BindingRegistry;
+use SineMacula\Laravel\Authorization\Diagnostics\Declarations;
 use SineMacula\Laravel\Authorization\Diagnostics\DiagnosticMode;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\Origin;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\PackageStatus;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
+use SineMacula\Laravel\Authorization\Diagnostics\SeamClassifier;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\QueryScopeRegistrar;
 use SineMacula\Laravel\Authorization\Support\DeclaredAbilities;
@@ -121,6 +125,21 @@ final class RefusedBootTest extends TestCase
         self::assertSame(0, Explosions::$count);
         self::assertSame(0, RecordingPermissionProvider::$reads);
         self::assertSame($this->held, $app->make(GrantHook::class));
+    }
+
+    /**
+     * The policy store the configuration names, which has no default, is left
+     * unbound in a refused boot, and reported so.
+     *
+     * @return void
+     */
+    public function testThePolicyStoreConfiguredIsLeftUnbound(): void
+    {
+        $app = $this->container();
+        $row = (new SeamClassifier($app, BindingRegistry::of($app), Declarations::of($app)))->classify(PolicyStore::class);
+
+        self::assertFalse($app->bound(PolicyStore::class));
+        self::assertSame([Origin::UNBOUND, []], [$row->origin, $row->classes]);
     }
 
     /**

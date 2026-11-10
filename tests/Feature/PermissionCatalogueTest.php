@@ -6,18 +6,21 @@ namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\PermissionMetadataReader;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\ConfigurablePermissionProvider;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\InvalidNamePermission;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\InjectedPermissionProvider;
+use Tests\Feature\Stubs\RecordingPermissionProvider;
 use Tests\Feature\Stubs\StubPermissionProvider;
 use Tests\TestCase;
 
@@ -38,6 +41,8 @@ use Tests\TestCase;
 #[CoversClass(InvalidPermissionCatalogueException::class)]
 final class PermissionCatalogueTest extends TestCase
 {
+    use RefusesThePackage;
+
     /**
      * Reset the configurable provider before each test.
      *
@@ -278,6 +283,40 @@ final class PermissionCatalogueTest extends TestCase
         $config->set('authorization.permission_enums', []);
 
         self::assertEquals((new PackagePermissions)->permissions(), $this->catalogue()->definitions());
+    }
+
+    /**
+     * While the package is pending, the boot's own validation reads what is
+     * declared, while every other read refuses; once the package refuses, both
+     * refuse by their own guard before any provider declares a permission.
+     *
+     * @return void
+     */
+    public function testReadingTheCatalogueRefusesWhileThePackageRefuses(): void
+    {
+        $app = $this->container();
+
+        $app['config']->set('authorization.permission_providers', [RecordingPermissionProvider::class]);
+
+        $catalogue = $app->make(PermissionCatalogue::class);
+
+        RecordingPermissionProvider::$reads = 0;
+
+        PackageState::of($app)?->pending();
+
+        self::assertSame('definitions', self::guardedBy(self::packageRefusalOf(static fn () => $catalogue->definitions())));
+        self::assertSame(0, RecordingPermissionProvider::$reads);
+        self::assertContains('reports:export', \array_column($catalogue->declared(), 'name'));
+        self::assertSame(1, RecordingPermissionProvider::$reads);
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'definitions' => static fn () => $catalogue->definitions(),
+            'declared'    => static fn () => $catalogue->declared(),
+        ]);
+
+        self::assertSame(1, RecordingPermissionProvider::$reads);
     }
 
     /**

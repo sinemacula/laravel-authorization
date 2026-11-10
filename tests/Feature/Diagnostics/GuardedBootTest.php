@@ -8,6 +8,7 @@ use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Application;
+use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -28,9 +29,14 @@ use SineMacula\Laravel\Authorization\Diagnostics\Enums\PackageStatus;
 use SineMacula\Laravel\Authorization\Diagnostics\GuardedBoot;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use SineMacula\Laravel\Authorization\Registrars\PendingRegistration;
+use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\StubTenantTree;
+use Tests\Fixtures\Diagnostics\EarlyBootingProvider;
 use Tests\Fixtures\Diagnostics\ExplodingTenantTree;
 use Tests\Fixtures\Diagnostics\Explosions;
+use Tests\Fixtures\Diagnostics\TenantAwareContextSource;
 use Tests\Fixtures\Diagnostics\ThrowingContextSource;
 use Tests\Fixtures\GrantHooks\RecordingGrantHook;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
@@ -55,6 +61,8 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationServiceProvider::class)]
 final class GuardedBootTest extends TestCase
 {
+    use RefusesThePackage;
+
     /** @var array<string, array<string, mixed>> The configuration each test booting for diagnosis sets, by the test's name. */
     private const array DIAGNOSED = [
         'testABrokenConfigurationRefusesWithEveryIssueInsteadOfThrowing' => [
@@ -63,12 +71,28 @@ final class GuardedBootTest extends TestCase
             'gate'        => ['enabled' => 'yes'],
             'tenant_tree' => ExplodingTenantTree::class,
             'grant_hooks' => [RecordingGrantHook::class],
+            'usage'       => ['enabled' => 'yes'],
         ],
         'testAnUnforeseenFailureAloneRefusesAsIncomplete' => [
             'context' => ['sources' => [ThrowingContextSource::class]],
         ],
-        'testASoundConfigurationBootsAsUsualForDiagnosis'       => [],
+        'testASoundConfigurationBootsAsUsualForDiagnosis' => [
+            'context' => ['sources' => [TenantAwareContextSource::class]],
+            'usage'   => ['enabled' => true],
+        ],
         'testAStepThatThrowsWhileDiagnosingRefusesAsIncomplete' => [
+            'tenant_tree' => StubTenantTree::class,
+            'grant_hooks' => [RecordingGrantHook::class],
+        ],
+    ];
+
+    /** @var array<string, array<string, mixed>> The configuration each test booting outside diagnosis sets, by the test's name. */
+    private const array CONFIGURED = [
+        'testOutsideDiagnosisTheStepsRunAndThePackageIsHealthy' => [
+            'tenant_tree' => StubTenantTree::class,
+            'context'     => ['sources' => [TenantAwareContextSource::class]],
+        ],
+        'testTheStepsRunBeforeAnyProviderBoots' => [
             'tenant_tree' => StubTenantTree::class,
         ],
     ];
@@ -93,9 +117,10 @@ final class GuardedBootTest extends TestCase
      * A refused configuration does not stop the application booting for
      * diagnosis: every issue is kept, the package refuses every operation,
      * naming the first refusal, `authorization:check` alone among its commands
-     * is registered, and none of the registration steps ran: the class
-     * configured was not bound or built, and the grant hook held was not
-     * wrapped.
+     * is registered, and none of the registration steps ran, nor are any left
+     * to run: the class configured was not bound or built, and the grant hook
+     * held was not wrapped; the manager and the resolved tenant refuse as the
+     * container builds them.
      *
      * @return void
      */
@@ -113,12 +138,23 @@ final class GuardedBootTest extends TestCase
         self::assertContains('authorization.nonsense', $paths);
         self::assertContains('authorization.cache.ttl', $paths);
         self::assertContains('authorization.gate.enabled', $paths);
+        self::assertContains('authorization.usage.enabled', $paths);
         self::assertSame($paths[0], $state->refusal()->getConfigKey());
         self::assertSame(\array_fill(0, 5, BootCheckOutcome::NOT_RUN), \array_map(static fn (BootCheck $check): BootCheckOutcome => $check->outcome, $state->bootChecks()));
 
         self::assertSame(0, Explosions::$count);
         self::assertFalse(BindingRegistry::of($app)->get(TenantTree::class)?->configured);
         self::assertSame($this->held, ContainerState::instance($app, GrantHook::class));
+        self::assertFalse(PendingRegistration::find($app)?->isPending());
+
+        $app->forgetInstance(ResolvedTenant::class);
+        $app->forgetInstance('authorization');
+
+        foreach (['authorization', ResolvedTenant::class] as $built) {
+            $refusal = self::packageRefusalOf(static fn () => $app->make($built));
+
+            self::assertSame([$state->refusal()->getConfigKey(), '{closure}'], [$refusal->getConfigKey(), self::guardedBy($refusal)], $built);
+        }
 
         $commands = \array_values(\array_filter(\array_keys(Artisan::all()), static fn (string $name): bool => \str_starts_with($name, 'authorization:')));
 
@@ -151,12 +187,15 @@ final class GuardedBootTest extends TestCase
         $context = $state->bootChecks()[0];
 
         self::assertSame([BootChecks::CONTEXT, BootCheckOutcome::FAILED, \RuntimeException::class], [$context->path, $context->outcome, $context->exception]);
+        self::assertArrayNotHasKey('authorization:sync', Artisan::all());
     }
 
     /**
      * A sound configuration boots for diagnosis as it boots otherwise: the
      * package is healthy, each check that builds what the configuration names
-     * ran or had nothing to build, and every command and operation is there.
+     * ran or had nothing to build, a context source handed the resolved tenant
+     * and the usage store as it is built included, and every command, operation
+     * and the usage tracking are there.
      *
      * @return void
      */
@@ -173,6 +212,7 @@ final class GuardedBootTest extends TestCase
         self::assertInstanceOf(AuthorizationManager::class, $app->make('authorization'));
         self::assertArrayHasKey('authorization:sync', Artisan::all());
         self::assertArrayHasKey('authorization:check', Artisan::all());
+        self::assertTrue($app['events']->hasListeners(JobProcessed::class));
     }
 
     /**
@@ -193,6 +233,116 @@ final class GuardedBootTest extends TestCase
 
         self::assertCount(1, $issues);
         self::assertSame(['authorization', IssueCode::INTERNAL, \UnexpectedValueException::class], [$issues[0]->path, $issues[0]->code, $issues[0]->exception]);
+        self::assertSame(PackageStatus::REFUSING, $state->status());
+        self::assertFalse(PendingRegistration::find($this->container())?->isPending());
+    }
+
+    /**
+     * Diagnosing a configuration fixed since it was refused sets the package
+     * back to pending first, so it is healthy once the checks pass.
+     *
+     * @return void
+     */
+    public function testARefusedConfigurationFixedBootsHealthyForDiagnosis(): void
+    {
+        $app = $this->container();
+        $ttl = $app['config']->get('authorization.cache.ttl');
+
+        DiagnosticMode::enable($app);
+
+        $app['config']->set('authorization.cache.ttl', 0);
+
+        $state = PackageState::start($app);
+
+        (new AuthorizationServiceProvider($app))->boot();
+
+        self::assertSame(PackageStatus::REFUSING, $state->status());
+
+        $app['config']->set('authorization.cache.ttl', $ttl);
+
+        PackageState::start($app);
+        (new AuthorizationServiceProvider($app))->boot();
+
+        self::assertSame(PackageStatus::HEALTHY, $state->status());
+    }
+
+    /**
+     * Outside diagnosis the registration steps run as the application boots,
+     * the class configured bound, and the package is healthy, every command
+     * registered, though a context source is handed the resolved tenant and the
+     * usage store as the validation builds it.
+     *
+     * @return void
+     */
+    public function testOutsideDiagnosisTheStepsRunAndThePackageIsHealthy(): void
+    {
+        $app = $this->container();
+
+        self::assertSame(PackageStatus::HEALTHY, PackageState::of($app)?->status());
+        self::assertFalse(PackageState::of($app)->isDiagnostic());
+        self::assertTrue(BindingRegistry::of($app)->get(TenantTree::class)?->configured);
+        self::assertInstanceOf(StubTenantTree::class, $app->make(TenantTree::class));
+        self::assertTrue((new GuardedBoot($app))->validate());
+        self::assertArrayHasKey('authorization:sync', Artisan::all());
+    }
+
+    /**
+     * The registration steps run as the application boots, before any provider
+     * boots: one booting before the package's resolves the class configured,
+     * with how the package boots decided, while a check it asks of the package
+     * refuses, the configuration not validated yet.
+     *
+     * @return void
+     */
+    public function testTheStepsRunBeforeAnyProviderBoots(): void
+    {
+        $app   = $this->container();
+        $check = $app->make(EarlyBootingProvider::CHECK);
+
+        self::assertSame(StubTenantTree::class, $app->make(EarlyBootingProvider::TENANT_TREE));
+        self::assertTrue($app->make(EarlyBootingProvider::DECIDED));
+        self::assertInstanceOf(InvalidAuthorizationConfigException::class, $check);
+        self::assertSame(IssueCode::INTERNAL, $check->getIssue());
+        self::assertSame(PackageStatus::HEALTHY, PackageState::of($app)?->status());
+    }
+
+    /**
+     * Registering on an application not booted yet leaves the steps to its
+     * boot; registering on one already booted runs them at once.
+     *
+     * @return void
+     */
+    public function testTheStepsWaitForTheBootUnlessTheApplicationBooted(): void
+    {
+        $config = ['authorization' => ['tenant_tree' => StubTenantTree::class]];
+
+        try {
+            $app = new Application(\dirname(__DIR__, 3));
+
+            $app->instance('config', new Repository($config));
+
+            (new AuthorizationServiceProvider($app))->register();
+
+            self::assertFalse(PackageState::of($app)?->isDecided());
+            self::assertFalse(BindingRegistry::of($app)->get(TenantTree::class)?->configured);
+
+            $app->boot();
+
+            self::assertTrue(PackageState::of($app)?->isDecided());
+            self::assertTrue(BindingRegistry::of($app)->get(TenantTree::class)?->configured);
+
+            $booted = new Application(\dirname(__DIR__, 3));
+
+            $booted->instance('config', new Repository($config));
+            $booted->boot();
+
+            (new AuthorizationServiceProvider($booted))->register();
+
+            self::assertTrue(PackageState::of($booted)?->isDecided());
+            self::assertTrue(BindingRegistry::of($booted)->get(TenantTree::class)?->configured);
+        } finally {
+            Container::setInstance($this->container());
+        }
     }
 
     /**
@@ -316,13 +466,15 @@ final class GuardedBootTest extends TestCase
     {
         parent::resolveApplicationConfiguration($app);
 
-        $authorization = self::DIAGNOSED[$this->name()] ?? null;
+        $authorization = self::DIAGNOSED[$this->name()] ?? self::CONFIGURED[$this->name()] ?? null;
 
         if ($authorization === null) {
             return;
         }
 
-        DiagnosticMode::enable($app);
+        if (isset(self::DIAGNOSED[$this->name()])) {
+            DiagnosticMode::enable($app);
+        }
 
         /** @var \Illuminate\Config\Repository $config */
         $config = $app['config'];
@@ -332,6 +484,21 @@ final class GuardedBootTest extends TestCase
         }
 
         $this->holdBefore($app);
+    }
+
+    /**
+     * Register a provider booting before the package's for the test that needs
+     * one, then the package's.
+     *
+     * @param  mixed  $app
+     * @return array<int, class-string<\Illuminate\Support\ServiceProvider>>
+     */
+    #[\Override]
+    protected function getPackageProviders(mixed $app): array
+    {
+        $providers = parent::getPackageProviders($app);
+
+        return $this->name() === 'testTheStepsRunBeforeAnyProviderBoots' ? [EarlyBootingProvider::class, ...$providers] : $providers;
     }
 
     /**

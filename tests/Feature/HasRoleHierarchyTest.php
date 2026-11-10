@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\TestCase;
 
@@ -34,6 +35,8 @@ use Tests\TestCase;
 #[CoversTrait(HasRoleHierarchy::class)]
 final class HasRoleHierarchyTest extends TestCase
 {
+    use RefusesThePackage;
+
     /**
      * Point `authorization.models.role` at the subclass stub.
      *
@@ -141,6 +144,29 @@ final class HasRoleHierarchyTest extends TestCase
         // The chain is loaded once: the two roles in the cycle, each as the
         // configured class.
         self::assertSame([CustomRole::class, CustomRole::class], $hydrated->getArrayCopy());
+    }
+
+    /**
+     * Once the package refuses, the rank and ancestry comparisons refuse by
+     * their own guard, reading nothing.
+     *
+     * @return void
+     */
+    public function testTheComparisonsRefuseOnceThePackageRefuses(): void
+    {
+        $parent = Role::create(['name' => 'editor', 'rank' => 1]);
+        $child  = Role::create(['name' => 'viewer', 'rank' => 2, 'parent_id' => $parent->getKey()]);
+
+        self::assertTrue($parent->isAncestorOf($child));
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'isAncestorOf'                     => static fn () => $parent->isAncestorOf($child),
+            'isAncestorOf through descendants' => static fn () => $child->isDescendantOf($parent),
+            'outranks'                         => static fn () => $parent->outranks($child),
+            'outranksOrEquals'                 => static fn () => $parent->outranksOrEquals($child),
+        ]);
     }
 
     /**

@@ -36,6 +36,7 @@ use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\InterleavesWrites;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\VanishedPolicy;
 use Tests\TestCase;
@@ -54,7 +55,8 @@ use Tests\TestCase;
 #[CoversClass(BoundaryService::class)]
 final class BoundaryServiceTest extends TestCase
 {
-    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, CatchesRefusals, ComparesReferences, InterleavesWrites, RacesDelegatedCalls, ReadsDispatchedEvents;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, CatchesRefusals, ComparesReferences, InterleavesWrites,
+        RacesDelegatedCalls, ReadsDispatchedEvents, RefusesThePackage;
 
     /**
      * The service is bound once in the container.
@@ -699,6 +701,29 @@ final class BoundaryServiceTest extends TestCase
         self::assertCount(1, $removed);
         self::assertSame($cap->id, $removed[0]->policy->id);
         self::assertSame(0, DB::table('authorizable_boundaries')->where('authorizable_id', 'user')->count());
+    }
+
+    /**
+     * Once the package refuses, every operation of the service refuses by its
+     * own guard, before it reads or writes anything.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryOperationRefusesOnceThePackageRefuses(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $policy  = new Policy(['name' => 'unsaved']);
+        $service = $this->container()->make(BoundaryService::class);
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'set'       => static fn () => $service->set($user, $policy),
+            'remove'    => static fn () => $service->remove($user),
+            'removeAll' => static fn () => $service->removeAll($user),
+        ]);
     }
 
     /**

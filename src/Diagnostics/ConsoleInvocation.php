@@ -25,10 +25,16 @@ use Symfony\Component\Console\Input\InputOption;
  * that is no option names the command, as it is given: an abbreviation the
  * console would expand is not expanded.
  *
- * No name is read when an option before the command is one the console does not
- * define or is given a value it does not take, as the console then refuses to
- * run the command, nor when help or the version is asked for anywhere before a
- * `--`, as the console then shows them instead of running the command.
+ * A long option the global options do not define, given its value after `=`, is
+ * skipped, as the console skips it when it reads the command's name: it may be
+ * one of the command's own options, such as `--format=json`, or a global option
+ * the application adds as the console starts, and the command's own definition
+ * decides on it once the command is found. No name is read when another option
+ * before the command is one the console does not define, as the console cannot
+ * tell whether it takes the next argument as its value, when an option is given
+ * a value it does not take, as the console then refuses to run the command, nor
+ * when help or the version is asked for anywhere before a `--`, as the console
+ * then shows them instead of running the command.
  *
  * The console application's class is read without running its constructor,
  * which would resolve every command the providers registered (hence php:S3011).
@@ -131,7 +137,9 @@ final class ConsoleInvocation
 
     /**
      * Read a long option, its value given after `=` when there is one, and
-     * return the arguments left once it has taken any value it takes.
+     * return the arguments left once it has taken any value it takes; one the
+     * global options do not define, given a value, is skipped, for the
+     * command's own definition to decide on.
      *
      * @param  string  $token
      * @param  list<string>  $tokens
@@ -143,6 +151,10 @@ final class ConsoleInvocation
     private static function longOption(string $token, array $tokens, InputDefinition $definition): array
     {
         $parts = \explode('=', $token, 2);
+
+        if (isset($parts[1]) && !$definition->hasOption($parts[0]) && !$definition->hasNegation($parts[0])) {
+            return $tokens;
+        }
 
         return self::option($parts[0], $parts[1] ?? null, $tokens, $definition);
     }

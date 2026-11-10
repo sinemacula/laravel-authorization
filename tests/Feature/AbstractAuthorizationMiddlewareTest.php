@@ -26,6 +26,7 @@ use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Concerns\ChecksAccess;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\TestCase;
 
@@ -47,7 +48,7 @@ use Tests\TestCase;
 #[CoversClass(AuthorizeAction::class)]
 final class AbstractAuthorizationMiddlewareTest extends TestCase
 {
-    use ChecksAccess;
+    use ChecksAccess, RefusesThePackage;
 
     /**
      * With no user signed in there is no subject, and every middleware answers
@@ -318,6 +319,30 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
                 self::assertSame(['multifactor'], $exception->requirements()[0]->unmet);
             }
         }
+    }
+
+    /**
+     * Once the package refuses, a route through each of the package's
+     * middleware refuses by the middleware's own guard before the route runs.
+     *
+     * @return void
+     */
+    public function testARouteThroughEachMiddlewareRefusesOnceThePackageRefuses(): void
+    {
+        $router = $this->container()->make('router');
+
+        foreach (['role:editor', 'permission:posts:read', 'authorize:posts:read'] as $middleware) {
+            $router->get('/refused/' . \strtok($middleware, ':'), static fn (): never => self::fail('The route ran.'))->middleware($middleware);
+        }
+
+        $this->refuseThePackage();
+        $this->withoutExceptionHandling();
+
+        $this->assertEachRefused([
+            'handle through role'       => fn () => $this->get('/refused/role'),
+            'handle through permission' => fn () => $this->get('/refused/permission'),
+            'handle through authorize'  => fn () => $this->get('/refused/authorize'),
+        ]);
     }
 
     /**

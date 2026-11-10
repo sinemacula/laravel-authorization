@@ -77,11 +77,14 @@ final class DiagnosticModeTest extends TestCase
         yield '--env x' => [['artisan', '--env', 'testing', 'authorization:check', '--format=json']];
         yield '--env=x' => [['artisan', '--env=testing', 'authorization:check']];
         yield 'after --' => [['artisan', '--no-ansi', '--', 'authorization:check']];
+        yield 'its own option before it' => [['artisan', '--format=json', 'authorization:check']];
+        yield 'its own option after a global one' => [['artisan', '-n', '--format=json', 'authorization:check']];
     }
 
     /**
      * The console running the check command boots the package for diagnosis,
-     * whatever options the console defines come before it.
+     * whatever options the console defines come before it, and its own given a
+     * value after `=`.
      *
      * @param  list<string>  $argv
      * @return void

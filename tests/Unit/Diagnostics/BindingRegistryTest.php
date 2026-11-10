@@ -58,27 +58,6 @@ final class BindingRegistryTest extends TestCase
     }
 
     /**
-     * A record forgotten is no longer kept, the others staying as they were,
-     * and forgetting a contract with no record changes nothing.
-     *
-     * @return void
-     */
-    public function testARecordIsForgotten(): void
-    {
-        $registry = new BindingRegistry;
-        $first    = self::record('First', null);
-        $second   = self::record('Second', null);
-
-        $registry->record($first);
-        $registry->record($second);
-        $registry->forget('First');
-        $registry->forget('Third');
-
-        self::assertNull($registry->get('First'));
-        self::assertSame(['Second' => $second], $registry->all());
-    }
-
-    /**
      * Return a record of the contract, holding the earlier binding given.
      *
      * @param  string  $contract

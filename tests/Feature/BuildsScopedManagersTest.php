@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubMachine;
@@ -39,7 +40,7 @@ use Tests\TestCase;
 #[CoversTrait(BuildsScopedManagers::class)]
 final class BuildsScopedManagersTest extends TestCase
 {
-    use ScopesQueries;
+    use RefusesThePackage, ScopesQueries;
 
     /**
      * `for()` names the subject, keeping the request's tenant and application,
@@ -224,6 +225,40 @@ final class BuildsScopedManagersTest extends TestCase
         self::assertTrue($preview->can('posts:read'));
         self::assertSame('tenant-a', Authorization::lastDecisionProvenance()?->tenant?->id);
         self::assertSame([$second->getMorphClass(), 'tenant-b'], TenantScope::currentTenant());
+    }
+
+    /**
+     * Once the package refuses, building every scoped manager refuses by the
+     * builder's own guard, before the subject is resolved or a resource
+     * translated, on a manager obtained while the package was healthy.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryScopedManagerRefusesOnceThePackageRefuses(): void
+    {
+        $user     = StubIdentity::create(['id' => 'user-1']);
+        $manager  = $this->container()->make(AuthorizationManager::class);
+        $subject  = new Subject($user, $user);
+        $resolved = [];
+
+        $this->refuseThePackage();
+        $this->container()->beforeResolving(SubjectResolver::class, static function (string $abstract) use (&$resolved): void {
+            $resolved[] = $abstract;
+        });
+
+        $this->assertEachRefused([
+            'for'                => static fn () => $manager->for($user),
+            'forActor'           => static fn () => $manager->forActor($subject),
+            'forUser'            => static fn () => $manager->forUser($user),
+            'withPolicies'       => static fn () => $manager->withPolicies([]),
+            'previewFor'         => static fn () => $manager->previewFor($user),
+            'capped'             => static fn () => $manager->capped(['posts:read']),
+            'withoutSessionCaps' => static fn () => $manager->withoutSessionCaps(),
+        ]);
+
+        self::assertSame([], $resolved);
     }
 
     /**

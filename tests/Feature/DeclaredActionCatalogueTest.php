@@ -6,8 +6,10 @@ namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\ConfigurablePermissionProvider;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\Feature\Stubs\LenientNamePermission;
@@ -28,6 +30,8 @@ use Tests\TestCase;
 #[CoversClass(DeclaredActionCatalogue::class)]
 final class DeclaredActionCatalogueTest extends TestCase
 {
+    use RefusesThePackage;
+
     /**
      * Reset the configurable and recording providers before each test.
      *
@@ -132,6 +136,33 @@ final class DeclaredActionCatalogueTest extends TestCase
         self::assertSame(0, RecordingPermissionProvider::$reads);
         self::assertTrue($catalogue->covers('reports:export'));
         self::assertFalse($catalogue->covers('reports:import'));
+        self::assertSame(1, RecordingPermissionProvider::$reads);
+    }
+
+    /**
+     * While the package is pending, as the boot's own validation asks, a
+     * pattern is matched; once the package refuses, asking refuses by the
+     * catalogue's own guard, with the names read before or without, before any
+     * provider declares a permission again.
+     *
+     * @return void
+     */
+    public function testCoveringRefusesWhileThePackageRefuses(): void
+    {
+        $catalogue = $this->catalogue([], [RecordingPermissionProvider::class]);
+        $state     = PackageState::of($this->container());
+
+        $state?->pending();
+
+        self::assertTrue($catalogue->covers('reports:export'));
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'covers'                      => static fn () => $catalogue->covers('reports:export'),
+            'covers on a fresh catalogue' => fn () => $this->catalogue([], [RecordingPermissionProvider::class])->covers('reports:export'),
+        ]);
+
         self::assertSame(1, RecordingPermissionProvider::$reads);
     }
 

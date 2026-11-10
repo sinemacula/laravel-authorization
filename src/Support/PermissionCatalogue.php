@@ -81,11 +81,11 @@ final readonly class PermissionCatalogue
 
     /**
      * Return every permission the package, the configured enums and the
-     * configured providers declare, as `definitions()` does, without asking
-     * where the package stands: the read of the action catalogue, which the
-     * boot's validation checks the session scopes against before the package is
-     * healthy, and which a policy is checked against only by operations that
-     * refused already.
+     * configured providers declare, as `definitions()` does, refusing, before
+     * any provider runs, only while the package refuses (see `PackageState`):
+     * the read of the declared action catalogue, which the boot's validation
+     * checks the session scopes against while the package is pending, and which
+     * a policy's document is checked against as it is set.
      *
      * @return list<\SineMacula\Laravel\Authorization\Support\PermissionDefinition>
      *
@@ -94,6 +94,8 @@ final readonly class PermissionCatalogue
      */
     public function declared(): array
     {
+        PackageState::guardBuild($this->container);
+
         $definitions = [];
 
         foreach ([...self::packageDefinitions(), ...$this->enumDefinitions(), ...$this->providerDefinitions()] as [$source, $definition]) {

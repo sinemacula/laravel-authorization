@@ -22,6 +22,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\TestCase;
@@ -40,7 +41,7 @@ use Tests\TestCase;
 #[CoversClass(PermissionService::class)]
 final class PermissionServiceTest extends TestCase
 {
-    use ComparesReferences, UsesAnAuthorizationConnection;
+    use ComparesReferences, RefusesThePackage, UsesAnAuthorizationConnection;
 
     /**
      * A name finds the permission the lookup ranks first under the guard, and
@@ -296,6 +297,32 @@ final class PermissionServiceTest extends TestCase
         self::assertSame(['tenant', 'acme'], [$owned->tenant_type, $owned->tenant_id]);
         self::assertSame('acme', Permission::query()->withoutGlobalScopes()->whereKey($owned->getKey())->firstOrFail()->tenant_id);
         self::assertNull(self::service()->create('posts:read')->tenant_type);
+    }
+
+    /**
+     * Once the package refuses, every operation of the service refuses by its
+     * own guard, before it reads or writes anything.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryOperationRefusesOnceThePackageRefuses(): void
+    {
+        $service = $this->container()->make(PermissionService::class);
+
+        Permission::create(['name' => 'posts:read']);
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'create'   => static fn () => $service->create('posts:write'),
+            'rename'   => static fn () => $service->rename('posts:read', 'posts:view'),
+            'describe' => static fn () => $service->describe('posts:read', 'Reads'),
+            'delete'   => static fn () => $service->delete('posts:read'),
+            'find'     => static fn () => $service->find('posts:read'),
+            'list'     => static fn () => $service->list(),
+        ]);
     }
 
     /**

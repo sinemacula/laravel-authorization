@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
+use Illuminate\Container\Container;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
@@ -67,7 +68,9 @@ final class ResolvedTenant
     /**
      * Resolve the subject's tenant and application through the given resolver,
      * refusing, before the resolver is asked, while the package of the current
-     * application is not healthy (see `PackageState`).
+     * application refuses (see `PackageState`): the holder is built for what
+     * reads it, which refuses itself until the package is healthy, so a context
+     * source handed it as the configuration is validated is still built.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\SubjectResolver  $resolver
      * @param  string|null  $guard
@@ -77,7 +80,7 @@ final class ResolvedTenant
      */
     public static function from(SubjectResolver $resolver, ?string $guard = null): self
     {
-        PackageState::guardCurrent();
+        PackageState::guardBuild(Container::getInstance());
 
         $subject = $resolver->resolve();
 

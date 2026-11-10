@@ -23,6 +23,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSessionPolicySource;
@@ -40,7 +41,7 @@ use Tests\TestCase;
 #[CoversClass(ApplicationAccess::class)]
 final class ApplicationAccessTest extends TestCase
 {
-    use ActsAsTenant;
+    use ActsAsTenant, RefusesThePackage;
 
     /**
      * Require a permission for the admin and mobile applications.
@@ -354,6 +355,25 @@ final class ApplicationAccessTest extends TestCase
         self::assertFalse(self::access()->mayUse('admin', $machine, $other));
         self::assertFalse(self::access()->mayUse('admin', $machine, null));
         self::assertFalse(self::access()->mayUse('mobile', $machine, $own));
+    }
+
+    /**
+     * Once the package refuses, asking whether a principal may use an
+     * application refuses by its own guard, on the path that allows an
+     * application no permission is named for without deciding too.
+     *
+     * @return void
+     */
+    public function testAskingRefusesOnEveryPathOnceThePackageRefuses(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'mayUse an application named for no permission' => static fn () => self::access()->mayUse('web', $user, null),
+            'mayUse an application named for one'           => static fn () => self::access()->mayUse('admin', $user, null),
+        ]);
     }
 
     /**

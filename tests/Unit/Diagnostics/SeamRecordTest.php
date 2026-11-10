@@ -54,8 +54,9 @@ final class SeamRecordTest extends TestCase
     }
 
     /**
-     * The decorator that replaced the instance held is shown as that instance;
-     * any other instance, and none, as it is.
+     * The decorator that replaced the instance held is shown as that instance,
+     * and is earlier only when that instance was held as the package
+     * registered; any other instance, and none, as it is.
      *
      * @return void
      */
@@ -65,13 +66,20 @@ final class SeamRecordTest extends TestCase
         $wrapper = new \ArrayObject;
         $other   = new \stdClass;
         $record  = self::record(earlierInstance: $held);
-        $wrapped = $record->wrappedBy($wrapper);
+        $wrapped = $record->wrappedBy($wrapper, $held);
+        $later   = $record->wrappedBy($wrapper, $other);
+        $added   = ['wrapper' => true, 'wrapped' => true];
 
         self::assertNull($record->wrapper);
-        self::assertSame($wrapper, $wrapped->wrapper);
-        self::assertSame(\array_diff_key(\get_object_vars($record), ['wrapper' => true]), \array_diff_key(\get_object_vars($wrapped), ['wrapper' => true]));
+        self::assertNull($record->wrapped);
+        self::assertSame([$wrapper, $held], [$wrapped->wrapper, $wrapped->wrapped]);
+        self::assertSame(\array_diff_key(\get_object_vars($record), $added), \array_diff_key(\get_object_vars($wrapped), $added));
         self::assertSame($held, $wrapped->unwrap($wrapper));
         self::assertTrue($wrapped->isEarlier($wrapper));
+        self::assertTrue($wrapped->isEarlier($held));
+        self::assertSame($other, $later->unwrap($wrapper));
+        self::assertFalse($later->isEarlier($wrapper));
+        self::assertTrue($later->isEarlier($held));
         self::assertFalse($record->isEarlier($wrapper));
         self::assertSame($other, $wrapped->unwrap($other));
         self::assertNull($wrapped->unwrap(null));

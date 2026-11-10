@@ -28,6 +28,7 @@ use SineMacula\Laravel\Authorization\Services\PruneResult;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
@@ -47,7 +48,7 @@ use Tests\TestCase;
 #[CoversClass(PruneResult::class)]
 final class GrantPrunerTest extends TestCase
 {
-    use ReadsDispatchedEvents;
+    use ReadsDispatchedEvents, RefusesThePackage;
 
     /**
      * Start the clock.
@@ -529,6 +530,26 @@ final class GrantPrunerTest extends TestCase
         );
 
         self::assertTrue((bool) $policy->delete());
+    }
+
+    /**
+     * Once the package refuses, pruning refuses by its own guard, pretending or
+     * not, before it reads or deletes anything.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testPruningRefusesOnceThePackageRefuses(): void
+    {
+        $pruner = $this->container()->make(GrantPruner::class);
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'prune'            => static fn () => $pruner->prune(100),
+            'prune pretending' => static fn () => $pruner->prune(100, true),
+        ]);
     }
 
     /**

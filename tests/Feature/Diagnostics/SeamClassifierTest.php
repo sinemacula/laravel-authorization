@@ -524,6 +524,28 @@ final class SeamClassifierTest extends TestCase
     }
 
     /**
+     * A grant hook a provider hands the container after the package registered,
+     * which the configured grant hooks wrap as the application boots, is a
+     * later binding, shown by the hook it wraps, with the configured hooks
+     * applied to it.
+     *
+     * @return void
+     */
+    public function testALaterGrantHookWrappedAsTheApplicationBootsIsLater(): void
+    {
+        $hooks = ['grant_hooks' => [ExplodingGrantHook::class]];
+        $later = static fn (Application $app) => $app->instance(GrantHook::class, self::unbuilt(ExplodingGrantHook::class));
+        $row   = self::classifyAll(self::registered($hooks, after: $later))[GrantHook::class];
+        $order = GrantHookOrder::of($hooks['grant_hooks'], $row);
+
+        self::assertSame(Origin::LATER_BINDING, $row->origin);
+        self::assertSame(ExplodingGrantHook::class, $row->class());
+        self::assertSame([SeamClassifier::APPLIED], $row->extenders);
+        self::assertSame(ExplodingGrantHook::class, $order[1]['class'] ?? null);
+        self::assertTrue($order[1]['runs']);
+    }
+
+    /**
      * A deferred provider known as the package registered, which the package
      * left the contract to, is shown as that provider once it has loaded.
      *

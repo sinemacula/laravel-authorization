@@ -120,6 +120,28 @@ final class BootChecksTest extends TestCase
     }
 
     /**
+     * The attribute providers are built when either list names one, the
+     * subjects' alone included, and both settings share the outcome, each under
+     * its own path, the refusal recorded at the setting it names.
+     *
+     * @return void
+     */
+    public function testTheAttributeProvidersAreBuiltForEitherList(): void
+    {
+        $config = $this->authorizationConfig();
+
+        $config['attributes'] = ['resources' => [], 'subjects' => ['user' => \stdClass::class]];
+
+        [$checks, $issues] = (new BootChecks($this->container()))->run($config);
+
+        self::assertSame(BootChecks::ATTRIBUTES, [$checks[1]->path, $checks[2]->path]);
+        self::assertSame([BootCheckOutcome::FAILED, BootCheckOutcome::FAILED], [$checks[1]->outcome, $checks[2]->outcome]);
+        self::assertSame([InvalidAuthorizationConfigException::class, InvalidAuthorizationConfigException::class], [$checks[1]->exception, $checks[2]->exception]);
+        self::assertCount(1, $issues);
+        self::assertStringStartsWith(BootChecks::ATTRIBUTES[1], $issues[0]->path);
+    }
+
+    /**
      * A block that is not an array is read as none, so its check has nothing to
      * build.
      *

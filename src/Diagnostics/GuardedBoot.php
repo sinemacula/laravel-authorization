@@ -137,8 +137,9 @@ final readonly class GuardedBoot
     }
 
     /**
-     * Collect every issue of the configuration's structure, refusing when there
-     * is any, and run the registration steps otherwise.
+     * Collect every issue of the configuration's structure, and run the
+     * registration steps when there is none, refusing, the steps left dropped,
+     * when there is any or a step throws.
      *
      * @param  \SineMacula\Laravel\Authorization\Diagnostics\PackageState  $state
      * @return void
@@ -151,25 +152,36 @@ final readonly class GuardedBoot
         $state->pending();
         $state->recordBootChecks(BootChecks::notRun());
 
-        if ($findings->issues !== []) {
-            $pending?->discard();
-            $state->refuse($findings);
-
-            return;
+        if ($findings->issues === []) {
+            $findings = self::afterRunning($pending, $findings);
         }
 
+        if ($findings->issues === []) {
+            $state->found($findings);
+        } else {
+            $pending?->discard();
+            $state->refuse($findings);
+        }
+    }
+
+    /**
+     * Run the registration steps left to the boot, and return what the
+     * structural check found, or, when a step throws, the `internal` issue it
+     * raised in its place.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Registrars\PendingRegistration|null  $pending
+     * @param  \SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings  $findings
+     * @return \SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings
+     */
+    private static function afterRunning(?PendingRegistration $pending, ConfigFindings $findings): ConfigFindings
+    {
         try {
             $pending?->run();
         } catch (\Throwable $exception) {
-            $pending?->discard();
-            $findings = new ConfigFindings([ConfigIssue::internal(StructuralCheck::ROOT, $exception)], $findings->checkedAtBoot);
-
-            $state->refuse($findings);
-
-            return;
+            return new ConfigFindings([ConfigIssue::internal(StructuralCheck::ROOT, $exception)], $findings->checkedAtBoot);
         }
 
-        $state->found($findings);
+        return $findings;
     }
 
     /**
@@ -191,7 +203,9 @@ final readonly class GuardedBoot
 
         [$checks, $issues] = (new BootChecks($this->app))->run(\is_array($config) ? $config : []);
 
-        $findings = new ConfigFindings([...$structural->issues, ...$issues], $structural->checkedAtBoot);
+        // The structure was sound, or the package would refuse already, so the
+        // boot checks found every issue there is.
+        $findings = new ConfigFindings($issues, $structural->checkedAtBoot);
 
         $state->recordBootChecks($checks);
 

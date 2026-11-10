@@ -194,8 +194,9 @@ final class RegistrationTimingTest extends TestCase
 
     /**
      * A grant hook held as the package registers is wrapped only as the
-     * application boots, and the decorator that replaced it is recorded; one
-     * held by a provider registering after the package is wrapped then too.
+     * application boots, and the decorator that replaced it is recorded, with
+     * the hook it replaced; one held by a provider registering after the
+     * package is wrapped then too, and recorded as the later hook it is.
      *
      * @return void
      */
@@ -218,14 +219,25 @@ final class RegistrationTimingTest extends TestCase
         self::assertSame($wrapper, BindingRegistry::of($app)->get(GrantHook::class)?->wrapper);
         self::assertSame($held, BindingRegistry::of($app)->get(GrantHook::class)->earlierInstance);
 
+        self::assertSame($held, BindingRegistry::of($app)->get(GrantHook::class)->wrapped);
+        self::assertTrue(BindingRegistry::of($app)->get(GrantHook::class)->isEarlier($wrapper));
+
         $later = self::application(['grant_hooks' => [RecordingGrantHook::class]]);
+        $hook  = new RefusingGrantHook;
 
         (new AuthorizationServiceProvider($later))->register();
 
-        $later->instance(GrantHook::class, new RefusingGrantHook);
+        $later->instance(GrantHook::class, $hook);
         $later->boot();
 
-        self::assertInstanceOf(ListedGrantHooks::class, ContainerState::instance($later, GrantHook::class));
+        $record = BindingRegistry::of($later)->get(GrantHook::class);
+        $latest = ContainerState::instance($later, GrantHook::class);
+
+        self::assertNotNull($record);
+        self::assertInstanceOf(ListedGrantHooks::class, $latest);
+        self::assertSame([$latest, $hook, null], [$record->wrapper, $record->wrapped, $record->earlierInstance]);
+        self::assertFalse($record->isEarlier($latest));
+        self::assertSame($hook, $record->unwrap($latest));
     }
 
     /**
@@ -293,7 +305,7 @@ final class RegistrationTimingTest extends TestCase
     /**
      * The policy store and the resource tenant resolver the configuration names
      * are bound as the application boots, the resolver wrapped in the declared
-     * one.
+     * one; the policy store, which has no default, is left unbound until then.
      *
      * @return void
      */
@@ -303,7 +315,7 @@ final class RegistrationTimingTest extends TestCase
 
         (new AuthorizationServiceProvider($app))->register();
 
-        self::assertTrue($app->bound(PolicyStore::class));
+        self::assertFalse($app->bound(PolicyStore::class));
         self::assertFalse(BindingRegistry::of($app)->get(ResourceTenantResolver::class)?->configured);
 
         $app->boot();

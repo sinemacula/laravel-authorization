@@ -45,12 +45,18 @@ final class ConsoleInvocationTest extends TestCase
         yield '--env followed by an option' => [['--env', '-v', self::CHECK]];
         yield 'several options before it' => [['-n', '--env', 'local', '--no-ansi', '-vv', self::CHECK]];
         yield '-- before it' => [['--', self::CHECK]];
+        yield 'its own option before it' => [['--format=json', self::CHECK]];
+        yield 'its own option among global ones before it' => [['-n', '--format=json', '-v', self::CHECK]];
+        yield 'a global option the application adds before it' => [['--tenant=1', self::CHECK]];
+        yield '--env followed by an option given a value' => [['--env', '--format=json', self::CHECK]];
         yield 'help after --' => [['-v', '--', self::CHECK, '--help']];
     }
 
     /**
      * The first argument that is no option names the command, each option the
-     * console defines being skipped with the value it takes.
+     * console defines being skipped with the value it takes, and each long one
+     * it does not define skipped when given its value after `=`, as the
+     * command's own definition decides on it.
      *
      * @param  list<string>  $tokens
      * @return void
@@ -84,13 +90,19 @@ final class ConsoleInvocationTest extends TestCase
         yield '--verbose given a value' => [['--verbose=2', self::CHECK]];
         yield '--quiet given a value' => [['--quiet=1', self::CHECK]];
         yield '--no-ansi given a value' => [['--no-ansi=1', self::CHECK]];
+        yield 'an unknown option given its value apart' => [['--format', 'json', self::CHECK]];
+        yield 'an unknown short option given a value' => [['-x=1', self::CHECK]];
+        yield '--env followed by an unknown option' => [['--env', '--bogus', self::CHECK]];
+        yield '--env followed by an option given a value it does not take' => [['--env', '--no-ansi=1', self::CHECK]];
         yield 'an argument that is no string' => [[self::CHECK, 42]];
     }
 
     /**
      * No command is read when none is given, when help or the version is asked
-     * for, when an option before it is one the console does not define or is
-     * given a value it does not take, or when an argument is no string.
+     * for, when an option before it is one the console does not define, given
+     * no value after `=` or a short one, or is given a value it does not take,
+     * or when an argument is no string; `--env` never takes an option as its
+     * value.
      *
      * @param  list<mixed>  $tokens
      * @return void
@@ -103,7 +115,8 @@ final class ConsoleInvocationTest extends TestCase
 
     /**
      * Another command, an abbreviation and an empty or lone dash argument are
-     * read as given, never expanded.
+     * read as given, never expanded, a lone dash never taken as `--env`'s
+     * value, and a command a sibling declares found past an option of its own.
      *
      * @return void
      */
@@ -112,6 +125,8 @@ final class ConsoleInvocationTest extends TestCase
         self::assertSame('list', ConsoleInvocation::commandName(['artisan', 'list']));
         self::assertSame('authorization:ch', ConsoleInvocation::commandName(['artisan', 'authorization:ch']));
         self::assertSame('-', ConsoleInvocation::commandName(['artisan', '-', self::CHECK]));
+        self::assertSame('-', ConsoleInvocation::commandName(['artisan', '--env', '-', self::CHECK]));
+        self::assertSame('acme:doctor', ConsoleInvocation::commandName(['artisan', '--strict=yes', 'acme:doctor']));
         self::assertSame('', ConsoleInvocation::commandName(['artisan', '', self::CHECK]));
     }
 

@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -34,7 +35,7 @@ use Tests\TestCase;
 #[CoversTrait(ManagesPermissions::class)]
 final class ManagesPermissionsTest extends TestCase
 {
-    use ComparesReferences;
+    use ComparesReferences, RefusesThePackage;
 
     /**
      * Reset the clock.
@@ -211,6 +212,30 @@ final class ManagesPermissionsTest extends TestCase
 
         Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => !$event->operation->isTrusted);
         self::assertSame('2030-01-01 00:00:00', self::expiryOf(Permission::query()->where('name', 'posts:edit')->sole()));
+    }
+
+    /**
+     * Once the package refuses, a role's own permission checks refuse by their
+     * own guard, reading nothing.
+     *
+     * @return void
+     */
+    public function testTheRolesChecksRefuseOnceThePackageRefuses(): void
+    {
+        $role = Role::create(['name' => 'editor']);
+
+        Permission::create(['name' => 'posts:read']);
+
+        $role->givePermission('posts:read');
+
+        self::assertTrue($role->hasPermission('posts:read'));
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'getPermissions'                 => static fn () => $role->getPermissions(),
+            'getPermissions through a check' => static fn () => $role->hasPermission('posts:read'),
+        ]);
     }
 
     /**
