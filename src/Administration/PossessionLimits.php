@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
@@ -42,6 +43,11 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  *   principal and identity, and to every role either holds and the roles above
  *   them, the policies attached to any resource, the boundaries of the
  *   principal and the identity, and the guardrails.
+ *
+ * Exactly `authorization:guardrail.manage` is exempt from the guardrails, as
+ * the guardrail stage exempts its check: no guardrail, one that cannot be read
+ * included, limits it, and they are not read when it is the only permission
+ * weighed.
  *
  * Each table is read in one query, the reach and the grantees in it, and every
  * policy found is read in one more, so what is read grows with what applies in
@@ -103,8 +109,10 @@ final class PossessionLimits
             return [];
         }
 
+        $isGuarded = \array_filter(\array_keys($sources), static fn (int|string $permission): bool => !self::isExempt((string) $permission)) !== [];
+
         try {
-            [$denying, $capping] = self::stored($subject, GrantReach::of($scope));
+            [$denying, $bounding, $guarding] = self::stored($subject, GrantReach::of($scope), $isGuarded);
         } catch (\Throwable) {
             return \array_map(static fn (): bool => true, $sources);
         }
@@ -112,8 +120,8 @@ final class PossessionLimits
         $limited = [];
 
         foreach ($sources as $permission => $checked) {
-            $caps = [...$capping, ...$checked->boundaries, ...$checked->guardrails ?? []];
             $name = (string) $permission;
+            $caps = [...$bounding, ...(self::isExempt($name) ? [] : $guarding), ...$checked->boundaries, ...$checked->guardrails ?? []];
 
             $limited[$permission] = self::denies([...$checked->policies, ...$denying, ...$caps], $name)
                 || !self::isCoveredByEvery($caps, $name)
@@ -152,17 +160,36 @@ final class PossessionLimits
     }
 
     /**
+     * Determine whether the permission is exempt from the guardrails: exactly
+     * `authorization:guardrail.manage`, as the guardrail stage exempts its
+     * check, so no guardrail, one that cannot be read included, ever limits it.
+     *
+     * @param  string  $permission
+     * @return bool
+     */
+    private static function isExempt(string $permission): bool
+    {
+        return $permission === PackagePermissions::GUARDRAIL_MANAGE;
+    }
+
+    /**
      * Return the policies stored for the subject in the reach that may deny
-     * (its policies, its roles' and every resource's), and those that cap (its
-     * boundaries and the guardrails), hydrated.
+     * (its policies, its roles' and every resource's), its boundaries, and the
+     * guardrails, read only when one of the permissions is not exempt from
+     * them, hydrated.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  \SineMacula\Laravel\Authorization\Administration\GrantReach  $reach
-     * @return array{list<\SineMacula\Laravel\Authorization\Evaluation\Policy>, list<\SineMacula\Laravel\Authorization\Evaluation\Policy>}
+     * @param  bool  $isGuarded
+     * @return array{
+     *     list<\SineMacula\Laravel\Authorization\Evaluation\Policy>,
+     *     list<\SineMacula\Laravel\Authorization\Evaluation\Policy>,
+     *     list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     * }
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
-    private static function stored(Subject $subject, GrantReach $reach): array
+    private static function stored(Subject $subject, GrantReach $reach, bool $isGuarded): array
     {
         $grantees = [];
 
@@ -180,10 +207,11 @@ final class PossessionLimits
         $held  = [...$grantees, ...\array_map(static fn (string $key): Reference => new Reference((new $role)->getMorphClass(), $key), $roles)];
 
         $denying  = [...self::keys('authorizable_policies', 'policy_id', $held, $reach), ...self::keys('resource_policies', 'policy_id', null, $reach)];
-        $capping  = [...self::keys('authorizable_boundaries', 'policy_id', $grantees, $reach), ...self::keys('guardrails', 'policy_id', null, $reach)];
-        $policies = self::hydrated([...$denying, ...$capping]);
+        $bounding = self::keys('authorizable_boundaries', 'policy_id', $grantees, $reach);
+        $guarding = $isGuarded ? self::keys('guardrails', 'policy_id', null, $reach) : [];
+        $policies = self::hydrated([...$denying, ...$bounding, ...$guarding]);
 
-        return [self::pick($policies, $denying), self::pick($policies, $capping)];
+        return [self::pick($policies, $denying), self::pick($policies, $bounding), self::pick($policies, $guarding)];
     }
 
     /**

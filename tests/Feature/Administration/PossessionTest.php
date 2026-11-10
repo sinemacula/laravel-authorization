@@ -188,25 +188,47 @@ final class PossessionTest extends TestCase
 
         self::holder([], PackagePermissions::POLICY_GRANTABLE);
 
-        $policyGrant = function (GrantScope $scope) use ($actor, $policy): bool {
-            [$operation, $change, , $checks] = $this->grant($actor, $scope);
-
-            return Possession::isGrantable($operation, $change, $operation->policyGrantable($policy, 'abc'), $checks);
-        };
+        $policyGrant = fn (GrantScope $scope): bool => $this->isPolicyGrantable($actor, $policy, $scope);
 
         self::assertNull(Possession::refusal(...$this->grant($actor, GrantScope::platform(), grantable: true)));
         self::assertTrue($policyGrant(GrantScope::platform()));
 
-        $role = Role::query()->create(['name' => 'restricted']);
-        $deny = ['effect' => 'deny', 'actions' => [PackagePermissions::PERMISSION_GRANTABLE, PackagePermissions::POLICY_GRANTABLE]];
-
-        GrantService::instance()?->attachPolicy($role, Policy::create(['name' => 'restricting', 'document' => ['statements' => [$deny]]]));
-        GrantService::instance()?->grantRole(StubIdentity::query()->findOrFail('admin'), $role, tenant: new Reference('tenant', 't0'));
+        self::restrictIn(new Reference('tenant', 't0'), [PackagePermissions::PERMISSION_GRANTABLE, PackagePermissions::POLICY_GRANTABLE]);
 
         self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, Possession::refusal(...$this->grant($actor, GrantScope::platform(), grantable: true)));
         self::assertFalse($policyGrant(GrantScope::platform()));
         self::assertNull(Possession::refusal(...$this->grant($actor, $other, grantable: true)));
         self::assertTrue($policyGrant($other));
+    }
+
+    /**
+     * Each grantable right is weighed across the reach by its own limits: a
+     * deny of `authorization:permission.grantable` alone in one tenant refuses
+     * a platform-wide grant of a permission through it, but leaves the policy
+     * route allowed, and a deny of `authorization:policy.grantable` alone does
+     * the reverse.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEachGrantableRightIsLimitedByItsOwnDeniesAlone(): void
+    {
+        $actor  = self::holder([], PackagePermissions::PERMISSION_GRANTABLE);
+        $policy = Policy::create(['name' => 'readers', 'document' => ['statements' => []]]);
+
+        self::holder([], PackagePermissions::POLICY_GRANTABLE);
+
+        $restricted = self::restrictIn(new Reference('tenant', 't0'), [PackagePermissions::PERMISSION_GRANTABLE]);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, Possession::refusal(...$this->grant($actor, GrantScope::platform(), grantable: true)));
+        self::assertTrue($this->isPolicyGrantable($actor, $policy, GrantScope::platform()));
+
+        GrantService::instance()?->revokeRole(StubIdentity::query()->findOrFail('admin'), $restricted, tenant: new Reference('tenant', 't0'));
+        self::restrictIn(new Reference('tenant', 't1'), [PackagePermissions::POLICY_GRANTABLE]);
+
+        self::assertNull(Possession::refusal(...$this->grant($actor, GrantScope::platform(), grantable: true)));
+        self::assertFalse($this->isPolicyGrantable($actor, $policy, GrantScope::platform()));
     }
 
     /**
@@ -370,6 +392,44 @@ final class PossessionTest extends TestCase
     private function forgetAsked(): void
     {
         $this->asked = [];
+    }
+
+    /**
+     * Determine whether the actor may hand the policy out through
+     * `authorization:policy.grantable` in the scope, on a descriptor of the
+     * policy's digest.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $actor
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @return bool
+     */
+    private function isPolicyGrantable(Subject $actor, Policy $policy, GrantScope $scope): bool
+    {
+        [$operation, $change, , $checks] = $this->grant($actor, $scope);
+
+        return Possession::isGrantable($operation, $change, $operation->policyGrantable($policy, 'abc'), $checks);
+    }
+
+    /**
+     * Grant the actor, in the tenant, a new role carrying a policy that denies
+     * the actions, and return the role.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @param  list<string>  $actions
+     * @return \SineMacula\Laravel\Authorization\Models\Role
+     *
+     * @throws \Throwable
+     */
+    private static function restrictIn(Reference $tenant, array $actions): Role
+    {
+        $role = Role::query()->create(['name' => 'restricted-' . $tenant->id]);
+        $deny = ['effect' => 'deny', 'actions' => $actions];
+
+        GrantService::instance()?->attachPolicy($role, Policy::create(['name' => 'restricting-' . $tenant->id, 'document' => ['statements' => [$deny]]]));
+        GrantService::instance()?->grantRole(StubIdentity::query()->findOrFail('admin'), $role, tenant: $tenant);
+
+        return $role;
     }
 
     /**

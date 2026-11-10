@@ -121,7 +121,12 @@ administration never grants anything it cannot justify.
       operation is decided at and again at the reach's node, with nothing anywhere in a wider reach that could limit it;
       `AdministeredScope::isLimited()` for a grantable right already decided in the reach), each refusing with its own
       reason, so a right allowed at the platform but denied by a role the actor holds in one tenant is never used on a
-      change that reaches that tenant;
+      change that reaches that tenant. The further rights inherit the rule's conservatism deliberately: any deny
+      statement whose actions overlap the right counts, whatever its application or conditions, so a deny held only for
+      another application, or a conditional one that would never hold, still refuses it across a reach wider than its
+      node. What could limit a right across a reach is read once per decision for each right, reach and scope in place
+      (`FurtherChecks::limited()`), so a role grant carrying many policies reads the grantable rights' limits once. A
+      guardrail's removal is weighed across the subtree it caps by the same rule (invariant 14);
     - **rank**: unless the grantee is the actor, the actor, ranked in the grant's own tenant and application, must be
       strictly senior to the most senior rank the grantee holds anywhere the change reaches (platform-wide, the
       grant's tenant and its ancestors, the tenants below for a grant reaching below, every tenant for a
@@ -145,12 +150,12 @@ administration never grants anything it cannot justify.
       tenants' rows; two patterns that both hold wildcards, one of them `?` or a `[...]` class, are taken to overlap);
       or when `authorization:permission.grantable` is allowed, in the grant's reach, on the grant's descriptor
       (`OperationResource::grantable()`), with nothing that denies or caps the actor anywhere in a reach wider than its
-      node that could limit the right (read as the scope rule reads the action, once for every permission a role or a
-      policy hands out), through a source lasting as long as the grant (`HeldLifetime::of()` for a permission held,
-      `HeldLifetime::ofPolicy()` for a stored policy, a resource policy never expiring). Otherwise it is
-      `administration.not_grantable` when the actor does not hold the permission across the reach and lifetime, and
-      `administration.unprovable` when it does but cannot be proved contained. An extension needs authority lasting
-      until the new expiry; a shortening only narrows;
+      node that could limit the right (read as the scope rule reads the action, and only once the right is allowed, once
+      per decision however many permissions and policies a role hands out), through a source lasting as long as the
+      grant (`HeldLifetime::of()` for a permission held, `HeldLifetime::ofPolicy()` for a stored policy, a resource
+      policy never expiring). Otherwise it is `administration.not_grantable` when the actor does not hold the permission
+      across the reach and lifetime, and `administration.unprovable` when it does but cannot be proved contained. An
+      extension needs authority lasting until the new expiry; a shortening only narrows;
     - **batches** are decided kind by kind, then by tenant, application and record (`ActingContext::authorizeIn()`), so
       the first refusal never depends on the order rows were read in;
     - the owner rule (D20, `Administration\OwnerConstraint`) does not apply to grant rows (N79): part 3 applies it to
@@ -302,12 +307,18 @@ administration never grants anything it cannot justify.
 14. **Guardrails (part 4, in this release).** Guardrail changes always take an acting context and run under the
     concurrency protocol: the actor's authority, the policy's row and the guardrails of the scope and of the scopes
     above it are locked and pinned before the right is decided, and read again once it is allowed. The right keeps its
-    own rule (`GuardrailAuthority`, decided through `check()` from above the scope, inside the change's transaction).
-    The exemption from the guardrail stage covers exactly `authorization:guardrail.manage`: no guardrail ever blocks it,
-    but the actor's own denies, boundaries and the call's caps still refuse it, and every other action, the
-    impersonation right decided beside it included, stays capped by the guardrails. A policy in use as a guardrail is
-    never edited or deleted, through the policy service, trusted or delegated, or through the model, until every
-    guardrail it is has been removed (`Support\PolicyGuardrails`).
+    own rule (`GuardrailAuthority`, decided through `check()` from above the scope, inside the change's transaction). A
+    removal lifts a cap across the scope's whole subtree, or every tenant for a platform guardrail, so it is also
+    weighed across that reach by the administered-scope rule (invariant 11): `authorization:guardrail.manage`, and
+    `authorization:administration.impersonated` for an impersonated actor, are refused when anything that denies or caps
+    the actor anywhere in it could limit them, through the acting context's further checks
+    (`ActingContext::furtherChecks()`), as `GuardrailException` or `administration.impersonating`. The guardrails never
+    count against `authorization:guardrail.manage` there either (`PossessionLimits` reads none for it alone). A set only
+    adds a cap, so it narrows and is decided from above alone. The exemption from the guardrail stage covers exactly
+    `authorization:guardrail.manage`: no guardrail ever blocks it, but the actor's own denies, boundaries and the call's
+    caps still refuse it, and every other action, the impersonation right decided beside it included, stays capped by
+    the guardrails. A policy in use as a guardrail is never edited or deleted, through the policy service, trusted or
+    delegated, or through the model, until every guardrail it is has been removed (`Support\PolicyGuardrails`).
 
 15. **Trusted surfaces (part 4, in this release).** Each of these is trusted system work, an integration surface for
     the application's own code and never an endpoint for user-controlled administration:
@@ -480,6 +491,7 @@ administration never grants anything it cannot justify.
   is (#122): the escalation property found an actor allowed `authorization:*` at the platform but denied
   `authorization:administration.self` in one tenant widening its own authority platform-wide, since the self right was
   decided at the change's node alone. `administration.self`, `administration.unbounded`, `administration.impersonated`
-  (a review's included) and the grantable rights now pass only when nothing anywhere in the reach could limit them.
+  (a review's included) and the grantable rights now pass only when nothing anywhere in the reach could limit them, and
+  a guardrail's removal is weighed the same way across the subtree it caps.
 - Adding an administration action, or an attribute of the operation resource, changes `PackagePermissions` or
   `OperationAttributes` and their tests, and the README's tables.

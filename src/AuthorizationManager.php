@@ -9,6 +9,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
+use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Concerns\BuildsScopedManagers;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
@@ -272,6 +273,22 @@ final class AuthorizationManager
         $denial = $stepUp ? InsufficientAuthenticationException::translated($decision->requirements, $this->translator, $decision) : null;
 
         throw $denial ?? AuthorizationException::translated($reason, $this->translator, $decision);
+    }
+
+    /**
+     * Return the further checks of the current subject, decided and gathered
+     * through this manager's pipeline, its caps included, in the scope in place
+     * when each is asked, or null when no subject is resolved.
+     *
+     * @return \SineMacula\Laravel\Authorization\Administration\FurtherChecks|null
+     *
+     * @internal
+     */
+    public function furtherChecks(): ?FurtherChecks
+    {
+        $subject = $this->currentSubject();
+
+        return $subject === null ? null : $this->pipeline->furtherChecksFor($subject);
     }
 
     /**

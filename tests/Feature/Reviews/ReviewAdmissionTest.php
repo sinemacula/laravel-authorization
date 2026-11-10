@@ -485,6 +485,41 @@ final class ReviewAdmissionTest extends TestCase
     }
 
     /**
+     * The impersonated right of a review of any application in one tenant is
+     * weighed across every application there, as the review right is: a deny of
+     * it held for one application refuses the review while impersonated, though
+     * a decision with no application never reads that deny, while a review of
+     * no application is admitted.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheImpersonatedRightIsWeighedAcrossApplications(): void
+    {
+        $this->tree();
+
+        $reviewer = self::reviewer('reviewer', self::tenant('acct1'));
+        $deny     = ['effect' => 'deny', 'actions' => [PackagePermissions::ADMINISTRATION_IMPERSONATED]];
+        $policy   = Policy::query()->create(['name' => 'no-impersonation', 'document' => ['statements' => [$deny]]]);
+
+        self::grants()->grantPermission($reviewer, self::previewPermission(PackagePermissions::ADMINISTRATION_IMPERSONATED), tenant: self::tenant('acct1'));
+        self::grants()->attachPolicy($reviewer, $policy, tenant: self::tenant('acct1'), application: 'billing');
+
+        $this->signIn($reviewer);
+
+        $role   = self::role('reviewed');
+        $acting = ActingContext::current()->impersonatedBy(self::identity('impersonator'));
+        $review = static fn (ApplicationSelector $application): mixed => self::reviews()->review(
+            ReviewQuery::holders($role, ReviewScope::appliesIn(self::tenant('acct1'), $application)),
+            $acting,
+        );
+
+        self::assertRefusedAs(DecisionReason::ADMINISTRATION_IMPERSONATING, static fn (): mixed => $review(ApplicationSelector::any()));
+        self::assertSame([], $review(ApplicationSelector::none())->rows);
+    }
+
+    /**
      * Only an allowed review right on a review resource is weighed: any other
      * resource, or none, leaves the decision as it is.
      *

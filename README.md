@@ -980,15 +980,21 @@ guardrail is read for it, neither its denies nor its allows apply, and the trace
 guardrails: exempt`. For a tenant's guardrails it is decided just below the tenant's parent, so a grant held at an
 ancestor of the tenant counts when it reaches the tenants below it, a platform-wide grant counts, and a grant held
 within the tenant itself never does: a tenant's own administrators never lift the guardrails their tenant is set under.
-A tenant with no parent, and the platform, are changed only through a platform-wide grant. The check keeps the request's
-application and is recorded and reported like any other decision. An actor without the right is refused with
-`GuardrailException`, whose `getReason()` is `not_permitted` and `getActor()` the actor's principal, before anything is
-read or written. An impersonated actor is refused with `AuthorizationException` as `administration.impersonating` unless
-`authorization:administration.impersonated` is allowed it from above the scope too. Every change runs under the
-[concurrency protocol](#delegated-administration) of delegated administration: the actor's authority, the policy's row
-and the guardrails of the scope and the scopes above it are locked before the right is decided and read again before
-anything is written, so a right revoked or a policy rewritten meanwhile has the change tried again, and refused as
-`administration.conflict` once every try has conflicted.
+A tenant with no parent, and the platform, are changed only through a platform-wide grant. A removal lifts a cap across
+the scope's whole subtree, so it is also weighed across that subtree, or across every tenant for a platform guardrail,
+by the administered-scope rule of delegated administration: the right, and `authorization:administration.impersonated`
+for an impersonated actor, are refused when anything that denies or caps the actor anywhere there could limit them, read
+as stored and as conservatively as for the action (any overlapping deny counts, whatever its application or conditions),
+the guardrails still never counting against the right itself. So an organisation's administrator denied the right by a
+role it holds in one team cannot remove the guardrails of the account above it. Setting a guardrail only adds a cap, so
+it is decided from above alone. The check keeps the request's application and is recorded and reported like any other
+decision. An actor without the right is refused with `GuardrailException`, whose `getReason()` is `not_permitted` and
+`getActor()` the actor's principal, before anything is read or written. An impersonated actor is refused with
+`AuthorizationException` as `administration.impersonating` unless `authorization:administration.impersonated` is allowed
+it from above the scope too. Every change runs under the [concurrency protocol](#delegated-administration) of delegated
+administration: the actor's authority, the policy's row and the guardrails of the scope and the scopes above it are
+locked before the right is decided and read again before anything is written, so a right revoked or a policy rewritten
+meanwhile has the change tried again, and refused as `administration.conflict` once every try has conflicted.
 
 ```php
 // Every scope, the platform included.
@@ -1347,7 +1353,11 @@ weighs the operation's constraints, in this order, and can only refuse:
   `authorization:administration.self`, `authorization:administration.unbounded`,
   `authorization:administration.impersonated` and the grantable rights, is weighed across the same reach by the same
   rule, so a right allowed at the platform but denied or limited by a role the actor holds in one tenant is never used
-  on a change that reaches that tenant.
+  on a change that reaches that tenant; a guardrail's removal is weighed across the subtree it caps the same way (see
+  [Guardrails](#guardrails)). The further rights inherit the rule's conservatism on purpose: any deny statement whose
+  actions overlap the right counts, whatever its application or conditions, so a deny held only for another application,
+  or one whose condition would never hold, still refuses the right on a change whose reach is wider than its node, and
+  what each right's limits read is read once per decision, however many permissions and policies the change hands out.
 - **Rank** (N76). Every change to an identity or a principal, a revocation, a sync, `revokeAll()`, a boundary change and
   a call that changes nothing included, is refused as `administration.rank` unless the actor is strictly senior to the
   grantee, and as `administration.rank_uncomparable` when either side's rank, or the reach, cannot be read. The actor is

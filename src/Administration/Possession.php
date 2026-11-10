@@ -8,7 +8,6 @@ use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
-use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 
 /**
  * Whether a delegated grant of a permission hands out only what the actor may
@@ -120,8 +119,7 @@ final class Possession
      */
     public static function isGrantable(OperationResource $operation, OperationChange $change, OperationResource $descriptor, FurtherChecks $checks): bool
     {
-        $grant = static fn (): bool => self::isAllowedFor($change, $descriptor, $checks, new HeldLifetimes($checks->subject))
-            && !AdministeredScope::isLimited($descriptor->action, $change->scope, $checks);
+        $grant = static fn (): bool => self::isGrantableFor($change, $descriptor, $checks, new HeldLifetimes($checks->subject));
 
         return TenantScope::within($operation->tenant, $change->scope->application, $grant, self::isBelow($operation, $change));
     }
@@ -174,9 +172,8 @@ final class Possession
     /**
      * Return the refusal of the first of the permissions, in order, that the
      * possession route refused and the actor is not explicitly allowed to
-     * grant, in the change's reach, which is in place, the grantable right's
-     * limits anywhere in the reach read once for them all; or null when there
-     * is none.
+     * grant, in the change's reach, which is in place; or null when there is
+     * none.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
@@ -188,23 +185,35 @@ final class Possession
     private static function firstUngrantable(OperationResource $operation, OperationChange $change, array $permissions, array $refusals, FurtherChecks $checks): ?DecisionReason
     {
         $lifetimes = new HeldLifetimes($checks->subject);
-        $isLimited = null;
 
         foreach ($permissions as $permission) {
             $refusal = $refusals[$permission->name] ?? null;
 
-            if ($refusal === null) {
-                continue;
-            }
-
-            $isLimited ??= AdministeredScope::isLimited(PackagePermissions::PERMISSION_GRANTABLE, $change->scope, $checks);
-
-            if ($isLimited || !self::isAllowedFor($change, $operation->grantable($permission), $checks, $lifetimes)) {
+            if ($refusal !== null && !self::isGrantableFor($change, $operation->grantable($permission), $checks, $lifetimes)) {
                 return $refusal;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Determine whether the actor may grant through the descriptor in the
+     * change's reach, which is in place: the grantable right it is decided
+     * under is allowed on it through a source lasting as long as the change
+     * (see `isAllowedFor()`), and nothing anywhere in a reach wider than its
+     * node could limit the right (see `AdministeredScope::isLimited()`), read
+     * once in the decision for every descriptor of the right.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $descriptor
+     * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
+     * @param  \SineMacula\Laravel\Authorization\Administration\HeldLifetimes  $lifetimes
+     * @return bool
+     */
+    private static function isGrantableFor(OperationChange $change, OperationResource $descriptor, FurtherChecks $checks, HeldLifetimes $lifetimes): bool
+    {
+        return self::isAllowedFor($change, $descriptor, $checks, $lifetimes) && !AdministeredScope::isLimited($descriptor->action, $change->scope, $checks);
     }
 
     /**

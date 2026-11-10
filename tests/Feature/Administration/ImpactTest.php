@@ -92,6 +92,10 @@ final class ImpactTest extends TestCase
         self::grants()->attachPolicy($restricted, Policy::create(['name' => 'restricting', 'document' => ['statements' => [$deny]]]));
         self::grants()->grantRole(self::user('admin'), $restricted, tenant: $tenant);
 
+        // Further checks belong to one decision, which reads the limits of a
+        // reach once, so the decision after the change takes its own.
+        $allowing = $this->checks(self::user('admin'), static fn (): Decision => Decision::allow(DecisionStage::ALLOW));
+
         self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, Impact::refusal(self::operation(), self::resource(), Impact::reachOf(null), $holders, $allowing));
     }
 
@@ -230,18 +234,18 @@ final class ImpactTest extends TestCase
         $actor        = self::user('admin', 1);
         $holders      = [Reference::of(self::user('junior', 5))];
         $impersonated = self::operation()->actedBy(new Reference('support', '9'));
-        $allowing     = $this->checks($actor, static fn (): Decision => Decision::allow(DecisionStage::ALLOW));
+        $allowing     = fn (): FurtherChecks => $this->checks($actor, static fn (): Decision => Decision::allow(DecisionStage::ALLOW));
 
-        self::assertNull(Impact::refusal($impersonated, $impersonated->toResourceReference(), Impact::reachOf(null), $holders, $allowing));
+        self::assertNull(Impact::refusal($impersonated, $impersonated->toResourceReference(), Impact::reachOf(null), $holders, $allowing()));
 
         self::restrictIn($actor, new Reference('tenant', 't0'), PackagePermissions::ADMINISTRATION_IMPERSONATED);
 
         self::assertSame(
             DecisionReason::ADMINISTRATION_IMPERSONATING,
-            Impact::refusal($impersonated, $impersonated->toResourceReference(), Impact::reachOf(null), $holders, $allowing),
+            Impact::refusal($impersonated, $impersonated->toResourceReference(), Impact::reachOf(null), $holders, $allowing()),
         );
-        self::assertNull(Impact::refusal($impersonated, $impersonated->toResourceReference(), Impact::reachOf(new Reference('tenant', 't1')), $holders, $allowing));
-        self::assertNull(Impact::refusal(self::operation(), self::resource(), Impact::reachOf(null), $holders, $allowing));
+        self::assertNull(Impact::refusal($impersonated, $impersonated->toResourceReference(), Impact::reachOf(new Reference('tenant', 't1')), $holders, $allowing()));
+        self::assertNull(Impact::refusal(self::operation(), self::resource(), Impact::reachOf(null), $holders, $allowing()));
     }
 
     /**

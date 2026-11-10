@@ -122,7 +122,10 @@ final class AdministeredScope
      * nothing more can; for a wider one, below the tenant, at the platform or
      * across applications, the sources of the action, read in the scope in
      * place, that cannot be read limit it too. A right already decided in the
-     * reach (see `Possession`) is weighed by this alone.
+     * reach (see `Possession`) is weighed by this alone. What is read is
+     * remembered for the rest of the decision, for the action, the reach and
+     * the scope in place (see `FurtherChecks::limited()`), so a change that
+     * weighs the same right for each policy it hands out reads it once.
      *
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
@@ -136,8 +139,41 @@ final class AdministeredScope
             return false;
         }
 
-        $sources = $checks->sources($action);
+        $limit = static function () use ($action, $reach, $checks): bool {
+            $sources = $checks->sources($action);
 
-        return $sources === null || PossessionLimits::isLimited($checks->subject, $action, $reach, $sources);
+            return $sources === null || PossessionLimits::isLimited($checks->subject, $action, $reach, $sources);
+        };
+
+        return $checks->limited(self::keyOf($action, $reach, $isAcrossApplications), $limit);
+    }
+
+    /**
+     * Return the key what limits the action across the reach is remembered
+     * under: the action, the reach, whether it spans every application, and the
+     * scope in place, which the action's sources are read in.
+     *
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
+     * @param  bool  $isAcrossApplications
+     * @return string
+     */
+    private static function keyOf(string $action, GrantScope $reach, bool $isAcrossApplications): string
+    {
+        $tenant = TenantScope::currentTenant();
+        $parts  = [
+            $action,
+            $reach->tenant?->type,
+            $reach->tenant?->id,
+            $reach->application,
+            $reach->includeSubtree,
+            $isAcrossApplications,
+            $tenant[0] ?? null,
+            $tenant[1] ?? null,
+            TenantScope::currentApplication(),
+            TenantScope::isBelowTenant(),
+        ];
+
+        return \serialize($parts);
     }
 }

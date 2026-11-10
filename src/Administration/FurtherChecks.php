@@ -20,6 +20,11 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * through the administration stage itself, so a constraint that decides the
  * operation's own action again in another scope cannot recurse.
  *
+ * What could limit a right across a reach is read once per decision for each
+ * right, reach and scope in place (see `limited()`), so a change that weighs
+ * the same right for every role, permission or policy it hands out reads its
+ * limits once.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -27,6 +32,9 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  */
 final readonly class FurtherChecks
 {
+    /** @var \ArrayObject<string, bool> Whether each right was found limited, keyed by the right, the reach and the scope in place. */
+    private \ArrayObject $limits;
+
     /**
      * Create the further checks of one decision.
      *
@@ -48,7 +56,9 @@ final readonly class FurtherChecks
 
         /** The tenant the check is made from; null for the platform. */
         public ?Reference $from = null,
-    ) {}
+    ) {
+        $this->limits = self::noLimits();
+    }
 
     /**
      * Decide the action for the subject on the resource, or on none, in the
@@ -74,5 +84,39 @@ final readonly class FurtherChecks
     public function sources(string $action): ?CheckSources
     {
         return ($this->sources)($action);
+    }
+
+    /**
+     * Return whether the right named by the key is limited across its reach,
+     * working it out through the callback the first time the key is asked and
+     * remembering it for the rest of this decision.
+     *
+     * @param  string  $key
+     * @param  \Closure(): bool  $limit
+     * @return bool
+     */
+    public function limited(string $key, \Closure $limit): bool
+    {
+        $known = $this->limits->offsetExists($key) ? $this->limits->offsetGet($key) : null;
+
+        if ($known !== null) {
+            return $known;
+        }
+
+        $isLimited = $limit();
+
+        $this->limits->offsetSet($key, $isLimited);
+
+        return $isLimited;
+    }
+
+    /**
+     * Return an empty record of what was found limited.
+     *
+     * @return \ArrayObject<string, bool>
+     */
+    private static function noLimits(): \ArrayObject
+    {
+        return new \ArrayObject;
     }
 }

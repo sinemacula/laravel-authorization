@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -64,6 +65,59 @@ final class DelegatedRoleGrantQueryBudgetTest extends TestCase
     }
 
     /**
+     * The grantable rights' limits across a reach wider than its node are read
+     * once for the whole grant: each further policy a role carries that only
+     * `authorization:policy.grantable` lets the actor hand out costs a
+     * platform-wide grant as many queries as a grant at one tenant's node,
+     * where nothing more is read, so the cost per policy stays as it was.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheGrantableLimitsAreReadOncePerGrant(): void
+    {
+        $actor  = self::administrator();
+        $tenant = new Reference('tenant', 't0');
+        $costs  = [];
+
+        foreach (['platform' => null, 'node' => $tenant] as $where => $scope) {
+            foreach ([1, 2, 4] as $count) {
+                $batch = "{$where}-{$count}";
+
+                $costs[$where][$count] = self::queriesOf($actor, self::conditional($batch, $count), $batch, $scope);
+            }
+        }
+
+        $perPolicy = static fn (array $cost): array => [$cost[2] - $cost[1], ($cost[4] - $cost[2]) / 2];
+
+        self::assertSame($perPolicy($costs['node']), $perPolicy($costs['platform']));
+    }
+
+    /**
+     * Return a new role carrying the number of policies, each with a
+     * conditional allow no route but the policy grantable right hands out.
+     *
+     * @param  string  $batch
+     * @param  int  $count
+     * @return \SineMacula\Laravel\Authorization\Models\Role
+     *
+     * @throws \Throwable
+     */
+    private static function conditional(string $batch, int $count): Role
+    {
+        $role = Role::create(['name' => "role-{$batch}", 'rank' => 5]);
+
+        for ($index = 0; $index < $count; $index++) {
+            $allow = ['effect' => 'allow', 'actions' => ["billing:{$batch}-{$index}"], 'conditions' => ['eq' => ['resource.owner' => 'x']]];
+
+            self::grants()->attachPolicy($role, Policy::create(['name' => "policy-{$batch}-{$index}", 'document' => ['statements' => [$allow]]]));
+        }
+
+        return $role;
+    }
+
+    /**
      * Return a new role carrying the number of permissions, each named under
      * the prefix.
      *
@@ -108,23 +162,27 @@ final class DelegatedRoleGrantQueryBudgetTest extends TestCase
     }
 
     /**
-     * Count the queries a delegated grant of the role to a new identity makes.
+     * Count the queries a delegated grant of the role to a new identity makes,
+     * platform-wide, or at the node of the tenant given alone.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  string  $batch
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return int
      *
      * @throws \Throwable
      */
-    private static function queriesOf(ActingContext $actor, Role $role, string $batch): int
+    private static function queriesOf(ActingContext $actor, Role $role, string $batch, ?Reference $tenant = null): int
     {
         $user = StubIdentity::create(['id' => \md5($batch)]);
 
         DB::flushQueryLog();
         DB::enableQueryLog();
 
-        self::grants()->grantRole($user, $role, actor: $actor);
+        $tenant === null
+            ? self::grants()->grantRole($user, $role, actor: $actor)
+            : self::grants()->grantRole($user, $role, actor: $actor, tenant: $tenant, includeSubtree: false);
 
         $count = \count(DB::getQueryLog());
 
