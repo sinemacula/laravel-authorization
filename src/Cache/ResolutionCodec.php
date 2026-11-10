@@ -153,7 +153,7 @@ final class ResolutionCodec
             $policies[] = $policy;
         }
 
-        return new Resolution($policies, $resolution->expiresIn, $resolution->stable);
+        return new Resolution($policies, $resolution->expiresIn, $resolution->stable, $resolution->routes);
     }
 
     /**
