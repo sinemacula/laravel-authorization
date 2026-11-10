@@ -88,14 +88,22 @@ abstract class TestCase extends OrchestraTestCase
      * Return the merged package config.
      *
      * @return array<string, mixed>
+     *
+     * @throws \UnexpectedValueException
      */
     protected function authorizationConfig(): array
     {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->container()->make(ConfigRepository::class);
+        $config = [];
 
-        /** @var array<string, mixed> */
-        return (array) $config->get('authorization');
+        foreach ($this->container()->make(ConfigRepository::class)->array('authorization') as $key => $value) {
+            if (!\is_string($key)) {
+                throw new \UnexpectedValueException('The package config holds an unnamed key.');
+            }
+
+            $config[$key] = $value;
+        }
+
+        return $config;
     }
 
     /**
