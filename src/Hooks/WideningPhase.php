@@ -28,11 +28,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * preliminary proposal of every grant it is about to write. The proposal is
  * classified (see `WideningClassifier`) and, when any grant widens, the bound
  * hook is called once with every widening grant of the call, a batch's
- * included, so every hook runs before any lock and any write. Only then does
- * the call enter the concurrency protocol: it locks, reads its records again,
- * rebuilds the grants it writes and decides them, and hands them to
- * `assertCovers()` before writing. The final grants are classified again, this
- * time with locking reads, after every other lock the call takes (see
+ * included, after the hooks the configuration lists (N108), so every hook runs
+ * before any lock and any write. Only then does the call enter the concurrency
+ * protocol: it locks, reads its records again, rebuilds the grants it writes
+ * and decides them, and hands them to `assertCovers()` before writing. The
+ * final grants are classified again, this time with locking reads, after every
+ * other lock the call takes (see
  * `Administration\DependencyPins::lockCoverage()`): the grantee's own row of
  * each grant, and the grants of the identity and its principals that applied in
  * each tenant, the evidence the hook was skipped or limited on. A locking read
@@ -211,6 +212,12 @@ final readonly class WideningPhase
      * composite holding none, so there is nothing to call; refuse a binding
      * that resolves to anything else, rather than call no hook.
      *
+     * When the configuration lists hooks, the hook is wrapped so they run
+     * before it, unless it already is (N108): the package extends the contract
+     * with them, but Laravel applies no extender to an instance it is handed
+     * after the package registers, nor to any hook bound after an instance it
+     * extended as the package registered.
+     *
      * @return \SineMacula\Laravel\Authorization\Contracts\GrantHook|null
      *
      * @throws \UnexpectedValueException
@@ -229,6 +236,10 @@ final readonly class WideningPhase
 
         if (!$hook instanceof GrantHook) {
             throw new \UnexpectedValueException('The grant hook bound on ' . GrantHook::class . ' resolves to ' . \get_debug_type($hook) . ', which does not implement it.');
+        }
+
+        if (config('authorization.grant_hooks', []) !== []) {
+            $hook = ListedGrantHooks::wrap($hook, $container);
         }
 
         return $hook instanceof GrantHooks && $hook->isEmpty() ? null : $hook;

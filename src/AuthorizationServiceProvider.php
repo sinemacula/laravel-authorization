@@ -31,7 +31,6 @@ use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
-use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
@@ -41,7 +40,6 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
-use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
@@ -50,6 +48,7 @@ use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\QueryScopeRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\SeamBindings;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
@@ -90,6 +89,9 @@ use SineMacula\Laravel\Authorization\Support\SessionScopes;
  * - `BladeDirectiveRegistrar` — wires the `@role` / `@permission` directive
  *   quartet and Spatie-compat aliases.
  * - `QueryScopeRegistrar` — registers the `whereAuthorized()` builder macro.
+ * - `SeamBindings` — binds each contract an application may bind itself to the
+ *   package's default, or to the class the configuration names, and runs the
+ *   grant hooks the configuration lists before the bound hook.
  *
  * Every binding that holds state for one request or job (the resolvers, the
  * policy store, the resolved tenant, the resolution cache, the last decision,
@@ -114,10 +116,19 @@ use SineMacula\Laravel\Authorization\Support\SessionScopes;
  * package-owned key that holds the scoped default. Each contract is bound to
  * that key only when nothing is bound to it yet (N103), so a binding a sibling
  * package or the application made before this provider registers stands,
- * `instance()` included, and one made afterwards replaces the default. Either
- * way the binding is not scoped by the package, so an instance it binds
- * survives the reset between jobs. The context key catalogue is bound the same
- * way, only when nothing is bound to it yet.
+ * `instance()` included, and one made afterwards replaces the default. A
+ * contract the application names a class other than the package's default for
+ * in the configuration is bound to that key whatever was bound before (N106), a
+ * deferred provider's binding included, so the application's configuration
+ * replaces a sibling package's binding, and a binding made afterwards still
+ * replaces it. The grant hook is the one exception: when the configuration
+ * lists hooks, they run before whatever hook the contract resolves to, before
+ * the package registers or after (N108). Either way a binding made outside the
+ * package is not scoped by it, so an instance it binds survives the reset
+ * between jobs. The context key catalogue is bound only when nothing is bound
+ * to it yet. The closure a contract is bound to is declared by this provider,
+ * as a sibling package that binds over the package's defaults tells them from
+ * the application's own bindings by that closure's declaring class.
  *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
@@ -135,9 +146,6 @@ use SineMacula\Laravel\Authorization\Support\SessionScopes;
  */
 final class AuthorizationServiceProvider extends ServiceProvider
 {
-    /** @var string Prefix of the package-owned keys that hold each contract's scoped default. */
-    private const string DEFAULT_BINDING_PREFIX = 'authorization.default:';
-
     /**
      * Register container bindings.
      *
@@ -182,6 +190,32 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
         (new BladeDirectiveRegistrar($this->app))->register();
         (new QueryScopeRegistrar)->register();
+    }
+
+    /**
+     * Determine whether the contract is bound to the package's own default,
+     * rather than to a binding an application or a sibling package made.
+     *
+     * A sibling that registers after the package uses this to replace the
+     * package's default with its own adapter, while leaving standing a binding
+     * the application made before the sibling registered. An unbound contract,
+     * an instance and any binding the package did not make answer false.
+     *
+     * @param  \Illuminate\Container\Container  $container
+     * @param  string  $contract
+     * @return bool
+     */
+    public static function isPackageDefault(Container $container, string $contract): bool
+    {
+        $concrete = $container->getBindings()[$contract]['concrete'] ?? null;
+
+        // An instance held over the default leaves the binding beneath it in
+        // place, and Laravel offers no public way to tell, so the instances are
+        // read in the container's own scope; the package's defaults are never
+        // shared, so any instance held under the contract is someone's.
+        $isHeld = \Closure::bind(static fn (Container $container): bool => isset($container->instances[$contract]), null, Container::class);
+
+        return !$isHeld($container) && $concrete instanceof \Closure && (new \ReflectionFunction($concrete))->getClosureScopeClass()?->getName() === self::class;
     }
 
     /**
@@ -230,14 +264,17 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
     /**
      * Bind the configured subject resolver, tenant tree and identity directory
-     * as the defaults, the composite of the configured grant hooks as the grant
-     * hook, and `ReferenceSubjectResolver` as the console subject resolver
+     * as the defaults, the composite holding no hook as the grant hook, and
+     * `ReferenceSubjectResolver` as the console subject resolver
      * `authorization:why` resolves its subject through, each scoped to the
      * request or job so any state it keeps does not reach the next one, and
      * each giving way to a binding a sibling package or the application makes
-     * on its contract, before the package registers or after. Rebinding the
-     * subject resolver or the tenant tree forgets the resolutions read through
-     * it.
+     * on its contract, before the package registers or after. A class the
+     * configuration names in place of the package's default replaces a binding
+     * made before the package registers instead (N106), and grant hooks it
+     * lists run before whatever hook the contract resolves to (N108). Rebinding
+     * the subject resolver or the tenant tree forgets the resolutions read
+     * through it.
      *
      * @return void
      */
@@ -252,15 +289,14 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->forgetResolutionsOnRebinding(SubjectResolver::class);
         $this->forgetResolutionsOnRebinding(TenantTree::class);
 
-        foreach ($defaults as $contract => [$key, $default]) {
-            /** @var class-string $class */
-            $class = $this->app['config']->get($key, $default);
+        $seams = $this->seams();
 
-            $this->bindScopedDefault($contract, $class);
+        foreach ($defaults as $contract => [$key, $default]) {
+            $seams->bindConfigured($contract, $key, $default);
         }
 
-        $this->bindScopedDefault(GrantHook::class, GrantHooks::fromConfig(...));
-        $this->bindScopedDefault(ConsoleSubjectResolver::class, ReferenceSubjectResolver::class);
+        $seams->bindGrantHooks();
+        $seams->bindDefault(ConsoleSubjectResolver::class, ReferenceSubjectResolver::class);
     }
 
     /**
@@ -268,7 +304,9 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * the request or job like the subject resolver, wrapped in the declared
      * resolver, which answers a model that declares its tenancy from its
      * declaration, as `whereAuthorized()` reads it, and passes every other to
-     * the configured one.
+     * the configured one. A class the configuration names in place of the
+     * package's default replaces a binding made before the package registers
+     * (N106).
      *
      * @return void
      */
@@ -277,7 +315,9 @@ final class AuthorizationServiceProvider extends ServiceProvider
         /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver> $class */
         $class = $this->app['config']->get('authorization.resource_tenant_resolver', NoResourceTenant::class);
 
-        $this->bindScopedDefault(ResourceTenantResolver::class, static fn (Application $app): DeclaredResourceTenant => new DeclaredResourceTenant($app->make($class)));
+        $declared = static fn (Application $app): DeclaredResourceTenant => new DeclaredResourceTenant($app->make($class));
+
+        $this->seams()->bindDefault(ResourceTenantResolver::class, $declared, $class !== NoResourceTenant::class);
     }
 
     /**
@@ -300,9 +340,11 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the configured policy store, when there is one, as the default,
-     * scoped to the request or job so any state it keeps does not reach the
-     * next one.
+     * Bind the configured policy store, when there is one, scoped to the
+     * request or job so any state it keeps does not reach the next one. The
+     * package has no store of its own, so a configured one replaces a binding
+     * made before the package registers (N106), and gives way to one made
+     * afterwards.
      *
      * @return void
      */
@@ -315,7 +357,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->bindScopedDefault(PolicyStore::class, $class);
+        $this->seams()->bindDefault(PolicyStore::class, $class, true);
     }
 
     /**
@@ -359,7 +401,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     protected function registerPolicyResolver(): void
     {
-        $this->bindScopedDefault(PolicyResolver::class, static fn (Application $app): PolicyResolver => new DefaultPolicyResolver(
+        $this->seams()->bindDefault(PolicyResolver::class, static fn (Application $app): PolicyResolver => new DefaultPolicyResolver(
             store: $app->bound(PolicyStore::class) ? $app->make(PolicyStore::class) : null,
         ));
     }
@@ -391,10 +433,12 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * checker `authorization.requirement_checker` names, the session policy
      * source `authorization.session.source` names and the scope map of
      * `authorization.session.scopes`. Each contract is bound as a default an
-     * application may replace, and the context key catalogue only when nothing
-     * is bound to it yet. The catalogue reads the authentication context's
-     * namespaces and assurance keys at its first use, never here, so a context
-     * a later provider binds is the one it reads.
+     * application may replace, the checker and the session policy source over a
+     * binding made before the package registers when the configuration names a
+     * class other than the package's default (N106), and the context key
+     * catalogue only when nothing is bound to it yet. The catalogue reads the
+     * authentication context's namespaces and assurance keys at its first use,
+     * never here, so a context a later provider binds is the one it reads.
      *
      * @return void
      */
@@ -403,19 +447,13 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->app->scoped(PolicyEvaluator::class);
         $this->app->scoped(SessionScopes::class, static fn (Application $app): SessionScopes => SessionScopes::fromConfig($app['config']->get('authorization.session.scopes', [])));
 
-        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker> $checker */
-        $checker = $this->app['config']->get('authorization.requirement_checker', RefusingRequirementChecker::class);
-        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\SessionPolicySource> $source */
-        $source   = $this->app['config']->get('authorization.session.source', NoSessionPolicy::class);
-        $defaults = [
-            ActionCatalogue::class                  => DeclaredActionCatalogue::class,
-            AuthenticationRequirementChecker::class => $checker,
-            SessionPolicySource::class              => $source,
-            ...ContextBindings::DEFAULTS,
-        ];
+        $seams = $this->seams();
 
-        foreach ($defaults as $contract => $concrete) {
-            $this->bindScopedDefault($contract, $concrete);
+        $seams->bindConfigured(AuthenticationRequirementChecker::class, 'authorization.requirement_checker', RefusingRequirementChecker::class);
+        $seams->bindConfigured(SessionPolicySource::class, 'authorization.session.source', NoSessionPolicy::class);
+
+        foreach ([ActionCatalogue::class => DeclaredActionCatalogue::class, ...ContextBindings::DEFAULTS] as $contract => $concrete) {
+            $seams->bindDefault($contract, $concrete);
         }
 
         $this->app->singletonIf(ContextKeyCatalogue::class, ContextBindings::catalogue(...));
@@ -578,13 +616,15 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * watched at once, on the application, and every Octane sandbox cloned from
      * it keeps the watch. One already bound, by a sibling package or the
      * application before the package registered, `instance()` included, is
-     * watched from its first resolution in each container that resolves it, the
-     * earliest a rebinding could change anything that container's memo holds:
-     * the watch is added before the resolution, on the container resolving it,
-     * so a sandbox is watched in its own right and nothing is built on the
-     * application it was cloned from. Only the abstract itself starts the
-     * watch, never a class that implements it, and only when resolved without
-     * parameters, since starting it resolves the abstract again without them.
+     * watched from its first resolution in each container that resolves it,
+     * whether that binding stands or the class the configuration names replaced
+     * it (N106), the earliest a rebinding could change anything that
+     * container's memo holds: the watch is added before the resolution, on the
+     * container resolving it, so a sandbox is watched in its own right and
+     * nothing is built on the application it was cloned from. Only the abstract
+     * itself starts the watch, never a class that implements it, and only when
+     * resolved without parameters, since starting it resolves the abstract
+     * again without them.
      *
      * The memo emptied is the one of the container rebinding the abstract, and
      * only once that container has resolved it, so a rebinding never builds a
@@ -625,30 +665,18 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind a contract an application may bind itself to the package's default,
-     * built once per request or job.
+     * Return the registrar of the seams an application may bind itself, handed
+     * the closure that builds the closure each contract is bound to.
      *
-     * The default is held under a package-owned key bound with `scoped()`, and
-     * the contract resolves through that key. Only the package-owned key is
-     * scoped, so an application that binds the contract itself (with
-     * `instance()`, `singleton()`, `scoped()` or `bind()`) keeps its binding
-     * across the reset between jobs, while the package's default is still
-     * rebuilt for each one.
+     * The provider declares that closure, so a sibling package that reads the
+     * binding table tells the package's default from the application's own
+     * binding by its declaring class, this provider, and replaces only the
+     * default.
      *
-     * The contract is bound to the key only when nothing is bound to it yet
-     * (N103): a binding a sibling package or the application made before the
-     * package registers stands, and one made afterwards replaces the default.
-     * The key itself is always bound, so the default stays reachable under it.
-     *
-     * @param  class-string  $contract
-     * @param  class-string|\Closure(\Illuminate\Contracts\Foundation\Application): object  $concrete
-     * @return void
+     * @return \SineMacula\Laravel\Authorization\Registrars\SeamBindings
      */
-    private function bindScopedDefault(string $contract, \Closure|string $concrete): void
+    private function seams(): SeamBindings
     {
-        $default = self::DEFAULT_BINDING_PREFIX . $contract;
-
-        $this->app->scoped($default, $concrete);
-        $this->app->bindIf($contract, static fn (Application $app): mixed => $app->make($default));
+        return new SeamBindings($this->app, static fn (string $key): \Closure => static fn (Application $app): mixed => $app->make($key));
     }
 }
