@@ -383,18 +383,20 @@ final class ConfigValidatorTest extends TestCase
      */
     public function testTheUsageBlockIsValidated(): void
     {
-        $config = $this->authorizationConfig();
+        $config    = $this->authorizationConfig();
+        $container = $this->app;
 
+        self::assertNotNull($container);
         self::assertSame(['enabled' => false, 'interval' => 3600, 'batch' => 250, 'connection' => null, 'queue' => null, 'retention' => 400], $config['usage']);
 
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $container);
 
         $short = $config;
 
         $short['usage']['interval'] = 59;
 
         $this->assertRejected(
-            fn () => ConfigValidator::validate($short, $this->app),
+            static fn () => ConfigValidator::validate($short, $container),
             'authorization.usage.interval',
             'expected a whole number of at least 60, got 59 (int).',
         );

@@ -173,10 +173,13 @@ final class ResolutionCacheTest extends TestCase
     private static function entries(Repository $store): array
     {
         /** @var \Illuminate\Cache\ArrayStore $array */
-        $array = $store->getStore();
-        $keys  = [];
+        $array   = $store->getStore();
+        $storage = (new \ReflectionProperty($array, 'storage'))->getValue($array);
+        $keys    = [];
 
-        foreach (\array_keys((new \ReflectionProperty($array, 'storage'))->getValue($array)) as $key) {
+        self::assertIsArray($storage);
+
+        foreach (\array_keys($storage) as $key) {
             if (!\str_contains((string) $key, '-routed:')) {
                 continue;
             }

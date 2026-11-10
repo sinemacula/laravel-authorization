@@ -7,8 +7,8 @@ namespace SineMacula\Laravel\Authorization\Usage;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\KeyAsText;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
-use SineMacula\Laravel\Authorization\Reviews\Support\Definitions;
 
 /**
  * Prunes the package's grant usage tables (N102): the row of every route whose
@@ -56,7 +56,7 @@ final class UsagePruner
     /**
      * Limit the query of the usage table to the rows of routes starting from a
      * grant of the kind that no longer exists, the grant's key compared as text
-     * (see `Definitions::keyAsText()`).
+     * (see `KeyAsText`).
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
@@ -72,7 +72,7 @@ final class UsagePruner
             ->whereNotExists(static function (Builder $exists) use ($usage, $grants, $kind): void {
                 $exists->selectRaw('1')
                     ->from($grants)
-                    ->whereRaw(Definitions::keyAsText($exists, $grants . '.' . $kind->column()) . ' = ' . $exists->getGrammar()->wrap($usage . '.grant_id'))
+                    ->whereColumn(new KeyAsText($grants . '.' . $kind->column()), $usage . '.grant_id')
                     ->whereColumn($grants . '.authorizable_type', $usage . '.authorizable_type')
                     ->whereColumn($grants . '.authorizable_id', $usage . '.authorizable_id');
 

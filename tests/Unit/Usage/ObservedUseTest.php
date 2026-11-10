@@ -30,14 +30,14 @@ final class ObservedUseTest extends TestCase
     public function testAUseCountsOnlyForTheGrantItWasObservedThrough(): void
     {
         $created = CarbonImmutable::createFromTimestampUTC(1794218400);
-        $use     = new ObservedUse(CarbonImmutable::create(2026, 11, 9, 11), $created);
+        $use     = new ObservedUse(CarbonImmutable::parse('2026-11-09 11:00:00'), $created);
 
         self::assertTrue($use->isOf($created));
         self::assertTrue($use->isOf($created->subSecond()));
         self::assertTrue($use->isOf(null));
         self::assertFalse($use->isOf($created->addSecond()));
-        self::assertFalse((new ObservedUse(CarbonImmutable::create(2026, 11, 9, 11)))->isOf($created));
-        self::assertTrue((new ObservedUse(CarbonImmutable::create(2026, 11, 9, 11)))->isOf(null));
-        self::assertNull((new ObservedUse(CarbonImmutable::create(2026)))->grantCreatedAt);
+        self::assertFalse((new ObservedUse(CarbonImmutable::parse('2026-11-09 11:00:00')))->isOf($created));
+        self::assertTrue((new ObservedUse(CarbonImmutable::parse('2026-11-09 11:00:00')))->isOf(null));
+        self::assertNull((new ObservedUse(CarbonImmutable::parse('2026-01-01 00:00:00')))->grantCreatedAt);
     }
 }

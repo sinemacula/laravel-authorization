@@ -71,7 +71,8 @@ final class RolePolicies
      * given columns, so a resolution can tell whether any role's policy can
      * apply.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $roles
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $roles
      * @param  list<string>  $columns
      * @return \Illuminate\Database\Query\Builder
      */
@@ -98,7 +99,8 @@ final class RolePolicies
      * attachment is to, so it can say which route each policy came through.
      *
      * @param  \Illuminate\Database\Eloquent\Collection<int, covariant \Illuminate\Database\Eloquent\Model>  $held
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $roles
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $roles
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \SineMacula\Laravel\Authorization\Support\InheritedPolicies
      *
@@ -201,7 +203,8 @@ final class RolePolicies
      * and their hierarchy afresh, for a resolution whose hierarchy moved while
      * it ran.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $roles
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $roles
      * @param  list<string>  $keys
      * @return list<string>
      *

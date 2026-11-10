@@ -382,7 +382,7 @@ final class AccessReviewTest extends TestCase
             $lines[] = \json_decode($line, true, 512, \JSON_THROW_ON_ERROR);
         }, 2);
 
-        $rows = \array_values(\array_filter($lines, static fn (array $line): bool => isset($line['usage'])));
+        $rows = \array_values(\array_filter($lines, static fn (mixed $line): bool => \is_array($line) && isset($line['usage'])));
 
         self::assertCount(5, $rows);
         self::assertSame('unused', $rows[0]['usage']['status']);

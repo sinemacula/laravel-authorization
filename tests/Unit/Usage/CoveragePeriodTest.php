@@ -27,8 +27,8 @@ final class CoveragePeriodTest extends TestCase
      */
     public function testAPeriodKeepsItsBounds(): void
     {
-        $from   = CarbonImmutable::create(2026, 11, 9, 8);
-        $until  = CarbonImmutable::create(2026, 11, 9, 10);
+        $from   = CarbonImmutable::parse('2026-11-09 08:00:00');
+        $until  = CarbonImmutable::parse('2026-11-09 10:00:00');
         $period = new CoveragePeriod($from, $until);
 
         self::assertSame([$from, $until], [$period->from, $period->until]);

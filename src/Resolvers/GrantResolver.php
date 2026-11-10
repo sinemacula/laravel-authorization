@@ -54,7 +54,8 @@ final class GrantResolver
     /**
      * Resolve the names of the roles granted through the relation.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \SineMacula\Laravel\Authorization\Cache\Resolution<string>
      */
@@ -81,7 +82,8 @@ final class GrantResolver
      * seen; the roles are then read afresh, and the resolution is marked
      * unstable, so it is kept for the request or job alone and never stored.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \SineMacula\Laravel\Authorization\Cache\Resolution<string>
      *
@@ -104,8 +106,10 @@ final class GrantResolver
      * Resolve the names of the permissions granted directly and through the
      * roles, with each role's ancestors' when the hierarchy is enabled.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Permission, \Illuminate\Database\Eloquent\Model>  $direct
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $roles
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Permission,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $direct
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $roles
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \SineMacula\Laravel\Authorization\Cache\Resolution<string>
      *
@@ -156,9 +160,11 @@ final class GrantResolver
      * its exception thrown, so it denies every check for its holder rather than
      * being skipped.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>|null  $roles
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>|null  $roles
      * @return \SineMacula\Laravel\Authorization\Cache\Resolution<\SineMacula\Laravel\Authorization\Evaluation\Policy>
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
@@ -226,7 +232,8 @@ final class GrantResolver
      * Return the held roles read afresh, with their hierarchy as it is now, for
      * a resolution whose hierarchy moved while it ran.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $roles
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $roles
      * @param  list<string>  $keys
      * @return list<\SineMacula\Laravel\Authorization\Models\Role>
      */
@@ -244,8 +251,10 @@ final class GrantResolver
      * out. While grant usage is tracked, each is read with where it was made
      * and its creation too.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, \Illuminate\Database\Eloquent\Model>  $grants
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>|null  $roles
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>|null  $roles
      * @param  bool  $isRouting
      * @return array{0: array<int, array{policy_id: string, authorizable_type: string, expires_at: string|null}>, 1: bool}
      */
@@ -273,7 +282,8 @@ final class GrantResolver
      *
      * @template TGranted of \Illuminate\Database\Eloquent\Model
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<TGranted, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<TGranted,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
      * @return \Illuminate\Database\Eloquent\Collection<int, TGranted>
      */
     private static function held(MorphToMany $grants): EloquentCollection
@@ -289,7 +299,8 @@ final class GrantResolver
      *
      * @template TGranted of \Illuminate\Database\Eloquent\Model
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<TGranted, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<TGranted,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \Illuminate\Database\Eloquent\Collection<int, TGranted>
      */

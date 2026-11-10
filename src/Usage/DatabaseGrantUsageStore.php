@@ -166,9 +166,11 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
     {
         AuthorizationConnection::connection()->transaction(static function () use ($chunk): void {
             $kept    = self::keptOf(\array_column($chunk, 'grant_key'));
-            $isNewer = static fn (array $observation): bool => isset($kept[$observation['grant_key']]) && self::isNewer($observation, ...$kept[$observation['grant_key']]);
             $missing = \array_filter($chunk, static fn (array $observation): bool => !isset($kept[$observation['grant_key']]));
-            $newer   = \array_filter($chunk, $isNewer);
+            $newer   = \array_filter(
+                $chunk,
+                static fn (array $observation): bool => isset($kept[$observation['grant_key']]) && self::isNewer($observation, ...$kept[$observation['grant_key']]),
+            );
             $isRaced = $missing !== [] && self::usage()->insertOrIgnore(\array_map(self::row(...), $missing)) !== \count($missing);
 
             foreach ($isRaced ? $chunk : $newer as $observation) {

@@ -21,6 +21,7 @@ use Tests\Concerns\ReviewsAccess;
 use Tests\Concerns\TracksGrantUsage;
 use Tests\Feature\Stubs\FailingPermissionsIdentity;
 use Tests\Feature\Stubs\RecordingLogger;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\TestCase;
 
@@ -55,7 +56,7 @@ final class DecisionPipelineTest extends TestCase
         $context = self::administrator([PackagePermissions::PERMISSION_GRANT, 'posts:*'], 'admin');
         $admin   = $context->subject->subject;
 
-        self::assertIsObject($admin);
+        self::assertInstanceOf(StubIdentity::class, $admin);
 
         $this->actAs($admin);
 

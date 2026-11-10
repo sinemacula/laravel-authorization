@@ -20,7 +20,7 @@ namespace SineMacula\Laravel\Authorization\Usage;
  * @phpstan-type RouteMapArray array{
  *     grants: list<array<string, int|string|null>>,
  *     routes: list<array{string, int}>,
- *     index: array<string, list<int>>
+ *     index: array<array-key, list<int>>
  * }
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -35,7 +35,7 @@ final readonly class RouteMap
      *
      * @param  list<\SineMacula\Laravel\Authorization\Usage\StoredGrant>  $grants
      * @param  list<array{string, int}>  $routes
-     * @param  array<string, list<int>>  $index
+     * @param  array<array-key, list<int>>  $index
      */
     public function __construct(
 
