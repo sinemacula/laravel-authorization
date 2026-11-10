@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider;
 use SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use Tests\Concerns\ReadsRefusedSettings;
 use Tests\Feature\Stubs\ConflictingResourceAttributes;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
@@ -33,6 +34,8 @@ use Tests\TestCase;
 #[CoversClass(AttributeConfigValidator::class)]
 final class AttributeConfigValidatorTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /** @var string The config key every declaration fault is reported under. */
     private const string ATTRIBUTES = 'authorization.attributes';
 
@@ -255,5 +258,42 @@ final class AttributeConfigValidatorTest extends TestCase
         $config = (array) $this->container()->make('config')->get('authorization');
 
         ConfigValidator::validate(['attributes' => ['resources' => ['post' => 'App\Missing']]] + $config, $this->container());
+    }
+
+    /**
+     * Each entry is checked on its own without building its provider, each
+     * refusal structured; the declarations are checked by building them.
+     *
+     * @return void
+     */
+    public function testEachEntryIsCheckedWithoutBuilding(): void
+    {
+        $app      = $this->container();
+        $expected = 'a morph type mapped to the name of a class implementing ' . ResourceAttributeProvider::class;
+
+        AttributeConfigValidator::provider('resources', 'post', RecordingResourceAttributes::class, ResourceAttributeProvider::class);
+
+        self::assertFalse($app->resolved(RecordingResourceAttributes::class));
+        self::assertSame(
+            ['authorization.attributes.resources', 'invalid_value', $expected, 'string'],
+            self::refusedSetting(static fn () => AttributeConfigValidator::provider('resources', '', 'X', ResourceAttributeProvider::class)),
+        );
+        self::assertSame(
+            ['authorization.attributes.resources.post', 'unknown_class', $expected, 'string'],
+            self::refusedSetting(static fn () => AttributeConfigValidator::provider('resources', 'post', 'Missing\X', ResourceAttributeProvider::class)),
+        );
+        self::assertSame('invalid_type', self::refusedSetting(static fn () => AttributeConfigValidator::provider('resources', 'post', 3, ResourceAttributeProvider::class))[1]);
+        self::assertSame(
+            'not_implemented',
+            self::refusedSetting(static fn () => AttributeConfigValidator::provider('subjects', 'user', \stdClass::class, SubjectAttributeProvider::class))[1],
+        );
+
+        AttributeConfigValidator::declarations(['post' => RecordingResourceAttributes::class], [], $app);
+
+        self::assertSame('invalid_value', self::refusedSetting(static fn () => AttributeConfigValidator::declarations(
+            ['post' => RecordingResourceAttributes::class, 'page' => ConflictingResourceAttributes::class],
+            [],
+            $app,
+        ))[1]);
     }
 }

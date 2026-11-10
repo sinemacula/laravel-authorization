@@ -13,6 +13,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Config\TableConfigValidator;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use Tests\Concerns\ReadsRefusedSettings;
 use Tests\Fixtures\Database\RecordingBlueprint;
 use Tests\TestCase;
 
@@ -31,6 +32,8 @@ use Tests\TestCase;
 #[CoversClass(TableConfigValidator::class)]
 final class TableConfigValidatorTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /** @var list<string> The package migrations, in the order they run. */
     private const array MIGRATIONS = [
         '2026_04_14_000001_create_roles_table',
@@ -200,6 +203,32 @@ final class TableConfigValidatorTest extends TestCase
         foreach ($names as $name) {
             self::assertFalse(Schema::hasTable($name), $name);
         }
+    }
+
+    /**
+     * Each table's name is checked on its own, and a name another table has is
+     * refused as a duplicate, each refusal structured.
+     *
+     * @return void
+     */
+    public function testEachNameIsCheckedOnItsOwn(): void
+    {
+        self::assertSame('roles', TableConfigValidator::name('roles', 'roles'));
+        self::assertSame(['admins' => 'roles'], TableConfigValidator::distinct('roles', 'Admins', []));
+        self::assertSame(
+            ['authorization.tables.roles', 'invalid_type', 'a plain identifier of at most 39 characters', 'int'],
+            self::refusedSetting(static fn () => TableConfigValidator::name('roles', 3)),
+        );
+        self::assertSame(
+            ['authorization.tables.roles', 'invalid_value', 'a plain identifier of at most 39 characters', 'string'],
+            self::refusedSetting(static fn () => TableConfigValidator::name('roles', 'a b')),
+        );
+        self::assertSame('out_of_range', self::refusedSetting(static fn () => TableConfigValidator::name('roles', \str_repeat('r', 40)))[1]);
+        self::assertSame('unknown_key', self::refusedSetting(static fn () => TableConfigValidator::name('rols', 'roles'))[1]);
+        self::assertSame(
+            ['authorization.tables.permissions', 'duplicate', 'a name no other table has', 'string'],
+            self::refusedSetting(static fn () => TableConfigValidator::distinct('permissions', 'ROLES', ['roles' => 'roles'])),
+        );
     }
 
     /**

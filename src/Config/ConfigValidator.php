@@ -7,6 +7,9 @@ namespace SineMacula\Laravel\Authorization\Config;
 use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
+use SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
+use SineMacula\Laravel\Authorization\Diagnostics\StructuralCheck;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -100,6 +103,25 @@ final class ConfigValidator
     }
 
     /**
+     * Collect every refusal of the supplied authorization config instead of
+     * throwing the first (see `Diagnostics\StructuralCheck`).
+     *
+     * Only the structural checks run: types, keys, that classes exist and
+     * implement their contracts, and that names name configured entries. The
+     * checks that build what the configuration names, such as the context
+     * sources or the cache store, ran as the application booted and are listed
+     * as checked then, never run again, so collecting builds nothing.
+     *
+     * @param  mixed  $root
+     * @param  \Illuminate\Contracts\Container\Container  $container
+     * @return \SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings
+     */
+    public static function issues(mixed $root, Container $container): ConfigFindings
+    {
+        return (new StructuralCheck($container))->run($root);
+    }
+
+    /**
      * Render a short debug description of a mixed value for use inside
      * exception messages.
      *
@@ -154,16 +176,8 @@ final class ConfigValidator
      */
     public static function permissionEnums(mixed $value): array
     {
-        if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException('authorization.permission_enums', 'expected an array of enum class names, got ' . \get_debug_type($value) . '.');
-        }
-
-        foreach ($value as $index => $class) {
-            self::validatePermissionEnumEntry($index, $class);
-        }
-
         /** @var array<array-key, class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum>> */
-        return $value;
+        return ConfigBlock::entries('authorization.permission_enums', $value, 'an array of enum class names', self::permissionEnum(...));
     }
 
     /**
@@ -180,28 +194,117 @@ final class ConfigValidator
      */
     public static function permissionProviders(mixed $value): array
     {
-        if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException('authorization.permission_providers', 'expected an array of class names, got ' . \get_debug_type($value) . '.');
-        }
-
-        foreach ($value as $index => $class) {
-            if (!\is_string($class) || $class === '') {
-                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", 'entry must be a non-empty class-string.');
-            }
-
-            if (!\class_exists($class)) {
-                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", "class '{$class}' does not exist.");
-            }
-
-            if (!\is_subclass_of($class, PermissionProvider::class)) {
-                $reason = "class '{$class}' does not implement " . PermissionProvider::class . '.';
-
-                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", $reason);
-            }
-        }
-
         /** @var array<array-key, class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionProvider>> */
-        return $value;
+        return ConfigBlock::entries('authorization.permission_providers', $value, 'an array of class names', self::permissionProvider(...));
+    }
+
+    /**
+     * Validate that the `models` entry under the key is an existing class that
+     * is the package's model or extends it.
+     *
+     * @param  string  $key
+     * @param  mixed  $class
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function model(string $key, mixed $class): void
+    {
+        $configKey = "authorization.models.{$key}";
+        $base      = self::MODELS[$key] ?? ConfigBlock::refuseUnknownKey('authorization.models', $key, \array_keys(self::MODELS));
+        $expected  = "the name of {$base} or a subclass of it";
+
+        [$issue, $reason] = match (true) {
+            !\is_string($class) || $class === ''      => [IssueCode::INVALID_TYPE, 'expected a class-string, got ' . self::describe($class) . '.'],
+            !\class_exists($class)                    => [IssueCode::UNKNOWN_CLASS, "class '{$class}' does not exist."],
+            !\is_a($class, $base, allow_string: true) => [IssueCode::NOT_IMPLEMENTED, "class '{$class}' is neither {$base} nor a subclass of it."],
+            default                                   => [null, ''],
+        };
+
+        if ($issue !== null) {
+            throw new InvalidAuthorizationConfigException($configKey, $reason, $issue, $expected, \get_debug_type($class));
+        }
+    }
+
+    /**
+     * Validate that one `permission_enums` entry names an existing enum
+     * implementing the `PermissionEnum` contract and backed by strings, since a
+     * case's value is the permission name.
+     *
+     * @param  int|string  $index
+     * @param  mixed  $class
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function permissionEnum(int|string $index, mixed $class): void
+    {
+        $expected = 'the name of an enum backed by strings implementing ' . PermissionEnum::class;
+
+        [$issue, $reason] = match (true) {
+            !\is_string($class) || $class === ''                                          => [IssueCode::INVALID_TYPE, 'entry must be a non-empty class-string.'],
+            !\class_exists($class) && !\interface_exists($class) && !\enum_exists($class) => [IssueCode::UNKNOWN_CLASS, "class '{$class}' does not exist."],
+            !\is_subclass_of($class, PermissionEnum::class)                               => [
+                IssueCode::NOT_IMPLEMENTED,
+                "class '{$class}' does not implement " . PermissionEnum::class . '.',
+            ],
+            !self::isStringBackedEnum($class) => [
+                IssueCode::INVALID_VALUE,
+                "enum '{$class}' must be backed by strings, since each case's value is a permission name.",
+            ],
+            default => [null, ''],
+        };
+
+        if ($issue !== null) {
+            throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", $reason, $issue, $expected, \get_debug_type($class));
+        }
+    }
+
+    /**
+     * Validate that one `permission_providers` entry names an existing class
+     * implementing the `PermissionProvider` contract.
+     *
+     * @param  int|string  $index
+     * @param  mixed  $class
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function permissionProvider(int|string $index, mixed $class): void
+    {
+        $expected = 'the name of a class implementing ' . PermissionProvider::class;
+
+        [$issue, $reason] = match (true) {
+            !\is_string($class) || $class === ''                => [IssueCode::INVALID_TYPE, 'entry must be a non-empty class-string.'],
+            !\class_exists($class)                              => [IssueCode::UNKNOWN_CLASS, "class '{$class}' does not exist."],
+            !\is_subclass_of($class, PermissionProvider::class) => [IssueCode::NOT_IMPLEMENTED, "class '{$class}' does not implement " . PermissionProvider::class . '.'],
+            default                                             => [null, ''],
+        };
+
+        if ($issue !== null) {
+            throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", $reason, $issue, $expected, \get_debug_type($class));
+        }
+    }
+
+    /**
+     * Validate that one entry of `application_access` maps an application's
+     * name to the permission it requires, both non-empty strings.
+     *
+     * @param  int|string  $application
+     * @param  mixed  $permission
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function applicationAccess(int|string $application, mixed $permission): void
+    {
+        if (!\is_string($application) || $application === '' || !\is_string($permission) || $permission === '') {
+            $reason = 'each application name must map to a permission name, both non-empty strings.';
+
+            $wanted = 'an application name mapped to a permission name';
+
+            throw new InvalidAuthorizationConfigException('authorization.application_access', $reason, IssueCode::INVALID_VALUE, $wanted, \get_debug_type($permission));
+        }
     }
 
     /**
@@ -223,65 +326,7 @@ final class ConfigValidator
                 continue;
             }
 
-            self::validateModelEntry("authorization.models.{$key}", $value[$key], $base);
-        }
-    }
-
-    /**
-     * Validate that a single `models.*` entry is an existing class that is the
-     * supplied package model or extends it.
-     *
-     * @param  string  $configKey
-     * @param  mixed  $class
-     * @param  class-string<\Illuminate\Database\Eloquent\Model>  $base
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validateModelEntry(string $configKey, mixed $class, string $base): void
-    {
-        if (!\is_string($class) || $class === '') {
-            throw new InvalidAuthorizationConfigException($configKey, 'expected a class-string, got ' . self::describe($class) . '.');
-        }
-
-        if (!\class_exists($class)) {
-            throw new InvalidAuthorizationConfigException($configKey, "class '{$class}' does not exist.");
-        }
-
-        if (!\is_a($class, $base, allow_string: true)) {
-            throw new InvalidAuthorizationConfigException($configKey, "class '{$class}' is neither {$base} nor a subclass of it.");
-        }
-    }
-
-    /**
-     * Validate a single `permission_enums` entry resolves to an existing enum
-     * implementing the `PermissionEnum` contract and backed by strings, since a
-     * case's value is the permission name.
-     *
-     * @param  int|string  $index
-     * @param  mixed  $class
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validatePermissionEnumEntry(int|string $index, mixed $class): void
-    {
-        if (!\is_string($class) || $class === '') {
-            throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", 'entry must be a non-empty class-string.');
-        }
-
-        if (!\class_exists($class) && !\interface_exists($class) && !\enum_exists($class)) {
-            throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "class '{$class}' does not exist.");
-        }
-
-        if (!\is_subclass_of($class, PermissionEnum::class)) {
-            throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "class '{$class}' does not implement " . PermissionEnum::class . '.');
-        }
-
-        if (!self::isStringBackedEnum($class)) {
-            $reason = "enum '{$class}' must be backed by strings, since each case's value is a permission name.";
-
-            throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", $reason);
+            self::model($key, $value[$key]);
         }
     }
 
@@ -310,13 +355,13 @@ final class ConfigValidator
     private static function validateApplicationAccess(mixed $value): void
     {
         if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException('authorization.application_access', 'expected an array of application names to permission names.');
+            $reason = 'expected an array of application names to permission names.';
+
+            throw new InvalidAuthorizationConfigException('authorization.application_access', $reason, IssueCode::INVALID_TYPE, ConfigBlock::ARRAY, \get_debug_type($value));
         }
 
         foreach ($value as $application => $permission) {
-            if (!\is_string($application) || $application === '' || !\is_string($permission) || $permission === '') {
-                throw new InvalidAuthorizationConfigException('authorization.application_access', 'each application name must map to a permission name, both non-empty strings.');
-            }
+            self::applicationAccess($application, $permission);
         }
     }
 }

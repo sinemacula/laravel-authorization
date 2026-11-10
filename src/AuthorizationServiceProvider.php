@@ -32,6 +32,7 @@ use SineMacula\Laravel\Authorization\Console\ValidatePolicyCommand;
 use SineMacula\Laravel\Authorization\Console\WhyCommand;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Context\ContextBindings;
+use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver;
@@ -78,6 +79,7 @@ use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\ClassName;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
@@ -161,6 +163,13 @@ use SineMacula\Laravel\Authorization\Usage\UsageTracking;
  */
 final class AuthorizationServiceProvider extends ServiceProvider
 {
+    /** @var array<string, class-string> The route middleware aliases the package registers, each with its middleware. */
+    public const array MIDDLEWARE = [
+        'role'       => RequireRole::class,
+        'permission' => RequirePermission::class,
+        'authorize'  => AuthorizeAction::class,
+    ];
+
     /**
      * Register container bindings.
      *
@@ -186,7 +195,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->registerAuthorizationManager();
         $this->registerManagementServices();
 
-        (new UsageRegistrar($this->app))->register();
+        (new UsageRegistrar($this->app))->register($this->seams());
     }
 
     /**
@@ -336,12 +345,16 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     protected function registerResourceTenantResolver(): void
     {
+        $key = 'authorization.resource_tenant_resolver';
+
         /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver> $class */
-        $class = $this->seams()->configuredClass('authorization.resource_tenant_resolver', ResourceTenantResolver::class, NoResourceTenant::class);
+        $class      = $this->seams()->configuredClass($key, ResourceTenantResolver::class, NoResourceTenant::class);
+        $configured = !ClassName::areSame($class, NoResourceTenant::class);
+        $class      = $configured ? $class : NoResourceTenant::class;
 
         $declared = static fn (Application $app): DeclaredResourceTenant => new DeclaredResourceTenant($app->make($class));
 
-        $this->seams()->bindDefault(ResourceTenantResolver::class, $declared, $class !== NoResourceTenant::class);
+        $this->seams()->bindDefault(ResourceTenantResolver::class, $declared, $configured, $key, $class);
     }
 
     /**
@@ -381,7 +394,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->seams()->bindDefault(PolicyStore::class, $class, true);
+        $this->seams()->bindDefault(PolicyStore::class, $class, true, 'authorization.policy_store');
     }
 
     /**
@@ -427,7 +440,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
     {
         $this->seams()->bindDefault(PolicyResolver::class, static fn (Application $app): PolicyResolver => new DefaultPolicyResolver(
             store: $app->bound(PolicyStore::class) ? $app->make(PolicyStore::class) : null,
-        ));
+        ), builds: DefaultPolicyResolver::class);
     }
 
     /**
@@ -480,7 +493,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             $seams->bindDefault($contract, $concrete);
         }
 
-        $this->app->singletonIf(ContextKeyCatalogue::class, ContextBindings::catalogue(...));
+        $seams->bindSharedIf(ContextKeyCatalogue::class, ContextBindings::catalogue(...), DeclaredContextKeyCatalogue::class);
         $this->app->scoped(CheckContextFactory::class, ContextBindings::factory(...));
     }
 
@@ -543,13 +556,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         /** @var \Illuminate\Routing\Router $router */
         $router = $this->app->make('router');
 
-        $aliases = [
-            'role'       => RequireRole::class,
-            'permission' => RequirePermission::class,
-            'authorize'  => AuthorizeAction::class,
-        ];
-
-        foreach (\array_diff_key($aliases, $router->getMiddleware()) as $alias => $middleware) {
+        foreach (\array_diff_key(self::MIDDLEWARE, $router->getMiddleware()) as $alias => $middleware) {
             $router->aliasMiddleware($alias, $middleware);
         }
 

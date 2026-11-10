@@ -4,13 +4,16 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Config\NamedEntryConfigValidator;
+use SineMacula\Laravel\Authorization\Diagnostics\ContainerState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use Tests\Concerns\ReadsRefusedSettings;
 use Tests\TestCase;
 
 /**
@@ -31,6 +34,11 @@ use Tests\TestCase;
 #[CoversClass(ConfigValidator::class)]
 final class NamedEntryConfigValidatorTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
+    /** @var string Why a log channel named `missing` is refused. */
+    private const string NO_CHANNEL = '\'missing\' names no entry of logging.channels.';
+
     /**
      * Null and an empty name select the default connection, which is
      * configured, and a configured connection may be named.
@@ -247,6 +255,69 @@ final class NamedEntryConfigValidatorTest extends TestCase
         NamedEntryConfigValidator::queueConnection('anything', $container);
 
         $this->assertRefused(static fn () => NamedEntryConfigValidator::logChannel(5, $container), 'authorization.log_channel', 'expected a non-empty name, got 5 (int).');
+    }
+
+    /**
+     * The configuration repository held as an instance is read as held, so
+     * nothing is resolved; one bound some other way is resolved, as in
+     * library-mode embedding.
+     *
+     * @return void
+     */
+    public function testTheConfigurationIsReadAsHeld(): void
+    {
+        $held      = new Container;
+        $resolving = new \ArrayObject;
+
+        $held->instance('config', new Repository(['logging' => ['channels' => ['audit' => []]]]));
+        $held->beforeResolving('config', static function () use ($resolving): void {
+            $resolving->append('config');
+        });
+
+        NamedEntryConfigValidator::logChannel('audit', $held);
+
+        self::assertCount(0, $resolving);
+        self::assertFalse(ContainerState::wasResolved($held, 'config'));
+        $this->assertRefused(static fn () => NamedEntryConfigValidator::logChannel('missing', $held), 'authorization.log_channel', self::NO_CHANNEL);
+
+        $bound = new Container;
+
+        $bound->singleton('config', static fn (): ConfigRepository => new Repository(['logging' => ['channels' => ['audit' => []]]]));
+
+        NamedEntryConfigValidator::logChannel('audit', $bound);
+
+        self::assertTrue(ContainerState::wasResolved($bound, 'config'));
+        $this->assertRefused(static fn () => NamedEntryConfigValidator::logChannel('missing', $bound), 'authorization.log_channel', self::NO_CHANNEL);
+    }
+
+    /**
+     * The guard is checked on its own, and each refusal of a name is
+     * structured, never holding the name.
+     *
+     * @return void
+     */
+    public function testEachRefusalIsStructured(): void
+    {
+        $app = $this->container();
+
+        NamedEntryConfigValidator::guard('web', $app);
+
+        self::assertSame(
+            ['authorization.defaults.guard', 'unknown_name', 'the name of an entry of auth.guards', 'string'],
+            self::refusedSetting(static fn () => NamedEntryConfigValidator::guard('nowhere', $app)),
+        );
+        self::assertSame(
+            ['authorization.defaults.guard', 'invalid_type', 'a non-empty name', 'int'],
+            self::refusedSetting(static fn () => NamedEntryConfigValidator::guard(3, $app)),
+        );
+        self::assertSame(
+            ['authorization.connection', 'invalid_type', 'a database connection name or null', 'array'],
+            self::refusedSetting(static fn () => NamedEntryConfigValidator::connection([], $app)),
+        );
+        self::assertSame(
+            ['authorization.connection', 'unknown_name', 'the name of an entry of database.connections', 'string'],
+            self::refusedSetting(static fn () => NamedEntryConfigValidator::connection('nowhere', $app)),
+        );
     }
 
     /**

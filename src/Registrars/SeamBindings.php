@@ -7,8 +7,12 @@ namespace SineMacula\Laravel\Authorization\Registrars;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Foundation\Application as FoundationApplication;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
+use SineMacula\Laravel\Authorization\Diagnostics\BindingRegistry;
+use SineMacula\Laravel\Authorization\Diagnostics\ContainerState;
+use SineMacula\Laravel\Authorization\Diagnostics\SeamRecord;
 use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
 use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
+use SineMacula\Laravel\Authorization\Support\ClassName;
 
 /**
  * Bind the seams an application may bind itself: the contracts the package
@@ -46,7 +50,14 @@ use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
  * as when nothing is configured, a binding made before the package registers
  * stands, and the application's boot refuses the value, naming the setting.
  * Telling such a value apart only checks its type and that the class exists and
- * implements the contract, so it resolves nothing.
+ * implements the contract, so it resolves nothing. A value naming the default
+ * class itself, whatever its case and with or without a leading backslash,
+ * names the default, as PHP reads one class by each such name.
+ *
+ * Before binding a contract, what was bound to it already is recorded, with the
+ * closure bound and the key it forwards to, in the registry the configuration
+ * report reads (see `Diagnostics\BindingRegistry`), so the report can tell the
+ * package's binding from one made before it registered and one made after.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -86,9 +97,10 @@ final readonly class SeamBindings
      */
     public function bindConfigured(string $contract, string $key, string $default): void
     {
-        $class = $this->configuredClass($key, $contract, $default);
+        $class      = $this->configuredClass($key, $contract, $default);
+        $configured = !ClassName::areSame($class, $default);
 
-        $this->bindDefault($contract, $class, $class !== $default);
+        $this->bindDefault($contract, $configured ? $class : $default, $configured, $key);
     }
 
     /**
@@ -130,25 +142,52 @@ final readonly class SeamBindings
      * @param  class-string  $contract
      * @param  class-string|\Closure(\Illuminate\Contracts\Foundation\Application): object  $concrete
      * @param  bool  $configured
-     * @return void
+     * @param  string|null  $configKey
+     * @param  class-string|null  $builds
+     * @return \SineMacula\Laravel\Authorization\Diagnostics\SeamRecord
      */
-    public function bindDefault(string $contract, \Closure|string $concrete, bool $configured = false): void
+    public function bindDefault(string $contract, \Closure|string $concrete, bool $configured = false, ?string $configKey = null, ?string $builds = null): SeamRecord
     {
         $default = self::DEFAULT_BINDING_PREFIX . $contract;
-
-        $this->app->scoped($default, $concrete);
-
-        if (!$configured) {
-            $this->app->bindIf($contract, ($this->resolving)($default));
-
-            return;
-        }
 
         // The application's own choice is bound through a closure this class
         // declares, not the provider, so neither the provider's
         // isPackageDefault() nor a sibling reading the binding table takes it
         // for the package's default and replaces it.
-        $this->bindOverEarlierBindings($contract, static fn (Application $app): mixed => $app->make($default));
+        $binding = $configured
+            ? static fn (Application $app): mixed => $app->make($default)
+            : ($this->resolving)($default);
+
+        $record = new SeamRecord($contract, $binding, $default, \is_string($concrete) ? $concrete : $builds, $configKey, $configured, ...$this->earlier($contract));
+
+        $this->record($record);
+
+        $this->app->scoped($default, $concrete);
+
+        if ($configured) {
+            $this->bindOverEarlierBindings($contract, $binding);
+        } else {
+            $this->app->bindIf($contract, $binding);
+        }
+
+        return $record;
+    }
+
+    /**
+     * Bind a contract an application may bind itself to the closure, built once
+     * for as long as the application runs, when nothing is bound to it yet
+     * (N103), recording the binding as the defaults are.
+     *
+     * @param  class-string  $contract
+     * @param  \Closure(\Illuminate\Contracts\Foundation\Application): object  $concrete
+     * @param  class-string  $builds
+     * @return void
+     */
+    public function bindSharedIf(string $contract, \Closure $concrete, string $builds): void
+    {
+        $this->record(new SeamRecord($contract, $concrete, null, $builds, null, false, ...$this->earlier($contract)));
+
+        $this->app->singletonIf($contract, $concrete);
     }
 
     /**
@@ -177,9 +216,8 @@ final readonly class SeamBindings
      */
     public function bindGrantHooks(): void
     {
-        $this->bindDefault(GrantHook::class, GrantHooks::class);
-
-        $hooks = $this->app['config']->get('authorization.grant_hooks', []);
+        $record = $this->bindDefault(GrantHook::class, GrantHooks::class);
+        $hooks  = $this->app['config']->get('authorization.grant_hooks', []);
 
         // A value that is not a list of hooks is refused as the application
         // boots, so none is listed until then.
@@ -187,7 +225,54 @@ final readonly class SeamBindings
             return;
         }
 
+        $held = ContainerState::instance($this->app, GrantHook::class);
+
         $this->app->extend(GrantHook::class, ListedGrantHooks::around(...));
+
+        // Laravel applies the extender at once to an instance it holds and
+        // keeps no trace of it, so the decorator that replaced the instance is
+        // recorded, for the report to tell it from a later binding.
+        $wrapper = ContainerState::instance($this->app, GrantHook::class);
+
+        if ($wrapper === $held) {
+            return;
+        }
+
+        $this->record($record->wrappedBy($wrapper));
+    }
+
+    /**
+     * Keep the record of a seam in the application's registry.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Diagnostics\SeamRecord  $record
+     * @return void
+     */
+    private function record(SeamRecord $record): void
+    {
+        BindingRegistry::of($this->app)->record($record);
+    }
+
+    /**
+     * Return what the contract was bound to before the package binds it: the
+     * binding's closure and the instance held, either of which the report
+     * matches with what supplies the contract when it runs (see
+     * `CurrentBinding`), the abstract it is an alias of, and the deferred
+     * provider that provides it, each null when there is none. Nothing is
+     * built.
+     *
+     * @param  class-string  $contract
+     * @return array{earlier: (\Closure(mixed ...): mixed)|null, earlierInstance: object|null, earlierAlias: string|null, deferredProvider: string|null}
+     */
+    private function earlier(string $contract): array
+    {
+        $deferred = $this->app instanceof FoundationApplication ? $this->app->getDeferredServices()[$contract] ?? null : null;
+
+        return [
+            'earlier'          => ContainerState::concrete($this->app, $contract),
+            'earlierInstance'  => ContainerState::instance($this->app, $contract),
+            'earlierAlias'     => ContainerState::alias($this->app, $contract),
+            'deferredProvider' => \is_string($deferred) ? $deferred : null,
+        ];
     }
 
     /**

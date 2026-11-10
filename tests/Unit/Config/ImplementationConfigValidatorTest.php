@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Config\ImplementationConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use Tests\Concerns\ReadsRefusedSettings;
 use Tests\Feature\Stubs\StubTenantTree;
 
 /**
@@ -25,6 +26,8 @@ use Tests\Feature\Stubs\StubTenantTree;
 #[CoversClass(ImplementationConfigValidator::class)]
 final class ImplementationConfigValidatorTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /** @var string The key the tests validate under. */
     private const string KEY = 'authorization.example';
 
@@ -78,5 +81,24 @@ final class ImplementationConfigValidatorTest extends TestCase
             self::assertStringContainsString(self::KEY, $exception->getMessage());
             self::assertStringContainsString($reason, $exception->getMessage());
         }
+    }
+
+    /**
+     * Each refusal states its code, what the setting expects, naming the
+     * contract, and the type found.
+     *
+     * @return void
+     */
+    public function testEachRefusalIsStructured(): void
+    {
+        $check = static fn (mixed $value): \Closure => static function () use ($value): void {
+            ImplementationConfigValidator::validate('authorization.tenant_tree', $value, TenantTree::class, 'required');
+        };
+        $expected = 'the name of a class implementing ' . TenantTree::class;
+
+        self::assertSame(['authorization.tenant_tree', 'required', $expected, 'null'], self::refusedSetting($check(null)));
+        self::assertSame(['authorization.tenant_tree', 'invalid_type', $expected, 'int'], self::refusedSetting($check(3)));
+        self::assertSame(['authorization.tenant_tree', 'unknown_class', $expected, 'string'], self::refusedSetting($check('Missing\Tree')));
+        self::assertSame(['authorization.tenant_tree', 'not_implemented', $expected, 'string'], self::refusedSetting($check(\stdClass::class)));
     }
 }

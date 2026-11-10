@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Config\UsageConfigValidator;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use Tests\Concerns\ReadsRefusedSettings;
 use Tests\TestCase;
 
 /**
@@ -22,6 +23,8 @@ use Tests\TestCase;
 #[CoversClass(UsageConfigValidator::class)]
 final class UsageConfigValidatorTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /**
      * Every setting is optional, each accepts its least value, and a whole
      * number is accepted as the environment gives one too.
@@ -105,5 +108,28 @@ final class UsageConfigValidatorTest extends TestCase
             self::assertStringContainsString($key, $exception->getMessage());
             self::assertStringContainsString($message, $exception->getMessage());
         }
+    }
+
+    /**
+     * Each refusal of the usage block is structured: a value of the wrong type
+     * told from one out of range.
+     *
+     * @return void
+     */
+    public function testEachRefusalIsStructured(): void
+    {
+        self::assertSame(['authorization.usage.enabled', 'invalid_type', 'true or false', 'string'], self::refusedSetting(static fn () => UsageConfigValidator::enabled('yes')));
+        self::assertSame(
+            ['authorization.usage.interval', 'out_of_range', 'a whole number of at least 60', 'int'],
+            self::refusedSetting(static fn () => UsageConfigValidator::whole('interval', 1)),
+        );
+        self::assertSame(
+            ['authorization.usage.batch', 'invalid_type', 'a whole number of at least 1', 'string'],
+            self::refusedSetting(static fn () => UsageConfigValidator::whole('batch', 'x')),
+        );
+        self::assertSame(
+            ['authorization.usage.queue', 'invalid_type', 'a non-empty string or null', 'string'],
+            self::refusedSetting(static fn () => UsageConfigValidator::name('queue', '')),
+        );
     }
 }

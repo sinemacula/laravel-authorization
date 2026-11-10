@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use Tests\Concerns\ReadsRefusedSettings;
 use Tests\Feature\Stubs\ContributingAuthenticationContext;
 use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\ReservedContextSource;
@@ -31,6 +32,8 @@ use Tests\TestCase;
 #[CoversClass(ContextConfigValidator::class)]
 final class ContextConfigValidatorTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /** @var string The reason a namespace that cannot map its keys is refused for. */
     private const string NOT_A_TYPE_MAP = 'each namespace must map key paths to the names of their types, such as [\'tenant\' => [\'plan\' => \'string\']].';
 
@@ -294,5 +297,36 @@ final class ContextConfigValidatorTest extends TestCase
         ContextConfigValidator::validate([], $this->container());
 
         $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * The checks of the values' shape build nothing: neither a source nor the
+     * authentication context is resolved; the check of the namespaces does, and
+     * each refusal is structured.
+     *
+     * @return void
+     */
+    public function testTheShapeIsCheckedWithoutBuilding(): void
+    {
+        $app = $this->container();
+
+        ContextConfigValidator::keys(['tenant' => ['plan' => 'string']]);
+        ContextConfigValidator::source(0, PlanContextSource::class);
+
+        self::assertFalse($app->resolved(PlanContextSource::class));
+        self::assertSame(
+            ['authorization.context.keys', 'invalid_value', 'a namespace mapped to key paths and the names of their types', 'int'],
+            self::refusedSetting(static fn () => ContextConfigValidator::keyEntry('tenant', 3)),
+        );
+        self::assertSame('invalid_value', self::refusedSetting(static fn () => ContextConfigValidator::keys(['tenant' => ['plan' => 'no-such-type']]))[1]);
+        self::assertSame(
+            ['authorization.context.sources.2', 'not_implemented', 'the name of a class implementing ' . ContextSource::class, 'string'],
+            self::refusedSetting(static fn () => ContextConfigValidator::source(2, \stdClass::class)),
+        );
+
+        ContextConfigValidator::namespaces([PlanContextSource::class], $app);
+
+        self::assertTrue($app->resolved(PlanContextSource::class));
+        self::assertSame('duplicate', self::refusedSetting(static fn () => ContextConfigValidator::namespaces([PlanContextSource::class, PlanContextSource::class], $app))[1]);
     }
 }

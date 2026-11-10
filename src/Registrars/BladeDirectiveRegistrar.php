@@ -39,6 +39,12 @@ use SineMacula\Laravel\Authorization\Support\BladeHelpers;
  */
 final readonly class BladeDirectiveRegistrar
 {
+    /** @var list<string> The conditional directives registered, each with its `endunless` pair. */
+    public const array DIRECTIVES = [
+        'role', 'anyrole', 'allroles', 'hasrole', 'hasanyrole', 'hasallroles',
+        'permission', 'anypermission', 'allpermissions', 'haspermission', 'hasanypermission', 'hasallpermissions',
+    ];
+
     /**
      * Create a new registrar instance.
      *
