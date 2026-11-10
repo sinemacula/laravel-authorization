@@ -351,6 +351,11 @@ lookup by name under a guard that does not exist finds only the roles and permis
 channel is checked at boot only, by design: a warning is written from inside error handling, and writing one never stops
 a check, so a channel changed after boot to one that does not exist is written to as the default channel.
 
+A suite package that reads these names reads them the way the package does, through `Config\TableNames::get('roles')`,
+`Config\ModelClasses::get('role')` and `Config\DefaultGuard::get()`, each taking an optional configuration repository.
+A name the configuration leaves out is the package's own; one that is not a non-empty string is refused as above. The
+three are part of the package's stable API.
+
 ## Usage
 
 Give your user model the contract and the trait:

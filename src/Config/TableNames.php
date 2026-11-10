@@ -19,10 +19,14 @@ use Illuminate\Contracts\Config\Repository;
  * and type checks, since every model reads its table when it is built and the
  * hot paths read theirs on every query.
  *
+ * Part of the stable API suite packages may use to read the package's settings
+ * the way the package itself does; breaking changes require a major version
+ * bump.
+ *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
- *
- * @internal
  */
 final class TableNames
 {
