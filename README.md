@@ -3262,17 +3262,16 @@ job; past that it drops the oldest, and the next job names the earliest bucket d
 extend the coverage, so the routes whose use was dropped read `unknown` rather than `unused`. A queue that refuses a
 job is written to the log channel, and its observations are dropped and named by the next job in the same way.
 
-**The tables and pruning.** The migration `2026_11_09_000001_create_grant_usage_tables` adds
-`authorization_grant_usage`, one row for each grant route with the start of the last bucket it was observed in and the
-creation of the grant it was observed through, keyed by a stable digest of its source kind, target, grantee, tenant,
-application and role path (the roles it runs through, as in `role_path`), and `authorization_usage_coverage`, the
-periods tracking was on, `[from, until)` in UTC. Both honour the configured table names (`tables.grant_usage`,
-`tables.usage_coverage`) and connection. A write never moves a route's last use backwards, so a job delivered twice or
-out of order changes nothing. The routes are written in the order of their keys, a hundred to a transaction, with no
-row read under a lock, so two workers take their locks in the same order; a transaction that deadlocks or waits too
-long for a lock is tried again, three times in all, and a job that still fails extends no coverage.
-`authorization:usage-prune` removes the usage of every route whose stored grant no longer exists and the coverage older
-than `retention` days.
+**The tables and pruning.** The migration `2026_11_09_000001_create_grant_usage_tables` adds `grant_usage`, one row for
+each grant route with the start of the last bucket it was observed in and the creation of the grant it was observed
+through, keyed by a stable digest of its source kind, target, grantee, tenant, application and role path (the roles it
+runs through, as in `role_path`), and `usage_coverage`, the periods tracking was on, `[from, until)` in UTC. Both honour
+the configured table names (`tables.grant_usage`, `tables.usage_coverage`) and connection. A write never moves a route's
+last use backwards, so a job delivered twice or out of order changes nothing. The routes are written in the order of
+their keys, a hundred to a transaction, with no row read under a lock, so two workers take their locks in the same
+order; a transaction that deadlocks or waits too long for a lock is tried again, three times in all, and a job that
+still fails extends no coverage. `authorization:usage-prune` removes the usage of every route whose stored grant no
+longer exists and the coverage older than `retention` days.
 
 **The heartbeat.** Each recording job extends the current coverage period, or opens a new one when the gap since the
 last one ended exceeds two intervals. A site that is tracking but quiet sends no jobs, so schedule the heartbeat at

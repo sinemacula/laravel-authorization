@@ -42,12 +42,12 @@ final class UsagePruner
         $usage = 0;
 
         foreach (GrantTarget::cases() as $kind) {
-            $orphans = self::orphansOf(self::table('grant_usage', 'authorization_grant_usage'), $kind);
+            $orphans = self::orphansOf(self::table('grant_usage', 'grant_usage'), $kind);
 
             $usage += $pretend ? $orphans->count() : $orphans->delete();
         }
 
-        $expired = self::table('usage_coverage', 'authorization_usage_coverage')
+        $expired = self::table('usage_coverage', 'usage_coverage')
             ->where('covered_until', '<', Carbon::now('UTC')->subDays($retention)->format('Y-m-d H:i:s'));
 
         return [$usage, $pretend ? $expired->count() : $expired->delete()];

@@ -86,9 +86,9 @@ final class UsagePrunerTest extends TestCase
         (new DatabaseGrantUsageStore)->record(UsageBatch::of([...$kept, ...$gone], Carbon::now()->getTimestamp()));
 
         self::assertSame([4, 0], UsagePruner::prune(400, true));
-        self::assertSame(7, DB::table('authorization_grant_usage')->count());
+        self::assertSame(7, DB::table('grant_usage')->count());
         self::assertSame([4, 0], UsagePruner::prune(400));
-        self::assertEqualsCanonicalizing(\array_column($kept, 'grant_key'), DB::table('authorization_grant_usage')->pluck('grant_key')->all());
+        self::assertEqualsCanonicalizing(\array_column($kept, 'grant_key'), DB::table('grant_usage')->pluck('grant_key')->all());
     }
 
     /**
@@ -108,7 +108,7 @@ final class UsagePrunerTest extends TestCase
 
         self::assertSame([0, 1], UsagePruner::prune(30, true));
         self::assertSame([0, 1], UsagePruner::prune(30));
-        $from = DB::table('authorization_usage_coverage')->pluck('covered_from')->all();
+        $from = DB::table('usage_coverage')->pluck('covered_from')->all();
 
         self::assertSame(['2026-11-01 00:00:00'], \array_map(static fn (mixed $value): string => \substr(\is_string($value) ? $value : '', 0, 19), $from));
     }
@@ -125,8 +125,8 @@ final class UsagePrunerTest extends TestCase
         foreach (self::drivers() as $driver) {
             foreach (GrantTarget::cases() as $kind) {
                 $key      = self::wrappedOn($driver, $kind->table() . '.' . $kind->column());
-                $expected = ($driver === 'pgsql' ? "cast({$key} as text)" : $key) . ' = ' . self::wrappedOn($driver, 'authorization_grant_usage.grant_id');
-                $sql      = UsagePruner::orphansOf(self::queryOn($driver, 'authorization_grant_usage'), $kind)->toSql();
+                $expected = ($driver === 'pgsql' ? "cast({$key} as text)" : $key) . ' = ' . self::wrappedOn($driver, 'grant_usage.grant_id');
+                $sql      = UsagePruner::orphansOf(self::queryOn($driver, 'grant_usage'), $kind)->toSql();
 
                 self::assertStringContainsString($expected, $sql, $driver);
                 self::assertStringContainsString('not exists', $sql, $driver);

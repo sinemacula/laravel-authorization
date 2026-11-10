@@ -57,7 +57,7 @@ final class DatabaseGrantUsageStoreTest extends TestCase
         self::assertSame(self::TEN, $found['a']->lastObservedAt->getTimestamp());
         self::assertSame(self::TEN - 600, $found['a']->grantCreatedAt?->getTimestamp());
 
-        $row = (array) DB::table('authorization_grant_usage')->sole();
+        $row = (array) DB::table('grant_usage')->sole();
 
         $columns = ['grant_source', 'grant_id', 'authorizable_type', 'authorizable_id', 'tenant_type', 'tenant_id', 'application'];
 
@@ -86,7 +86,7 @@ final class DatabaseGrantUsageStoreTest extends TestCase
         $store->record(UsageBatch::of([self::observation('a', null, self::TEN + 7200)], self::TEN + 7300));
 
         self::assertSame(self::TEN + 7200, $store->lastObserved(['a'])['a']->lastObservedAt->getTimestamp());
-        self::assertSame(1, DB::table('authorization_grant_usage')->count());
+        self::assertSame(1, DB::table('grant_usage')->count());
     }
 
     /**
@@ -210,7 +210,7 @@ final class DatabaseGrantUsageStoreTest extends TestCase
         });
 
         self::assertSame([['insert', ['a', 'c']]], $writes);
-        self::assertSame(3, DB::table('authorization_grant_usage')->count());
+        self::assertSame(3, DB::table('grant_usage')->count());
     }
 
     /**
@@ -233,7 +233,7 @@ final class DatabaseGrantUsageStoreTest extends TestCase
         $store->record(UsageBatch::of([self::observation('b', null, self::TEN)], self::TEN + 7300));
 
         self::assertSame(self::TEN + 7200, $store->lastObserved(['b'])['b']->lastObservedAt->getTimestamp());
-        self::assertSame(2, DB::table('authorization_grant_usage')->count());
+        self::assertSame(2, DB::table('grant_usage')->count());
     }
 
     /**
@@ -254,8 +254,8 @@ final class DatabaseGrantUsageStoreTest extends TestCase
         self::assertSame(2, self::failingInserts(1, static function () use ($store): void {
             $store->record(UsageBatch::of([self::observation('a', null, self::TEN)], self::TEN + 100));
         }));
-        self::assertSame(1, self::authorizationConnection()->table('authorization_grant_usage')->count());
-        self::assertSame(1, self::authorizationConnection()->table('authorization_usage_coverage')->count());
+        self::assertSame(1, self::authorizationConnection()->table('grant_usage')->count());
+        self::assertSame(1, self::authorizationConnection()->table('usage_coverage')->count());
 
         try {
             self::failingInserts(3, static function () use ($store): void {
@@ -310,10 +310,10 @@ final class DatabaseGrantUsageStoreTest extends TestCase
      */
     private static function cover(array $periods): void
     {
-        DB::table('authorization_usage_coverage')->delete();
+        DB::table('usage_coverage')->delete();
 
         foreach ($periods as [$from, $until]) {
-            DB::table('authorization_usage_coverage')->insert([
+            DB::table('usage_coverage')->insert([
                 'covered_from'  => self::at($from)->format('Y-m-d H:i:s'),
                 'covered_until' => self::at($until)->format('Y-m-d H:i:s'),
             ]);
@@ -343,13 +343,13 @@ final class DatabaseGrantUsageStoreTest extends TestCase
         $isRaced = false;
 
         DB::listen(static function (QueryExecuted $query) use (&$isRaced, $observation): void {
-            if ($isRaced || !\str_starts_with($query->sql, 'select') || !\str_contains($query->sql, 'authorization_grant_usage')) {
+            if ($isRaced || !\str_starts_with($query->sql, 'select') || !\str_contains($query->sql, 'grant_usage')) {
                 return;
             }
 
             $isRaced = true;
 
-            DB::table('authorization_grant_usage')->insert([
+            DB::table('grant_usage')->insert([
                 ...\array_diff_key($observation, ['grant_created_at' => true, 'last_observed_at' => true]),
                 'grant_created_at' => null,
                 'last_observed_at' => self::at($observation['last_observed_at'])->format('Y-m-d H:i:s'),
@@ -371,7 +371,7 @@ final class DatabaseGrantUsageStoreTest extends TestCase
         $tried = 0;
 
         DB::listen(static function (QueryExecuted $query) use (&$tried, $failures): void {
-            if ($query->connectionName !== 'authorization' || !\str_starts_with($query->sql, 'insert') || !\str_contains($query->sql, 'authorization_grant_usage')) {
+            if ($query->connectionName !== 'authorization' || !\str_starts_with($query->sql, 'insert') || !\str_contains($query->sql, 'grant_usage')) {
                 return;
             }
 
@@ -401,7 +401,7 @@ final class DatabaseGrantUsageStoreTest extends TestCase
         $writes = [];
 
         DB::listen(static function (QueryExecuted $query) use (&$writes): void {
-            if (\str_starts_with($query->sql, 'select') || !\str_contains($query->sql, 'authorization_grant_usage')) {
+            if (\str_starts_with($query->sql, 'select') || !\str_contains($query->sql, 'grant_usage')) {
                 return;
             }
 
