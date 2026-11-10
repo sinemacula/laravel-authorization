@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Services\Support;
 
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
@@ -293,8 +294,7 @@ final class GrantChanges
      */
     private static function boundaries(Reference $grantee): array
     {
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_boundaries', 'authorizable_boundaries');
+        $table = TableNames::get('authorizable_boundaries');
 
         return BoundaryService::removals($grantee, (new BoundaryTable(AuthorizationConnection::connection(), $table, $grantee))->everywhere());
     }

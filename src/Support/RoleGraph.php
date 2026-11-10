@@ -5,9 +5,11 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Support\Carbon;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
-use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
@@ -380,10 +382,9 @@ final class RoleGraph
     private static function permissionQuery(array $roleKeys): array
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
-        $class = config('authorization.models.permission', Permission::class);
+        $class = ModelClasses::get('permission');
 
-        /** @var string $pivot */
-        $pivot = config('authorization.tables.role_permissions', 'role_permissions');
+        $pivot = TableNames::get('role_permissions');
         $model = new $class;
         $query = $class::query()
             ->useWritePdo()
@@ -488,8 +489,7 @@ final class RoleGraph
      */
     private static function isHierarchyEnabled(): bool
     {
-        /** @var bool */
-        return config('authorization.hierarchy.enabled', true);
+        return SwitchConfigValidator::isEnabled('hierarchy');
     }
 
     /**
@@ -500,6 +500,6 @@ final class RoleGraph
     private static function roleClass(): string
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> */
-        return config('authorization.models.role', Role::class);
+        return ModelClasses::get('role');
     }
 }

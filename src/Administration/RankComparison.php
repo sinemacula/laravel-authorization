@@ -7,10 +7,12 @@ namespace SineMacula\Laravel\Authorization\Administration;
 use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
-use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
@@ -92,8 +94,7 @@ final class RankComparison
      */
     public static function isEnabled(): bool
     {
-        /** @var bool */
-        return config('authorization.rank.enabled', true);
+        return SwitchConfigValidator::isEnabled('rank');
     }
 
     /**
@@ -185,10 +186,9 @@ final class RankComparison
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class = config('authorization.models.role', Role::class);
+        $class = ModelClasses::get('role');
 
-        /** @var string $pivot */
-        $pivot = config('authorization.tables.authorizable_roles', 'authorizable_roles');
+        $pivot = TableNames::get('authorizable_roles');
         $role  = new $class;
         $query = $class::query()->withoutGlobalScopes()->useWritePdo()->join($pivot, $pivot . '.role_id', '=', $role->getQualifiedKeyName())
             ->where(static function (Builder $query) use ($pivot, $holders): void {

@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
@@ -283,8 +284,7 @@ final readonly class GrantPruner
      */
     private static function expiredRolePermissions(): Builder
     {
-        /** @var string $table */
-        $table = config('authorization.tables.role_permissions', 'role_permissions');
+        $table = TableNames::get('role_permissions');
 
         return AuthorizationConnection::connection()->table($table)->where('expires_at', '<=', Carbon::now('UTC'));
     }
@@ -460,8 +460,7 @@ final readonly class GrantPruner
      */
     private static function table(string $name): string
     {
-        /** @var string */
-        return config('authorization.tables.' . $name, $name);
+        return TableNames::get($name);
     }
 
     /**

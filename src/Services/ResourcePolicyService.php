@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
@@ -376,7 +378,7 @@ final class ResourcePolicyService
             ->all();
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
+        $class = ModelClasses::get('policy');
 
         /** @var array<string, \SineMacula\Laravel\Authorization\Models\Policy> $policies */
         $policies    = $class::query()->withoutGlobalScopes()->useWritePdo()->whereKey(\array_column($rows, 'policy_id'))->get()->getDictionary();
@@ -421,8 +423,7 @@ final class ResourcePolicyService
      */
     private static function tableName(): string
     {
-        /** @var string */
-        return config('authorization.tables.resource_policies', 'resource_policies');
+        return TableNames::get('resource_policies');
     }
 
     /**

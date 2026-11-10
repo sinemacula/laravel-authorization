@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
+
 /**
  * The size limits of a policy document (AUTHZ-6.10), so a policy cannot be made
  * expensive to store or evaluate.
@@ -26,6 +28,9 @@ final readonly class PolicyLimits
 {
     /** @var list<string> The keys of `authorization.policies.limits`. */
     public const array KEYS = ['document_bytes', 'statements', 'conditions', 'pattern_length'];
+
+    /** @var string The config key of the limits. */
+    public const string KEY = 'authorization.policies.limits';
 
     /** @var list<string> The statement keys that hold action or resource patterns. */
     private const array PATTERN_KEYS = ['actions', 'not_actions', 'resources', 'not_resources'];
@@ -55,14 +60,17 @@ final readonly class PolicyLimits
 
     /**
      * Read the limits from `authorization.policies.limits`, taking the default
-     * of each one that is not set.
+     * of each one that is not set, and refusing a limit, or a block holding
+     * them, that boot would refuse, so a limit changed after boot is never read
+     * as its default.
      *
      * @return self
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function fromConfig(): self
     {
-        $limits = config('authorization.policies.limits', []);
-        $limits = \is_array($limits) ? $limits : [];
+        $limits = ConfigValue::block('policies.limits');
 
         $defaults = new self;
 
@@ -228,18 +236,18 @@ final readonly class PolicyLimits
     }
 
     /**
-     * Return the configured limit, or the default when it is not a whole number
-     * of at least one.
+     * Return the configured limit, or the default when it is left out, refusing
+     * one that is not a whole number of at least one.
      *
      * @param  array<array-key, mixed>  $limits
      * @param  string  $key
      * @param  int  $default
      * @return int
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     private static function limitOf(array $limits, string $key, int $default): int
     {
-        $limit = $limits[$key] ?? null;
-
-        return \is_int($limit) && $limit >= 1 ? $limit : $default;
+        return ConfigValue::integerOf(self::KEY . ".{$key}", \array_key_exists($key, $limits) ? $limits[$key] : $default, 1);
     }
 }

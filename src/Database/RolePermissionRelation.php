@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Database;
 
 use Illuminate\Contracts\Database\Query\Builder;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 
 /**
  * What the relation between a role and the permissions it carries reads, alike
@@ -28,8 +29,7 @@ final class RolePermissionRelation
      */
     public static function table(): string
     {
-        /** @var string */
-        return config('authorization.tables.role_permissions', 'role_permissions');
+        return TableNames::get('role_permissions');
     }
 
     /**

@@ -6,8 +6,9 @@ namespace SineMacula\Laravel\Authorization\Query;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
-use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Subject;
@@ -92,7 +93,7 @@ final class ScopeAnchors
         $roles    = \array_keys(RoleGraph::reach(self::keysOf('authorizable_roles', 'role_id', $isHeld)));
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
-        $roleClass = config('authorization.models.role', Role::class);
+        $roleClass = ModelClasses::get('role');
         $roleType  = (new $roleClass)->getMorphClass();
 
         $direct      = self::keysOf('authorizable_permissions', 'permission_id', $isHeld);
@@ -224,7 +225,6 @@ final class ScopeAnchors
      */
     private static function table(string $name): string
     {
-        /** @var string */
-        return config("authorization.tables.{$name}", $name);
+        return TableNames::get($name);
     }
 }

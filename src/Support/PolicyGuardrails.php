@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\GuardrailException;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -99,8 +100,7 @@ final class PolicyGuardrails
      */
     private static function scopes(Policy $policy): array
     {
-        /** @var string $table */
-        $table   = config('authorization.tables.guardrails', 'guardrails');
+        $table   = TableNames::get('guardrails');
         $query   = AuthorizationConnection::connection()->table($table)->useWritePdo()->where('policy_id', $policy->getKey())->sharedLock();
         $tenants = [];
 

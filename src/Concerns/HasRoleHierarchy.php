@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
@@ -229,6 +230,6 @@ trait HasRoleHierarchy // @phpstan-ignore trait.unused
     private static function configuredRoleClass(): string
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> */
-        return config('authorization.models.role', Role::class);
+        return ModelClasses::get('role');
     }
 }

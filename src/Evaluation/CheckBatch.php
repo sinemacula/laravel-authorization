@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
@@ -422,15 +423,16 @@ final readonly class CheckBatch
 
     /**
      * Return how many checks a chunk holds: `authorization.bulk.chunk_size`, or
-     * 500 when it sets none.
+     * 500 when it sets none, refusing one that is not a whole number of at
+     * least one.
      *
      * @return positive-int
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     private static function chunkSize(): int
     {
-        $container = Container::getInstance();
-        $size      = $container->bound('config') ? $container->make('config')->get('authorization.bulk.chunk_size', self::CHUNK_SIZE) : self::CHUNK_SIZE;
-
-        return \is_int($size) && $size > 0 ? $size : self::CHUNK_SIZE;
+        /** @var positive-int */
+        return ConfigValue::integer('bulk.chunk_size', self::CHUNK_SIZE, 1);
     }
 }

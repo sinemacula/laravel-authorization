@@ -11,6 +11,7 @@ use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
@@ -637,6 +638,6 @@ final class RoleService
     private static function roleClass(): string
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> */
-        return config('authorization.models.role', Role::class);
+        return ModelClasses::get('role');
     }
 }

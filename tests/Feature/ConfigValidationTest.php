@@ -303,9 +303,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `subject_resolver` rejection message when passed a non-string. Kills
-     * Concat and ConcatOperandRemoval on line 157 (via assertImplementsContract
-     * at line 262).
+     * `subject_resolver` rejection message when passed a non-string names the
+     * type it was given.
      *
      * @return void
      */
@@ -320,9 +319,8 @@ final class ConfigValidationTest extends TestCase
             self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
         } catch (InvalidAuthorizationConfigException $exception) {
             $reason = $exception->getReason();
-            self::assertStringContainsString('expected a class-string', $reason);
-            self::assertStringContainsString('42', $reason);
-            self::assertStringContainsString('int', $reason);
+            self::assertSame('authorization.subject_resolver', $exception->getConfigKey());
+            self::assertSame('expected a class-string, got int.', $reason);
         }
     }
 

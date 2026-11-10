@@ -190,13 +190,17 @@ final class ReviewQueryTest extends TestCase
 
         self::assertSame(25, ReviewQuery::defaultLimit());
 
+        config(['authorization.reviews.limit' => '50']);
+
+        self::assertSame(50, ReviewQuery::defaultLimit());
+
         config(['authorization.reviews.limit' => 0]);
 
         // A review built while the limit is invalid is refused, never bounded
         // by another limit.
         self::assertSame('authorization.reviews.limit', self::refusedLimitKey(static fn (): ReviewQuery => ReviewQuery::grantedBy($actor, ReviewScope::everywhere())));
 
-        foreach ([0, -1, '50', 1.5, null] as $invalid) {
+        foreach ([0, -1, '5e1', ' 50', 1.5, null] as $invalid) {
             config(['authorization.reviews.limit' => $invalid]);
 
             try {

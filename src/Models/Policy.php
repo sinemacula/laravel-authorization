@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
@@ -83,9 +84,7 @@ class Policy extends Model
     {
         parent::__construct($attributes);
 
-        /** @var string $table */
-        $table       = config('authorization.tables.policies', 'policies');
-        $this->table = $table;
+        $this->table = TableNames::get('policies');
     }
 
     /**

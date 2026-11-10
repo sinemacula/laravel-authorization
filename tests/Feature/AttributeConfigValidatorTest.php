@@ -44,8 +44,8 @@ final class AttributeConfigValidatorTest extends TestCase
 
     /**
      * Providers of each kind, registered by morph type, pass; so do two
-     * declaring one key alike, one declaring its types as types and by name, an
-     * empty config and one whose lists of providers are null.
+     * declaring one key alike, one declaring its types as types and by name,
+     * and an empty config, whose lists of providers are left out.
      *
      * @return void
      */
@@ -61,7 +61,6 @@ final class AttributeConfigValidatorTest extends TestCase
         $this->container()->instance(ConflictingResourceAttributes::class, new ConflictingResourceAttributes(['state' => ContextKeyType::STRING, 'count' => 'number']));
 
         AttributeConfigValidator::validate(['resources' => ['post' => ConflictingResourceAttributes::class]], $this->container());
-        AttributeConfigValidator::validate(['resources' => null, 'subjects' => null], $this->container());
 
         $this->expectNotToPerformAssertions();
     }
@@ -74,7 +73,11 @@ final class AttributeConfigValidatorTest extends TestCase
      */
     public static function invalidConfigs(): iterable
     {
-        yield 'not an array' => ['providers', self::ATTRIBUTES, 'expected an array with resources and subjects, got string.'];
+        yield 'not an array' => ['providers', self::ATTRIBUTES, 'expected an array, got \'providers\' (string).'];
+        yield 'null' => [null, self::ATTRIBUTES, 'expected an array, got \'null\' (null).'];
+        yield 'an unknown key' => [['resource' => []], self::ATTRIBUTES . '.resource', 'unknown key \'resource\'; expected one of resources, subjects.'];
+        yield 'null resources' => [['resources' => null], self::ATTRIBUTES . '.resources', 'expected an array of morph types to class names, got null.'];
+        yield 'null subjects' => [['subjects' => null], self::ATTRIBUTES . '.subjects', 'expected an array of morph types to class names, got null.'];
         yield 'resources that are not an array' => [
             ['resources' => RecordingResourceAttributes::class],
             self::ATTRIBUTES . '.resources',

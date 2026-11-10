@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Query;
 
 use Illuminate\Container\Container;
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
@@ -299,14 +300,16 @@ final readonly class QueryAuthorizer
     }
 
     /**
-     * Return the most policies one scope may attach to records of the type.
+     * Return the most policies one scope may attach to records of the type:
+     * `authorization.query_scoping.max_attachments`, or the default when it is
+     * left out, refusing one that is not a whole number of at least one.
      *
      * @return int
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     private static function attachmentLimit(): int
     {
-        $limit = config('authorization.query_scoping.max_attachments', self::MAX_ATTACHMENTS);
-
-        return \is_int($limit) ? $limit : self::MAX_ATTACHMENTS;
+        return ConfigValue::integer('query_scoping.max_attachments', self::MAX_ATTACHMENTS, 1);
     }
 }

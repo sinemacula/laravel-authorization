@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Database\RolePermissionRelation;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
@@ -64,7 +65,7 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     public function permissions(): BelongsToMany
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $permissionModel */
-        $permissionModel = config('authorization.models.permission', Permission::class);
+        $permissionModel = ModelClasses::get('permission');
 
         return $this->belongsToMany($permissionModel, RolePermissionRelation::table(), 'role_id', 'permission_id')
             ->using(RolePermission::class)

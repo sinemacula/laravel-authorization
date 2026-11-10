@@ -7,8 +7,7 @@ namespace SineMacula\Laravel\Authorization\Console;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use SineMacula\Laravel\Authorization\Models\Permission;
-use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
@@ -31,13 +30,13 @@ abstract class ListCatalogueCommand extends Command
     /** @var string The console command's name, which each listing command declares. */
     public const string NAME = '';
 
-    /** @var string The `authorization.models` key of the listed model, which each listing command declares. */
-    protected const string MODEL = '';
+    /** @var 'permission'|'role' The `authorization.models` key of the listed model, which each listing command declares. */
+    protected const string MODEL = 'role';
 
-    /** @var array<string, array{0: class-string<\Illuminate\Database\Eloquent\Model>, 1: string, 2: string}> For each listed model's key: the model listed when none is configured, the relation whose records are counted, also the plural of the related records, and the plural name of the listed records. */
+    /** @var array{permission: array{0: string, 1: string}, role: array{0: string, 1: string}} For each listed model's key: the relation whose records are counted, also the plural of the related records, and the plural name of the listed records. */
     private const array LISTINGS = [
-        'permission' => [Permission::class, 'roles', 'permissions'],
-        'role'       => [Role::class, 'permissions', 'roles'],
+        'permission' => ['roles', 'permissions'],
+        'role'       => ['permissions', 'roles'],
     ];
 
     /**
@@ -49,7 +48,7 @@ abstract class ListCatalogueCommand extends Command
      */
     public function __construct()
     {
-        $this->signature   = static::NAME . ' {--guard= : Filter ' . self::LISTINGS[static::MODEL][2] . ' by guard name}';
+        $this->signature   = static::NAME . ' {--guard= : Filter ' . self::LISTINGS[static::MODEL][1] . ' by guard name}';
         $this->description = 'List every authorization ' . static::MODEL . ', platform-wide and tenant-owned, with its owner';
 
         parent::__construct();
@@ -62,10 +61,10 @@ abstract class ListCatalogueCommand extends Command
      */
     public function handle(): int
     {
-        [$default, $relation, $plural] = self::LISTINGS[static::MODEL];
+        [$relation, $plural] = self::LISTINGS[static::MODEL];
 
         /** @var class-string<\Illuminate\Database\Eloquent\Model> $class */
-        $class = config('authorization.models.' . static::MODEL, $default);
+        $class = ModelClasses::get(static::MODEL);
 
         $query = $class::query()
             ->withoutGlobalScope(TenantScope::class)

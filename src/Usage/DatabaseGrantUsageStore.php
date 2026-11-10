@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Usage;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\GrantUsageStore;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
@@ -400,8 +401,7 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
      */
     private static function usage(): Builder
     {
-        /** @var string $table */
-        $table = config('authorization.tables.grant_usage', 'grant_usage');
+        $table = TableNames::get('grant_usage');
 
         return AuthorizationConnection::connection()->table($table)->useWritePdo();
     }
@@ -413,8 +413,7 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
      */
     private static function periods(): Builder
     {
-        /** @var string $table */
-        $table = config('authorization.tables.usage_coverage', 'usage_coverage');
+        $table = TableNames::get('usage_coverage');
 
         return AuthorizationConnection::connection()->table($table)->useWritePdo();
     }

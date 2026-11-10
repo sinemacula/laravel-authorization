@@ -32,10 +32,10 @@ final class GrantHookConfigValidatorTest extends TestCase
      */
     public function testAListOfHooksIsAccepted(): void
     {
-        GrantHookConfigValidator::validate([]);
-        GrantHookConfigValidator::validate([RecordingGrantHook::class, RefusingGrantHook::class, GrantHooks::class]);
+        $hooks = [RecordingGrantHook::class, RefusingGrantHook::class, GrantHooks::class];
 
-        $this->addToAssertionCount(2);
+        self::assertSame([], GrantHookConfigValidator::validate([]));
+        self::assertSame($hooks, GrantHookConfigValidator::validate($hooks));
     }
 
     /**

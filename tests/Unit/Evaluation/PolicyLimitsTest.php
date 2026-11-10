@@ -8,6 +8,7 @@ use Illuminate\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use Tests\TestCase;
 
 /**
@@ -61,20 +62,30 @@ final class PolicyLimitsTest extends TestCase
     }
 
     /**
-     * A limit that is not set, or is not a whole number of at least one, takes
-     * its default, and so does every limit when the limits are not an array.
+     * A limit that is not set takes its default, and a whole number written as
+     * the environment gives one is read as one; a limit that is not a whole
+     * number of at least one, or limits that are not an array, are refused,
+     * never read as the defaults.
      *
      * @return void
      */
     public function testALimitNotSetTakesItsDefault(): void
     {
-        $this->config()->set('authorization.policies.limits', ['document_bytes' => 0, 'statements' => '5', 'conditions' => 1]);
+        $this->config()->set('authorization.policies.limits', ['statements' => '5', 'conditions' => 1]);
 
-        self::assertEquals(new PolicyLimits(conditions: 1), PolicyLimits::fromConfig());
+        self::assertEquals(new PolicyLimits(statements: 5, conditions: 1), PolicyLimits::fromConfig());
 
-        $this->config()->set('authorization.policies.limits', 'none');
+        foreach ([['document_bytes' => 0], ['pattern_length' => '1e3'], ['statements' => null], 'none'] as $limits) {
+            $this->config()->set('authorization.policies.limits', $limits);
 
-        self::assertEquals(new PolicyLimits, PolicyLimits::fromConfig());
+            try {
+                PolicyLimits::fromConfig();
+
+                self::fail('The limits ' . \var_export($limits, true) . ' were not refused.');
+            } catch (InvalidAuthorizationConfigException $exception) {
+                self::assertStringStartsWith(PolicyLimits::KEY, $exception->getConfigKey());
+            }
+        }
     }
 
     /**

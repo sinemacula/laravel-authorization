@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Query;
 
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Query\Dialects\Dialects;
@@ -75,6 +77,7 @@ final class ScopeClasses
      * @param  \SineMacula\Laravel\Authorization\Query\SchemaInspector  $inspector
      * @return list<\SineMacula\Laravel\Authorization\Query\ScopeClass>
      *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException
      */
     public static function of(ResourceShape $shape, Subject $subject, string $action, SchemaInspector $inspector): array
@@ -253,8 +256,7 @@ final class ScopeClasses
         $dialect    = Dialects::for($connection->getDriverName());
 
         foreach (self::TENANT_TABLES as $name) {
-            /** @var string $table */
-            $table = config("authorization.tables.{$name}", $name);
+            $table = TableNames::get($name);
 
             foreach (['tenant_type', 'tenant_id'] as $column) {
                 if ($dialect === null || !$inspector->isExactCollation($connection, $dialect, $table, $column)) {
@@ -265,17 +267,18 @@ final class ScopeClasses
     }
 
     /**
-     * Return a limit of `authorization.query_scoping`, or its default.
+     * Return a limit of `authorization.query_scoping`, or its default when it
+     * is left out, refusing one that is not a whole number of at least one.
      *
      * @param  string  $key
      * @param  int  $default
      * @return int
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     private static function limit(string $key, int $default): int
     {
-        $limit = config("authorization.query_scoping.{$key}", $default);
-
-        return \is_int($limit) ? $limit : $default;
+        return ConfigValue::integer("query_scoping.{$key}", $default, 1);
     }
 
     /**

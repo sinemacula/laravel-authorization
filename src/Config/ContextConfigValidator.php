@@ -31,6 +31,9 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * name with no `.`, or a name followed by one trailing `*`, or boot fails
  * closed (N104).
  *
+ * The block sets no key but `keys` and `sources` (N116); each is an empty list
+ * when left out, and refused when set to null.
+ *
  * It runs at boot, after every service provider has registered, so the
  * authentication context read is the one bound last, whichever provider bound
  * it (N104).
@@ -42,6 +45,9 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  */
 final class ContextConfigValidator
 {
+    /** @var list<string> The settings the block may set. */
+    public const array SETTINGS = ['keys', 'sources'];
+
     /** @var string The config key of the context keys. */
     private const string KEYS = 'authorization.context.keys';
 
@@ -59,24 +65,26 @@ final class ContextConfigValidator
      */
     public static function validate(mixed $config, Container $container): void
     {
-        if (!\is_array($config)) {
-            throw new InvalidAuthorizationConfigException('authorization.context', 'expected an array with keys and sources, got ' . \get_debug_type($config) . '.');
-        }
+        $block = ConfigBlock::of('authorization.context', $config, self::SETTINGS);
 
-        self::validateKeys($config['keys'] ?? []);
-        self::validateSources($config['sources'] ?? [], $container);
+        self::validateKeys(ConfigBlock::entry($block, 'keys', []));
+        self::validateSources(ConfigBlock::entry($block, 'sources', []), $container);
     }
 
     /**
-     * Validate that `context.keys` maps namespaces to their keys' types, and
-     * that the context key catalogue accepts every key.
+     * Return the namespaces `context.keys` declares, each mapped to its keys'
+     * types, refusing a value of any other shape.
+     *
+     * The context key catalogue is built through here at run time too, so a
+     * value changed after boot is refused there, never cast; the catalogue
+     * itself refuses a key it does not accept.
      *
      * @param  mixed  $value
-     * @return void
+     * @return array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    private static function validateKeys(mixed $value): void
+    public static function keyMap(mixed $value): array
     {
         if (!\is_array($value)) {
             throw new InvalidAuthorizationConfigException(self::KEYS, 'expected an array of namespaces to their keys, got ' . \get_debug_type($value) . '.');
@@ -90,8 +98,49 @@ final class ContextConfigValidator
             }
         }
 
-        /** @var array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>> $keys */
-        $keys = $value;
+        /** @var array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>> */
+        return $value;
+    }
+
+    /**
+     * Return the classes `context.sources` lists, refusing a value that is not
+     * an array and an entry that is not a class implementing `ContextSource`.
+     *
+     * The check context factory reads the list through here at run time, before
+     * it resolves any source, so an entry changed after boot is refused there
+     * too, never cast.
+     *
+     * @param  mixed  $value
+     * @return array<array-key, class-string<\SineMacula\Laravel\Authorization\Contracts\ContextSource>>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function sources(mixed $value): array
+    {
+        if (!\is_array($value)) {
+            throw new InvalidAuthorizationConfigException(self::SOURCES, 'expected an array of class names, got ' . \get_debug_type($value) . '.');
+        }
+
+        foreach ($value as $index => $class) {
+            self::sourceClass("{$index}", $class);
+        }
+
+        /** @var array<array-key, class-string<\SineMacula\Laravel\Authorization\Contracts\ContextSource>> */
+        return $value;
+    }
+
+    /**
+     * Validate that `context.keys` maps namespaces to their keys' types, and
+     * that the context key catalogue accepts every key.
+     *
+     * @param  mixed  $value
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function validateKeys(mixed $value): void
+    {
+        $keys = self::keyMap($value);
 
         try {
             new DeclaredContextKeyCatalogue($keys);
@@ -113,14 +162,13 @@ final class ContextConfigValidator
      */
     private static function validateSources(mixed $value, Container $container): void
     {
-        if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException(self::SOURCES, 'expected an array of class names, got ' . \get_debug_type($value) . '.');
-        }
-
+        $sources = self::sources($value);
         $claimed = self::contributedNamespaces($container);
 
-        foreach ($value as $index => $class) {
-            $namespace = self::namespaceOf("{$index}", $class, $container);
+        foreach ($sources as $index => $class) {
+            /** @var \SineMacula\Laravel\Authorization\Contracts\ContextSource $source */
+            $source    = $container->make($class);
+            $namespace = $source->namespace();
 
             if (!self::isClaimable($namespace)) {
                 $reason = "source '{$class}' supplies the namespace '{$namespace}', which is not a name or is reserved ("
@@ -194,19 +242,18 @@ final class ContextConfigValidator
     }
 
     /**
-     * Return the namespace the source an entry names supplies, refusing an
-     * entry that is not a class implementing `ContextSource`.
+     * Refuse an entry of `context.sources` that is not a class implementing
+     * `ContextSource`.
      *
      * @param  string  $index
      * @param  mixed  $class
-     * @param  \Illuminate\Contracts\Container\Container  $container
-     * @return string
+     * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      *
      * @phpstan-assert class-string<\SineMacula\Laravel\Authorization\Contracts\ContextSource> $class
      */
-    private static function namespaceOf(string $index, mixed $class, Container $container): string
+    private static function sourceClass(string $index, mixed $class): void
     {
         if (!\is_string($class) || $class === '') {
             throw new InvalidAuthorizationConfigException(self::SOURCES . ".{$index}", 'entry must be a non-empty class-string, got ' . \get_debug_type($class) . '.');
@@ -219,11 +266,6 @@ final class ContextConfigValidator
         if (!\is_subclass_of($class, ContextSource::class)) {
             throw new InvalidAuthorizationConfigException(self::SOURCES . ".{$index}", "class '{$class}' does not implement " . ContextSource::class . '.');
         }
-
-        /** @var \SineMacula\Laravel\Authorization\Contracts\ContextSource $source */
-        $source = $container->make($class);
-
-        return $source->namespace();
     }
 
     /**

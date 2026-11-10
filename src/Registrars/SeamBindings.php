@@ -40,6 +40,14 @@ use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
  * Nothing is resolved here, but as Laravel resolves a contract it rebinds or
  * extends for the callbacks that watch it with `rebinding()` or `refresh()`.
  *
+ * The configuration is read before it is validated, so a value that names no
+ * class implementing the contract, null, a number or an empty string among
+ * them, is taken for no configured class at all: the package's default is bound
+ * as when nothing is configured, a binding made before the package registers
+ * stands, and the application's boot refuses the value, naming the setting.
+ * Telling such a value apart only checks its type and that the class exists and
+ * implements the contract, so it resolves nothing.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -78,10 +86,28 @@ final readonly class SeamBindings
      */
     public function bindConfigured(string $contract, string $key, string $default): void
     {
-        /** @var class-string $class */
-        $class = $this->app['config']->get($key, $default);
+        $class = $this->configuredClass($key, $contract, $default);
 
         $this->bindDefault($contract, $class, $class !== $default);
+    }
+
+    /**
+     * Return the class the configuration key names, or the default when it
+     * names no existing class implementing the contract, which the
+     * application's boot then refuses.
+     *
+     * @template TDefault of class-string|null
+     *
+     * @param  string  $key
+     * @param  class-string  $contract
+     * @param  TDefault  $default
+     * @return class-string|TDefault
+     */
+    public function configuredClass(string $key, string $contract, ?string $default): ?string
+    {
+        $class = $this->app['config']->get($key, $default);
+
+        return \is_string($class) && $class !== '' && \class_exists($class) && \is_a($class, $contract, true) ? $class : $default;
     }
 
     /**
@@ -139,8 +165,8 @@ final readonly class SeamBindings
      * after receives the wrapped hook. Laravel applies an extender to an
      * instance the container already holds once, at once, and to none it is
      * handed later, so the grant service wraps the hook it calls again, which a
-     * hook already wrapped is not (see `WideningPhase`). With no hook listed no
-     * extender is registered.
+     * hook already wrapped is not (see `WideningPhase`). With no hook listed,
+     * or a value that lists none, no extender is registered.
      *
      * Registering builds none of the listed hooks: the wrapped hook builds them
      * at its first use. It resolves the bound hook only when that was resolved
@@ -153,7 +179,11 @@ final readonly class SeamBindings
     {
         $this->bindDefault(GrantHook::class, GrantHooks::class);
 
-        if ($this->app['config']->get('authorization.grant_hooks', []) === []) {
+        $hooks = $this->app['config']->get('authorization.grant_hooks', []);
+
+        // A value that is not a list of hooks is refused as the application
+        // boots, so none is listed until then.
+        if (!\is_array($hooks) || $hooks === []) {
             return;
         }
 

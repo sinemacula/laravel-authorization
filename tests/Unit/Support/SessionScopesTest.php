@@ -6,6 +6,7 @@ namespace Tests\Unit\Support;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
 
 /**
@@ -53,18 +54,16 @@ final class SessionScopesTest extends TestCase
 
     /**
      * The configuration maps a scope to its patterns, or lists it on its own to
-     * name itself, and an entry of any other shape is skipped, as are the
-     * entries of a list that are not strings.
+     * name itself, and an entry of any other shape, or a list holding an entry
+     * that is not a pattern, is refused rather than skipped.
      *
      * @return void
      */
     public function testFromConfigReadsMappedAndListedScopes(): void
     {
         $scopes = SessionScopes::fromConfig([
-            'editor' => ['posts:*', 42, 'comments:read'],
+            'editor' => ['posts:*', 'comments:read'],
             'posts:read',
-            'broken' => 'posts:edit',
-            7,
             'reader' => ['posts:read'],
         ]);
 
@@ -74,17 +73,24 @@ final class SessionScopesTest extends TestCase
         self::assertSame(['posts:read'], $scopes->patternsFor(['reader']));
         self::assertFalse($scopes->isMapped('broken'));
         self::assertSame(['broken'], $scopes->patternsFor(['broken']));
+
+        foreach ([['editor' => ['posts:*', 42]], ['broken' => 'posts:edit'], [7], ['editor' => []], ['']] as $map) {
+            self::assertRefused($map);
+        }
     }
 
     /**
-     * A configuration that is not an array maps no scope.
+     * A configuration that is not an array is refused, never read as mapping no
+     * scope.
      *
      * @return void
      */
-    public function testFromConfigOfANonArrayMapsNothing(): void
+    public function testFromConfigOfANonArrayIsRefused(): void
     {
-        self::assertSame([], SessionScopes::fromConfig(null)->names());
-        self::assertSame([], SessionScopes::fromConfig('editor')->names());
+        self::assertSame([], SessionScopes::fromConfig([])->names());
+
+        self::assertRefused(null);
+        self::assertRefused('editor');
     }
 
     /**
@@ -103,5 +109,22 @@ final class SessionScopesTest extends TestCase
         self::assertFalse($scopes->isMapped('reader'));
         self::assertSame(['editor', '7'], $scopes->names());
         self::assertSame(['7'], $scopes->patternsFor(['7']));
+    }
+
+    /**
+     * Assert the scope map is refused under `authorization.session.scopes`.
+     *
+     * @param  mixed  $map
+     * @return void
+     */
+    private static function assertRefused(mixed $map): void
+    {
+        try {
+            SessionScopes::fromConfig($map);
+
+            self::fail('The scope map ' . \var_export($map, true) . ' was not refused.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame('authorization.session.scopes', $exception->getConfigKey());
+        }
     }
 }

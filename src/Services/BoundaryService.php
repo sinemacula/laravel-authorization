@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
@@ -18,9 +20,7 @@ use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
-use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
-use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\BoundaryTable;
 use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
@@ -384,9 +384,9 @@ final class BoundaryService
      */
     private static function assertSettable(Policy $stored, string $name, Reference $grantee): void
     {
-        foreach (['role' => Role::class, 'permission' => Permission::class, 'policy' => Policy::class] as $kind => $default) {
+        foreach (['role', 'permission', 'policy'] as $kind) {
             /** @var class-string<\Illuminate\Database\Eloquent\Model> $class */
-            $class = config("authorization.models.{$kind}", $default);
+            $class = ModelClasses::get($kind);
 
             if ($grantee->type === (new $class)->getMorphClass()) {
                 throw BoundaryException::notASubject($name, $grantee, $kind);
@@ -446,7 +446,7 @@ final class BoundaryService
     private static function removedEvent(Operation $operation, Reference $grantee, string $policy, GrantScope $scope): BoundaryRemoved
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
+        $class = ModelClasses::get('policy');
 
         // A boundary's policy cannot be deleted from under it, so it is read,
         // and one that is not refuses the removal rather than name nothing.
@@ -467,8 +467,7 @@ final class BoundaryService
      */
     private static function table(Reference $grantee, Operation $operation, GrantScope $scope): BoundaryTable
     {
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_boundaries', 'authorizable_boundaries');
+        $table = TableNames::get('authorizable_boundaries');
 
         return new BoundaryTable(AuthorizationConnection::connection(), $table, $grantee, $scope->tenant, $scope->includeSubtree, $operation->actor);
     }

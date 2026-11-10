@@ -7,6 +7,8 @@ namespace SineMacula\Laravel\Authorization\Context;
 use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Administration\OperationAttributes;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\Config\AttributeConfigValidator;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider;
 use SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
@@ -80,16 +82,20 @@ final class AttributeProviders
 
     /**
      * Return the providers `authorization.attributes` registers, which the
-     * service provider validated at boot, with the package's own provider of
-     * the administration operation resources (see `OperationAttributes`), of
-     * the preview resources (see `Preview\PreviewAttributes`) and of the review
-     * resources (see `Reviews\ReviewAttributes`), which a provider configured
-     * for their type never replaces.
+     * service provider validated at boot and whose shape is checked again here
+     * (an entry changed after boot is refused with
+     * `InvalidAuthorizationConfigException`, never cast), with the package's
+     * own provider of the administration operation resources (see
+     * `OperationAttributes`), of the preview resources (see
+     * `Preview\PreviewAttributes`) and of the review resources (see
+     * `Reviews\ReviewAttributes`), which a provider configured for their type
+     * never replaces.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @return self
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function fromConfig(Container $container): self
     {
@@ -97,14 +103,14 @@ final class AttributeProviders
         $config = $container->make('config');
 
         /** @var array<string, class-string<\SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider>> $resources */
-        $resources = (array) $config->get('authorization.attributes.resources', []);
+        $resources = AttributeConfigValidator::providers('resources', ConfigValue::get('attributes.resources', [], $config), ResourceAttributeProvider::class);
 
         $resources[OperationResource::TYPE] = OperationAttributes::class;
         $resources[PreviewResource::TYPE]   = PreviewAttributes::class;
         $resources[ReviewResource::TYPE]    = ReviewAttributes::class;
 
         /** @var array<string, class-string<\SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider>> $subjects */
-        $subjects = (array) $config->get('authorization.attributes.subjects', []);
+        $subjects = AttributeConfigValidator::providers('subjects', ConfigValue::get('attributes.subjects', [], $config), SubjectAttributeProvider::class);
 
         return new self($container, $resources, $subjects);
     }

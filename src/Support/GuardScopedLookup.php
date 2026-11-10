@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Config\DefaultGuard;
 use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
@@ -54,10 +55,7 @@ final class GuardScopedLookup
      */
     public static function findForGuard(string $class, string $name, ?string $guard = null): ?Model
     {
-        /** @var string $default */
-        $default = config('authorization.defaults.guard', 'web');
-
-        return self::queryForGuard($class, $name, $guard ?? $default)->first();
+        return self::queryForGuard($class, $name, $guard ?? DefaultGuard::get())->first();
     }
 
     /**

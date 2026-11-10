@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
@@ -80,9 +81,7 @@ class Role extends Model implements SupportsPolicies
     {
         parent::__construct($attributes);
 
-        /** @var string $table */
-        $table       = config('authorization.tables.roles', 'roles');
-        $this->table = $table;
+        $this->table = TableNames::get('roles');
     }
 
     /**

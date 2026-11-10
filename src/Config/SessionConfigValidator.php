@@ -28,6 +28,9 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  * it, so the declared permissions are read at boot, and only when the map names
  * a scope.
  *
+ * The block sets no key but `source` and `scopes` (N116); `scopes` is empty
+ * when left out, and refused when set to null.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -35,6 +38,9 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  */
 final class SessionConfigValidator
 {
+    /** @var list<string> The settings the block may set. */
+    public const array SETTINGS = ['source', 'scopes'];
+
     /** @var string The config key of the session policy source. */
     public const string SOURCE = 'authorization.session.source';
 
@@ -52,49 +58,28 @@ final class SessionConfigValidator
      */
     public static function validate(mixed $config, Container $container): void
     {
-        if (!\is_array($config)) {
-            throw new InvalidAuthorizationConfigException('authorization.session', 'expected an array with a source and scopes, got ' . \get_debug_type($config) . '.');
-        }
+        $block = ConfigBlock::of('authorization.session', $config, self::SETTINGS);
 
-        self::validateSource(\array_key_exists('source', $config) ? $config['source'] : NoSessionPolicy::class);
-        self::validateScopes($config['scopes'] ?? [], $container);
+        self::validateSource(ConfigBlock::entry($block, 'source', NoSessionPolicy::class));
+        self::validateCoverage(self::scopeMap(ConfigBlock::entry($block, 'scopes', [])), $container);
     }
 
     /**
-     * Validate that `session.source` names a class implementing the contract.
+     * Return the scope map `session.scopes` holds, each scope keyed to the
+     * patterns it names, a scope listed on its own naming itself, refusing a
+     * value that does not map each scope, once, to a non-empty list of patterns
+     * or list it on its own.
+     *
+     * The scope map is built through here at run time too, so an entry changed
+     * after boot is refused there, never skipped. Whether each pattern covers a
+     * declared permission is checked at boot only.
      *
      * @param  mixed  $value
-     * @return void
+     * @return array<string, list<non-empty-string>>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    private static function validateSource(mixed $value): void
-    {
-        $reason = match (true) {
-            $value                        === null           => 'a session policy source class is required; set it to \\' . NoSessionPolicy::class . ' for no credential cap.',
-            !\is_string($value) || $value === ''             => 'expected a class-string, got ' . \get_debug_type($value) . '.',
-            !\class_exists($value)                           => "class '{$value}' does not exist.",
-            !\is_a($value, SessionPolicySource::class, true) => "class '{$value}' does not implement " . SessionPolicySource::class . '.',
-            default                                          => null,
-        };
-
-        if ($reason !== null) {
-            throw new InvalidAuthorizationConfigException(self::SOURCE, $reason);
-        }
-    }
-
-    /**
-     * Validate that `session.scopes` maps each scope, once, to a list of
-     * patterns, or lists it on its own, and that every pattern covers a
-     * declared permission.
-     *
-     * @param  mixed  $value
-     * @param  \Illuminate\Contracts\Container\Container  $container
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validateScopes(mixed $value, Container $container): void
+    public static function scopeMap(mixed $value): array
     {
         if (!\is_array($value)) {
             throw new InvalidAuthorizationConfigException(self::SCOPES, 'expected an array of scopes to their action patterns, got ' . \get_debug_type($value) . '.');
@@ -119,7 +104,30 @@ final class SessionConfigValidator
             $patterns[$scope] = $list;
         }
 
-        self::validateCoverage($patterns, $container);
+        return $patterns;
+    }
+
+    /**
+     * Validate that `session.source` names a class implementing the contract.
+     *
+     * @param  mixed  $value
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function validateSource(mixed $value): void
+    {
+        $reason = match (true) {
+            $value                        === null           => 'a session policy source class is required; set it to \\' . NoSessionPolicy::class . ' for no credential cap.',
+            !\is_string($value) || $value === ''             => 'expected a class-string, got ' . \get_debug_type($value) . '.',
+            !\class_exists($value)                           => "class '{$value}' does not exist.",
+            !\is_a($value, SessionPolicySource::class, true) => "class '{$value}' does not implement " . SessionPolicySource::class . '.',
+            default                                          => null,
+        };
+
+        if ($reason !== null) {
+            throw new InvalidAuthorizationConfigException(self::SOURCE, $reason);
+        }
     }
 
     /**

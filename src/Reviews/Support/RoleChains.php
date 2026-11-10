@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Reviews\Support;
 
+use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
@@ -217,7 +218,6 @@ final class RoleChains
      */
     private static function isHierarchyEnabled(): bool
     {
-        /** @var bool */
-        return config('authorization.hierarchy.enabled', true);
+        return SwitchConfigValidator::isEnabled('hierarchy');
     }
 }
