@@ -51,7 +51,11 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * names the impersonator (`resource.impersonated`, `impersonator_type` and
  * `impersonator_id`), and the review is refused as
  * `administration.impersonating` unless the reviewer is also allowed
- * `authorization:administration.impersonated` on the same review.
+ * `authorization:administration.impersonated` on the same review, at the
+ * reviewed scope and across the review's whole reach by the rule the review
+ * right is weighed by (see `AdministeredScope::isAllowedAcross()`), so a child
+ * tenant that denies the reviewer the impersonated right is never read through
+ * a review of its parent's subtree.
  *
  * A refusal is recorded and reported as `authorize()` records and reports any,
  * and throws `AuthorizationException` with the one generic `denied` line,
@@ -135,8 +139,8 @@ final class ReviewAdmission
     /**
      * Return `administration.impersonating` when someone impersonates the
      * reviewer and the reviewer is not also allowed
-     * `authorization:administration.impersonated` on the review; null
-     * otherwise.
+     * `authorization:administration.impersonated` on the review, at the
+     * reviewed scope and across its whole reach; null otherwise.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewResource  $review
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
@@ -145,9 +149,14 @@ final class ReviewAdmission
      */
     private static function impersonation(ReviewResource $review, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
-        $isRefused = $review->impersonator !== null && !$checks->decide(PackagePermissions::ADMINISTRATION_IMPERSONATED, $resource)->isAllowed();
+        if ($review->impersonator === null) {
+            return null;
+        }
 
-        return $isRefused ? DecisionReason::ADMINISTRATION_IMPERSONATING : null;
+        $across    = $review->scope->isAcrossApplications();
+        $isAllowed = AdministeredScope::isAllowedAcross(PackagePermissions::ADMINISTRATION_IMPERSONATED, $resource, $review->reach(), $checks, $across);
+
+        return $isAllowed ? null : DecisionReason::ADMINISTRATION_IMPERSONATING;
     }
 
     /**

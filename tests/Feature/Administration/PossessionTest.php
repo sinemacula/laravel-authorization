@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Subject;
@@ -165,6 +166,47 @@ final class PossessionTest extends TestCase
 
         self::assertNull(Possession::refusal(...$this->grant($actor, new GrantScope($tenant, null, false), null, grantable: true)));
         self::assertSame([['tenant', 'a'], null, false], [$this->asked[0][2], $this->asked[0][3], $this->asked[0][4]]);
+    }
+
+    /**
+     * The grantable right is weighed across the grant's whole reach, as the
+     * action is (N79): allowed at the platform, it allows a platform-wide grant
+     * while nothing limits it, but once the actor holds a role in one tenant
+     * whose policy denies the grantable rights, it allows no grant reaching
+     * that tenant, of a permission or of a policy, while a grant in a tenant
+     * the deny does not reach is still allowed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheGrantableRightIsWeighedAcrossTheWholeReach(): void
+    {
+        $actor  = self::holder([], PackagePermissions::PERMISSION_GRANTABLE);
+        $policy = Policy::create(['name' => 'readers', 'document' => ['statements' => []]]);
+        $other  = new GrantScope(new Reference('tenant', 't1'), null, false);
+
+        self::holder([], PackagePermissions::POLICY_GRANTABLE);
+
+        $policyGrant = function (GrantScope $scope) use ($actor, $policy): bool {
+            [$operation, $change, , $checks] = $this->grant($actor, $scope);
+
+            return Possession::isGrantable($operation, $change, $operation->policyGrantable($policy, 'abc'), $checks);
+        };
+
+        self::assertNull(Possession::refusal(...$this->grant($actor, GrantScope::platform(), grantable: true)));
+        self::assertTrue($policyGrant(GrantScope::platform()));
+
+        $role = Role::query()->create(['name' => 'restricted']);
+        $deny = ['effect' => 'deny', 'actions' => [PackagePermissions::PERMISSION_GRANTABLE, PackagePermissions::POLICY_GRANTABLE]];
+
+        GrantService::instance()?->attachPolicy($role, Policy::create(['name' => 'restricting', 'document' => ['statements' => [$deny]]]));
+        GrantService::instance()?->grantRole(StubIdentity::query()->findOrFail('admin'), $role, tenant: new Reference('tenant', 't0'));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, Possession::refusal(...$this->grant($actor, GrantScope::platform(), grantable: true)));
+        self::assertFalse($policyGrant(GrantScope::platform()));
+        self::assertNull(Possession::refusal(...$this->grant($actor, $other, grantable: true)));
+        self::assertTrue($policyGrant($other));
     }
 
     /**

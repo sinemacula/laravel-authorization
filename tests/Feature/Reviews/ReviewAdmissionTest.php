@@ -448,6 +448,43 @@ final class ReviewAdmissionTest extends TestCase
     }
 
     /**
+     * The impersonated right is weighed across the review's whole reach, as the
+     * review right is: a reviewer allowed it platform-wide, but holding a role
+     * in one child tenant whose policy denies it, is refused a review reaching
+     * that tenant while impersonated, everywhere or of a parent's subtree,
+     * while a review of a sibling's subtree is admitted, and a review no one
+     * impersonates is admitted everywhere.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheImpersonatedRightIsWeighedAcrossTheReach(): void
+    {
+        $this->tree();
+
+        $reviewer     = self::reviewer('reviewer', null);
+        $impersonator = self::identity('impersonator');
+        $role         = self::role('no-impersonation');
+        $deny         = ['effect' => 'deny', 'actions' => [PackagePermissions::ADMINISTRATION_IMPERSONATED]];
+
+        self::grants()->grantPermission($reviewer, self::previewPermission(PackagePermissions::ADMINISTRATION_IMPERSONATED));
+        self::grants()->attachPolicy($role, Policy::query()->create(['name' => 'no-impersonation', 'document' => ['statements' => [$deny]]]));
+        self::grants()->grantRole($reviewer, $role, tenant: self::tenant('team1'));
+
+        $this->signIn($reviewer);
+
+        $reviewed = self::role('reviewed');
+        $acting   = ActingContext::current()->impersonatedBy($impersonator);
+        $review   = static fn (ReviewScope $scope): mixed => self::reviews()->review(ReviewQuery::holders($reviewed, $scope), $acting);
+
+        self::assertRefusedAs(DecisionReason::ADMINISTRATION_IMPERSONATING, static fn (): mixed => $review(ReviewScope::everywhere()));
+        self::assertRefusedAs(DecisionReason::ADMINISTRATION_IMPERSONATING, static fn (): mixed => $review(ReviewScope::rootedWithin(self::tenant('org1'))));
+        self::assertSame([], $review(ReviewScope::rootedWithin(self::tenant('acct2')))->rows);
+        self::assertSame([], self::reviews()->review(ReviewQuery::holders($reviewed, ReviewScope::everywhere()), ActingContext::current())->rows);
+    }
+
+    /**
      * Only an allowed review right on a review resource is weighed: any other
      * resource, or none, leaves the decision as it is.
      *

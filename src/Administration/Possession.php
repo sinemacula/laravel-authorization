@@ -8,6 +8,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 
 /**
  * Whether a delegated grant of a permission hands out only what the actor may
@@ -31,17 +32,22 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  *    `OperationResource::grantable()`), which names the permission, the
  *    grantee, the reach and the expiry, so a policy may allow an exact
  *    delegation the actor does not hold, and a right limited to one application
- *    or to one tenant's node allows no grant beyond it. The right must also
- *    last as long as the grant: held as a permission, through grants lasting
- *    that long; allowed by a policy, through an attachment lasting that long, a
- *    resource policy's never expiring; allowed by a policy the package did not
- *    store, never.
+ *    or to one tenant's node allows no grant beyond it; for a reach wider than
+ *    its node, nothing that denies or caps the actor anywhere in it may limit
+ *    the right, by the rule the action is weighed by (see
+ *    `AdministeredScope::isLimited()`), so a right allowed at the platform but
+ *    denied in one tenant allows no grant reaching that tenant. The right must
+ *    also last as long as the grant: held as a permission, through grants
+ *    lasting that long; allowed by a policy, through an attachment lasting that
+ *    long, a resource policy's never expiring; allowed by a policy the package
+ *    did not store, never.
  *
  * Many permissions, those a role carries or a policy allows, are decided in one
  * pass (see `refusalOfEach()`): the actor's grants, sources and limits read
  * once in the reach for them all (see `HeldLifetime::ofEach()` and
  * `PossessionLimits::limitedEach()`), and the grantable right of each that
- * fails in one more pass, so the cost never grows with the permissions.
+ * fails in one more pass, its limits read once for them all, so the cost never
+ * grows with the permissions.
  *
  * When neither holds, the grant is refused as `administration.not_grantable`
  * when the actor does not hold the permission across the grant's reach and
@@ -103,7 +109,8 @@ final class Possession
     /**
      * Determine whether the actor is allowed the grantable right the descriptor
      * is decided under, on the descriptor, in the change's reach, through a
-     * source lasting at least as long as the change.
+     * source lasting at least as long as the change, with nothing anywhere in a
+     * reach wider than its node that could limit the right.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
@@ -113,7 +120,8 @@ final class Possession
      */
     public static function isGrantable(OperationResource $operation, OperationChange $change, OperationResource $descriptor, FurtherChecks $checks): bool
     {
-        $grant = static fn (): bool => self::isAllowedFor($change, $descriptor, $checks, new HeldLifetimes($checks->subject));
+        $grant = static fn (): bool => self::isAllowedFor($change, $descriptor, $checks, new HeldLifetimes($checks->subject))
+            && !AdministeredScope::isLimited($descriptor->action, $change->scope, $checks);
 
         return TenantScope::within($operation->tenant, $change->scope->application, $grant, self::isBelow($operation, $change));
     }
@@ -166,8 +174,9 @@ final class Possession
     /**
      * Return the refusal of the first of the permissions, in order, that the
      * possession route refused and the actor is not explicitly allowed to
-     * grant, in the change's reach, which is in place; or null when there is
-     * none.
+     * grant, in the change's reach, which is in place, the grantable right's
+     * limits anywhere in the reach read once for them all; or null when there
+     * is none.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
@@ -179,11 +188,18 @@ final class Possession
     private static function firstUngrantable(OperationResource $operation, OperationChange $change, array $permissions, array $refusals, FurtherChecks $checks): ?DecisionReason
     {
         $lifetimes = new HeldLifetimes($checks->subject);
+        $isLimited = null;
 
         foreach ($permissions as $permission) {
             $refusal = $refusals[$permission->name] ?? null;
 
-            if ($refusal !== null && !self::isAllowedFor($change, $operation->grantable($permission), $checks, $lifetimes)) {
+            if ($refusal === null) {
+                continue;
+            }
+
+            $isLimited ??= AdministeredScope::isLimited(PackagePermissions::PERMISSION_GRANTABLE, $change->scope, $checks);
+
+            if ($isLimited || !self::isAllowedFor($change, $operation->grantable($permission), $checks, $lifetimes)) {
                 return $refusal;
             }
         }

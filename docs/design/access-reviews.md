@@ -135,10 +135,12 @@ N97, N98), and what is still left out.
     so a deny, boundary or guardrail held for one application refuses it, while a review of none or one application
     is not.
 
-    An impersonated reviewer is weighed as a delegated change made while impersonating is: the impersonator is the
-    one shown the disclosure, so the review resource names it (`resource.impersonated`, `impersonator_type`,
-    `impersonator_id`), and the review is refused as `administration.impersonating` unless the reviewer is also
-    allowed `authorization:administration.impersonated` on the same review.
+    An impersonated reviewer is weighed as a delegated change made while impersonating is: the impersonator is the one
+    shown the disclosure, so the review resource names it (`resource.impersonated`, `impersonator_type`,
+    `impersonator_id`), and the review is refused as `administration.impersonating` unless the reviewer is also allowed
+    `authorization:administration.impersonated` on the same review, at the reviewed scope and across the review's whole
+    reach by the rule the review right is weighed by, so a deny of the right in one child tenant refuses a review of its
+    parent's subtree.
 
 12. **Refusal discloses nothing.** A refused review is recorded and reported as `authorize()` records and reports a
     refusal and throws `AuthorizationException` with the one generic line, carrying the reviewer's own decision, a

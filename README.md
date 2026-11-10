@@ -1328,21 +1328,26 @@ session cap, and in its intended tenant. Then an administration stage, after the
 weighs the operation's constraints, in this order, and can only refuse:
 
 - **Impersonation.** A change made while impersonating is refused as `administration.impersonating` unless the actor is
-  also allowed `authorization:administration.impersonated` on the same operation.
+  also allowed `authorization:administration.impersonated` on the same operation, and, for a change that may widen
+  authority, across its whole reach by the administered-scope rule below.
 - **Administered scope** (N79). The actor must administer the whole reach of a change that may widen authority, or the
-  change is refused as `administration.scope`. Its action is decided again in the grant's tenant, standing just below
-  it for a grant that reaches the tenants below, so only authority that itself reaches below counts (node-only authority
+  change is refused as `administration.scope`. Its action is decided again in the grant's tenant, standing just below it
+  for a grant that reaches the tenants below, so only authority that itself reaches below counts (node-only authority
   cannot issue a subtree grant), or at platform scope for a platform-wide grant, and in the grant's application, so a
-  grant to every application needs authority unrestricted by application. A decision at one node reads only what
-  applies there, so a reach wider than its node, a platform-wide grant or one reaching the tenants below, is also
-  refused when anything of the actor's anywhere in it could deny or limit the action, read as the possession route reads
-  it: a deny statement whose actions overlap it, conditional or not, a boundary or guardrail that does not allow it
-  whole, a session or credential cap that does not cover it, or a tree, row or document that cannot be read. So an actor
-  allowed `authorization:*` at the platform, but denied `authorization:role.grant` by a role it holds in one tenant,
-  cannot grant a role platform-wide, and a parent's administrator denied an action in one child cannot take it across
-  the parent's subtree, though a node-only change in the parent is still decided there alone. The same rule weighs the
-  reach of a definition change and of a resource-policy attachment in the impact check, and every widening change a
-  platform-scope `revokeAll()` or `removeAll()` decides.
+  grant to every application needs authority unrestricted by application. A decision at one node reads only what applies
+  there, so a reach wider than its node, a platform-wide grant or one reaching the tenants below, is also refused when
+  anything of the actor's anywhere in it could deny or limit the action, read as the possession route reads it: a deny
+  statement whose actions overlap it, conditional or not, a boundary or guardrail that does not allow it whole, a
+  session or credential cap that does not cover it, or a tree, row or document that cannot be read. So an actor allowed
+  `authorization:*` at the platform, but denied `authorization:role.grant` by a role it holds in one tenant, cannot
+  grant a role platform-wide, and a parent's administrator denied an action in one child cannot take it across the
+  parent's subtree, though a node-only change in the parent is still decided there alone. The same rule weighs the reach
+  of a definition change and of a resource-policy attachment in the impact check, and every widening change a
+  platform-scope `revokeAll()` or `removeAll()` decides. Every further right a widening change needs beside its action,
+  `authorization:administration.self`, `authorization:administration.unbounded`,
+  `authorization:administration.impersonated` and the grantable rights, is weighed across the same reach by the same
+  rule, so a right allowed at the platform but denied or limited by a role the actor holds in one tenant is never used
+  on a change that reaches that tenant.
 - **Rank** (N76). Every change to an identity or a principal, a revocation, a sync, `revokeAll()`, a boundary change and
   a call that changes nothing included, is refused as `administration.rank` unless the actor is strictly senior to the
   grantee, and as `administration.rank_uncomparable` when either side's rank, or the reach, cannot be read. The actor is
@@ -1355,9 +1360,11 @@ weighs the operation's constraints, in this order, and can only refuse:
   acts on no one, two unranked sides are equal and refused, and with `authorization.rank.enabled` off rank is no
   constraint.
 - **Self.** A change to the actor itself, its principal or its identity, that may widen authority is refused as
-  `administration.self` unless the actor is also allowed `authorization:administration.self` on the same operation;
-  rank is not weighed against itself. A change to itself that only narrows, such as revoking its own permission, needs
-  no such right.
+  `administration.self` unless the actor is also allowed `authorization:administration.self` on the same operation, at
+  the node it is decided at and across the change's whole reach, as its action is: an actor allowed the right at the
+  platform, but holding a role in one tenant whose policy denies it, cannot widen its own authority platform-wide, or
+  across a subtree holding that tenant. Rank is not weighed against itself. A change to itself that only narrows, such
+  as revoking its own permission, needs no such right.
 - **Narrowing.** A change that can only narrow what anyone may do is then allowed: revoking a permission (directly or
   from a role), revoking a role no policy attached to it or its ancestors denies anything in, detaching a policy, from a
   grantee or a resource, with no deny statement, setting a boundary where the grantee has none in the scope, or
@@ -1380,11 +1387,13 @@ weighs the operation's constraints, in this order, and can only refuse:
     never grows with other tenants' policies. Two patterns that both hold wildcards, one of them `?` or a `[...]` class,
     are taken to overlap. When in doubt, a tree, row or document that cannot be read included, the route fails;
   - *explicit grantability*: `authorization:permission.grantable` is allowed, in the grant's reach, on the grant's
-    descriptor (`OperationResource::grantable()`), the same operation resource under that action, naming the
-    permission, the grantee, the reach and the expiry, so a policy may allow exactly one delegation the actor does not
-    hold. A right held for one application, or at a tenant's node alone, allows no grant to every application, another
-    application or the subtree. The right must last as long as the grant: held as a permission, through grants lasting
-    that long; allowed by a policy, through an attachment lasting that long (a resource policy's never expires).
+    descriptor (`OperationResource::grantable()`), the same operation resource under that action, naming the permission,
+    the grantee, the reach and the expiry, so a policy may allow exactly one delegation the actor does not hold. A right
+    held for one application, or at a tenant's node alone, allows no grant to every application, another application or
+    the subtree, and, for a reach wider than its node, nothing that denies or caps the actor anywhere in the reach may
+    limit the right, read as the administered-scope rule reads the action, so a right denied in one tenant allows no
+    grant reaching it. The right must last as long as the grant: held as a permission, through grants lasting that long;
+    allowed by a policy, through an attachment lasting that long (a resource policy's never expires).
 
   Otherwise the grant is refused as `administration.not_grantable` when the actor does not hold the permission across
   the grant's reach and lifetime, and as `administration.unprovable` when it does but its check there is refused or
@@ -1461,12 +1470,12 @@ weighs the operation's constraints, in this order, and can only refuse:
   a deny, and detaching a denying policy, lift a deny that cannot be bounded, so they are `administration.unprovable`.
 - **Policy documents.** A rewrite (`policy.update` with a new document) is compared with the stored document statement
   by statement, conservatively: one that only removes allows or adds denies narrows and passes, the same document in
-  authority terms included (key order and sids aside); one that lifts a deny, or either document that cannot be read,
-  is `administration.unprovable`; any other adds allows, so it needs the impact check over every holder (the subjects
-  it is attached to or bounds, the holders of every role it is attached to, and the principals either document names
-  where it is attached to a resource), the policy route for the allows it adds, the grantable right decided on the new
-  digest, and, for a policy in use as a boundary, `authorization:administration.unbounded`. A policy attached as a
-  guardrail is still never edited.
+  authority terms included (key order and sids aside); one that lifts a deny, or either document that cannot be read, is
+  `administration.unprovable`; any other adds allows, so it needs the impact check over every holder (the subjects it is
+  attached to or bounds, the holders of every role it is attached to, and the principals either document names where it
+  is attached to a resource), the policy route for the allows it adds, the grantable right decided on the new digest,
+  and, for a policy in use as a boundary, `authorization:administration.unbounded`, weighed across the policy's reach. A
+  policy attached as a guardrail is still never edited.
 - **The impact check.** A change to a shared definition reaches everyone who holds it. Their set is read in a fixed
   number of queries, outside every tenant scope, whether or not a grant has expired: the grantees of a role and of every
   role below it, the grantees of a permission and the holders of every role carrying it, the subjects a policy is
@@ -1475,16 +1484,19 @@ weighs the operation's constraints, in this order, and can only refuse:
   allowed across the whole reach their grants can have (the owner and every tenant below it, in every application, or
   the platform), or `administration.scope`; the actor must be strictly senior to the most senior rank any holder but
   itself holds there, and to a rank the change gives them, or `administration.rank` (`administration.rank_uncomparable`
-  when a rank cannot be read); and a change reaching the actor itself needs `authorization:administration.self`, or
-  `administration.self`. A change reaching no holder widens no one and needs neither the check nor a route. The set is
-  bounded by `authorization.administration.max_impact` (1000 by default), counted in distinct holders: a holder that
-  two sets, or one set twice, name counts once, and never hides a holder not read yet. A change reaching more holders is
-  refused as `administration.unprovable`, never approximated.
+  when a rank cannot be read); and a change reaching the actor itself needs `authorization:administration.self` across
+  the same reach, or `administration.self`, as a change made while impersonating needs
+  `authorization:administration.impersonated` there, or `administration.impersonating`. A change reaching no holder
+  widens no one and needs neither the check nor a route. The set is bounded by `authorization.administration.max_impact`
+  (1000 by default), counted in distinct holders: a holder that two sets, or one set twice, name counts once, and never
+  hides a holder not read yet. A change reaching more holders is refused as `administration.unprovable`, never
+  approximated.
 - **Boundaries.** Setting a boundary where the grantee has none narrows, and so does replacing one with the same policy
   or one whose document can only narrow it, reaching no fewer tenants. Replacing one with a wider boundary, and removing
   one (`revokeAll()` included), lift a cap whose release cannot in general be bounded, so each is refused as
   `administration.unprovable` unless the actor is also allowed `authorization:administration.unbounded` on the same
-  operation, after the scope, rank and self rules. A delegated change never lifts a boundary on possession alone.
+  operation, across its whole reach, after the scope, rank and self rules. A delegated change never lifts a boundary on
+  possession alone.
 - **Resource-policy attachments.** A resource policy grants without any permission held, to every principal its allows
   name, on one record or on the whole type: each principal, and every holder of a role a selector names, is weighed by
   the impact check across the attachment's reach, and the policy must pass the policy route. A principal whose rank
@@ -2997,11 +3009,11 @@ the right, a conditional deny included. So a deny the reviewer holds in one chil
 parent's subtree. Applications are weighed the same way: a review of `ApplicationSelector::any()` in one tenant needs
 the right held for every application, and is refused when a deny, boundary or guardrail held for any one application
 could limit it. A review run while the reviewer is impersonated (`ActingContext::impersonatedBy()`) is refused as
-`administration.impersonating` unless the reviewer is also allowed `authorization:administration.impersonated` on it, as
-a delegated change is, since the impersonator is the one shown what it discloses. A refused review throws
-`AuthorizationException` with the one generic line, carrying the reviewer's own decision (a step-up the right needs
-included), after recording and reporting it as any refused check, and discloses no row, count, truncation or
-completeness.
+`administration.impersonating` unless the reviewer is also allowed `authorization:administration.impersonated` on it,
+across the review's whole reach by the same rule, as a delegated change is, since the impersonator is the one shown what
+it discloses. A refused review throws `AuthorizationException` with the one generic line, carrying the reviewer's own
+decision (a step-up the right needs included), after recording and reporting it as any refused check, and discloses no
+row, count, truncation or completeness.
 
 **The trusted path.** `trusted()` runs a review as trusted system work, for a scheduled job or a command, with no
 reviewer and no admission. Nothing falls back to it: `review()` always takes an acting context, and one that cannot be

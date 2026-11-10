@@ -35,6 +35,13 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * this one rule, so what a change reaches never exceeds what its actor
  * administers. A change it refuses is refused as `administration.scope`.
  *
+ * A further right such a change needs beside its action, the self, unbounded,
+ * impersonated or grantable right, is weighed across the same reach by the same
+ * rule (see `isAllowedAcross()`, and `isLimited()` for a right decided in the
+ * reach already), so an actor allowed the right at the platform but denied it
+ * in one tenant cannot use it on a change that reaches that tenant; each caller
+ * refuses with the right's own reason.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -90,12 +97,32 @@ final class AdministeredScope
     }
 
     /**
+     * Determine whether a further right the operation needs beside its action
+     * is allowed on it everywhere the change reaches: at the node the operation
+     * is decided at, as its action is, and across the whole reach by the rule
+     * `refusalOf()` applies to the action, so anything that denies or caps the
+     * right anywhere in a reach wider than its node refuses it.
+     *
+     * @param  string  $right
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
+     * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
+     * @param  bool  $isAcrossApplications
+     * @return bool
+     */
+    public static function isAllowedAcross(string $right, ResourceReference $resource, GrantScope $reach, FurtherChecks $checks, bool $isAcrossApplications = false): bool
+    {
+        return $checks->decide($right, $resource)->isAllowed() && self::refusalOf($right, $resource, $reach, $checks, $isAcrossApplications) === null;
+    }
+
+    /**
      * Determine whether anything that applies to the actor anywhere in the
      * reach could limit the action, the reach in place: a reach of one tenant's
      * node alone, in one application or in none, is what its decision reads, so
      * nothing more can; for a wider one, below the tenant, at the platform or
      * across applications, the sources of the action, read in the scope in
-     * place, that cannot be read limit it too.
+     * place, that cannot be read limit it too. A right already decided in the
+     * reach (see `Possession`) is weighed by this alone.
      *
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
@@ -103,7 +130,7 @@ final class AdministeredScope
      * @param  bool  $isAcrossApplications
      * @return bool
      */
-    private static function isLimited(string $action, GrantScope $reach, FurtherChecks $checks, bool $isAcrossApplications): bool
+    public static function isLimited(string $action, GrantScope $reach, FurtherChecks $checks, bool $isAcrossApplications = false): bool
     {
         if ($reach->tenant !== null && !$reach->includeSubtree && !$isAcrossApplications) {
             return false;

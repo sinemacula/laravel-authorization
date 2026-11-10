@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Administration;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\Impact;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
@@ -173,6 +174,77 @@ final class ImpactTest extends TestCase
     }
 
     /**
+     * The self right is weighed across the definition's whole reach, as the
+     * action is (N79): a change to a platform role the actor holds, which
+     * reaches it everywhere, is allowed while nothing limits
+     * `authorization:administration.self`, and refused as self once the actor
+     * holds a role in one tenant whose policy denies it, though the right is
+     * allowed at the node the change is decided at; a reach that does not hold
+     * that tenant is still allowed, and a change that only narrows is never
+     * weighed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheSelfRightIsWeighedAcrossTheWholeReach(): void
+    {
+        $actor = self::user('admin', 1);
+        $role  = Role::query()->create(['name' => 'member', 'rank' => 9]);
+        $write = Permission::query()->create(['name' => 'comments:write']);
+        $check = static fn (OperationResource $operation): Decision => ActingContext::for($actor)->check($operation);
+        $add   = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $role, $write, GrantScope::platform());
+
+        $actor->givePermission(Permission::query()->create(['name' => 'authorization:*']));
+        $actor->givePermission(Permission::query()->create(['name' => '*:*']));
+        self::grants()->grantRole($actor, $role);
+
+        self::assertTrue($check($add)->isAllowed());
+
+        self::restrictIn($actor, new Reference('tenant', 't0'), PackagePermissions::ADMINISTRATION_SELF);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_SELF, $check($add)->reason);
+        self::assertSame(DecisionStage::ADMINISTRATION, $check($add)->stage);
+        self::assertTrue($check(OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $role, $write, GrantScope::platform()))->isAllowed());
+
+        $allowing = $this->checks($actor, static fn (): Decision => Decision::allow(DecisionStage::ALLOW));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_SELF, Impact::refusal(self::operation(), self::resource(), Impact::reachOf(null), [Reference::of($actor)], $allowing));
+        self::assertNull(Impact::refusal(self::operation(), self::resource(), Impact::reachOf(new Reference('tenant', 't1')), [Reference::of($actor)], $allowing));
+    }
+
+    /**
+     * A change made while impersonating needs
+     * `authorization:administration.impersonated` across the whole reach, its
+     * node having been decided before the impact check: allowed while nothing
+     * limits it, refused as impersonating once the actor holds a role in one
+     * tenant of the reach whose policy denies it, and never asked of a change
+     * no one impersonates.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheImpersonatedRightIsWeighedAcrossTheWholeReach(): void
+    {
+        $actor        = self::user('admin', 1);
+        $holders      = [Reference::of(self::user('junior', 5))];
+        $impersonated = self::operation()->actedBy(new Reference('support', '9'));
+        $allowing     = $this->checks($actor, static fn (): Decision => Decision::allow(DecisionStage::ALLOW));
+
+        self::assertNull(Impact::refusal($impersonated, $impersonated->toResourceReference(), Impact::reachOf(null), $holders, $allowing));
+
+        self::restrictIn($actor, new Reference('tenant', 't0'), PackagePermissions::ADMINISTRATION_IMPERSONATED);
+
+        self::assertSame(
+            DecisionReason::ADMINISTRATION_IMPERSONATING,
+            Impact::refusal($impersonated, $impersonated->toResourceReference(), Impact::reachOf(null), $holders, $allowing),
+        );
+        self::assertNull(Impact::refusal($impersonated, $impersonated->toResourceReference(), Impact::reachOf(new Reference('tenant', 't1')), $holders, $allowing));
+        self::assertNull(Impact::refusal(self::operation(), self::resource(), Impact::reachOf(null), $holders, $allowing));
+    }
+
+    /**
      * The rules are weighed in order, the first that fails refusing: the scope
      * before rank, and rank before the self rule.
      *
@@ -292,6 +364,26 @@ final class ImpactTest extends TestCase
         }
 
         return $user;
+    }
+
+    /**
+     * Grant the actor, in the tenant, a role carrying a policy that denies the
+     * action.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $actor
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @param  string  $action
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private static function restrictIn(StubIdentity $actor, Reference $tenant, string $action): void
+    {
+        $restricted = Role::query()->create(['name' => 'restricted']);
+        $deny       = ['effect' => 'deny', 'actions' => [$action]];
+
+        self::grants()->attachPolicy($restricted, Policy::create(['name' => 'restricting', 'document' => ['statements' => [$deny]]]));
+        self::grants()->grantRole($actor, $restricted, tenant: $tenant);
     }
 
     /**
