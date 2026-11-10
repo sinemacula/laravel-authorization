@@ -502,6 +502,15 @@ another guard is refused with `ParentGuardMismatchException`, and a role or perm
 guard with `GranteeGuardMismatchException`. The tenant that owns a role, permission or policy is fixed once it is
 created (`OwnerChangedException`): to move one, create it in the new tenant and grant it again.
 
+**How a tenant is named.** A tenant is an Eloquent model, or any object implementing
+`SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant`, and the package names it by its morph type and its
+`getKey()` everywhere: in the `tenant_type` and `tenant_id` of every grant and owned row, in the tenant tree's questions
+and answers, in the resolution cache's keys, in events and in a `Support\Reference`. `getKey()` is the contract's
+identifier, and for a model it is the primary key, so a tenant that also carries a public identifier of its own (a slug,
+an external id) is still named by its key. A sibling package, or the application, naming a tenant to this one passes
+the tenant, a `Reference` made from it, or its morph type and key, never the other identifier. A non-Eloquent tenant
+returns from `getKey()` the value its rows are to be keyed by, and keeps it for the tenant's life.
+
 Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class
 implementing `SineMacula\Laravel\Authorization\Contracts\TenantTree` as `tenant_tree` in `config/authorization.php`,
 answering a tenant's ancestors, whether one tenant is within another, and a tenant's subtree as a query. The subtree
@@ -2347,7 +2356,7 @@ or about the subject of the scoped manager it is called on:
 | `lastDecision()`                                  | Returns the latest decision of the request or job, whichever manager made it                                              |
 | `lastDecisionProvenance()`                        | Returns who the latest decision was about, who previewed it and where it was made, or null whenever `lastDecision()` is   |
 | `permissionsFor($subject, $scope, $context)`      | Lists the actions of the permission catalogue the subject may take in the scope                                           |
-| `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's tenant and application, or a `Subject` as it is |
+| `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's scope, or a `Subject` in its own scope          |
 | `forUser($user)`                                  | Returns a scoped manager deciding about the subject the resolver translates the user into                                 |
 | `previewFor($subject, $scope)`                    | Returns a preview deciding about the subject as the caller, admitted at every use (see [Preview](#preview))               |
 | `capped($actions)`                                | Returns a scoped manager whose checks are capped by the actions given                                                     |
@@ -2402,6 +2411,32 @@ $scoped->all(['posts:read', 'posts:update'], $post);
 Authorization::lastDecision();            // the decision of the last action $scoped decided
 Authorization::lastDecisionProvenance();  // DecisionProvenance: a Reference to $user as subject and identity
 ```
+
+**`for()` and the scope.** A model given to `for()` is decided in the request's tenant and application, as the subject
+resolver reports them. A resolved `Subject` is taken as it is, keeping its identity, guard and session, and when it
+names a tenant or an application, every check through the manager is decided there: its tenant, or the platform when it
+names none, and its application, or none, are put in place of the request's, both as the subject's and as the scope of
+the grants that count, for each `check()`, `can()`, `cannot()`, `any()`, `all()`, `authorize()`, `checkMany()`,
+`canEach()`, `filterAuthorized()`, `explain()` and query scoped through it with `whereAuthorized()`. The request's are
+restored once each is decided, even when it throws, and nothing is kept between calls or requests. A `Subject` naming
+neither is decided in the request's scope, as a model is. So a subject in another tenant needs no wrapping:
+
+```php
+use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+
+$member = new Subject($principal, $person, $account, 'admin');
+
+Authorization::for($member)->can('posts:update', $post);   // decided in $account, on the admin application
+
+// The same decision, as callers wrote it before: wrapping the call still gives the same result.
+$scope = AuthorizationScope::tenant($account, 'admin');
+$scope->within(fn () => Authorization::for($scope->subjectIn($member))->can('posts:update', $post));
+```
+
+`permissionsFor()` lists in the scope it is given, which wins over the subject's, and a preview from `previewFor()`
+keeps its own scope (see [Preview](#preview)). A `Subject` whose tenant cannot be read, a plain object that is neither a
+model nor an `AuthorizableTenant`, is refused by `for()` with `InvalidTenantException`.
 
 The last decision is kept with its provenance, a `DecisionProvenance` of references and names alone: `subject` and
 `identity`, references to the principal the decision was about and its identity, null for a guest; `previewer`, whoever
@@ -3144,6 +3179,12 @@ there is built per request or job, and null or a class that does not implement t
 'identity_directory' => App\Authorization\PrincipalDirectory::class,
 ```
 
+**In the suite.** `laravel-iam` binds a complete identity directory adapter, so an application using it needs nothing
+more. An application with principals that does not use `laravel-iam` binds its own: a directory that lists, for each
+identity, every principal it owns, as below, and answers an incomplete list for an identity it cannot read. Left in
+place under another subject resolver, `GuardUserIdentityDirectory` answers incomplete for everyone, so a grant to any
+principal is treated as widening (`INCOMPLETE_DIRECTORY`) and no grant scope query answers `WITHIN`.
+
 ```php
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Support\IdentityPrincipals;
@@ -3275,6 +3316,15 @@ final class ScopeWideningHook implements GrantHook
 }
 ```
 
+**The client.** The widening carries the operation's client, `ip` and `userAgent`, each a nullable string, as the
+`Operation` does. A delegated call made in a routed request takes them from the request, the IP address as Laravel
+resolves it behind your trusted proxies; a trusted call, and any call made from the console or a queued job, has none
+unless its caller passes them. A caller that builds the operation itself passes them explicitly, as
+`Operation::begin($actor, $actions, $ip, $userAgent)` or the constructor's last two arguments, and a client given there
+is kept as it is. Both are personal data, so the package hands them to the grant hook alone: the change events carry the
+operation without them, and they are never put in a cache key, a decision event, a log or a stored grant row. A hook
+that keeps them is answerable for them.
+
 **One binding, an ordered composite.** Exactly one hook is bound. The default is `Hooks\GrantHooks`, the composite of
 the classes `grant_hooks` lists in `config/authorization.php`, each built from the container and run in the order
 listed; the first that throws stops the rest. The list is validated at boot: each entry must name a class implementing
@@ -3366,6 +3416,8 @@ hook refuses stops the import, with what was written before it kept.
               reasons: [WideningReason::MEMBERSHIP],
           )],
           observedAt: now('UTC')->toImmutable(),
+          ip: request()->ip(),
+          userAgent: request()->userAgent(),
       ));
   });
   ```
@@ -3891,6 +3943,12 @@ Gate hook: enabled (the package answers every ability it declares through Gate::
 
 It is the start of the configuration report: each setting and seam it comes to report adds a line.
 
+Each command's class names its command in a public `NAME` constant, the name its signature declares, so a schedule, a
+test or a sibling package can refer to it without repeating the string: `PruneGrantsCommand::NAME` is
+`authorization:prune`, and so on for `CheckConfigurationCommand`, `GrantRoleCommand`, `RevokeRoleCommand`,
+`ListRolesCommand`, `ListPermissionsCommand`, `SyncPermissionsCommand`, `MigrateSpatieCommand`,
+`ValidatePolicyCommand`, `WhyCommand` and `ReviewCommand`, all in `SineMacula\Laravel\Authorization\Console`.
+
 The listing commands are administrative views: they list every role or permission, platform-wide and tenant-owned
 alike, and show each one's owner. `grant` and `revoke` write through the grant service and look the role up within the
 tenant scope, so without a resolved tenant they find platform-wide roles only. A role the identity already holds with
@@ -3917,7 +3975,9 @@ than making checks correct. Like `model:prune`, it takes `--pretend`, which coun
 boundaries apart from the grants as a run does, and `--chunk`, and is scheduled like any command:
 
 ```php
-Schedule::command('authorization:prune')->daily();
+use SineMacula\Laravel\Authorization\Console\PruneGrantsCommand;
+
+Schedule::command(PruneGrantsCommand::NAME)->daily();
 ```
 
 #### Explaining a check from the console

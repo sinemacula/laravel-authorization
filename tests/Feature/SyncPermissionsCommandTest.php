@@ -75,6 +75,19 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
+     * The command is registered under its `NAME` constant, the name its
+     * signature declares.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:sync', SyncPermissionsCommand::NAME);
+        self::assertInstanceOf(SyncPermissionsCommand::class, Artisan::all()[SyncPermissionsCommand::NAME] ?? null);
+        self::assertSame(SyncPermissionsCommand::NAME, Artisan::all()[SyncPermissionsCommand::NAME]->getName());
+    }
+
+    /**
      * A fresh catalogue is added, one row per case and guard, with each
      * declaration's metadata, the package's own permission among them, and each
      * addition runs the model's observers.

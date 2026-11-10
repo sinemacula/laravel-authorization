@@ -62,7 +62,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * the check (the subject, resource and tenant stages) and gathers every source,
  * the session caps included; the policy evaluator runs the rest of the stages
  * in AUTHZ-7.1's order, the denies, the caps, the allows and the implicit deny,
- * each recorded in the decision's trace for audit consumers.
+ * each recorded in the decision's trace for audit consumers. A manager from
+ * `for()` of a `Subject` naming a tenant or an application decides every check,
+ * batch, explanation and query scope there (N109), with the request's scope
+ * restored afterwards; `permissionsFor()` lists in the scope it is given.
  *
  * `scopedTo()` is called from the `BuildsScopedManagers` trait alone, which an
  * analysis of this file by itself does not see (hence php:S1144), and so is the
@@ -256,7 +259,8 @@ final class AuthorizationManager
             return;
         }
 
-        $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? $this->preview?->provenance() ?? DecisionProvenance::of($this->currentSubject());
+        $current    = fn (): DecisionProvenance => DecisionProvenance::of($this->currentSubject());
+        $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? $this->preview?->provenance() ?? $this->inSubjectScope($current);
         $failed     = AuthorizationFailed::of($provenance, $action, ResourceReferences::identifierOf($reference), $decision);
 
         if ($this->preview === null) {
@@ -308,9 +312,11 @@ final class AuthorizationManager
      * a batch of one, through the same `CheckBatch`, so a check is decided the
      * same way on its own or in a batch, but reads nothing ahead and holds
      * nothing for later. The decision is recorded as the last decision and
-     * reported with `DecisionEvaluated`. On a preview from `previewFor()`, the
-     * preview is admitted first, and the decision is about its target, in its
-     * scope, recorded and reported with both parties.
+     * reported with `DecisionEvaluated`. On a manager from `for()` of a
+     * `Subject` naming a tenant or an application, it is decided there, as
+     * every form adapting it is (see `for()`). On a preview from
+     * `previewFor()`, the preview is admitted first, and the decision is about
+     * its target, in its scope, recorded and reported with both parties.
      *
      * The context is what the caller passes, which a policy reads under `input`
      * (`['post' => ['status' => 'draft']]` is `input.post.status`) and never
@@ -340,7 +346,7 @@ final class AuthorizationManager
             return $this->preview->run(fn (?Subject $target): Decision => $this->batch()->decideOne($target, $check));
         }
 
-        return $this->batch()->decideOne($this->currentSubject(), $check);
+        return $this->inSubjectScope(fn (): Decision => $this->batch()->decideOne($this->currentSubject(), $check));
     }
 
     /**
@@ -371,7 +377,7 @@ final class AuthorizationManager
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      *
-     * @phpstan-ignore throws.unusedType
+     * @phpstan-ignore throws.unusedType, throws.unusedType
      */
     public function checkMany(array $checks): array
     {
@@ -379,7 +385,7 @@ final class AuthorizationManager
             return $this->preview->run(fn (?Subject $target): array => $this->batch()->decide($target, $checks));
         }
 
-        return $this->batch()->decide($this->currentSubject(), $checks);
+        return $this->inSubjectScope(fn (): array => $this->batch()->decide($this->currentSubject(), $checks));
     }
 
     /**
@@ -469,7 +475,7 @@ final class AuthorizationManager
             return AuthorizedQuery::compiled($model, $action, static fn (): string => $preview->run($compile), true);
         }
 
-        return AuthorizedQuery::compiled($model, $action, fn (): string => $compile($this->currentSubject()));
+        return AuthorizedQuery::compiled($model, $action, fn (): string => $this->inSubjectScope(fn (): string => $compile($this->currentSubject())));
     }
 
     /**
@@ -533,7 +539,7 @@ final class AuthorizationManager
         $check   = new CheckInput($action, $resource, $context);
         $explain = fn (?Subject $target): Decision => $this->batch(isExplaining: true)->decideOne($target, $check);
 
-        return ($this->preview === null ? $explain($this->currentSubject()) : $this->preview->run($explain))->explain();
+        return ($this->preview === null ? $this->inSubjectScope(fn (): Decision => $explain($this->currentSubject())) : $this->preview->run($explain))->explain();
     }
 
     /**
@@ -564,7 +570,9 @@ final class AuthorizationManager
      * request's, both as the subject's and as the scope of the grants that
      * count, and the request's are restored once the actions are decided, even
      * when deciding one throws, with what the resolution cache held for them
-     * (see `AuthorizationScope`).
+     * (see `AuthorizationScope`). The scope given wins over the one a `Subject`
+     * named through `for()` would decide in, as it does inside
+     * `AuthorizationScope::within()`.
      *
      * The listing is exact: each action is decided through the one decision
      * path `checkMany()` takes, over what the checks share read once, the

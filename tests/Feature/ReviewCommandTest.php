@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\ReviewCommand;
@@ -64,6 +65,19 @@ final class ReviewCommandTest extends TestCase
         Carbon::setTestNow();
 
         parent::tearDown();
+    }
+
+    /**
+     * The command is registered under its `NAME` constant, the name its
+     * signature declares.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:review', ReviewCommand::NAME);
+        self::assertInstanceOf(ReviewCommand::class, Artisan::all()[ReviewCommand::NAME] ?? null);
+        self::assertSame(ReviewCommand::NAME, Artisan::all()[ReviewCommand::NAME]->getName());
     }
 
     /**

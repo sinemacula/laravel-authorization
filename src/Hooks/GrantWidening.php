@@ -25,6 +25,13 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * its own membership path (AUTHZ-13.9) builds one itself, with the reason
  * `WideningReason::MEMBERSHIP`.
  *
+ * The client, the IP address and the user agent of the operation, is that of
+ * the routed request a delegated call was made in, or what the caller passed
+ * when it built the operation, and null for trusted, console and queued work
+ * otherwise (see `Support\Operation`). Both are personal data: the package
+ * hands them to the hook alone, never to an event, a cache key, a log or a
+ * stored grant row, and a hook that keeps them is answerable for them.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -45,6 +52,8 @@ final readonly class GrantWidening
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  list<\SineMacula\Laravel\Authorization\Hooks\ProposedGrant>  $changes
      * @param  \DateTimeImmutable  $observedAt
+     * @param  string|null  $ip
+     * @param  string|null  $userAgent
      */
     public function __construct(
 
@@ -74,6 +83,12 @@ final readonly class GrantWidening
 
         /** When the proposal was observed, in UTC. */
         public \DateTimeImmutable $observedAt,
+
+        /** The IP address the operation came from, or null when unknown: personal data. */
+        public ?string $ip = null,
+
+        /** The user agent the operation came from, or null when unknown: personal data. */
+        public ?string $userAgent = null,
     ) {
         $reasons = [];
 
@@ -86,7 +101,7 @@ final readonly class GrantWidening
 
     /**
      * Return the widening of the grants the operation proposes for the grantee,
-     * observed at the instant given.
+     * observed at the instant given, with the operation's client.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $identity
@@ -99,7 +114,19 @@ final readonly class GrantWidening
      */
     public static function of(Operation $operation, Reference $identity, Reference $grantee, array $changes, \DateTimeImmutable $observedAt): self
     {
-        return new self($operation->id, $operation->isTrusted, $operation->actor, $operation->identity, $operation->impersonator, $identity, $grantee, $changes, $observedAt);
+        return new self(
+            $operation->id,
+            $operation->isTrusted,
+            $operation->actor,
+            $operation->identity,
+            $operation->impersonator,
+            $identity,
+            $grantee,
+            $changes,
+            $observedAt,
+            $operation->ip,
+            $operation->userAgent,
+        );
     }
 
     /**

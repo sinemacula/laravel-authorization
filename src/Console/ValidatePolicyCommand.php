@@ -29,9 +29,12 @@ use SineMacula\Laravel\Authorization\Support\PolicyDocument;
  */
 final class ValidatePolicyCommand extends Command
 {
+    /** @var string The console command's name. */
+    public const string NAME = 'authorization:policy:validate';
+
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:policy:validate
+    protected $signature = self::NAME . <<<'EOD'
+
                                     {paths?* : JSON files of one document or an array of them, or directories of such files}
                                     {--database : Check every stored policy, as well as any paths}
         EOD;

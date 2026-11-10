@@ -27,7 +27,10 @@ use SineMacula\Laravel\Authorization\Preview\Previewing;
  * The operation stops being current before the transaction commits, so a
  * listener that writes is an operation of its own. A model write made outside a
  * call is an operation of its own too, with no actor, shared by every event
- * that one save or delete dispatches.
+ * that one save or delete dispatches. The work, and so every event it
+ * dispatches, is given the operation without its client (see
+ * `Operation::withoutClient()`), which a grant service hands the grant hook
+ * alone.
  *
  * `dispatch()` queues events on the package's connection, the connection every
  * row the package writes lives on, through its `afterCommit()`: they are
@@ -265,6 +268,7 @@ final class OperationScope
      */
     public static function dispatch(AuthorizationEvent ...$events): void
     {
+        /** @var list<\SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent> $events */
         $connection = AuthorizationConnection::connection();
         $cache      = ResolutionCache::instance();
         $keys       = $cache?->versionKeys($events) ?? [];
@@ -328,11 +332,11 @@ final class OperationScope
     }
 
     /**
-     * Run the work as the operation, with the pins of its try, in one
-     * transaction on the package's connection, the operation current while it
-     * runs; given the conflict an earlier try failed with, keep it while the
-     * work runs when this try runs inside a transaction the operation did not
-     * open (see `retriedInPlace()`).
+     * Run the work as the operation, without its client, with the pins of its
+     * try, in one transaction on the package's connection, the operation
+     * current while it runs; given the conflict an earlier try failed with,
+     * keep it while the work runs when this try runs inside a transaction the
+     * operation did not open (see `retriedInPlace()`).
      *
      * @template TResult
      *
@@ -348,6 +352,8 @@ final class OperationScope
     {
         $connection = AuthorizationConnection::connection();
         $retried    = $connection->transactionLevel() > 0 ? $conflict : null;
+
+        $operation = $operation->withoutClient();
 
         return $connection->transaction(static function () use ($operation, $work, $pins, $retried): mixed {
             self::$operations[] = $operation;

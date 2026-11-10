@@ -239,6 +239,9 @@ working: each forwards to the matching service method with no actor.
   still count.
 - **The commands name no actor by default.** `authorization:grant`, `authorization:revoke` and `authorization:sync`
   take `--actor={morphType}:{key}`, which must name a row that exists; without it they record no actor.
+- **Each command names itself once.** Every package command declares its name in a public `NAME` constant
+  (`PruneGrantsCommand::NAME` is `authorization:prune`) and builds its signature from it, so a schedule, a test or a
+  sibling package refers to the constant and the two cannot drift; each command's test pins the name it registers.
 
 ## Implementation Anchors
 

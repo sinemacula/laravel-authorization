@@ -91,7 +91,9 @@ the hook runs in a grant call.
     target, tenant, application, reach, expiry and reasons, the reasons of the call once each, and when the proposal
     was observed. Exactly one hook is bound: by default `Hooks\GrantHooks`, the ordered composite of the classes
     `authorization.grant_hooks` lists, validated at boot (`Config\GrantHookConfigValidator`), run in order and stopped
-    by the first that throws. With none listed nothing is classified. There is no runtime registrar.
+    by the first that throws. With none listed nothing is classified. There is no runtime registrar. The widening also
+    carries the operation's client, `ip` and `userAgent`, both nullable, the last two constructor arguments with
+    defaults, so a widening built by hand without them still builds (see invariant 16).
 
 13. **Veto only.** A hook refuses by throwing, `Exceptions\GrantRefusedException` or anything else: the call rolls back
     with nothing written and no event, and is not tried again, unless what it threw is a concurrency error
@@ -126,6 +128,15 @@ the hook runs in a grant call.
     (`OperationScope::retriedInPlace()`). Grant calls made one after another in the application's own transaction are
     each a call of their own; `authorization:migrate-spatie` commits its catalogue, then makes each grant as one.
     A binding of the contract to anything that is not a `GrantHook` is refused, never taken as none.
+
+16. **The client is personal data, for the hook alone (BL-74).** `Support\Operation` and `Hooks\GrantWidening` carry
+    the IP address and the user agent of the call. `Operation::begin()` takes a client the caller passes as it is;
+    otherwise a delegated operation reads the routed request it is begun in through `Support\RequestClient` (the IP
+    behind the trusted proxies), and a trusted one, or any begun with no routed request (console, queue), has none. The
+    grant service hands `WideningPhase::before()` the operation as begun, with its client, while `OperationScope`
+    gives the call's work, and so every event it dispatches and every write its observers report, the operation
+    without it (`Operation::withoutClient()`). The client is never put in a cache key, a decision event, a log or a
+    stored grant row.
 
 ## Success Path
 
@@ -224,6 +235,10 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
   lock, and the coverage check's locks last in the lock order.
 - `Feature\Hooks\GrantHooksTest`, `Unit\Config\GrantHookConfigValidatorTest` and `Feature\OperationScopeTest` -- the
   composite's order and stop, its validation, the guard and the trusted retry.
+- `Unit\Support\OperationTest`, `Unit\Support\RequestClientTest`, `Unit\Hooks\GrantWideningTest`,
+  `Feature\OperationScopeTest` and `GrantServiceTest::testTheHookAloneIsHandedTheRequestsClient` -- the client read
+  from a routed request for a delegated operation, none for trusted, console and queued work, an explicit client kept,
+  the work and its events given the operation without it, and the hook handed it.
 
 ## Done
 
@@ -238,6 +253,7 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
 - Returning anything beyond the status breaks invariant 8.
 - A per-grant or per-tenant query, or loading a subtree's ids, breaks invariant 9.
 - Caching an answer needs invalidation across every principal of an identity.
+- Handing the client to anything but the grant hook (an event, a cache key, a log or a stored row) breaks invariant 16.
 - Classifying from anything but the identity and every principal the directory lists, or skipping the hook in doubt,
   breaks invariants 10 and 11.
 - Letting a hook change the grant, or a service run while a hook does, breaks invariant 13 and N80.

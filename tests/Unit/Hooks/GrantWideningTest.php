@@ -66,6 +66,28 @@ final class GrantWideningTest extends TestCase
         self::assertSame(['principals', 'identities', 'identities'], [$widening->actor?->type, $widening->actorIdentity?->type, $widening->impersonator?->type]);
         self::assertSame([$identity, $grantee, $at], [$widening->identity, $widening->grantee, $widening->observedAt]);
         self::assertSame([WideningReason::PLATFORM], $widening->reasons);
+        self::assertSame([null, null], [$widening->ip, $widening->userAgent]);
+    }
+
+    /**
+     * The widening of an operation carries the operation's client, and one
+     * built by hand carries the client given, or none.
+     *
+     * @return void
+     */
+    public function testTheWideningCarriesTheOperationsClient(): void
+    {
+        $operation = new Operation('id-1', null, new \DateTimeImmutable, true, null, null, [], '203.0.113.9', 'Browser/1.0');
+        $identity  = new Reference('identities', '1');
+        $at        = new \DateTimeImmutable('@100');
+
+        $widening = GrantWidening::of($operation, $identity, $identity, [self::change([WideningReason::IDENTITY])], $at);
+        $built    = new GrantWidening('id-2', true, null, null, null, $identity, $identity, [], $at, '198.51.100.1', 'Worker/2.0');
+        $none     = new GrantWidening('id-3', true, null, null, null, $identity, $identity, [], $at);
+
+        self::assertSame(['203.0.113.9', 'Browser/1.0'], [$widening->ip, $widening->userAgent]);
+        self::assertSame(['198.51.100.1', 'Worker/2.0'], [$built->ip, $built->userAgent]);
+        self::assertSame([null, null], [$none->ip, $none->userAgent]);
     }
 
     /**

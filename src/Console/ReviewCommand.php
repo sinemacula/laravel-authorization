@@ -45,12 +45,15 @@ final class ReviewCommand extends Command
 {
     use RefusesInvocations;
 
+    /** @var string The console command's name. */
+    public const string NAME = 'authorization:review';
+
     /** @var list<string> The options that take a value, refused when given without one. */
     private const array VALUED = ['tenant', 'rooted-within', 'application', 'from', 'until', 'actor', 'output'];
 
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:review
+    protected $signature = self::NAME . <<<'EOD'
+
                                     {query : The review: holders, holdings, expiring or granted_by}
                                     {reference? : For holders, the role, permission or policy as type:key (e.g. role:1); for holdings, the saved subject as morphType:key}
                                     {--tenant= : Review what applies in the tenant, as morphType:key; the platform when no scope option is given}
