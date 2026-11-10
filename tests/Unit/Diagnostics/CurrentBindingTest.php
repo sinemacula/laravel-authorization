@@ -61,18 +61,70 @@ final class CurrentBindingTest extends TestCase
         $handed    = new \stdClass;
 
         $container->singleton('singleton', \stdClass::class);
-        $container->make('singleton');
+
+        $built = $container->make('singleton');
+
         $container->bind('transient', \stdClass::class);
         $container->instance('transient', $handed);
 
         $singleton = CurrentBinding::of($container, 'singleton');
+        $transient = CurrentBinding::of($container, 'transient');
 
-        self::assertNull($singleton->instance);
+        self::assertSame($built, $singleton->instance);
         self::assertSame($singleton->concrete, $singleton->supplier());
         self::assertSame(Lifetime::SINGLETON, $singleton->lifetime);
         self::assertTrue($singleton->previouslyResolved);
-        self::assertSame($handed, CurrentBinding::of($container, 'transient')->supplier());
+        self::assertSame($handed, $transient->supplier());
+        self::assertSame(Lifetime::INSTANCE, $transient->lifetime);
         self::assertFalse(CurrentBinding::of($container, 'unmade')->previouslyResolved);
+    }
+
+    /**
+     * An instance handed over a singleton or a scoped binding never resolved is
+     * what the contract resolves to, so it supplies the contract, while a
+     * scoped binding whose instance was forgotten supplies it again.
+     *
+     * @return void
+     */
+    public function testAnInstanceHandedOverASharedBindingSuppliesIt(): void
+    {
+        $container = new Container;
+        $handed    = new \ArrayObject;
+
+        $container->singleton('singleton', \stdClass::class);
+        $container->instance('singleton', $handed);
+        $container->scoped('scoped', \stdClass::class);
+        $container->instance('scoped', $handed);
+
+        foreach (['singleton', 'scoped'] as $key) {
+            $binding = CurrentBinding::of($container, $key);
+
+            self::assertSame($handed, $binding->supplier(), $key);
+            self::assertSame(Lifetime::INSTANCE, $binding->lifetime, $key);
+            self::assertSame(\get_class($container->make($key)), \get_class($binding->instance ?? new \stdClass), $key);
+        }
+
+        $container->make('scoped');
+        $container->forgetScopedInstances();
+
+        self::assertSame(Lifetime::SCOPED, CurrentBinding::of($container, 'scoped')->lifetime);
+        self::assertNull(CurrentBinding::of($container, 'scoped')->instance);
+    }
+
+    /**
+     * An instance handed over and never resolved was not resolved before,
+     * although Laravel's `resolved()` says it was.
+     *
+     * @return void
+     */
+    public function testAnInstanceNeverResolvedWasNotResolvedBefore(): void
+    {
+        $container = new Container;
+
+        $container->instance('instance', new \stdClass);
+
+        self::assertTrue($container->resolved('instance'));
+        self::assertFalse(CurrentBinding::of($container, 'instance')->previouslyResolved);
     }
 
     /**

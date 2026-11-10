@@ -39,4 +39,18 @@ final class SettingRowTest extends TestCase
         self::assertFalse((new SettingRow('authorization.c', true, true, [null], 'null', 'ok'))->toArray()['redacted']);
         self::assertSame(300, (new SettingRow('authorization.d', true, true, [300], 'int', 'ok'))->toArray()['value']);
     }
+
+    /**
+     * A map is shown as an object, empty or not, and one not shown as null; a
+     * list of a setting that is no map stays a list.
+     *
+     * @return void
+     */
+    public function testAMapKeepsItsShape(): void
+    {
+        self::assertSame('{}', \json_encode((new SettingRow('authorization.e', true, true, [[]], 'array(0)', 'ok', true))->toArray()['value']));
+        self::assertSame('{"0":"A"}', \json_encode((new SettingRow('authorization.e', true, true, [['A']], 'array(1)', 'ok', true))->toArray()['value']));
+        self::assertNull((new SettingRow('authorization.e', true, true, null, 'array(1)', 'ok', true))->toArray()['value']);
+        self::assertSame('[]', \json_encode((new SettingRow('authorization.f', true, true, [[]], 'array(0)', 'ok'))->toArray()['value']));
+    }
 }

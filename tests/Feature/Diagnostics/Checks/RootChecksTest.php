@@ -94,6 +94,64 @@ final class RootChecksTest extends TestCase
     }
 
     /**
+     * The names the configuration gives a connection, a log channel and the
+     * default guard are each checked against the application's own
+     * configuration, and each permission provider and model on its own.
+     *
+     * @return void
+     */
+    public function testNamesProvidersAndModelsAreCheckedOnTheirOwn(): void
+    {
+        self::assertSame([
+            ['authorization.connection', 'unknown_name'],
+            ['authorization.defaults.guard', 'unknown_name'],
+            ['authorization.log_channel', 'unknown_name'],
+            ['authorization.models.extra', 'unknown_key'],
+            ['authorization.models.role', 'unknown_class'],
+            ['authorization.permission_providers.0', 'unknown_class'],
+        ], $this->issues([
+            'connection'           => 'nowhere',
+            'defaults'             => ['guard' => 'nowhere'],
+            'log_channel'          => 'nowhere',
+            'models'               => ['role' => 'Missing\Model', 'extra' => 'x'],
+            'permission_providers' => ['Missing\Provider'],
+        ]));
+    }
+
+    /**
+     * A grant hooks map is refused once, and none of its entries is checked.
+     *
+     * @return void
+     */
+    public function testAGrantHooksMapIsRefusedOnce(): void
+    {
+        self::assertSame([['authorization.grant_hooks', 'invalid_type']], $this->issues(['grant_hooks' => ['a' => 'Missing\Hook']]));
+    }
+
+    /**
+     * A hook whose check fails in a way the package did not foresee, as when
+     * loading its class throws, is recorded under its own entry's path.
+     *
+     * @return void
+     */
+    public function testAnUnforeseenFailureIsRecordedUnderTheEntrysPath(): void
+    {
+        $loader = static function (string $class): void {
+            if ($class === 'Throwing\Hook') {
+                throw new \RuntimeException('The class could not be loaded.');
+            }
+        };
+
+        \spl_autoload_register($loader);
+
+        try {
+            self::assertSame([['authorization.grant_hooks.0', 'internal']], $this->issues(['grant_hooks' => ['Throwing\Hook']]));
+        } finally {
+            \spl_autoload_unregister($loader);
+        }
+    }
+
+    /**
      * Return the path and code of each issue the checks find in the suite's
      * configuration with the settings given.
      *

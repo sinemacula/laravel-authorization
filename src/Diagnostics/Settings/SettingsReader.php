@@ -67,6 +67,7 @@ final readonly class SettingsReader
             shown: $isSet ? ValueRenderer::render(SettingCatalogue::kindOf($path), $value) : null,
             type: $isSet ? ValueRenderer::typeOf($value) : null,
             status: $this->status($path),
+            isMap: \in_array(SettingCatalogue::kindOf($path), SettingCatalogue::MAPS, true),
         );
     }
 

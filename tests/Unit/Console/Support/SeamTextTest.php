@@ -43,15 +43,19 @@ final class SeamTextTest extends TestCase
     public function testEachOriginIsTold(): void
     {
         $binding = static fn (): mixed => null;
-        $record  = new SeamRecord(self::CONTRACT, $binding, null, 'App\Tree', 'authorization.tenant_tree', true, null, null, null);
+        $record  = new SeamRecord(self::CONTRACT, $binding, null, 'App\Tree', 'authorization.tenant_tree', true, null, null, null, null);
         $owned   = new Declaration(self::CONTRACT, 'acme/sibling', ['Acme\Tree'], null, Lifetime::SCOPED, $binding);
+        $alias   = 'tenancy.tree';
+        $sibling = self::row(Origin::DECLARED, $owned->classes, declaration: $owned, concrete: $binding, source: $owned->owner);
         $lines   = [
-            'configured in authorization.tenant_tree; App\Tree; scoped' => self::row(Origin::CONFIGURED, ['App\Tree'], record: $record),
-            'declared by acme/sibling; Acme\Tree; scoped'               => self::row(Origin::DECLARED, ['Acme\Tree'], declaration: $owned, concrete: $binding),
-            'deferred provider Acme\Provider, not loaded yet'           => self::row(Origin::DEFERRED, [], deferred: 'Acme\Provider', lifetime: null),
-            'alias of tenancy.tree; tenancy.tree; singleton'            => self::row(Origin::ALIAS, ['tenancy.tree'], alias: 'tenancy.tree', lifetime: Lifetime::SINGLETON),
-            self::EARLIER . '; App\Tree; scoped'                        => self::row(Origin::EARLIER_BINDING, ['App\Tree']),
-            'not bound; none'                                           => self::row(Origin::UNBOUND, [], lifetime: null),
+            'configured in authorization.tenant_tree; App\Tree; scoped'  => self::row(Origin::CONFIGURED, ['App\Tree'], record: $record, source: $record->configKey),
+            'declared by acme/sibling; Acme\Tree; scoped'                => $sibling,
+            'deferred provider Acme\Provider, not loaded yet'            => self::row(Origin::DEFERRED, [], deferred: 'Acme\Provider', lifetime: null, source: 'Acme\Provider'),
+            'deferred provider Acme\Provider (loaded); App\Tree; scoped' => self::row(Origin::DEFERRED_LOADED, ['App\Tree'], source: 'Acme\Provider'),
+            'alias of tenancy.tree; tenancy.tree; singleton'             => self::row(Origin::ALIAS, [$alias], lifetime: Lifetime::SINGLETON, alias: $alias, source: $alias),
+            self::EARLIER . '; App\Tree; scoped'                         => self::row(Origin::EARLIER_BINDING, ['App\Tree']),
+            'package default; App\Tree; scoped'                          => self::row(Origin::PACKAGE_DEFAULT, ['App\Tree']),
+            'not bound; none'                                            => self::row(Origin::UNBOUND, [], lifetime: null),
         ];
 
         foreach ($lines as $line => $row) {
@@ -74,10 +78,14 @@ final class SeamTextTest extends TestCase
     {
         $binding = static fn (): mixed => null;
         $factory = new Declaration(self::CONTRACT, 'acme/sibling', ['Acme\One', 'Acme\Two'], 'per tenant', Lifetime::TRANSIENT, $binding);
-        $built   = self::row(Origin::DECLARED, ['Acme\One', 'Acme\Two'], declaration: $factory, concrete: $binding, lifetime: Lifetime::TRANSIENT);
+        $built   = self::row(Origin::DECLARED, ['Acme\One', 'Acme\Two'], declaration: $factory, concrete: $binding, lifetime: Lifetime::TRANSIENT, source: 'acme/sibling');
         $custom  = self::row(Origin::LATER_BINDING, [], factory: 'app/Tree.php:7', lifetime: Lifetime::TRANSIENT);
 
+        $one    = new Declaration(self::CONTRACT, 'acme/sibling', ['Acme\One'], 'per tenant', Lifetime::TRANSIENT, $binding);
+        $chosen = self::row(Origin::DECLARED, ['Acme\One'], lifetime: Lifetime::TRANSIENT, declaration: $one, concrete: $binding, source: 'acme/sibling');
+
         self::assertSame('[seam TenantTree] declared by acme/sibling; one of Acme\One, Acme\Two, decided per tenant; transient', SeamText::line($built));
+        self::assertSame('[seam TenantTree] declared by acme/sibling; one of Acme\One, decided per tenant; transient', SeamText::line($chosen));
         self::assertSame(
             '[seam TenantTree] ' . self::LATER . '; supplied by custom code (app/Tree.php:7); class decided at first use; transient',
             SeamText::line($custom),
@@ -145,6 +153,7 @@ final class SeamTextTest extends TestCase
      * @param  string|null  $alias
      * @param  string|null  $deferred
      * @param  string  $contract
+     * @param  string|null  $source
      * @return \SineMacula\Laravel\Authorization\Diagnostics\SeamRow
      */
     private static function row(
@@ -160,6 +169,7 @@ final class SeamTextTest extends TestCase
         ?string $alias = null,
         ?string $deferred = null,
         string $contract = self::CONTRACT,
+        ?string $source = null,
     ): SeamRow {
         return new SeamRow(
             $contract,
@@ -171,6 +181,7 @@ final class SeamTextTest extends TestCase
             new CurrentBinding($concrete, null, $lifetime, $alias, $deferred, $resolved),
             $record,
             $declaration,
+            $source,
         );
     }
 }

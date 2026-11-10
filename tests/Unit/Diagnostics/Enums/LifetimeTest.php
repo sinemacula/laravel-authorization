@@ -29,4 +29,21 @@ final class LifetimeTest extends TestCase
     {
         self::assertSame(['transient', 'singleton', 'scoped', 'instance'], \array_column(Lifetime::cases(), 'value'));
     }
+
+    /**
+     * An instance outlives a singleton, which outlives what is scoped, which
+     * outlives what is built afresh each time, and none outlives itself.
+     *
+     * @return void
+     */
+    public function testEachLifetimeOutlivesTheShorterOnes(): void
+    {
+        $order = [Lifetime::TRANSIENT, Lifetime::SCOPED, Lifetime::SINGLETON, Lifetime::INSTANCE];
+
+        foreach ($order as $longer => $lifetime) {
+            foreach ($order as $shorter => $other) {
+                self::assertSame($longer > $shorter, $lifetime->outlives($other), "{$lifetime->value} against {$other->value}");
+            }
+        }
+    }
 }

@@ -184,7 +184,7 @@ final class UsageRegistrarTest extends TestCase
         (new AuthorizationServiceProvider($plain))->register();
 
         self::assertSame($store, $before->make(GrantUsageStore::class));
-        self::assertSame($store, BindingRegistry::of($before)->get(GrantUsageStore::class)?->earlier);
+        self::assertSame($store, BindingRegistry::of($before)->get(GrantUsageStore::class)?->earlierInstance);
         self::assertFalse(AuthorizationServiceProvider::isPackageDefault($before, GrantUsageStore::class));
         self::assertTrue(AuthorizationServiceProvider::isPackageDefault($plain, GrantUsageStore::class));
         self::assertSame(DatabaseGrantUsageStore::class, BindingRegistry::of($plain)->get(GrantUsageStore::class)?->class);

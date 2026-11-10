@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace Tests\Feature\Diagnostics\Checks;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Config\AttributeConfigValidator;
+use SineMacula\Laravel\Authorization\Config\ContextConfigValidator;
 use SineMacula\Laravel\Authorization\Diagnostics\Checks\ExtensionChecks;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
@@ -84,6 +86,14 @@ final class ExtensionChecksTest extends TestCase
             ['authorization.session.source', 'skipped'],
             ['authorization.session.scopes', 'skipped'],
         ], self::pathsAndCodes($this->check(['session' => 'off'])));
+
+        foreach (['context' => ContextConfigValidator::SETTINGS, 'attributes' => AttributeConfigValidator::SETTINGS] as $block => $settings) {
+            self::assertSame(
+                [["authorization.{$block}", 'invalid_type'], ...\array_map(static fn (string $setting): array => ["authorization.{$block}.{$setting}", 'skipped'], $settings)],
+                self::pathsAndCodes($this->check([$block => 'x'])),
+                $block,
+            );
+        }
     }
 
     /**

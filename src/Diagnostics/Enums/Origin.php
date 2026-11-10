@@ -31,6 +31,9 @@ enum Origin: string
     /** A deferred provider not loaded yet, which binds the contract as it is first resolved. */
     case DEFERRED = 'deferred';
 
+    /** A deferred provider known as the package registered, so the package left it standing, since loaded. */
+    case DEFERRED_LOADED = 'deferred_loaded';
+
     /** The contract is an alias of another abstract, which it resolves to. */
     case ALIAS = 'alias';
 
@@ -39,4 +42,26 @@ enum Origin: string
 
     /** Nothing is bound to the contract. */
     case UNBOUND = 'unbound';
+
+    /**
+     * Determine whether the binding is the package's own, whose record names
+     * the class it builds and the key it forwards to.
+     *
+     * @return bool
+     */
+    public function isPackages(): bool
+    {
+        return $this === self::PACKAGE_DEFAULT || $this === self::CONFIGURED;
+    }
+
+    /**
+     * Determine whether the binding was made by others, so its closure may be
+     * custom code that decides what it builds.
+     *
+     * @return bool
+     */
+    public function isOthers(): bool
+    {
+        return \in_array($this, [self::EARLIER_BINDING, self::LATER_BINDING, self::DEFERRED_LOADED, self::EXTERNAL], true);
+    }
 }

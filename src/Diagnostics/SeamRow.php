@@ -14,10 +14,14 @@ use SineMacula\Laravel\Authorization\Diagnostics\Enums\Origin;
  * long what it builds lives, the extenders registered on it, and what is known
  * of its history.
  *
- * `previously_resolved` says the contract was resolved before; it says nothing
+ * `previously_resolved` says the contract was resolved before, which an
+ * instance handed to the container and never resolved is not; it says nothing
  * of whether anything is held now. `extenders` are the extenders still
  * registered: one Laravel applied at once to an instance it already held leaves
- * no trace.
+ * no trace, but for the package's own decorator running the configured grant
+ * hooks, which the package recorded. `deferred_provider` is the deferred
+ * provider not loaded yet, and `deferred_provider_at_registration` the one
+ * known as the package registered, loaded since or not.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,6 +40,7 @@ final readonly class SeamRow
      * @param  \SineMacula\Laravel\Authorization\Diagnostics\CurrentBinding  $binding
      * @param  \SineMacula\Laravel\Authorization\Diagnostics\SeamRecord|null  $record
      * @param  \SineMacula\Laravel\Authorization\Diagnostics\Declaration|null  $declaration
+     * @param  string|null  $source
      */
     public function __construct(
 
@@ -65,6 +70,9 @@ final readonly class SeamRow
 
         /** What a sibling package declared of it, or null when none did. */
         public ?Declaration $declaration,
+
+        /** What its origin names: the setting naming the configured class, the sibling that declared it, the deferred provider or the abstract an alias names; else null. */
+        public ?string $source = null,
     ) {}
 
     /**
@@ -98,24 +106,25 @@ final readonly class SeamRow
         $declaration = $this->declaration;
 
         return [
-            'contract'            => $this->contract,
-            'origin'              => $this->origin->value,
-            'class'               => $this->class(),
-            'classes'             => $this->classes,
-            'decides'             => $declaration?->decides,
-            'factory'             => $this->factory,
-            'lifetime'            => $this->lifetime?->value,
-            'extenders'           => $this->extenders,
-            'config_key'          => $this->record?->configKey,
-            'alias'               => $this->binding->alias,
-            'deferred_provider'   => $this->binding->deferredProvider ?? $this->record?->deferredProvider,
-            'previously_resolved' => $this->binding->previouslyResolved,
-            'declaration'         => $declaration === null ? null : [
+            'contract'                          => $this->contract,
+            'origin'                            => $this->origin->value,
+            'class'                             => $this->class(),
+            'classes'                           => $this->classes,
+            'decides'                           => $declaration?->decides,
+            'factory'                           => $this->factory,
+            'lifetime'                          => $this->lifetime?->value,
+            'extenders'                         => $this->extenders,
+            'config_key'                        => $this->record?->configKey,
+            'alias'                             => $this->binding->alias,
+            'deferred_provider'                 => $this->binding->deferredProvider,
+            'deferred_provider_at_registration' => $this->record?->deferredProvider,
+            'previously_resolved'               => $this->binding->previouslyResolved,
+            'declaration'                       => $declaration === null ? null : [
                 'owner'    => $declaration->owner,
                 'classes'  => $declaration->classes,
                 'decides'  => $declaration->decides,
                 'lifetime' => $declaration->lifetime->value,
-                'state'    => $declaration->standing($this->binding->concrete),
+                'state'    => $declaration->standing($this->binding),
             ],
         ];
     }

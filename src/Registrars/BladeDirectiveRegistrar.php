@@ -20,13 +20,13 @@ use SineMacula\Laravel\Authorization\Support\BladeHelpers;
  * which a role directive honours and a permission directive refuses. A third
  * argument is refused rather than dropped.
  *
- * `Blade::if('role', …)` auto-generates the paired `@role / @unlessrole /
- *
- * @elserole / @endrole` quartet; the same pattern covers `@permission`,
- * `@anyrole`, `@allroles`, `@anypermission`, and `@allpermissions`.
- * Spatie-style aliases (`@hasrole`, `@hasanyrole`, `@hasallroles`,
- * `@haspermission`, `@hasanypermission`, `@hasallpermissions`) are registered
- * in parallel so consumers migrating from Spatie can move their views verbatim.
+ * `Blade::if('role', …)` auto-generates the paired
+ * `@role / @unlessrole / @elserole / @endrole` quartet; the same pattern covers
+ * `@permission`, `@anyrole`, `@allroles`, `@anypermission`, and
+ * `@allpermissions`. Spatie-style aliases (`@hasrole`, `@hasanyrole`,
+ * `@hasallroles`, `@haspermission`, `@hasanypermission`, `@hasallpermissions`)
+ * are registered in parallel so consumers migrating from Spatie can move their
+ * views verbatim.
  *
  * Spatie closes its unless-variants with `@endunless<name>`, whereas
  * `Blade::if` closes its auto-generated variant with `@end<name>`. Every

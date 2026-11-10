@@ -49,6 +49,9 @@ final class SettingCatalogue
     /** @var string A value never shown. */
     public const string OPAQUE = 'opaque';
 
+    /** @var list<string> The kinds that map names to values, shown as a map even when empty. */
+    public const array MAPS = [self::CLASS_MAP, self::NAME_MAP];
+
     /** @var array<string, string> Each setting's path mapped to the kind of value it holds, in the order the shipped configuration lists them. */
     public const array SETTINGS = [
         'authorization.models.role'                     => self::CLASS_NAME,

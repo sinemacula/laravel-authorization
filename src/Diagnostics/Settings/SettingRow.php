@@ -16,6 +16,9 @@ namespace SineMacula\Laravel\Authorization\Diagnostics\Settings;
  * merged from the package's defaults cannot be told reliably once the
  * configuration is merged or cached, so it is never guessed.
  *
+ * `value` is an object for a setting mapping names to classes or permissions,
+ * empty or not, so its JSON keeps one type.
+ *
  * `status` is `ok`, `refused`, `skipped` (not checked, as a setting it depends
  * on was refused), `unchecked` (its check failed in a way the package did not
  * foresee) or `checked_at_boot` (its checks that build what it names ran, and
@@ -35,6 +38,7 @@ final readonly class SettingRow
      * @param  array{0: mixed}|null  $shown
      * @param  string|null  $type
      * @param  string  $status
+     * @param  bool  $isMap
      */
     public function __construct(
 
@@ -55,6 +59,9 @@ final readonly class SettingRow
 
         /** What the check found of it. */
         public string $status,
+
+        /** Whether the setting maps names to values, so its value is shown as a map even when it holds none. */
+        public bool $isMap = false,
     ) {}
 
     /**
@@ -78,7 +85,7 @@ final readonly class SettingRow
             'path'     => $this->path,
             'known'    => $this->isKnown,
             'set'      => $this->isSet,
-            'value'    => $this->shown[0] ?? null,
+            'value'    => $this->isMap && $this->shown !== null ? (object) $this->shown[0] : $this->shown[0] ?? null,
             'redacted' => $this->isSet && $this->shown === null,
             'type'     => $this->type,
             'source'   => $this->source(),

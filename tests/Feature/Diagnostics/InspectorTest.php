@@ -11,6 +11,8 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigurationReport;
+use SineMacula\Laravel\Authorization\Diagnostics\Declarations;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\Lifetime;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\ReportStatus;
 use SineMacula\Laravel\Authorization\Diagnostics\Inspector;
 use SineMacula\Laravel\Authorization\Diagnostics\SeamRow;
@@ -70,7 +72,10 @@ final class InspectorTest extends TestCase
         self::assertSame('passed', $shape['status']);
         self::assertSame([], $shape['issues']);
         self::assertSame(\array_keys(SettingCatalogue::SETTINGS), \array_map(static fn (SettingRow $row): string => $row->path, $report->settings));
-        self::assertSame(Inspector::SEAMS, \array_slice(\array_map(static fn (SeamRow $row): string => $row->contract, $report->seams), 0, \count(Inspector::SEAMS)));
+        $contracts = \array_map(static fn (SeamRow $row): string => $row->contract, $report->seams);
+
+        self::assertSame(Inspector::SEAMS, \array_slice($contracts, 0, \count(Inspector::SEAMS)));
+        self::assertSame(\array_values(\array_unique($contracts)), $contracts);
         self::assertSame('testing', $shape['connection']['database']['name']);
         self::assertSame('default', $shape['connection']['database']['chosen']);
         self::assertSame('not_tested', $shape['connection']['database']['connectivity']);
@@ -82,7 +87,26 @@ final class InspectorTest extends TestCase
             'middleware.role'       => 'registered',
             'middleware.permission' => 'registered',
             'middleware.authorize'  => 'registered',
-        ], \array_column($shape['integrations'], 'state', 'name'));
+        ], \array_column($report->integrations, 'state', 'name'));
+    }
+
+    /**
+     * A contract a sibling package declared that the package neither binds nor
+     * reads follows the package's seams, and the seams stay a list.
+     *
+     * @return void
+     */
+    public function testADeclaredContractFollowsThePackagesSeams(): void
+    {
+        Declarations::of($this->container())->adapter('Acme\Thing', 'acme/thing', ExplodingTenantTree::class, Lifetime::SCOPED);
+
+        $report = $this->inspect();
+        $seams  = $report->toArray()['seams'];
+
+        self::assertIsArray($seams);
+        self::assertTrue(\array_is_list($seams));
+        self::assertSame('Acme\Thing', $report->seams[\count($report->seams) - 1]->contract);
+        self::assertSame(0, Explosions::$count);
     }
 
     /**
@@ -151,6 +175,26 @@ final class InspectorTest extends TestCase
         self::assertSame('later_binding', $rows[TenantTree::class]['origin']);
         self::assertNull($rows[TenantTree::class]['class']);
         self::assertSame(__FILE__ . ":{$line}", $rows[TenantTree::class]['factory'], 'A file outside the base path is shown whole.');
+    }
+
+    /**
+     * The file custom code is written in is shown relative to the application's
+     * base path when it lies under it.
+     *
+     * @return void
+     */
+    public function testTheFactoryIsShownRelativeToTheBasePath(): void
+    {
+        $app = $this->container();
+
+        $app->setBasePath(\dirname(__DIR__, 3));
+
+        $line = __LINE__ + 1;
+        $app->bind(TenantTree::class, static fn (): TenantTree => new ExplodingTenantTree);
+
+        $rows = \array_column(\array_map(static fn (SeamRow $row): array => $row->toArray(), $this->inspect()->seams), null, 'contract');
+
+        self::assertSame("tests/Feature/Diagnostics/InspectorTest.php:{$line}", $rows[TenantTree::class]['factory']);
     }
 
     /**
@@ -231,6 +275,7 @@ final class InspectorTest extends TestCase
         self::assertSame(3, $report->status->exitCode());
         self::assertSame(\RuntimeException::class, $issues['report.configuration']['exception'] ?? null);
         self::assertArrayHasKey('report.connection', $issues);
+        self::assertSame('{"database":null,"cache":null,"queue":null}', \json_encode($report->toArray()['connection']));
         self::assertNotSame([], $report->seams);
         self::assertStringNotContainsString(self::SECRET, (string) \json_encode($report->toArray()));
     }

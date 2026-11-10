@@ -76,6 +76,32 @@ final class ContainerStateTest extends TestCase
     }
 
     /**
+     * Whether an abstract was resolved is read through its alias, and an
+     * instance handed over and never resolved was not, although Laravel's own
+     * `resolved()` says it was.
+     *
+     * @return void
+     */
+    public function testWhetherAnAbstractWasResolvedIsRead(): void
+    {
+        $container = new Container;
+
+        $container->singleton('singleton', \stdClass::class);
+        $container->alias('singleton', 'alias');
+        $container->instance('instance', new \stdClass);
+
+        self::assertFalse(ContainerState::wasResolved($container, 'alias'));
+
+        $container->make('singleton');
+
+        self::assertTrue(ContainerState::wasResolved($container, 'singleton'));
+        self::assertTrue(ContainerState::wasResolved($container, 'alias'));
+        self::assertTrue($container->resolved('instance'));
+        self::assertFalse(ContainerState::wasResolved($container, 'instance'));
+        self::assertFalse(ContainerState::wasResolved($container, 'other'));
+    }
+
+    /**
      * A container that is not Laravel's holds nothing that can be read.
      *
      * @return void
@@ -90,5 +116,6 @@ final class ContainerStateTest extends TestCase
         self::assertFalse(ContainerState::isScoped($container, 'a'));
         self::assertSame([], ContainerState::extenders($container, 'a'));
         self::assertNull(ContainerState::alias($container, 'a'));
+        self::assertFalse(ContainerState::wasResolved($container, 'a'));
     }
 }

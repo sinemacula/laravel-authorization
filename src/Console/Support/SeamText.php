@@ -27,11 +27,16 @@ final class SeamText
     /** @var string The namespace of the package's contracts, left out of their names. */
     private const string CONTRACTS = 'SineMacula\Laravel\Authorization\Contracts\\';
 
-    /** @var array<string, string> How each origin is shown, where it names nothing more. */
+    /** @var array<string, string> How each origin is shown, `{name}` standing for what it names: the setting, the owner, the deferred provider or the abstract. */
     private const array ORIGINS = [
         Origin::PACKAGE_DEFAULT->value => 'package default',
+        Origin::CONFIGURED->value      => 'configured in {name}',
         Origin::EARLIER_BINDING->value => 'bound before the package registered, which left it standing',
         Origin::LATER_BINDING->value   => 'bound after the package registered, over its binding',
+        Origin::DECLARED->value        => 'declared by {name}',
+        Origin::DEFERRED->value        => 'deferred provider {name}, not loaded yet',
+        Origin::DEFERRED_LOADED->value => 'deferred provider {name} (loaded)',
+        Origin::ALIAS->value           => 'alias of {name}',
         Origin::EXTERNAL->value        => 'bound outside the package',
         Origin::UNBOUND->value         => 'not bound; none',
     ];
@@ -84,13 +89,7 @@ final class SeamText
      */
     private static function origin(SeamRow $seam): string
     {
-        return match ($seam->origin) {
-            Origin::CONFIGURED => 'configured in ' . ReportText::escape((string) $seam->record?->configKey),
-            Origin::DECLARED   => 'declared by ' . ReportText::escape((string) $seam->declaration?->owner),
-            Origin::DEFERRED   => 'deferred provider ' . ReportText::escape((string) $seam->binding->deferredProvider) . ', not loaded yet',
-            Origin::ALIAS      => 'alias of ' . ReportText::escape((string) $seam->binding->alias),
-            default            => self::ORIGINS[$seam->origin->value],
-        };
+        return \strtr(self::ORIGINS[$seam->origin->value], ['{name}' => ReportText::escape($seam->source ?? '')]);
     }
 
     /**
@@ -147,10 +146,10 @@ final class SeamText
             return null;
         }
 
-        $state = match ($declaration->standing($seam->binding->concrete)) {
-            'overridden' => 'but overridden later',
-            'standing'   => 'but an instance is bound over it',
-            default      => 'unverified, as it named no binding',
+        $state = match ($declaration->standing($seam->binding)) {
+            'overridden'       => 'but overridden later',
+            'instance_over_it' => 'but an instance is bound over it',
+            default            => 'unverified, as it named no binding',
         };
 
         return 'declared by ' . ReportText::escape($declaration->owner) . ' as ' . self::factory($declaration->classes, $declaration->decides) . ", {$state}";

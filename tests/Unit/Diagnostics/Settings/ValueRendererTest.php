@@ -40,6 +40,8 @@ final class ValueRendererTest extends TestCase
         yield 'a name' => [SettingCatalogue::NAME, 'redis-cache', 'redis-cache'];
         yield 'no name' => [SettingCatalogue::NAME, null, null];
         yield 'a map of names' => [SettingCatalogue::NAME_MAP, ['admin' => 'admin.access'], ['admin' => 'admin.access']];
+        yield 'a list where a map of classes is expected' => [SettingCatalogue::CLASS_MAP, ['App\Post'], ['App\Post']];
+        yield 'a list where a map of names is expected' => [SettingCatalogue::NAME_MAP, ['admin.access'], ['admin.access']];
     }
 
     /**

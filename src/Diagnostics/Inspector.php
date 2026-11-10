@@ -105,7 +105,7 @@ final readonly class Inspector
                 fn (): array => GrantHookOrder::of(\is_array($root) ? $root['grant_hooks'] ?? [] : [], $this->classifier()->classify(GrantHook::class)),
                 [],
             ),
-            connection: $parts->read('connection', fn (): array => (new ConnectionReader($this->config))->read(), []),
+            connection: $parts->read('connection', fn (): array => (new ConnectionReader($this->config))->read(), ConnectionReader::UNREAD),
             integrations: $parts->read('integrations', fn (): array => (new IntegrationReader($this->container, $this->config))->read(), []),
             issues: [...$findings->issues, ...$parts->failures()],
         );

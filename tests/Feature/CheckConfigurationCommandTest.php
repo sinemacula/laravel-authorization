@@ -246,7 +246,7 @@ final class CheckConfigurationCommandTest extends TestCase
         $seamKeys = \array_keys(self::listed($json, 'seams')[0]);
 
         self::assertSame(['contract', 'origin', 'class', 'classes', 'decides', 'factory', 'lifetime', 'extenders'], \array_slice($seamKeys, 0, 8));
-        self::assertSame(['config_key', 'alias', 'deferred_provider', 'previously_resolved', 'declaration'], \array_slice($seamKeys, 8));
+        self::assertSame(['config_key', 'alias', 'deferred_provider', 'deferred_provider_at_registration', 'previously_resolved', 'declaration'], \array_slice($seamKeys, 8));
         self::assertSame(['position', 'source', 'class', 'type', 'origin', 'factory', 'runs'], \array_keys(self::listed($json, 'grant_hooks')[0]));
         self::assertSame(['name', 'state', 'detail'], \array_keys(self::listed($json, 'integrations')[0]));
         self::assertSame(['database', 'cache', 'queue'], \array_keys((array) $json['connection']));
@@ -313,7 +313,7 @@ final class CheckConfigurationCommandTest extends TestCase
     {
         \config(['authorization.models.rol' => 'X']);
 
-        $this->failToRead('database.connections');
+        $this->failToRead('authorization.usage.queue');
 
         [$code, $lines]    = self::text();
         [$jsonCode, $json] = self::report();
@@ -384,6 +384,39 @@ final class CheckConfigurationCommandTest extends TestCase
         self::assertStringNotContainsString(self::SECRET, (string) \json_encode($json));
         self::assertStringContainsString('[setting authorization.password] unknown key', $text);
         self::assertStringContainsString('[setting authorization.cache.password] unknown key', $text);
+    }
+
+    /**
+     * A queue's URL set as the usage queue, which the check accepts, and a URL
+     * set as the connection after boot are never printed: the connection
+     * section withholds them as the settings section does.
+     *
+     * @return void
+     */
+    public function testNoUrlIsPrintedInTheConnection(): void
+    {
+        $queue = 'https://sqs.eu-west-1.amazonaws.com/123456789012/authz-usage';
+        $url   = 'pgsql://user:' . self::SECRET . '@localhost/db';
+
+        \config(['authorization.usage.queue' => $queue]);
+
+        [$passed]       = self::text();
+        [, $passedJson] = self::report();
+
+        \config()->set('authorization.connection', $url);
+
+        [$code, $lines]    = self::text();
+        [$jsonCode, $json] = self::report();
+        $printed           = \implode("\n", $lines) . (string) \json_encode($json) . (string) \json_encode($passedJson);
+        $connection        = $passedJson['connection'] ?? null;
+
+        self::assertSame(0, $passed);
+        self::assertSame([1, 1], [$code, $jsonCode]);
+        self::assertStringNotContainsString('123456789012', $printed);
+        self::assertStringNotContainsString(self::SECRET, $printed);
+        self::assertIsArray($connection);
+        self::assertSame(['queue'], $connection['queue']['redacted'] ?? null);
+        self::assertContains('[connection database] value not shown; chosen by authorization.connection; driver unknown; not connected to', $lines);
     }
 
     /**

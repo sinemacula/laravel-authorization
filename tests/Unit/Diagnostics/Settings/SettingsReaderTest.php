@@ -89,6 +89,26 @@ final class SettingsReaderTest extends TestCase
     }
 
     /**
+     * A setting mapping names to classes or permissions is shown as a map,
+     * empty or not, and a list of classes as a list.
+     *
+     * @return void
+     */
+    public function testMapsAreShownAsMaps(): void
+    {
+        $rows = self::rows([
+            'attributes'         => ['resources' => [], 'subjects' => ['user' => 'App\User']],
+            'application_access' => [],
+            'permission_enums'   => [],
+        ]);
+
+        self::assertSame('{}', \json_encode($rows['authorization.attributes.resources']['value']));
+        self::assertSame('{"user":"App\\\User"}', \json_encode($rows['authorization.attributes.subjects']['value']));
+        self::assertSame('{}', \json_encode($rows['authorization.application_access']['value']));
+        self::assertSame('[]', \json_encode($rows['authorization.permission_enums']['value']));
+    }
+
+    /**
      * Return each row of the configuration, in the shape the report shows it,
      * keyed by path.
      *

@@ -6,6 +6,7 @@ namespace Tests\Unit\Diagnostics;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Diagnostics\CurrentBinding;
 use SineMacula\Laravel\Authorization\Diagnostics\Declaration;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\Lifetime;
 
@@ -21,21 +22,28 @@ use SineMacula\Laravel\Authorization\Diagnostics\Enums\Lifetime;
 final class DeclarationTest extends TestCase
 {
     /**
-     * A declaration stands while the closure it names is bound, by identity, is
-     * overridden once another is, and is unverified when it names none.
+     * A declaration stands while the closure it names is bound, by identity,
+     * and supplies the contract, has an instance over it once an instance
+     * handed to the container supplies the contract instead, is overridden once
+     * another closure is bound, and is unverified when it names none.
      *
      * @return void
      */
-    public function testItStandsOnlyWhileItsClosureIsBound(): void
+    public function testItStandsOnlyWhileItsClosureSuppliesTheContract(): void
     {
         $binding     = static fn (): object => new \stdClass;
         $lookalike   = static fn (): object => new \stdClass;
         $declaration = new Declaration('Contract', 'acme/sibling', ['Adapter'], null, Lifetime::SCOPED, $binding);
+        $built       = new \stdClass;
 
-        self::assertSame('standing', $declaration->standing($binding));
-        self::assertSame('overridden', $declaration->standing($lookalike));
-        self::assertSame('overridden', $declaration->standing(null));
-        self::assertSame('unverified', (new Declaration('Contract', 'acme/sibling', ['Adapter'], null, Lifetime::SCOPED, null))->standing($binding));
+        self::assertSame('standing', $declaration->standing(new CurrentBinding($binding, null, Lifetime::SCOPED, null, null, false)));
+        self::assertSame('standing', $declaration->standing(new CurrentBinding($binding, $built, Lifetime::SCOPED, null, null, true)));
+        self::assertSame('instance_over_it', $declaration->standing(new CurrentBinding($binding, new \ArrayObject, Lifetime::INSTANCE, null, null, false)));
+        self::assertSame('overridden', $declaration->standing(new CurrentBinding($lookalike, null, Lifetime::SCOPED, null, null, false)));
+        self::assertSame('overridden', $declaration->standing(new CurrentBinding(null, new \ArrayObject, Lifetime::INSTANCE, null, null, false)));
+        $unproven = new Declaration('Contract', 'acme/sibling', ['Adapter'], null, Lifetime::SCOPED, null);
+
+        self::assertSame('unverified', $unproven->standing(new CurrentBinding($binding, null, null, null, null, false)));
     }
 
     /**

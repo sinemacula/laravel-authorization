@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Config;
 
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Container\Container;
+use SineMacula\Laravel\Authorization\Diagnostics\ContainerState;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
@@ -196,18 +197,26 @@ final class NamedEntryConfigValidator
     }
 
     /**
-     * Return the configuration repository bound in the container, or null when
-     * none is.
+     * Return the configuration repository the container holds, or null when it
+     * holds none.
+     *
+     * The repository is no seam: Laravel holds it as an instance from the
+     * start, and so does every application the package runs in, so it is read
+     * as held, which builds nothing and resolves nothing, as the configuration
+     * report requires. Only a container holding no instance under `config` but
+     * binding it some other way, as in library-mode embedding, has it resolved.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @return \Illuminate\Contracts\Config\Repository|null
      */
     private static function config(Container $container): ?Repository
     {
-        if (!$container->bound('config')) {
-            return null;
+        $held = ContainerState::instance($container, 'config');
+
+        if ($held instanceof Repository) {
+            return $held;
         }
 
-        return $container->make('config');
+        return $container->bound('config') ? $container->make('config') : null;
     }
 }

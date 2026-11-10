@@ -266,14 +266,31 @@ final class ReportText
 
         foreach (self::CONNECTIONS as $part => [$key, $configured, $default, $none]) {
             $entry   = \is_array($connection[$part] ?? null) ? $connection[$part] : [];
-            $name    = $entry[$key] ?? null;
+            $name    = self::field($entry, $key, '');
             $chosen  = ($entry['chosen'] ?? null) === 'configured' ? $configured : $default;
-            $lines[] = self::line("connection {$part}", \is_string($name)
-                ? self::escape($name) . "; chosen by {$chosen}; driver " . self::scalar($entry['driver'] ?? null) . self::connectionNote($part, $entry)
-                : $none);
+            $lines[] = self::line("connection {$part}", $name === ''
+                ? $none
+                : "{$name}; chosen by {$chosen}; driver " . self::field($entry, 'driver', 'unknown') . self::connectionNote($part, $entry));
         }
 
         return $lines;
+    }
+
+    /**
+     * Return a field of a part of the connection: its name escaped, `value not
+     * shown` when the report withheld it, as it is not a name, or else the
+     * fallback.
+     *
+     * @param  array<array-key, mixed>  $entry
+     * @param  string  $field
+     * @param  string  $fallback
+     * @return string
+     */
+    private static function field(array $entry, string $field, string $fallback): string
+    {
+        $redacted = \is_array($entry['redacted'] ?? null) && \in_array($field, $entry['redacted'], true);
+
+        return $redacted ? 'value not shown' : self::scalar($entry[$field] ?? null, $fallback);
     }
 
     /**
@@ -288,7 +305,7 @@ final class ReportText
     {
         return match ($part) {
             'database' => '; not connected to',
-            'queue'    => '; queue ' . self::scalar($entry['queue'] ?? null, 'the default'),
+            'queue'    => '; queue ' . self::field($entry, 'queue', 'the default'),
             default    => '',
         };
     }

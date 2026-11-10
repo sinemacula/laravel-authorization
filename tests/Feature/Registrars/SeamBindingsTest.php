@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Diagnostics\BindingRegistry;
 use SineMacula\Laravel\Authorization\Diagnostics\ContainerState;
+use SineMacula\Laravel\Authorization\Diagnostics\CurrentBinding;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
 use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
@@ -243,6 +244,8 @@ final class SeamBindingsTest extends TestCase
         self::seams($app)->bindDefault(GrantHook::class, RecordingGrantHook::class, $configured);
 
         self::assertSame($configured, $app->providerIsLoaded(DeferredBindingProvider::class));
+
+        self::assertSame(DeferredBindingProvider::class, BindingRegistry::of($app)->get(GrantHook::class)?->deferredProvider);
 
         $resolved = $app->make(GrantHook::class);
 
@@ -607,12 +610,90 @@ final class SeamBindingsTest extends TestCase
         $record = BindingRegistry::of($app)->get(GrantHook::class);
 
         self::assertNotNull($record);
-        self::assertSame($earlier, $record->earlier);
+        self::assertSame($earlier, $record->earlierInstance);
+        self::assertNull($record->earlier);
+        self::assertNull($record->deferredProvider);
+        self::assertNull($record->wrapper);
         self::assertSame(self::DEFAULT, $record->target);
         self::assertSame(RecordingGrantHook::class, $record->class);
         self::assertFalse($record->configured);
         self::assertTrue($record->wasBound());
         self::assertSame($earlier, $app->make(GrantHook::class));
+    }
+
+    /**
+     * A shared binding resolved before the package binds the contract is
+     * recorded by both its closure and what it built, either of which the
+     * report matches.
+     *
+     * @return void
+     */
+    public function testAResolvedSharedBindingIsRecordedByItsClosureAndInstance(): void
+    {
+        foreach (['singleton', 'scoped'] as $kind) {
+            $app     = self::application();
+            $earlier = static fn (): RefusingGrantHook => new RefusingGrantHook;
+
+            if ($kind === 'singleton') {
+                $app->singleton(GrantHook::class, $earlier);
+            } else {
+                $app->scoped(GrantHook::class, $earlier);
+            }
+
+            $built = $app->make(GrantHook::class);
+
+            self::seams($app)->bindDefault(GrantHook::class, RecordingGrantHook::class);
+
+            $record = BindingRegistry::of($app)->get(GrantHook::class);
+
+            self::assertNotNull($record, $kind);
+            self::assertSame($earlier, $record->earlier, $kind);
+            self::assertSame($built, $record->earlierInstance, $kind);
+            self::assertTrue($record->isEarlier(CurrentBinding::of($app, GrantHook::class)->supplier()), $kind);
+            self::assertSame($built, $app->make(GrantHook::class), $kind);
+        }
+    }
+
+    /**
+     * The grant hook held as an instance as the package registers is wrapped at
+     * once by the configured hooks, and the decorator that replaced it is
+     * recorded; an instance that is no grant hook is left as it is, and nothing
+     * is recorded of a decorator.
+     *
+     * @return void
+     */
+    public function testTheDecoratorReplacingAHeldGrantHookIsRecorded(): void
+    {
+        $app     = self::application(['grant_hooks' => [RecordingGrantHook::class]]);
+        $earlier = new RefusingGrantHook;
+
+        $app->instance(GrantHook::class, $earlier);
+
+        self::seams($app)->bindGrantHooks();
+
+        $record  = BindingRegistry::of($app)->get(GrantHook::class);
+        $wrapper = ContainerState::instance($app, GrantHook::class);
+
+        self::assertNotNull($record);
+        self::assertInstanceOf(ListedGrantHooks::class, $wrapper);
+        self::assertSame($wrapper, $record->wrapper);
+        self::assertSame($earlier, $record->earlierInstance);
+
+        $app   = self::application(['grant_hooks' => [RecordingGrantHook::class]]);
+        $other = new \stdClass;
+
+        $app->instance(GrantHook::class, $other);
+
+        self::seams($app)->bindGrantHooks();
+
+        self::assertSame($other, ContainerState::instance($app, GrantHook::class));
+        self::assertNull(BindingRegistry::of($app)->get(GrantHook::class)?->wrapper);
+
+        $app = self::application(['grant_hooks' => [RecordingGrantHook::class]]);
+
+        self::seams($app)->bindGrantHooks();
+
+        self::assertNull(BindingRegistry::of($app)->get(GrantHook::class)?->wrapper);
     }
 
     /**
@@ -658,6 +739,7 @@ final class SeamBindingsTest extends TestCase
         self::assertNotNull($record);
         self::assertNull($record->target);
         self::assertSame($earlier, $record->earlier);
+        self::assertNull($record->earlierInstance);
         self::assertInstanceOf(RefusingGrantHook::class, $app->make(GrantHook::class));
         self::assertSame(DeclaredContextKeyCatalogue::class, BindingRegistry::of(self::registered([]))->get(ContextKeyCatalogue::class)?->class);
     }

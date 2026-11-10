@@ -10,13 +10,14 @@ use Illuminate\Contracts\Container\Container;
 /**
  * Read what a container holds for an abstract without building anything.
  *
- * The bindings, the alias and whether the abstract was resolved before are read
- * through the container's public methods. What Laravel offers no public way to
- * read, the instances it holds, the abstracts it scopes and the extenders still
- * pending, is read in the container's own scope, as
- * `AuthorizationServiceProvider::isPackageDefault()` reads the instances.
- * Nothing here calls `make()`, `rebinding()`, `refresh()`, `extend()` or
- * `isShared()`, any of which may build or autoload what it is asked about.
+ * The bindings and the alias are read through the container's public methods.
+ * What Laravel offers no public way to read, the instances it holds, whether it
+ * resolved the abstract (its public `resolved()` also counts an instance held),
+ * the abstracts it scopes and the extenders still pending, is read in the
+ * container's own scope, as `AuthorizationServiceProvider::isPackageDefault()`
+ * reads the instances. Nothing here calls `make()`, `rebinding()`, `refresh()`,
+ * `extend()` or `isShared()`, any of which may build or autoload what it is
+ * asked about.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -70,6 +71,26 @@ final class ContainerState
         $instance = \Closure::bind(static fn (BaseContainer $container): mixed => $container->instances[$abstract] ?? null, null, BaseContainer::class)($container);
 
         return \is_object($instance) ? $instance : null;
+    }
+
+    /**
+     * Determine whether the container resolved the abstract before, after its
+     * alias is followed. Unlike `resolved()`, an instance handed to the
+     * container and never resolved does not count.
+     *
+     * @param  \Illuminate\Contracts\Container\Container  $container
+     * @param  string  $abstract
+     * @return bool
+     */
+    public static function wasResolved(Container $container, string $abstract): bool
+    {
+        if (!$container instanceof BaseContainer) {
+            return false;
+        }
+
+        $alias = $container->getAlias($abstract);
+
+        return \Closure::bind(static fn (BaseContainer $container): bool => isset($container->resolved[$alias]), null, BaseContainer::class)($container);
     }
 
     /**

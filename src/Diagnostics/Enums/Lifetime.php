@@ -23,4 +23,25 @@ enum Lifetime: string
 
     /** An object handed to the container (`instance()`). */
     case INSTANCE = 'instance';
+
+    /**
+     * Determine whether what lives this long outlives what lives as long as the
+     * other: an instance outlives a singleton, which outlives what is scoped,
+     * which outlives what is built afresh each time.
+     *
+     * A binding forwarding to another key builds what lives as long as the
+     * longer of the two, as whichever keeps what it built hands it back.
+     *
+     * @param  self  $other
+     * @return bool
+     */
+    public function outlives(self $other): bool
+    {
+        return match ($this) {
+            self::TRANSIENT => false,
+            self::SCOPED    => $other === self::TRANSIENT,
+            self::SINGLETON => $other === self::TRANSIENT || $other === self::SCOPED,
+            self::INSTANCE  => $other !== self::INSTANCE,
+        };
+    }
 }

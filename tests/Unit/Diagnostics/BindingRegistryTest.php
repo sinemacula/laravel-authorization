@@ -66,6 +66,6 @@ final class BindingRegistryTest extends TestCase
      */
     private static function record(string $contract, ?object $earlier): SeamRecord
     {
-        return new SeamRecord($contract, static fn (): mixed => null, "authorization.default:{$contract}", null, null, false, $earlier, null, null);
+        return new SeamRecord($contract, static fn (): mixed => null, "authorization.default:{$contract}", null, null, false, null, $earlier, null, null);
     }
 }

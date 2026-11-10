@@ -53,7 +53,7 @@ final class SeamRowTest extends TestCase
     public function testTheShapeIsVersioned(): void
     {
         $binding     = static fn (): mixed => null;
-        $record      = new SeamRecord('C', $binding, 'authorization.default:C', 'A', 'authorization.c', true, null, null, 'Acme\Provider');
+        $record      = new SeamRecord('C', $binding, 'authorization.default:C', 'A', 'authorization.c', true, null, null, null, 'Acme\Provider');
         $declaration = new Declaration('C', 'acme/sibling', ['B'], null, Lifetime::SCOPED, $binding);
         $row         = new SeamRow(
             'C',
@@ -62,26 +62,62 @@ final class SeamRowTest extends TestCase
             null,
             Lifetime::SCOPED,
             ['authorization.grant_hooks'],
-            new CurrentBinding($binding, null, Lifetime::TRANSIENT, null, null, true),
+            new CurrentBinding($binding, null, Lifetime::TRANSIENT, null, 'Acme\Pending', true),
             $record,
             $declaration,
+            'authorization.c',
         );
 
         self::assertSame([
-            'contract'            => 'C',
-            'origin'              => 'configured',
-            'class'               => 'A',
-            'classes'             => ['A'],
-            'decides'             => null,
-            'factory'             => null,
-            'lifetime'            => 'scoped',
-            'extenders'           => ['authorization.grant_hooks'],
-            'config_key'          => 'authorization.c',
-            'alias'               => null,
-            'deferred_provider'   => 'Acme\Provider',
-            'previously_resolved' => true,
-            'declaration'         => ['owner' => 'acme/sibling', 'classes' => ['B'], 'decides' => null, 'lifetime' => 'scoped', 'state' => 'standing'],
+            'contract'                          => 'C',
+            'origin'                            => 'configured',
+            'class'                             => 'A',
+            'classes'                           => ['A'],
+            'decides'                           => null,
+            'factory'                           => null,
+            'lifetime'                          => 'scoped',
+            'extenders'                         => ['authorization.grant_hooks'],
+            'config_key'                        => 'authorization.c',
+            'alias'                             => null,
+            'deferred_provider'                 => 'Acme\Pending',
+            'deferred_provider_at_registration' => 'Acme\Provider',
+            'previously_resolved'               => true,
+            'declaration'                       => ['owner' => 'acme/sibling', 'classes' => ['B'], 'decides' => null, 'lifetime' => 'scoped', 'state' => 'standing'],
         ], $row->toArray());
+    }
+
+    /**
+     * A row the package recorded nothing of names no configuration key and no
+     * deferred provider known as the package registered, and the deferred
+     * provider not loaded yet is the binding's.
+     *
+     * @return void
+     */
+    public function testARowWithoutARecordNamesNoneOfIt(): void
+    {
+        $row = new SeamRow('C', Origin::DEFERRED, [], null, null, [], new CurrentBinding(null, null, null, null, 'Acme\Pending', false), null, null, 'Acme\Pending');
+
+        self::assertNull($row->toArray()['config_key']);
+        self::assertNull($row->toArray()['deferred_provider_at_registration']);
+        self::assertSame('Acme\Pending', $row->toArray()['deferred_provider']);
+        self::assertNull($row->toArray()['declaration']);
+    }
+
+    /**
+     * The declaration's state says an instance is bound over the declared
+     * closure while an instance handed to the container supplies the contract,
+     * as the text does.
+     *
+     * @return void
+     */
+    public function testTheDeclarationStateKnowsOfAnInstanceOverIt(): void
+    {
+        $binding     = static fn (): mixed => null;
+        $declaration = new Declaration('C', 'acme/sibling', ['B'], null, Lifetime::TRANSIENT, $binding);
+        $current     = new CurrentBinding($binding, new \stdClass, Lifetime::INSTANCE, null, null, false);
+        $row         = new SeamRow('C', Origin::EXTERNAL, [\stdClass::class], null, Lifetime::INSTANCE, [], $current, null, $declaration);
+
+        self::assertSame('instance_over_it', $row->toArray()['declaration']['state'] ?? null);
     }
 
     /**

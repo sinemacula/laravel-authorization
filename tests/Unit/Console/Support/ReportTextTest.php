@@ -147,6 +147,28 @@ final class ReportTextTest extends TestCase
     }
 
     /**
+     * A name or a driver the report withheld, as it is not a name, is told as
+     * not shown, never as none or the default; a part that could not be read is
+     * told as none.
+     *
+     * @return void
+     */
+    public function testAWithheldNameIsToldAsNotShown(): void
+    {
+        $lines = ReportText::lines(self::report(connection: [
+            'database' => ['name' => null, 'chosen' => 'configured', 'driver' => null, 'connectivity' => 'not_tested', 'redacted' => ['name', 'driver']],
+            'cache'    => null,
+            'queue'    => ['connection' => 'jobs', 'chosen' => 'configured', 'driver' => 'sqs', 'queue' => null, 'redacted' => ['queue']],
+        ]));
+
+        self::assertSame([
+            '[connection database] value not shown; chosen by authorization.connection; driver value not shown; not connected to',
+            '[connection cache] none (entries are kept for the request or job alone)',
+            '[connection queue] jobs; chosen by authorization.usage.connection; driver sqs; queue value not shown',
+        ], \array_slice($lines, 8, 3));
+    }
+
+    /**
      * Each integration is told by its state, the Gate hook in words, and a
      * middleware alias bound to something else names it.
      *

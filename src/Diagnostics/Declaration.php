@@ -13,8 +13,10 @@ use SineMacula\Laravel\Authorization\Diagnostics\Enums\Lifetime;
  *
  * A declaration is data only: no class it names is loaded or built. It is
  * authoritative only while the closure it names is still what the contract is
- * bound to, compared by identity; without one, or once another binding has
- * replaced it, the report shows the declaration beside what is bound instead.
+ * bound to, compared by identity, and no instance handed to the container
+ * supplies the contract over it; without one, or once another binding or an
+ * instance has replaced it, the report shows the declaration beside what is
+ * bound instead.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,19 +66,22 @@ final readonly class Declaration
     }
 
     /**
-     * Return whether the declaration still describes the contract's binding:
-     * `standing` while the closure it names is bound, `overridden` once another
-     * binding replaced it, or `unverified` when it names no closure.
+     * Return whether the declaration still describes what supplies the
+     * contract: `standing` while the closure it names is bound and supplies it,
+     * `instance_over_it` while that closure is bound but an instance handed to
+     * the container supplies the contract instead, `overridden` once another
+     * binding replaced the closure, or `unverified` when it names none.
      *
-     * @param  (\Closure(mixed ...): mixed)|null  $concrete
+     * @param  \SineMacula\Laravel\Authorization\Diagnostics\CurrentBinding  $binding
      * @return string
      */
-    public function standing(?\Closure $concrete): string
+    public function standing(CurrentBinding $binding): string
     {
         return match (true) {
-            $this->binding === null      => 'unverified',
-            $this->binding === $concrete => 'standing',
-            default                      => 'overridden',
+            $this->binding === null                     => 'unverified',
+            $this->binding       !== $binding->concrete => 'overridden',
+            $binding->supplier() !== $binding->concrete => 'instance_over_it',
+            default                                     => 'standing',
         };
     }
 }

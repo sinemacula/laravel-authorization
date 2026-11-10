@@ -224,7 +224,8 @@ only from it: without a tenant, only platform-wide roles and permissions are vis
 Every seam the package gives a default for can also be bound directly on its contract, from any service provider: the
 subject resolver, the tenant tree, the identity directory, the grant hook, the console subject resolver, the resource
 tenant resolver, the policy store, the policy resolver, the action catalogue, the context key catalogue, the
-authentication requirement checker, the session policy source and the authentication, request and environment contexts.
+authentication requirement checker, the session policy source, the grant usage store and the authentication, request
+and environment contexts.
 The package binds its default only when nothing is bound to the contract yet, so a binding made before it registers, by
 a sibling package or by your application, `instance()` included, stands, and a binding made afterwards with `bind()`,
 `singleton()`, `scoped()` or `instance()` replaces the default. A class you name in `config/authorization.php` is
@@ -3344,7 +3345,8 @@ Schedule::command('authorization:usage-prune')->daily();
 only when its observation is newer, and extends the coverage to the batch's instant, but never across the time since a
 `lostSince` the batch names; `lastObserved(array $keys)` returns
 what is kept of each route asked about; and `coverage($from, $until)` returns the periods that overlap a window. The
-package binds `Usage\DatabaseGrantUsageStore` on the tables above; bind your own to send usage elsewhere.
+package binds `Usage\DatabaseGrantUsageStore` on the tables above; bind your own to send usage elsewhere. Like the
+other seams, a store bound before the package registers stands, and one bound after replaces the default.
 
 **Coverage and unknown.** A row's window runs from the later of the review's `since` and the grant's creation to the
 review's instant. Its `usage` is `used` when its route was observed in a bucket that ends after the window starts;
@@ -4269,18 +4271,26 @@ It reports:
   environment is not known once the configuration is merged or cached, so it is `unknown`, and `default` for a
   setting left out.
 - **Seams**: for each contract the package binds or reads, where its binding came from (`package_default`,
-  `configured`, `earlier_binding`, `later_binding`, `declared`, `deferred`, `alias`, `external_binding` or `unbound`),
-  the class it builds when that is known without building it, how long what it builds lives (of the key a forwarding
-  binding resolves, not of the forwarder), the extenders still registered on it, in order (the configured grant hooks
-  as `authorization.grant_hooks`, any other by its file and line), and whether it was resolved before. A seam bound to
-  a closure whose class is decided when it is first resolved is shown by the closure's file and line, `supplied by
-  custom code`; that is a note, and never fails the check. An optional contract nothing binds, such as `PolicyStore`
-  or `ScopeRegistry`, is `unbound`.
+  `configured`, `earlier_binding`, `later_binding`, `declared`, `deferred`, `deferred_loaded`, `alias`,
+  `external_binding` or `unbound`), the class it builds when that is known without building it, how long what it
+  builds lives (of the key a forwarding binding resolves, not of the forwarder, and of a class's own binding when a
+  binding names the class), the extenders still registered on it, in order (the configured grant hooks as
+  `authorization.grant_hooks`, any other by its file and line), and whether it was resolved before. An instance the
+  container holds is what the contract resolves to, so an instance handed over any binding is shown by its class, as
+  the binding that supplies the contract. A grant hook held as an instance before the package registered, which the
+  configured grant hooks wrap at once, is still the earlier binding, shown by the hook it wraps, with the configured
+  hooks listed as `authorization.grant_hooks (applied to the held instance)`. A deferred provider the application
+  knew of as the package registered, which the package then left the contract to, is `deferred_loaded` once it has
+  loaded. A seam bound to a closure whose class is decided when it is first resolved is shown by the closure's file
+  and line, `supplied by custom code`; that is a note, and never fails the check. An optional contract nothing binds,
+  such as `PolicyStore` or `ScopeRegistry`, is `unbound`.
 - **Grant hooks**: the hooks in the order they run: those `authorization.grant_hooks` lists, by class, then the hook
   bound to the contract. The chain stops at the first refusal.
 - **Connection**: the database connection's name, whether `authorization.connection` or `database.default` chose it,
   and its driver; the cache store's name and driver; the usage queue's connection, driver and queue. Nothing else of
-  a connection's configuration is read, so no host, user, password or URL is shown.
+  a connection's configuration is read, so no host, user, password or URL is shown, and each name and driver is shown
+  by the rules the settings are: one that is not made of the characters names are, such as a queue's URL, is shown
+  as `value not shown`, and listed under `redacted` in the JSON.
 - **Integrations**: whether the Gate hook is enabled, the Blade directives, the query macros and the route middleware
   aliases are registered.
 
@@ -4302,12 +4312,12 @@ Settings
 
 Seams
 [seam SubjectResolver] package default; SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver; scoped
-[seam TenantTree] bound after the package registered, over its binding; supplied by custom code (app/Providers/AppServiceProvider.php:24); class decided at first use; transient
+[seam TenantTree] bound after the package registered, over its binding; supplied by custom code (app/T.php:9); ...
 [seam PolicyStore] not bound; none
 
 Grant hooks, in the order they run; the chain stops at the first refusal
 [grant hook 1] App\Authorization\AuditGrants; listed in authorization.grant_hooks
-[grant hook 2] SineMacula\Laravel\Authorization\Hooks\GrantHooks; bound to the contract, package default; runs no hook of its own
+[grant hook 2] SineMacula\Laravel\Authorization\Hooks\GrantHooks; bound to the contract, package default; ...
 
 Connection
 [connection database] mysql; chosen by database.default; driver mysql; not connected to
@@ -4321,8 +4331,8 @@ Integrations
 A check failed.
 ```
 
-(Lines are shortened here; the report lists every setting, seam and integration.) Every name is printed with its
-console markup and control characters escaped.
+(Lines are shortened here, `...` standing for what a line goes on to say; the report lists every setting, seam and
+integration.) Every name is printed with its console markup and control characters escaped.
 
 **The JSON.** `--format=json` prints the report's versioned JSON alone on the standard output, with no prose or
 styling. Its keys are stable; version 1 is:
@@ -4333,24 +4343,29 @@ styling. Its keys are stable; version 1 is:
     "status": "passed | refused | incomplete",
     "settings": [
         {"path": "authorization.models.role", "known": true, "set": true, "value": "...", "redacted": false,
-         "type": "string", "source": "default | unknown", "status": "ok | refused | skipped | unchecked | checked_at_boot"}
+         "type": "string", "source": "default | unknown",
+         "status": "ok | refused | skipped | unchecked | checked_at_boot"}
     ],
     "seams": [
         {"contract": "...", "origin": "package_default", "class": "... | null", "classes": ["..."],
-         "decides": "... | null", "factory": "file:line | null", "lifetime": "transient | singleton | scoped | instance | null",
+         "decides": "... | null", "factory": "file:line | null",
+         "lifetime": "transient | singleton | scoped | instance | null",
          "extenders": ["authorization.grant_hooks", "file:line"], "config_key": "... | null", "alias": "... | null",
-         "deferred_provider": "... | null", "previously_resolved": false,
+         "deferred_provider": "... | null", "deferred_provider_at_registration": "... | null",
+         "previously_resolved": false,
          "declaration": {"owner": "...", "classes": ["..."], "decides": "... | null", "lifetime": "scoped",
-                         "state": "standing | overridden | unverified"}}
+                         "state": "standing | instance_over_it | overridden | unverified"}}
     ],
     "grant_hooks": [
         {"position": 1, "source": "configured | bound", "class": "... | null", "type": "... | null",
          "origin": "... | null", "factory": "file:line | null", "runs": true}
     ],
     "connection": {
-        "database": {"name": "...", "chosen": "configured | default", "driver": "...", "connectivity": "not_tested"},
-        "cache": {"store": "... | null", "chosen": "configured | none", "driver": "... | null"},
-        "queue": {"connection": "...", "chosen": "configured | default", "driver": "...", "queue": "... | null"}
+        "database": {"name": "... | null", "chosen": "configured | default", "driver": "... | null",
+                     "connectivity": "not_tested", "redacted": ["name", "driver"]},
+        "cache": {"store": "... | null", "chosen": "configured | none", "driver": "... | null", "redacted": []},
+        "queue": {"connection": "... | null", "chosen": "configured | default", "driver": "... | null",
+                  "queue": "... | null", "redacted": ["queue"]}
     },
     "integrations": [
         {"name": "gate | blade_directives | query_macro | grammar_macro | middleware.{alias}",
@@ -4363,8 +4378,14 @@ styling. Its keys are stable; version 1 is:
 }
 ```
 
-`value` is null when it is not shown, and `redacted` is then true for a setting that is set. `declaration` is null when
-no sibling package declared the seam, and `exception` names the class alone of what a check that could not be
+`value` is null when it is not shown, and `redacted` is then true for a setting that is set; a setting mapping names
+to classes or permissions shows its `value` as an object, empty or not. `previously_resolved` is true only when the
+contract was resolved: an instance handed to the container and never resolved was not. `deferred_provider` is the
+deferred provider not loaded yet, and `deferred_provider_at_registration` the one the application knew of as the
+package registered, loaded since or not. `declaration` is null when no sibling package declared the seam; its `state`
+is `instance_over_it` while the declared closure is bound but an instance handed to the container supplies the
+contract. Each part of `connection` is null when the connection could not be read, and `redacted` lists the fields
+of a part withheld as they are not names. `exception` names the class alone of what a check that could not be
 completed threw.
 
 **Exit codes.**
@@ -4398,14 +4419,21 @@ $binding = static fn (Application $app): TenantTree => $app->make('acme.tenants'
 
 $this->app->bind(TenantTree::class, $binding);
 
-Declarations::of($this->app)->adapter(TenantTree::class, 'acme/tenants', AcmeTenantTree::class, Lifetime::SCOPED, $binding);
+Declarations::of($this->app)->adapter(
+    TenantTree::class,
+    'acme/tenants',
+    AcmeTenantTree::class,
+    Lifetime::SCOPED,
+    $binding,
+);
 ```
 
 A binding that decides among several classes as it is resolved declares them with `factory()`, naming the classes it
 may build and when it decides (`'per tenant, at first use'`); the report shows the set, never one class. Naming the
 closure bound lets the report tell the declared adapter, still bound, from a binding made later over it, which it
-shows as `declared by acme/tenants as ..., but overridden later`; a declaration naming no closure is shown beside
-whatever is bound as unverified. A declaration is data alone: nothing is loaded or built to read it.
+shows as `declared by acme/tenants as ..., but overridden later`, and from an instance handed to the container over
+it, `but an instance is bound over it`; a declaration naming no closure is shown beside whatever is bound as
+unverified. A declaration is data alone: nothing is loaded or built to read it.
 
 #### Explaining a check from the console
 

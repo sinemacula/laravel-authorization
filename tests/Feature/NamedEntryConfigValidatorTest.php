@@ -4,12 +4,14 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Config\NamedEntryConfigValidator;
+use SineMacula\Laravel\Authorization\Diagnostics\ContainerState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use Tests\Concerns\ReadsRefusedSettings;
 use Tests\TestCase;
@@ -33,6 +35,9 @@ use Tests\TestCase;
 final class NamedEntryConfigValidatorTest extends TestCase
 {
     use ReadsRefusedSettings;
+
+    /** @var string Why a log channel named `missing` is refused. */
+    private const string NO_CHANNEL = '\'missing\' names no entry of logging.channels.';
 
     /**
      * Null and an empty name select the default connection, which is
@@ -250,6 +255,39 @@ final class NamedEntryConfigValidatorTest extends TestCase
         NamedEntryConfigValidator::queueConnection('anything', $container);
 
         $this->assertRefused(static fn () => NamedEntryConfigValidator::logChannel(5, $container), 'authorization.log_channel', 'expected a non-empty name, got 5 (int).');
+    }
+
+    /**
+     * The configuration repository held as an instance is read as held, so
+     * nothing is resolved; one bound some other way is resolved, as in
+     * library-mode embedding.
+     *
+     * @return void
+     */
+    public function testTheConfigurationIsReadAsHeld(): void
+    {
+        $held      = new Container;
+        $resolving = new \ArrayObject;
+
+        $held->instance('config', new Repository(['logging' => ['channels' => ['audit' => []]]]));
+        $held->beforeResolving('config', static function () use ($resolving): void {
+            $resolving->append('config');
+        });
+
+        NamedEntryConfigValidator::logChannel('audit', $held);
+
+        self::assertCount(0, $resolving);
+        self::assertFalse(ContainerState::wasResolved($held, 'config'));
+        $this->assertRefused(static fn () => NamedEntryConfigValidator::logChannel('missing', $held), 'authorization.log_channel', self::NO_CHANNEL);
+
+        $bound = new Container;
+
+        $bound->singleton('config', static fn (): ConfigRepository => new Repository(['logging' => ['channels' => ['audit' => []]]]));
+
+        NamedEntryConfigValidator::logChannel('audit', $bound);
+
+        self::assertTrue(ContainerState::wasResolved($bound, 'config'));
+        $this->assertRefused(static fn () => NamedEntryConfigValidator::logChannel('missing', $bound), 'authorization.log_channel', self::NO_CHANNEL);
     }
 
     /**

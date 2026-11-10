@@ -144,9 +144,9 @@ final readonly class SeamBindings
      * @param  bool  $configured
      * @param  string|null  $configKey
      * @param  class-string|null  $builds
-     * @return void
+     * @return \SineMacula\Laravel\Authorization\Diagnostics\SeamRecord
      */
-    public function bindDefault(string $contract, \Closure|string $concrete, bool $configured = false, ?string $configKey = null, ?string $builds = null): void
+    public function bindDefault(string $contract, \Closure|string $concrete, bool $configured = false, ?string $configKey = null, ?string $builds = null): SeamRecord
     {
         $default = self::DEFAULT_BINDING_PREFIX . $contract;
 
@@ -158,17 +158,19 @@ final readonly class SeamBindings
             ? static fn (Application $app): mixed => $app->make($default)
             : ($this->resolving)($default);
 
-        $this->record(new SeamRecord($contract, $binding, $default, \is_string($concrete) ? $concrete : $builds, $configKey, $configured, ...$this->earlier($contract)));
+        $record = new SeamRecord($contract, $binding, $default, \is_string($concrete) ? $concrete : $builds, $configKey, $configured, ...$this->earlier($contract));
+
+        $this->record($record);
 
         $this->app->scoped($default, $concrete);
 
-        if (!$configured) {
+        if ($configured) {
+            $this->bindOverEarlierBindings($contract, $binding);
+        } else {
             $this->app->bindIf($contract, $binding);
-
-            return;
         }
 
-        $this->bindOverEarlierBindings($contract, $binding);
+        return $record;
     }
 
     /**
@@ -214,9 +216,8 @@ final readonly class SeamBindings
      */
     public function bindGrantHooks(): void
     {
-        $this->bindDefault(GrantHook::class, GrantHooks::class);
-
-        $hooks = $this->app['config']->get('authorization.grant_hooks', []);
+        $record = $this->bindDefault(GrantHook::class, GrantHooks::class);
+        $hooks  = $this->app['config']->get('authorization.grant_hooks', []);
 
         // A value that is not a list of hooks is refused as the application
         // boots, so none is listed until then.
@@ -224,7 +225,20 @@ final readonly class SeamBindings
             return;
         }
 
+        $held = ContainerState::instance($this->app, GrantHook::class);
+
         $this->app->extend(GrantHook::class, ListedGrantHooks::around(...));
+
+        // Laravel applies the extender at once to an instance it holds and
+        // keeps no trace of it, so the decorator that replaced the instance is
+        // recorded, for the report to tell it from a later binding.
+        $wrapper = ContainerState::instance($this->app, GrantHook::class);
+
+        if ($wrapper === $held) {
+            return;
+        }
+
+        $this->record($record->wrappedBy($wrapper));
     }
 
     /**
@@ -240,19 +254,22 @@ final readonly class SeamBindings
 
     /**
      * Return what the contract was bound to before the package binds it: the
-     * instance held or the binding's closure, the abstract it is an alias of,
-     * and the deferred provider that provides it, each null when there is none.
-     * Nothing is built.
+     * binding's closure and the instance held, either of which the report
+     * matches with what supplies the contract when it runs (see
+     * `CurrentBinding`), the abstract it is an alias of, and the deferred
+     * provider that provides it, each null when there is none. Nothing is
+     * built.
      *
      * @param  class-string  $contract
-     * @return array{earlier: object|null, earlierAlias: string|null, deferredProvider: string|null}
+     * @return array{earlier: (\Closure(mixed ...): mixed)|null, earlierInstance: object|null, earlierAlias: string|null, deferredProvider: string|null}
      */
     private function earlier(string $contract): array
     {
         $deferred = $this->app instanceof FoundationApplication ? $this->app->getDeferredServices()[$contract] ?? null : null;
 
         return [
-            'earlier'          => ContainerState::instance($this->app, $contract) ?? ContainerState::concrete($this->app, $contract),
+            'earlier'          => ContainerState::concrete($this->app, $contract),
+            'earlierInstance'  => ContainerState::instance($this->app, $contract),
             'earlierAlias'     => ContainerState::alias($this->app, $contract),
             'deferredProvider' => \is_string($deferred) ? $deferred : null,
         ];

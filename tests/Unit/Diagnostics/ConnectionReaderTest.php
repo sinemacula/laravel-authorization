@@ -32,9 +32,9 @@ final class ConnectionReaderTest extends TestCase
     {
         $read = (new ConnectionReader(self::config([])))->read();
 
-        self::assertSame(['name' => 'main', 'chosen' => 'default', 'driver' => 'pgsql', 'connectivity' => 'not_tested'], $read['database']);
-        self::assertSame(['store' => null, 'chosen' => 'none', 'driver' => null], $read['cache']);
-        self::assertSame(['connection' => 'jobs', 'chosen' => 'default', 'driver' => 'redis', 'queue' => null], $read['queue']);
+        self::assertSame(['name' => 'main', 'chosen' => 'default', 'driver' => 'pgsql', 'connectivity' => 'not_tested', 'redacted' => []], $read['database']);
+        self::assertSame(['store' => null, 'chosen' => 'none', 'driver' => null, 'redacted' => []], $read['cache']);
+        self::assertSame(['connection' => 'jobs', 'chosen' => 'default', 'driver' => 'redis', 'queue' => null, 'redacted' => []], $read['queue']);
         self::assertStringNotContainsString('Hunter2', (string) \json_encode($read));
     }
 
@@ -52,9 +52,78 @@ final class ConnectionReaderTest extends TestCase
             'usage'      => ['connection' => 'missing', 'queue' => 'usage'],
         ])))->read();
 
-        self::assertSame(['name' => 'audit', 'chosen' => 'configured', 'driver' => 'mysql', 'connectivity' => 'not_tested'], $read['database']);
-        self::assertSame(['store' => 'shared', 'chosen' => 'configured', 'driver' => 'redis'], $read['cache']);
-        self::assertSame(['connection' => 'missing', 'chosen' => 'configured', 'driver' => null, 'queue' => 'usage'], $read['queue']);
+        self::assertSame(['name' => 'audit', 'chosen' => 'configured', 'driver' => 'mysql', 'connectivity' => 'not_tested', 'redacted' => []], $read['database']);
+        self::assertSame(['store' => 'shared', 'chosen' => 'configured', 'driver' => 'redis', 'redacted' => []], $read['cache']);
+        self::assertSame(['connection' => 'missing', 'chosen' => 'configured', 'driver' => null, 'queue' => 'usage', 'redacted' => []], $read['queue']);
+    }
+
+    /**
+     * A name or a driver that is not made of the characters names are, such as
+     * a queue's URL, is never shown: it is null, and listed as redacted, as the
+     * settings section hides it.
+     *
+     * @return void
+     */
+    public function testANameThatIsNoNameIsNeverShown(): void
+    {
+        $url  = 'https://sqs.eu-west-1.amazonaws.com/123456789012/authz-usage';
+        $read = (new ConnectionReader(new Repository([
+            'authorization' => ['connection' => 'pgsql://u:Hunter2@h/d', 'usage' => ['queue' => $url, 'connection' => 'jobs']],
+            'database'      => ['connections' => ['pgsql://u:Hunter2@h/d' => ['driver' => 'pgsql://u:Hunter2@h/d']]],
+            'queue'         => ['connections' => ['jobs' => ['driver' => 'sqs']]],
+        ])))->read();
+
+        self::assertSame(['name' => null, 'chosen' => 'configured', 'driver' => null, 'connectivity' => 'not_tested', 'redacted' => ['name', 'driver']], $read['database']);
+        self::assertSame(['connection' => 'jobs', 'chosen' => 'configured', 'driver' => 'sqs', 'queue' => null, 'redacted' => ['queue']], $read['queue']);
+        self::assertStringNotContainsString('Hunter2', (string) \json_encode($read));
+        self::assertStringNotContainsString('123456789012', (string) \json_encode($read));
+    }
+
+    /**
+     * An empty name, or one that is not a string, is taken for none: the
+     * default's name is shown, or none for the cache store.
+     *
+     * @return void
+     */
+    public function testAnEmptyOrNonStringNameIsNone(): void
+    {
+        $read = (new ConnectionReader(self::config([
+            'connection' => '',
+            'cache'      => ['store' => ''],
+            'usage'      => ['connection' => 3, 'queue' => ''],
+        ])))->read();
+
+        self::assertSame(['main', 'default'], [$read['database']['name'], $read['database']['chosen']]);
+        self::assertSame([null, 'none'], [$read['cache']['store'], $read['cache']['chosen']]);
+        self::assertSame(['jobs', 'default', null], [$read['queue']['connection'], $read['queue']['chosen'], $read['queue']['queue']]);
+    }
+
+    /**
+     * A map of connections that is not an array, or an entry that is not one,
+     * gives no driver.
+     *
+     * @return void
+     */
+    public function testAMalformedMapGivesNoDriver(): void
+    {
+        $read = (new ConnectionReader(new Repository([
+            'database' => ['default' => 'main', 'connections' => 'x'],
+            'queue'    => ['default' => 'jobs', 'connections' => ['jobs' => 'redis']],
+        ])))->read();
+
+        self::assertSame(['main', null], [$read['database']['name'], $read['database']['driver']]);
+        self::assertSame(['jobs', null], [$read['queue']['connection'], $read['queue']['driver']]);
+    }
+
+    /**
+     * What the report holds when the connection could not be read keeps each
+     * part, as null, so its JSON is still an object.
+     *
+     * @return void
+     */
+    public function testTheUnreadConnectionKeepsItsShape(): void
+    {
+        self::assertSame('{"database":null,"cache":null,"queue":null}', \json_encode(ConnectionReader::UNREAD));
     }
 
     /**

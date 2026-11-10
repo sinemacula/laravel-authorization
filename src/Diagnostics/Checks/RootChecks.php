@@ -94,17 +94,18 @@ final readonly class RootChecks
         }
 
         $names = [];
+        $named = [];
 
+        // Each check refuses under the table's own path, so the block's path is
+        // recorded only for a failure the checks did not foresee.
         foreach ($keys as $key) {
-            $this->collector->verify(TableConfigValidator::KEY . ".{$key}", static function () use ($key, $block, &$names): void {
+            $this->collector->verify(TableConfigValidator::KEY, static function () use ($key, $block, &$names): void {
                 $names[$key] = TableConfigValidator::name($key, ConfigBlock::entry($block, $key, $key));
             });
         }
 
-        $named = [];
-
         foreach ($names as $key => $name) {
-            $this->collector->verify(TableConfigValidator::KEY . ".{$key}", static function () use ($key, $name, &$named): void {
+            $this->collector->verify(TableConfigValidator::KEY, static function () use ($key, $name, &$named): void {
                 $named = TableConfigValidator::distinct($key, $name, $named);
             });
         }

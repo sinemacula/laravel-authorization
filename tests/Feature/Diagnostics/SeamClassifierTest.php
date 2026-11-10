@@ -10,6 +10,7 @@ use Illuminate\Foundation\Application;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Console\Support\SeamText;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Contracts\GrantUsageStore;
@@ -21,10 +22,12 @@ use SineMacula\Laravel\Authorization\Diagnostics\BindingRegistry;
 use SineMacula\Laravel\Authorization\Diagnostics\Declarations;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\Lifetime;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\Origin;
+use SineMacula\Laravel\Authorization\Diagnostics\GrantHookOrder;
 use SineMacula\Laravel\Authorization\Diagnostics\Inspector;
 use SineMacula\Laravel\Authorization\Diagnostics\SeamClassifier;
 use SineMacula\Laravel\Authorization\Diagnostics\SeamRow;
 use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
+use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Usage\DatabaseGrantUsageStore;
@@ -374,6 +377,15 @@ final class SeamClassifierTest extends TestCase
         self::assertSame(Origin::ALIAS, $row->origin);
         self::assertSame(ExplodingTenantTree::class, $row->class());
         self::assertSame(ExplodingTenantTree::class, $row->toArray()['alias']);
+        self::assertNull($row->lifetime);
+
+        $scoped = self::classifyAll(self::registered(after: static function (Application $app): void {
+            $app->scoped(ExplodingTenantTree::class);
+            $app->alias(ExplodingTenantTree::class, TenantTree::class);
+        }))[TenantTree::class];
+
+        self::assertSame(Origin::ALIAS, $scoped->origin);
+        self::assertSame(Lifetime::SCOPED, $scoped->lifetime);
     }
 
     /**
@@ -413,6 +425,306 @@ final class SeamClassifierTest extends TestCase
     }
 
     /**
+     * A singleton or scoped binding resolved before the package registered is
+     * still the earlier binding, shown by the class of what it built.
+     *
+     * @param  class-string  $contract
+     * @return void
+     */
+    #[DataProvider('contracts')]
+    public function testAnEarlierSharedBindingResolvedBeforeRegistrationIsEarlier(string $contract): void
+    {
+        foreach (['singleton' => Lifetime::SINGLETON, 'scoped' => Lifetime::SCOPED] as $kind => $lifetime) {
+            $row = self::classifyAll(self::registered(before: static function (Application $app) use ($contract, $kind): void {
+                self::share($app, $kind, $contract, static fn (): object => self::unbuilt(ExplodingTenantTree::class));
+                $app->make($contract);
+            }))[$contract];
+
+            self::assertSame(Origin::EARLIER_BINDING, $row->origin, $kind);
+            self::assertSame(ExplodingTenantTree::class, $row->class(), $kind);
+            self::assertSame($lifetime, $row->lifetime, $kind);
+            self::assertTrue($row->binding->previouslyResolved, $kind);
+            self::assertNull($row->factory, $kind);
+        }
+    }
+
+    /**
+     * An instance handed over a shared binding, the package's earlier one or a
+     * sibling's declared one, is what the contract resolves to: it is shown by
+     * its class, as a later binding, never as the binding under it.
+     *
+     * @return void
+     */
+    public function testAnInstanceHandedOverASharedBindingIsShown(): void
+    {
+        $handed    = static fn (Application $app) => $app->instance(TenantTree::class, new \ArrayObject);
+        $declaring = static fn (string $kind): \Closure => static function (Application $app) use ($kind): void {
+            $binding  = static fn (): object => self::unbuilt(ExplodingTenantTree::class);
+            $lifetime = $kind === 'singleton' ? Lifetime::SINGLETON : Lifetime::SCOPED;
+
+            self::share($app, $kind, TenantTree::class, $binding);
+
+            Declarations::of($app)->adapter(TenantTree::class, 'acme/sibling', ExplodingTenantTree::class, $lifetime, $binding);
+        };
+
+        $rows = [
+            'earlier singleton'  => self::registered(before: static fn (Application $app) => $app->singleton(TenantTree::class, ExplodingTenantTree::class), after: $handed),
+            'declared singleton' => self::registered(before: $declaring('singleton'), after: $handed),
+            'declared scoped'    => self::registered(before: $declaring('scoped'), after: $handed),
+        ];
+
+        foreach ($rows as $case => $app) {
+            $row = self::classifyAll($app)[TenantTree::class];
+
+            self::assertSame(Origin::LATER_BINDING, $row->origin, $case);
+            self::assertSame(\get_class($app->make(TenantTree::class)), $row->class(), $case);
+            self::assertSame(Lifetime::INSTANCE, $row->lifetime, $case);
+            self::assertFalse($row->binding->previouslyResolved, $case);
+            self::assertStringNotContainsString('previously resolved', SeamText::line($row), $case);
+        }
+
+        self::assertSame('instance_over_it', self::classifyAll($rows['declared scoped'])[TenantTree::class]->toArray()['declaration']['state'] ?? null);
+    }
+
+    /**
+     * The grant hook held as an instance before the package registered, which
+     * the configured grant hooks wrapped at once, is still the earlier binding,
+     * shown by the hook it wraps, with the configured hooks applied to it; one
+     * a binding built before is too.
+     *
+     * @return void
+     */
+    public function testAnEarlierGrantHookWrappedAtOnceIsEarlier(): void
+    {
+        $hooks   = ['grant_hooks' => [ExplodingGrantHook::class]];
+        $befores = [
+            'instance'  => static fn (Application $app) => $app->instance(GrantHook::class, self::unbuilt(ExplodingGrantHook::class)),
+            'singleton' => static function (Application $app): void {
+                $app->singleton(GrantHook::class, static fn (): object => self::unbuilt(ExplodingGrantHook::class));
+                $app->make(GrantHook::class);
+            },
+        ];
+
+        foreach ($befores as $kind => $before) {
+            $row   = self::classifyAll(self::registered($hooks, before: $before))[GrantHook::class];
+            $order = GrantHookOrder::of($hooks['grant_hooks'], $row);
+
+            self::assertSame(Origin::EARLIER_BINDING, $row->origin, $kind);
+            self::assertSame(ExplodingGrantHook::class, $row->class(), $kind);
+            self::assertSame([SeamClassifier::APPLIED], $row->extenders, $kind);
+            self::assertSame(ExplodingGrantHook::class, $order[1]['class'] ?? null, $kind);
+            self::assertTrue($order[1]['runs'], $kind);
+        }
+
+        $unwrapped = self::classifyAll(self::registered($hooks, before: static fn (Application $app) => $app->instance(GrantHook::class, new \stdClass)))[GrantHook::class];
+
+        self::assertSame(Origin::EARLIER_BINDING, $unwrapped->origin);
+        self::assertSame(\stdClass::class, $unwrapped->class());
+        self::assertSame([], $unwrapped->extenders);
+    }
+
+    /**
+     * A deferred provider known as the package registered, which the package
+     * left the contract to, is shown as that provider once it has loaded.
+     *
+     * @return void
+     */
+    public function testALoadedDeferredProviderIsNotALaterBinding(): void
+    {
+        DeferredBindingProvider::$objects = [TenantTree::class => new \stdClass];
+
+        $app = self::registered(
+            before: static fn (Application $app) => $app->addDeferredServices([TenantTree::class => DeferredBindingProvider::class]),
+            after: static fn (Application $app) => $app->loadDeferredProvider(TenantTree::class),
+        );
+        $row = self::classifyAll($app)[TenantTree::class];
+
+        self::assertSame(Origin::DEFERRED_LOADED, $row->origin);
+        self::assertSame(DeferredBindingProvider::class, $row->source);
+        self::assertNull($row->toArray()['deferred_provider']);
+        self::assertSame(DeferredBindingProvider::class, $row->toArray()['deferred_provider_at_registration']);
+        self::assertNull($row->class());
+        self::assertSame('tests/Feature/Stubs/DeferredBindingProvider.php:34', $row->factory);
+
+        $later = self::classifyAll(self::registered(
+            ['tenant_tree' => ExplodingTenantTree::class],
+            before: static fn (Application $app) => $app->addDeferredServices([TenantTree::class => DeferredBindingProvider::class]),
+            after: static fn (Application $app) => $app->bind(TenantTree::class, FlatTenantTree::class),
+        ))[TenantTree::class];
+
+        self::assertSame(Origin::LATER_BINDING, $later->origin);
+    }
+
+    /**
+     * A contract bound by class name while a deferred provider not loaded yet
+     * provides it builds no class known yet.
+     *
+     * @return void
+     */
+    public function testADeferredContractBuildsNoClassKnownYet(): void
+    {
+        DeferredBindingProvider::$objects = [TenantTree::class => new \stdClass];
+
+        $row = self::classifyAll(self::registered(after: static function (Application $app): void {
+            $app->bind(TenantTree::class, ExplodingTenantTree::class);
+            $app->addDeferredServices([TenantTree::class => DeferredBindingProvider::class]);
+        }))[TenantTree::class];
+
+        self::assertSame(Origin::DEFERRED, $row->origin);
+        self::assertSame([], $row->classes);
+        self::assertNull($row->class());
+    }
+
+    /**
+     * A binding made with a class name lives as long as the class's own
+     * binding, followed through an alias, and a loop of such bindings ends; the
+     * package's default lives as long as the configured class's binding when
+     * that outlives the scoped key.
+     *
+     * @return void
+     */
+    public function testAForwardingBindingLivesAsLongAsItsTarget(): void
+    {
+        $cases = [
+            'class binding' => [Lifetime::SINGLETON, static function (Application $app): void {
+                $app->singleton(FlatTenantTree::class);
+                $app->bind(TenantTree::class, FlatTenantTree::class);
+            }],
+            'aliased class binding' => [Lifetime::SINGLETON, static function (Application $app): void {
+                $app->singleton(FlatTenantTree::class);
+                $app->alias(FlatTenantTree::class, 'flat');
+                $app->bind(TenantTree::class, 'flat');
+            }],
+            'loop' => [Lifetime::SCOPED, static function (Application $app): void {
+                $app->scoped('tree', TenantTree::class);
+                $app->bind(TenantTree::class, 'tree');
+            }],
+            'unbound class' => [Lifetime::TRANSIENT, static fn (Application $app) => $app->bind(TenantTree::class, FlatTenantTree::class)],
+        ];
+
+        foreach ($cases as $case => [$lifetime, $after]) {
+            $row = self::classifyAll(self::registered(after: $after))[TenantTree::class];
+
+            self::assertSame(Origin::LATER_BINDING, $row->origin, $case);
+            self::assertSame($lifetime, $row->lifetime, $case);
+        }
+
+        $configured = self::classifyAll(self::registered(
+            ['tenant_tree' => ExplodingTenantTree::class],
+            after: static fn (Application $app) => $app->singleton(ExplodingTenantTree::class),
+        ))[TenantTree::class];
+
+        self::assertSame(Origin::CONFIGURED, $configured->origin);
+        self::assertSame(Lifetime::SINGLETON, $configured->lifetime);
+    }
+
+    /**
+     * A closure is shown by where it is written whatever it captures and
+     * whatever class it is declared in, and an extender is the configured grant
+     * hooks' only when it is the package's own.
+     *
+     * @return void
+     */
+    public function testClosuresAreShownByWhereTheyAreWritten(): void
+    {
+        [$captures, $capturesLine] = self::capturing();
+
+        $unscopedLine  = __LINE__ + 1;
+        $unscoped      = \Closure::bind(static fn (): object => new \stdClass, null, null);
+        $containerLine = __LINE__ + 1;
+        $container     = \Closure::bind(static fn (): object => new \stdClass, null, Container::class);
+        $hooksLine     = __LINE__ + 1;
+        $hooks         = \Closure::bind(static fn (mixed $hook): mixed => $hook, null, ListedGrantHooks::class);
+
+        self::assertInstanceOf(\Closure::class, $unscoped);
+        self::assertInstanceOf(\Closure::class, $container);
+        self::assertInstanceOf(\Closure::class, $hooks);
+
+        $bindings = ['captures' => [$captures, $capturesLine], 'unscoped' => [$unscoped, $unscopedLine], 'container' => [$container, $containerLine]];
+
+        foreach ($bindings as $case => [$closure, $line]) {
+            $row = self::classifyAll(self::registered(after: static fn (Application $app) => $app->bind(TenantTree::class, $closure)))[TenantTree::class];
+
+            self::assertNull($row->class(), $case);
+            self::assertSame(self::FILE . ":{$line}", $row->factory, $case);
+        }
+
+        $app = self::registered(after: static function (Application $app) use ($unscoped, $hooks): void {
+            $app->extend(GrantHook::class, $unscoped);
+            $app->extend(GrantHook::class, $hooks);
+        });
+
+        self::assertSame([self::FILE . ":{$unscopedLine}", self::FILE . ":{$hooksLine}"], self::classifyAll($app)[GrantHook::class]->extenders);
+    }
+
+    /**
+     * The file a closure is written in is shown relative to the base path,
+     * whether or not the base path ends in a separator, and whole when it lies
+     * outside the base path, or the base path is the root.
+     *
+     * @return void
+     */
+    public function testTheFileIsShownRelativeToTheBasePath(): void
+    {
+        $line    = __LINE__ + 1;
+        $factory = static fn (): object => new \stdClass;
+        $app     = self::registered(after: static fn (Application $app) => $app->bind(TenantTree::class, $factory));
+        $whole   = __FILE__ . ":{$line}";
+        $paths   = [$app->basePath() . '/' => self::FILE . ":{$line}", '/nonexistent' => $whole, '/' => $whole, '' => $whole];
+
+        foreach ($paths as $basePath => $expected) {
+            $classifier = new SeamClassifier($app, BindingRegistry::of($app), Declarations::of($app), $basePath === '' ? null : $basePath);
+
+            self::assertSame($expected, $classifier->classify(TenantTree::class)->factory, $basePath);
+        }
+    }
+
+    /**
+     * Return a closure that captures a class name in a variable named as the
+     * one Laravel's own closures hold, though it is not Laravel's, and the line
+     * it is written on.
+     *
+     * @return array{\Closure(): string, int}
+     */
+    private static function capturing(): array
+    {
+        $concrete = ExplodingTenantTree::class;
+
+        return [static fn (): string => $concrete, __LINE__];
+    }
+
+    /**
+     * Bind the contract to the closure as a singleton or scoped, as given.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @param  string  $kind
+     * @param  string  $contract
+     * @param  \Closure(): object  $concrete
+     * @return void
+     */
+    private static function share(Application $app, string $kind, string $contract, \Closure $concrete): void
+    {
+        if ($kind === 'singleton') {
+            $app->singleton($contract, $concrete);
+
+            return;
+        }
+
+        $app->scoped($contract, $concrete);
+    }
+
+    /**
+     * Return an object of the class without building it, so nothing explodes.
+     *
+     * @param  class-string  $class
+     * @return object
+     */
+    private static function unbuilt(string $class): object
+    {
+        return (new \ReflectionClass($class))->newInstanceWithoutConstructor();
+    }
+
+    /**
      * Bind the contract to the exploding tenant tree the way given, building
      * nothing.
      *
@@ -424,7 +736,7 @@ final class SeamClassifierTest extends TestCase
     private static function bind(Application $app, string $contract, string $kind): void
     {
         if ($kind === 'instance') {
-            $app->instance($contract, (new \ReflectionClass(ExplodingTenantTree::class))->newInstanceWithoutConstructor());
+            $app->instance($contract, self::unbuilt(ExplodingTenantTree::class));
 
             return;
         }

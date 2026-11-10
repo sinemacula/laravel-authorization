@@ -5,10 +5,14 @@ declare(strict_types = 1);
 namespace Tests\Feature\Diagnostics\Checks;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Config\CacheConfigValidator;
+use SineMacula\Laravel\Authorization\Config\PolicyConfigValidator;
+use SineMacula\Laravel\Authorization\Config\UsageConfigValidator;
 use SineMacula\Laravel\Authorization\Diagnostics\Checks\BlockChecks;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
 use SineMacula\Laravel\Authorization\Diagnostics\IssueCollector;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 use Tests\TestCase;
 
 /**
@@ -71,6 +75,60 @@ final class BlockChecksTest extends TestCase
         self::assertSame([['authorization.usage.connection', 'unknown_name']], self::pathsAndCodes($unknown));
         self::assertSame(['authorization.cache.store'], $unknown->checkedAtBoot);
         self::assertSame([], $unnamed->checkedAtBoot);
+    }
+
+    /**
+     * A block that is not an array is refused once, and each setting it holds
+     * is skipped, never checked.
+     *
+     * @return void
+     */
+    public function testARefusedBlockSkipsItsSettings(): void
+    {
+        foreach (['cache' => CacheConfigValidator::SETTINGS, 'policies' => PolicyConfigValidator::SETTINGS, 'usage' => UsageConfigValidator::SETTINGS] as $block => $settings) {
+            self::assertSame(
+                [["authorization.{$block}", 'invalid_type'], ...\array_map(static fn (string $setting): array => ["authorization.{$block}.{$setting}", 'skipped'], $settings)],
+                self::pathsAndCodes($this->check([$block => 'x'])),
+                $block,
+            );
+        }
+    }
+
+    /**
+     * The usage switch is checked on its own.
+     *
+     * @return void
+     */
+    public function testTheUsageSwitchIsChecked(): void
+    {
+        self::assertSame([['authorization.usage.enabled', 'invalid_type']], self::pathsAndCodes($this->check(['usage' => ['enabled' => 'yes']])));
+    }
+
+    /**
+     * Each whole number passes at the least it allows and is refused below it.
+     *
+     * @return void
+     */
+    public function testEachWholeNumberPassesAtItsLeast(): void
+    {
+        $least = [
+            'policies'       => ['limits' => \array_fill_keys(PolicyLimits::KEYS, 1)],
+            'query_scoping'  => ['max_anchors' => 1, 'max_scopes' => 1, 'max_attachments' => 1],
+            'bulk'           => ['chunk_size' => 1],
+            'administration' => ['max_impact' => 1, 'retries' => 0],
+            'reviews'        => ['limit' => 1],
+        ];
+
+        $below = [
+            'policies'       => ['limits' => \array_fill_keys(PolicyLimits::KEYS, 0)],
+            'query_scoping'  => ['max_anchors' => 0, 'max_scopes' => 0, 'max_attachments' => 0],
+            'bulk'           => ['chunk_size' => 0],
+            'administration' => ['max_impact' => 0, 'retries' => -1],
+            'reviews'        => ['limit' => 0],
+        ];
+
+        self::assertSame([], self::pathsAndCodes($this->check($least)));
+        self::assertCount(\count(PolicyLimits::KEYS) + 7, \array_filter(self::pathsAndCodes($this->check($below)), static fn (array $issue): bool => $issue[1] === 'out_of_range'));
     }
 
     /**
