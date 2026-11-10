@@ -111,7 +111,7 @@ final class RouteSourcesTest extends TestCase
 
         self::assertSame(self::rowKeys($ann, ['policy_attachment ann deny-own']), self::keysOf($routes->routesFor(Reference::of($own)->id)));
         self::assertSame(self::rowKeys($ann, $throughRole), self::keysOf($routes->routesFor(Reference::of($role)->id)));
-        self::assertSame(self::createdAt('authorizable_policies'), $routes->routesFor(Reference::of($own)->id)[0]->grant->createdAt);
+        self::assertSame(self::createdAt('authorizable_policies', ['policy_id' => $own->getKey()]), $routes->routesFor(Reference::of($own)->id)[0]->grant->createdAt);
         self::assertNull(RouteSources::policies($ann, [], new EloquentCollection([$admin]), new InheritedPolicies(stable: false)));
         self::assertNull(GrantResolver::policies($ann->policies(), new ResolutionPins, RolePolicies::heldBy($ann))->routes);
     }
@@ -204,15 +204,16 @@ final class RouteSourcesTest extends TestCase
     }
 
     /**
-     * Return the creation of the only row of the grant table, as a UTC
-     * timestamp.
+     * Return the creation of the row of the grant table the conditions pick,
+     * the only row when they pick none, as a UTC timestamp.
      *
      * @param  string  $table
+     * @param  array<string, mixed>  $where
      * @return int
      */
-    private static function createdAt(string $table): int
+    private static function createdAt(string $table, array $where = []): int
     {
-        $created = DB::table($table)->value('created_at');
+        $created = DB::table($table)->where($where)->sole('created_at')->created_at;
 
         return Carbon::parse(\is_string($created) ? $created : '', 'UTC')->getTimestamp();
     }
