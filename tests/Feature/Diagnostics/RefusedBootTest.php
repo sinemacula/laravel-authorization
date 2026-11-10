@@ -184,8 +184,9 @@ final class RefusedBootTest extends TestCase
     }
 
     /**
-     * Turn the switch on, set the refused configuration, hold a grant hook and
-     * record every resolution, before any provider registers.
+     * Forget counts other tests left, turn the switch on, set the refused
+     * configuration, hold a grant hook and record every resolution, before any
+     * provider registers.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
@@ -194,6 +195,9 @@ final class RefusedBootTest extends TestCase
     protected function resolveApplicationConfiguration(mixed $app): void
     {
         parent::resolveApplicationConfiguration($app);
+
+        Explosions::$count                  = 0;
+        RecordingPermissionProvider::$reads = 0;
 
         DiagnosticMode::enable($app);
 
