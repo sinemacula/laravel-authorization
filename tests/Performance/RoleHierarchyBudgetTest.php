@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
+use Tests\Concerns\MeasuresTime;
 use Tests\TestCase;
 
 /**
@@ -35,6 +36,8 @@ use Tests\TestCase;
 #[CoversTrait(ManagesPermissions::class)]
 final class RoleHierarchyBudgetTest extends TestCase
 {
+    use MeasuresTime;
+
     /**
      * A single ancestors walk on a 10-deep chain must complete in under 50ms on
      * the reference machine. Observed ~2.2ms on the reference machine; budget
@@ -53,7 +56,7 @@ final class RoleHierarchyBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(
+        $this->assertWithinBudget(
             0.05,
             $elapsed,
             "Role::ancestors() 10-deep budget exceeded ({$elapsed}s).",

@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Support\DeclaredAbilities;
+use Tests\Concerns\MeasuresTime;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubPermissionProvider;
@@ -35,6 +36,8 @@ use Tests\TestCase;
 #[CoversClass(DeclaredAbilities::class)]
 final class GateHookBudgetTest extends TestCase
 {
+    use MeasuresTime;
+
     /**
      * Declare the stub enum and provider, and act as a user holding one of the
      * enum's permissions, handed over by the Gate.
@@ -81,7 +84,7 @@ final class GateHookBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(0.1, $elapsed, "Gate fall-through budget exceeded ({$elapsed}s for 500 checks).");
+        $this->assertWithinBudget(0.1, $elapsed, "Gate fall-through budget exceeded ({$elapsed}s for 500 checks).");
     }
 
     /**
@@ -103,6 +106,6 @@ final class GateHookBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(0.5, $elapsed, "Gate hook budget exceeded ({$elapsed}s for 500 checks).");
+        $this->assertWithinBudget(0.5, $elapsed, "Gate hook budget exceeded ({$elapsed}s for 500 checks).");
     }
 }
