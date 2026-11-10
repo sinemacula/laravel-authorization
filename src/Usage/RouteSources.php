@@ -65,8 +65,8 @@ final class RouteSources
      * its direct grants, and the routes through the roles it holds.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $grantee
-     * @param  \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>  $granted
-     * @param  \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>  $held
+     * @param  \Illuminate\Database\Eloquent\Collection<int, covariant \Illuminate\Database\Eloquent\Model>  $granted
+     * @param  \Illuminate\Database\Eloquent\Collection<int, covariant \Illuminate\Database\Eloquent\Model>  $held
      * @param  array<string, list<string>>  $chains
      * @param  \SineMacula\Laravel\Authorization\Support\InheritedPermissions  $inherited
      * @return \SineMacula\Laravel\Authorization\Usage\RouteMap
@@ -105,7 +105,7 @@ final class RouteSources
      *
      * @param  \Illuminate\Database\Eloquent\Model  $grantee
      * @param  array<int, array<string, mixed>>  $own
-     * @param  \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>|null  $held
+     * @param  \Illuminate\Database\Eloquent\Collection<int, covariant \Illuminate\Database\Eloquent\Model>|null  $held
      * @param  \SineMacula\Laravel\Authorization\Support\InheritedPolicies  $inherited
      * @return \SineMacula\Laravel\Authorization\Usage\RouteMap|null
      */
@@ -142,7 +142,7 @@ final class RouteSources
      *
      * @param  \SineMacula\Laravel\Authorization\Usage\RouteMapBuilder  $map
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
-     * @param  \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>  $held
+     * @param  \Illuminate\Database\Eloquent\Collection<int, covariant \Illuminate\Database\Eloquent\Model>  $held
      * @param  array<string, list<string>>  $chains
      * @param  array<array-key, list<array{string, string}>>  $carried
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind  $kind
