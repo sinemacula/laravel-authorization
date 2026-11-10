@@ -45,7 +45,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * - `grant_state`: whether the starting row still counts at the review's
  *   instant, `live` or `expired`, or `malformed` when a row the route rests on
  *   names half a tenant (see `Enums\GrantState`); `subject_state`: what the
- *   review knows of the subject.
+ *   review knows of the subject;
+ * - `usage`: what the review knows of the route's use, `used`, `unused` or
+ *   `unknown`, with its last observed use and the coverage of tracking (see
+ *   `RowUsage`); `unknown` while grant usage tracking is off.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,6 +79,7 @@ final readonly class ReviewRow
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $grantedBy
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\GrantState  $grantState
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState  $subjectState
+     * @param  \SineMacula\Laravel\Authorization\Reviews\RowUsage|null  $usage
      *
      * @formatter:on
      *
@@ -124,6 +128,9 @@ final readonly class ReviewRow
 
         /** What the review knows of the subject. */
         public SubjectState $subjectState = SubjectState::UNKNOWN,
+
+        /** What the review knows of the route's use; null when it was not read, which reads as unknown. */
+        public ?RowUsage $usage = null,
     ) {}
 
     /**
@@ -149,7 +156,46 @@ final readonly class ReviewRow
             $this->grantedBy,
             $this->grantState,
             $state,
+            $this->usage,
         );
+    }
+
+    /**
+     * Return the row with what the review knows of its use.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\RowUsage  $usage
+     * @return self
+     */
+    public function withUsage(RowUsage $usage): self
+    {
+        return new self(
+            $this->rowKey,
+            $this->subject,
+            $this->grantee,
+            $this->target,
+            $this->sourceKind,
+            $this->sourceKey,
+            $this->originScope,
+            $this->viaIdentity,
+            $this->rolePath,
+            $this->supportingGrants,
+            $this->times,
+            $this->grantedBy,
+            $this->grantState,
+            $this->subjectState,
+            $usage,
+        );
+    }
+
+    /**
+     * Return when the row's starting grant was created, or null when it records
+     * none.
+     *
+     * @return \Carbon\CarbonImmutable|null
+     */
+    public function createdAt(): ?CarbonImmutable
+    {
+        return $this->times['created_at'];
     }
 
     /**
@@ -189,6 +235,7 @@ final readonly class ReviewRow
             'granted_by'        => self::referenceArray($this->grantedBy),
             'grant_state'       => $this->grantState->value,
             'subject_state'     => $this->subjectState->value,
+            'usage'             => ($this->usage ?? RowUsage::unknown())->toArray(),
         ];
     }
 

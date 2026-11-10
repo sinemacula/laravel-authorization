@@ -31,6 +31,19 @@ use Tests\TestCase;
 final class RevokeRoleCommandTest extends TestCase
 {
     /**
+     * The command is registered under its `NAME` constant, the name its
+     * signature declares.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:revoke', RevokeRoleCommand::NAME);
+        self::assertInstanceOf(RevokeRoleCommand::class, Artisan::all()[RevokeRoleCommand::NAME] ?? null);
+        self::assertSame(RevokeRoleCommand::NAME, Artisan::all()[RevokeRoleCommand::NAME]->getName());
+    }
+
+    /**
      * Successfully revokes a role from an identity.
      *
      * @return void

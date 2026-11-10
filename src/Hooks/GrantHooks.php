@@ -8,16 +8,18 @@ use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 
 /**
- * The ordered composite of grant hooks, and the package's default binding of
- * the grant hook contract (AUTHZ-11.3).
+ * The ordered composite of grant hooks (AUTHZ-11.3), and, holding none, the
+ * package's default binding of the grant hook contract.
  *
- * It holds the hooks `authorization.grant_hooks` lists, each built from the
- * container, and calls them in the order listed: the first that throws stops
- * the rest, and its exception refuses the call. With none listed it does
- * nothing, and the grant service then classifies nothing, since there is no
- * hook to call. The list is validated at boot, and there is no way to add a
- * hook at run time: an application lists its hooks in the config, or binds its
- * own hook on the contract in place of this one.
+ * It calls its hooks in order: the first that throws stops the rest, and its
+ * exception refuses the call. `fromConfig()` builds it from the hooks
+ * `authorization.grant_hooks` lists, each built from the container. The list is
+ * validated at boot, and there is no way to add a hook at run time: an
+ * application lists its hooks in the config, or binds its own hook on the
+ * contract. The listed hooks run before whatever the contract resolves to, this
+ * default included, through `ListedGrantHooks` (N108). With none listed the
+ * default does nothing, and the grant service then classifies nothing, since
+ * there is no hook to call.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

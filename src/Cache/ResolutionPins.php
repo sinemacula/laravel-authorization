@@ -37,12 +37,28 @@ final class ResolutionPins
      * Create a new set of pins.
      *
      * @param  \SineMacula\Laravel\Authorization\Cache\VersionedStore|null  $store
+     * @param  bool  $isRouting
      */
     public function __construct(
 
         /** The store the tokens are read from; null when there is none. */
         private readonly ?VersionedStore $store = null,
+
+        /** Whether the resolution also keeps the routes of the grants behind what it finds, as grant usage tracking needs (see `Usage\GrantRoute`). */
+        private readonly bool $isRouting = false,
     ) {}
+
+    /**
+     * Determine whether the resolution keeps the routes of the stored grants
+     * behind each permission or policy it finds, which it does only while grant
+     * usage is tracked.
+     *
+     * @return bool
+     */
+    public function isRouting(): bool
+    {
+        return $this->isRouting;
+    }
 
     /**
      * Pin the grantee's version.

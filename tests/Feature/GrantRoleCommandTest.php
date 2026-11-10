@@ -31,6 +31,19 @@ use Tests\TestCase;
 final class GrantRoleCommandTest extends TestCase
 {
     /**
+     * The command is registered under its `NAME` constant, the name its
+     * signature declares.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:grant', GrantRoleCommand::NAME);
+        self::assertInstanceOf(GrantRoleCommand::class, Artisan::all()[GrantRoleCommand::NAME] ?? null);
+        self::assertSame(GrantRoleCommand::NAME, Artisan::all()[GrantRoleCommand::NAME]->getName());
+    }
+
+    /**
      * Successfully grants a role to an identity via morph alias.
      *
      * @return void

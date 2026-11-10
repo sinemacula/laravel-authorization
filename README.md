@@ -129,7 +129,9 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   in one order on every database and bounded by a limit. A review is admitted through `check()` as the reviewer under
   `authorization:review.read`, across the whole of a broad reach, or run as trusted work. It is read a page at a time
   by keyset with signed cursors, streamed a chunk at a time, or exported as versioned JSON Lines under
-  `authorization:review.export` as well, and `authorization:review` exports one from the console.
+  `authorization:review.export` as well, and `authorization:review` exports one from the console. With opt-in usage
+  tracking it also lists which grants show no observed use (`unused()`), every row carrying a `usage` status of
+  `used`, `unused` or `unknown`.
 - **Grant scope query**: `GrantScopeQuery` tells a trusted integration whether every grant of an identity and of the
   principals an application-bound identity directory lists lies within a tenant (`within`), any lies outside it
   (`outside`), or that cannot be told (`unknown`), and whether a principal holds a grant that applies in a tenant. It
@@ -222,17 +224,38 @@ only from it: without a tenant, only platform-wide roles and permissions are vis
 Every seam the package gives a default for can also be bound directly on its contract, from any service provider: the
 subject resolver, the tenant tree, the identity directory, the grant hook, the console subject resolver, the resource
 tenant resolver, the policy store, the policy resolver, the action catalogue, the context key catalogue, the
-authentication requirement checker, the session policy source and the authentication, request and environment
-contexts. The package binds its default only when nothing is bound to the contract yet, so a binding made before it
-registers, by a sibling package or by your application, `instance()` included, stands, and a binding made afterwards
-with `bind()`, `singleton()`, `scoped()` or `instance()` replaces the default. The order your providers register in
-therefore never lets the package's default replace a binding of yours. It still decides between other bindings of the
-same contract: of two bindings made outside the package, by a sibling package and your application for example, the
-later one wins as usual, and a `bindIf()`, `singletonIf()` or `scopedIf()` only fills a contract nothing has bound yet,
-so one made after the package registers is skipped and the package's default stands. To replace a seam whatever order
-providers register in, bind it unconditionally. A binding of your own is kept as you bound it across the reset between
-queue jobs and Octane requests, while the package's defaults, the context key catalogue aside, are built afresh for
-each.
+authentication requirement checker, the session policy source and the authentication, request and environment contexts.
+The package binds its default only when nothing is bound to the contract yet, so a binding made before it registers, by
+a sibling package or by your application, `instance()` included, stands, and a binding made afterwards with `bind()`,
+`singleton()`, `scoped()` or `instance()` replaces the default. A class you name in `config/authorization.php` is
+different: when `subject_resolver`, `tenant_tree`, `identity_directory`, `resource_tenant_resolver`,
+`requirement_checker` or `session.source` names a class other than the package's default, or when `policy_store` names
+any class, the package binds the contract to it even over a binding a sibling package made before it registered, since
+your configuration is the explicit choice. The same holds for a sibling package's deferred provider, which would
+otherwise bind the contract at its first resolution and so replace your class: the package loads that provider before
+binding your class, as it registers when the application already knows of the provider, and otherwise as the application
+boots, since Laravel learns of the deferred providers of your configuration and of package discovery only once every
+eager provider, this package among them, has registered. A value equal to the package's default, or no value, binds
+nothing over an earlier binding. From the highest precedence down, a contract resolves to a binding made after the
+package registers, then the class your configuration names, then a binding made before the package registers, then the
+package's default. Binding your configured class over a contract follows Laravel's rules for any binding: an extender a
+sibling package registered on the contract is applied to your class, so one typed to the sibling's own class fails, and
+when the contract was already resolved, a callback watching it with `rebinding()` or `refresh()` is called, which may
+resolve your class while the package registers. The grant hook is the one exception: hooks only refuse, so when
+`grant_hooks` lists any, the package extends the contract and the listed hooks run before whatever hook it resolves to,
+rather than replacing it (see [Grant hooks](#grant-hooks)). The order your providers register in therefore never lets
+the package's default replace a binding of yours. It still decides between other bindings of the same contract: of two
+bindings made outside the package, by a sibling package and your application for example, the later one wins as usual,
+and a `bindIf()`, `singletonIf()` or `scopedIf()` only fills a contract nothing has bound yet, so one made after the
+package registers is skipped and the package's default, or your configured class, stands. To replace a seam whatever
+order providers register in, bind it unconditionally. A binding of your own is kept as you bound it across the reset
+between queue jobs and Octane requests, while the package's defaults and configured classes, the context key catalogue
+aside, are built afresh for each.
+
+A sibling package that registers after this one and wants to replace only the package's default, never a binding the
+application made, asks `AuthorizationServiceProvider::isPackageDefault($app, $contract)`. It is true only while the
+contract holds the package's own default: a class your configuration names, an instance, any other binding and an
+unbound contract all answer false.
 
 List the enums whose cases are the application's permissions, and any permission providers; the Gate asks the package
 about every permission either declares:
@@ -272,7 +295,8 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
 Gate switch, the policy store, the policy limits, the context keys and sources, the attribute providers, the subject
 resolver, the identity directory, the authentication requirement checker, the session policy source and the scope map,
-the cache, the bulk checks' chunk size, and the role hierarchy and rank.
+the cache, the bulk checks' chunk size, the role hierarchy and rank, the access reviews' limit, and grant usage
+tracking (see [Usage tracking](#usage-tracking)).
 
 ## Usage
 
@@ -501,6 +525,15 @@ rule as a role and its permissions: two concrete guards must match, and a guard-
 another guard is refused with `ParentGuardMismatchException`, and a role or permission granted to a grantee of another
 guard with `GranteeGuardMismatchException`. The tenant that owns a role, permission or policy is fixed once it is
 created (`OwnerChangedException`): to move one, create it in the new tenant and grant it again.
+
+**How a tenant is named.** A tenant is an Eloquent model, or any object implementing
+`SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant`, and the package names it by its morph type and its
+`getKey()` everywhere: in the `tenant_type` and `tenant_id` of every grant and owned row, in the tenant tree's questions
+and answers, in the resolution cache's keys, in events and in a `Support\Reference`. `getKey()` is the contract's
+identifier, and for a model it is the primary key, so a tenant that also carries a public identifier of its own (a slug,
+an external id) is still named by its key. A sibling package, or the application, naming a tenant to this one passes
+the tenant, a `Reference` made from it, or its morph type and key, never the other identifier. A non-Eloquent tenant
+returns from `getKey()` the value its rows are to be keyed by, and keeps it for the tenant's life.
 
 Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class
 implementing `SineMacula\Laravel\Authorization\Contracts\TenantTree` as `tenant_tree` in `config/authorization.php`,
@@ -2359,14 +2392,14 @@ or about the subject of the scoped manager it is called on:
 | `lastDecision()`                                  | Returns the latest decision of the request or job, whichever manager made it                                              |
 | `lastDecisionProvenance()`                        | Returns who the latest decision was about, who previewed it and where it was made, or null whenever `lastDecision()` is   |
 | `permissionsFor($subject, $scope, $context)`      | Lists the actions of the permission catalogue the subject may take in the scope                                           |
-| `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's tenant and application, or a `Subject` as it is |
+| `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's scope, or a `Subject` in its own scope          |
 | `forUser($user)`                                  | Returns a scoped manager deciding about the subject the resolver translates the user into                                 |
 | `previewFor($subject, $scope)`                    | Returns a preview deciding about the subject as the caller, admitted at every use (see [Preview](#preview))               |
 | `capped($actions)`                                | Returns a scoped manager whose checks are capped by the actions given                                                     |
 | `withPolicies($policies)`                         | Returns a scoped manager that evaluates only the policies given                                                           |
 | `queryScope($model, $action, $context)`           | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))                               |
 | `GrantScopeQuery::forIdentity()`, `hasGrantIn()`  | Not on the manager: grant scope and presence in a tenant (see [Grant scope query](#grant-scope-query))                    |
-| `AccessReview::review()`, `trusted()`             | Not on the manager: grant routes held, holdings, expiries and grants by actor (see [Access reviews](#access-reviews))     |
+| `AccessReview::review()`, `trusted()`             | Not on the manager: holders, holdings, expiries, grants by actor, unused (see [Access reviews](#access-reviews))          |
 | `AccessReview::page()`, `stream()`, `export()`    | Not on the manager: a review a keyset page, a lazy stream or JSON Lines at a time, each with a `trusted…()` counterpart   |
 
 `check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` deciding as `checkMany()`
@@ -2414,6 +2447,33 @@ $scoped->all(['posts:read', 'posts:update'], $post);
 Authorization::lastDecision();            // the decision of the last action $scoped decided
 Authorization::lastDecisionProvenance();  // DecisionProvenance: a Reference to $user as subject and identity
 ```
+
+**`for()` and the scope.** A model given to `for()` is decided in the request's tenant and application, as the subject
+resolver reports them. A resolved `Subject` is taken as it is, keeping its identity, guard and session, and when it
+names a tenant or an application, every check through the manager is decided there: its tenant, or the platform when it
+names none, and its application, or none, are put in place of the request's, both as the subject's and as the scope of
+the grants that count, for each `check()`, `can()`, `cannot()`, `any()`, `all()`, `authorize()`, `checkMany()`,
+`canEach()`, `filterAuthorized()`, `explain()` and query scoped through it with `whereAuthorized()`. The request's are
+restored once each is decided, even when it throws, and nothing is kept between calls or requests. A `Subject` naming
+neither is decided in the request's scope, as a model is. So a subject in another tenant needs no wrapping:
+
+```php
+use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+
+$member = new Subject($principal, $person, $account, 'admin');
+
+Authorization::for($member)->can('posts:update', $post);   // decided in $account, on the admin application
+
+// The same decision, as callers wrote it before: wrapping the call still gives the same result.
+$scope = AuthorizationScope::tenant($account, 'admin');
+$scope->within(fn () => Authorization::for($scope->subjectIn($member))->can('posts:update', $post));
+```
+
+`permissionsFor()` lists in the scope it is given, which wins over the subject's, and a preview from `previewFor()`
+keeps its own scope (see [Preview](#preview)). The subject's tenant is read when a check is decided, not by `for()`, so
+a `Subject` whose tenant cannot be read, a plain object that is neither a model nor an `AuthorizableTenant`, is refused
+with `InvalidTenantException` by each check through the manager, before anything is decided.
 
 The last decision is kept with its provenance, a `DecisionProvenance` of references and names alone: `subject` and
 `identity`, references to the principal the decision was about and its identity, null for a guest; `previewer`, whoever
@@ -2863,8 +2923,9 @@ options name, without the subject's browser session (see
 ### Access reviews
 
 `AccessReview` lists, for periodic reviews and their sign-off (AUTHZ-11.6), who holds a role, a permission or a policy
-in a scope, what a subject holds and where, which grants expire within a window, and which grants an actor last granted
-or changed. Resolve it from the container, where it is a singleton, and run a typed `ReviewQuery`:
+in a scope, what a subject holds and where, which grants expire within a window, which grants an actor last granted or
+changed, and, with [usage tracking](#usage-tracking) on, which grants show no use. Resolve it from the container, where
+it is a singleton, and run a typed `ReviewQuery`:
 
 ```php
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
@@ -2923,6 +2984,7 @@ Holders, holdings, expiries and an actor's grants each follow their scope select
 | `ReviewQuery::holdings($subject, $scope)`        | A `Subject`'s own grants and its identity's that reach it; or an identity's and its listed principals' |
 | `ReviewQuery::expiring($scope, $from, $until)`   | Grants, attachments and role permission edges expiring within `[from, until)`, in UTC                  |
 | `ReviewQuery::grantedBy($actor, $scope)`         | Grants whose `granted_by` pair is exactly the actor's                                                  |
+| `ReviewQuery::unused($scope, $since)`            | Live grants with no observed use since the instant (see [Usage tracking](#usage-tracking))             |
 | `withLimit($limit)`                              | The same review returning at most that many rows                                                       |
 
 A permission target means that definition, never a policy statement or wildcard grant that might authorise its action,
@@ -2971,6 +3033,7 @@ document or value. Its shape is versioned (`version: 1`):
 | `route_expires_at`                       | The earliest expiry of every row the route rests on                                          |
 | `granted_by`                             | The last actor to grant or change the starting row; null for a trusted write                 |
 | `grant_state`, `subject_state`           | `live`, `expired` or `malformed`; `active`, `inactive` or `unknown`                          |
+| `usage`                                  | `status` (`used`, `unused` or `unknown`), the last observed use and the coverage             |
 
 The rows come in one total order, the same on SQLite, PostgreSQL and MySQL: by source kind, target, grantee, origin
 scope (the platform before a tenant, every application before a named one) and route (the first role of its chain, how
@@ -3090,7 +3153,7 @@ review's order, then a footer:
 
 ```json lines
 {"record":"header","version":1,"query":"holders","scope":{"selection":"applies_in","tenant":{"type":"tenant","id":"acct1"},"application":{"selection":"named","name":"admin"}},"reviewed_at":"2026-11-08T12:00:00.250000Z","scan_started_at":"2026-11-08T12:00:00.250000Z","consistency":"live"}
-{"record":"row","version":1,"row_key":"004885d0a74311b154e17bb6365cb7332cfd7ae2bb46526880e6be6593bd8ac5","subject":{"type":"user","id":"17"},"grantee":{"type":"user","id":"17"},"target":{"type":"role","id":"01a1be88-d4d3-72cc-b9bc-620cc97d4906"},"source_kind":"role_grant","source_key":"4:role|36:01a1be88-d4d3-72cc-b9bc-620cc97d4906|4:user|2:17|~|~|~","origin_scope":{"tenant":null,"application":null,"include_subtree":true},"via_identity":null,"role_path":[{"type":"role","id":"01a1be88-d4d3-72cc-b9bc-620cc97d4906"}],"supporting_grants":[{"source_key":"4:role|36:01a1be88-d4d3-72cc-b9bc-620cc97d4906|4:user|2:17|~|~|~","scope":{"tenant":null,"application":null,"include_subtree":true},"expires_at":null}],"created_at":"2026-10-01T09:00:00Z","updated_at":"2026-10-01T09:00:00Z","expires_at":null,"route_expires_at":null,"granted_by":null,"grant_state":"live","subject_state":"active"}
+{"record":"row","version":1,"row_key":"004885d0a74311b154e17bb6365cb7332cfd7ae2bb46526880e6be6593bd8ac5","subject":{"type":"user","id":"17"},"grantee":{"type":"user","id":"17"},"target":{"type":"role","id":"01a1be88-d4d3-72cc-b9bc-620cc97d4906"},"source_kind":"role_grant","source_key":"4:role|36:01a1be88-d4d3-72cc-b9bc-620cc97d4906|4:user|2:17|~|~|~","origin_scope":{"tenant":null,"application":null,"include_subtree":true},"via_identity":null,"role_path":[{"type":"role","id":"01a1be88-d4d3-72cc-b9bc-620cc97d4906"}],"supporting_grants":[{"source_key":"4:role|36:01a1be88-d4d3-72cc-b9bc-620cc97d4906|4:user|2:17|~|~|~","scope":{"tenant":null,"application":null,"include_subtree":true},"expires_at":null}],"created_at":"2026-10-01T09:00:00Z","updated_at":"2026-10-01T09:00:00Z","expires_at":null,"route_expires_at":null,"granted_by":null,"grant_state":"live","subject_state":"active","usage":{"status":"unknown","last_observed_at":null,"coverage_from":null,"coverage_until":null}}
 {"record":"footer","version":1,"rows":1,"scan_ended_at":"2026-11-08T12:00:00.412000Z","complete":true}
 ```
 
@@ -3118,8 +3181,134 @@ tables already have: on MySQL and SQLite, whose reference columns compare their 
 table's unique index. The migration honours the configured table names and connection.
 
 **What is left out.** Boundaries, guardrails and resource-policy attachments restrict or extend what a check decides,
-but are not held, so no review lists them. Snapshot exports and CSV are not offered, and the unused-grant report comes
-in the next part of the reviews. See [Access reviews](docs/design/access-reviews.md) for the design.
+but are not held, so no review lists them. Snapshot exports and CSV are not offered. See
+[Access reviews](docs/design/access-reviews.md) for the design.
+
+#### Usage tracking
+
+Usage tracking records which grants are used, so a review can tell a grant nobody uses from one whose use was never
+watched (N94, N100 to N102). It is off by default, and free when off: a check does no extra work and allocates nothing
+for it, no listener is registered and no usage table is read, and every review row's `usage` reads `unknown`. Turn it on
+in `config/authorization.php`, or with `AUTHORIZATION_USAGE_ENABLED=true`:
+
+```php
+'usage' => [
+    'enabled'    => true,
+    'interval'   => 3600,   // the bucket, in seconds; at least 60
+    'batch'      => 250,    // the most observations one recording job carries
+    'connection' => null,   // the queue connection the recording job goes to; null for the default
+    'queue'      => null,   // the queue; null for the connection's default
+    'retention'  => 400,    // the days coverage is kept
+],
+```
+
+**The cost.** While tracking is on, a resolution of a grantee's permissions and policies also keeps the routes of the
+stored grants behind each, read from the rows it reads already and kept beside its entry in the resolution cache, each
+grant and route once however many permissions it gives. A check finds the routes behind its decision only among what it
+resolved itself, so a cold check runs the same queries as an untracked one (a subject's identity, say, is never
+resolved for tracking when the check did not need it), and a warm check finds the routes at a constant extra cost and
+with no query. A cache entry kept before tracking was turned on is never read for one, so turning it on resolves each
+grantee once more. The routes are noted in memory and sent to be recorded by a queued job, never on the check. No step
+tracking adds ever changes or breaks a check: one that fails is written to the log channel and the decision is
+returned as it was made.
+
+**What counts.** Only what a decision rested on counts, by the rules the check itself applied. An allowed decision
+counts every live grant route behind the permission that allowed it, redundant ones included: the direct grant, and each
+role grant that carried it with the ancestor role it came through. They are the routes of the grantee whose permission
+matched: the subject's own, or its identity's only when the subject's did not match, since the check asks for the
+identity's only then. A policy counts whenever one of its statements decided, allow or deny, so a policy that only
+denies, doing its job, is used, by its attachment to the subject or to its identity. An identity of the other kind (a
+machine's person, or a person's machine) gives a check its deny statements alone, so its attachment counts only for a
+decision its denies made. These are everyday decisions and count: `check()`, `can()`, `cannot()`, `any()`, `all()`,
+`authorize()`, `checkMany()`, `canEach()`, `filterAuthorized()`, the Gate, the Blade directives and the middleware, and
+a delegated change's own check. A role check (`hasRole()`, `@role`, `role:`) is no decision and counts nothing.
+
+**What never counts.** Only a decision the application acts on is use, so nothing else counts:
+
+| Path                                                                           | Why it never counts                                                                     |
+|--------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
+| `previewFor()` and its admission                                               | A preview decides about another subject as the caller, who uses none of its grants      |
+| `explain()` and `authorization:why`                                            | An explanation runs the check to show it, not to act on it (N89)                        |
+| `permissionsFor()`                                                             | A listing of what a subject may do is introspection (N70)                               |
+| `whereAuthorized()` and `queryScope()`                                         | A scoped query compiles SQL and decides no record                                       |
+| A review's admission and its reads                                             | Reviewing who holds what is introspection, and must not create the use it reports       |
+| A delegated change's administration stage                                      | Its further checks weigh the change, and a refused change counts nothing it was allowed |
+| A permission from a custom `getPermissions()`                                  | A grantee whose grants the package does not resolve cannot say where they came from     |
+| A policy from a store, a resource, `withPolicies()`, a guardrail or a boundary | None of these is a grant a subject holds                                                |
+| An identity's grant when the subject's own matched                             | The check never asked for it, so the decision did not rest on it                        |
+
+**The interval.** Observations are bucketed by `interval` seconds, an hour by default: a bucket starts at a whole
+multiple of the interval in UTC, so every worker agrees where it starts. Each route is noted at most once a bucket per
+worker, and a review says a route was last used within the interval that starts at its `last_observed_at`. A queue
+worker or a command notes for as long as it runs; under Octane each request's sandbox notes for itself.
+
+**The queue.** Nothing is sent from within a check, so a check never waits on the queue or the store, the `sync`
+connection included. What a worker notes is sent as `RecordGrantUsage` jobs when the request, command or queued job
+ends, to the `connection` and `queue` configured. Once a worker notes `batch` observations it sets them aside as a job
+of their own, so no job outgrows a queue's limit on a job's size: a job of the default 250 is about 110 KB at worst,
+well under SQS's 256 KB, and each observation adds about 450 bytes at worst, so lower `batch` for a queue with a
+smaller limit (Beanstalkd's default is 64 KB). A worker sets aside at most ten batches before it ends its request or
+job; past that it drops the oldest, and the next job names the earliest bucket dropped, from which the store does not
+extend the coverage, so the routes whose use was dropped read `unknown` rather than `unused`. A queue that refuses a
+job is written to the log channel, and its observations are dropped and named by the next job in the same way.
+
+**The tables and pruning.** The migration `2026_11_09_000001_create_grant_usage_tables` adds
+`authorization_grant_usage`, one row for each grant route with the start of the last bucket it was observed in and the
+creation of the grant it was observed through, keyed by a stable digest of its source kind, target, grantee, tenant,
+application and role path (the roles it runs through, as in `role_path`), and `authorization_usage_coverage`, the
+periods tracking was on, `[from, until)` in UTC. Both honour the configured table names (`tables.grant_usage`,
+`tables.usage_coverage`) and connection. A write never moves a route's last use backwards, so a job delivered twice or
+out of order changes nothing. The routes are written in the order of their keys, a hundred to a transaction, with no
+row read under a lock, so two workers take their locks in the same order; a transaction that deadlocks or waits too
+long for a lock is tried again, three times in all, and a job that still fails extends no coverage.
+`authorization:usage-prune` removes the usage of every route whose stored grant no longer exists and the coverage older
+than `retention` days.
+
+**The heartbeat.** Each recording job extends the current coverage period, or opens a new one when the gap since the
+last one ended exceeds two intervals. A site that is tracking but quiet sends no jobs, so schedule the heartbeat at
+least once an interval to keep it covered; it records nothing while tracking is off:
+
+```php
+Schedule::command('authorization:usage-heartbeat')->hourly();
+Schedule::command('authorization:usage-prune')->daily();
+```
+
+**The store.** Usage is kept behind `Contracts\GrantUsageStore`: `record(UsageBatch $batch)` keeps a batch, each route
+only when its observation is newer, and extends the coverage to the batch's instant, but never across the time since a
+`lostSince` the batch names; `lastObserved(array $keys)` returns
+what is kept of each route asked about; and `coverage($from, $until)` returns the periods that overlap a window. The
+package binds `Usage\DatabaseGrantUsageStore` on the tables above; bind your own to send usage elsewhere.
+
+**Coverage and unknown.** A row's window runs from the later of the review's `since` and the grant's creation to the
+review's instant. Its `usage` is `used` when its route was observed in a bucket that ends after the window starts;
+`unused` only when the coverage periods, each taken to run two intervals past its end, cover the whole window and the
+route was never observed in it; and `unknown` otherwise: tracking is off, coverage of the window is incomplete (a
+window that starts before tracking began, or that a gap interrupts), or the route's source cannot report its use (a
+role's permission edge or policy attachment, a grantee with its own `getPermissions()` or `getPolicies()`, or, for a
+policy, a policy resolver of your own). A missing observation alone is never taken as proof of non-use.
+`coverage_from` and `coverage_until` give the latest coverage period overlapping the window.
+
+**Regrants.** A grant revoked and made again is a new row, created later, and never inherits the old grant's use: an
+observation made through a grant created before the current one is ignored. A grant whose expiry or reach
+(`include_subtree`) is rewritten in place, neither of which is part of its usage key, keeps its creation, and so its
+use.
+
+**The unused review.** `ReviewQuery::unused($scope, $since)` lists the live grants in the scope (roles and permissions
+granted, policies attached to grantees) with no observed use since the instant, each `unused` or `unknown`, and leaves
+out those used. It pages, streams and exports as every review does, admitted by the same `authorization:review.read`
+right, which never counts as use; `authorization:review unused --since=…` exports one. It reads the grants a fixed
+chunk at a time, never fewer for the rows a page has kept, so the reads grow with the grants it passes over, never one
+for each. Every review row carries `usage`, read in one batched lookup a page, or a chunk for the unused review. The
+row's shape stays `version: 1`, since the package is unreleased.
+
+```php
+$reviews->trusted(ReviewQuery::unused(ReviewScope::everywhere(), now()->subDays(90)));
+```
+
+Recording lags: a worker's observations arrive at the store when its request, command or job ends, so a grant used only
+in the last moments may read as unused until then. Coverage is kept for the whole site, so observations a worker lost
+without naming them (a process killed before it sent them, say) are lost while other workers' jobs keep the coverage
+going.
 
 ### Grant scope query
 
@@ -3155,6 +3344,12 @@ there is built per request or job, and null or a class that does not implement t
 ```php
 'identity_directory' => App\Authorization\PrincipalDirectory::class,
 ```
+
+**In the suite.** `laravel-iam` binds a complete identity directory adapter, so an application using it needs nothing
+more. An application with principals that does not use `laravel-iam` binds its own: a directory that lists, for each
+identity, every principal it owns, as below, and answers an incomplete list for an identity it cannot read. Left in
+place under another subject resolver, `GuardUserIdentityDirectory` answers incomplete for everyone, so a grant to any
+principal is treated as widening (`INCOMPLETE_DIRECTORY`) and no grant scope query answers `WITHIN`.
 
 ```php
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
@@ -3287,11 +3482,46 @@ final class ScopeWideningHook implements GrantHook
 }
 ```
 
-**One binding, an ordered composite.** Exactly one hook is bound. The default is `Hooks\GrantHooks`, the composite of
-the classes `grant_hooks` lists in `config/authorization.php`, each built from the container and run in the order
-listed; the first that throws stops the rest. The list is validated at boot: each entry must name a class implementing
-the contract, once. With none listed the composite does nothing, and then nothing is classified at all. An application
-may bind its own hook on the contract instead. There is no way to add a hook at run time.
+**The client.** The widening carries the operation's client, `ip` and `userAgent`, each a nullable string, as the
+`Operation` does. A grant made through the services gets its client only from the routed request of a delegated call,
+the IP address as Laravel resolves it behind your trusted proxies. A trusted grant, and any grant made from the console
+or a queued job, reaches the hook with no client: no service takes one. Code that builds an `Operation` or a
+`GrantWidening` itself, such as the membership path below or a hook's own tests, may pass one explicitly, as
+`Operation::begin($actor, $actions, $ip, $userAgent)` or the constructors' last two arguments, and a client given there
+is kept as it is. Pass only the client of a routed request, never one read from the request Laravel binds for the
+console and the queue, which reports `127.0.0.1` and `Symfony`. Both are personal data, so the package hands them to the
+grant hook alone: the change events carry the operation without them, and they are never put in a cache key, a decision
+event, a log or a stored grant row. A hook that keeps them is answerable for them.
+
+**One binding, with the listed hooks before it.** Exactly one hook is bound on the contract. The default is
+`Hooks\GrantHooks` holding no hook, which does nothing; a sibling package or your application may bind its own instead,
+before the package registers or after. The classes `grant_hooks` lists in `config/authorization.php` run before
+whichever hook is bound, each built from the container and run in the order listed, and the first that throws stops
+the rest. The list is validated at boot: each entry must name a class implementing the contract, once. With none listed,
+and the default bound, nothing is classified at all. There is no way to add a hook at run time.
+
+**The listed hooks run before whatever is bound.** When `grant_hooks` lists hooks, the package extends the contract with
+Laravel's `extend()`, so whatever the contract resolves to is wrapped in `Hooks\ListedGrantHooks`: the listed hooks run
+first, in the order listed, then the bound hook, and any of them may refuse, so nothing either would refuse gets
+through. Hooks only refuse, so wrapping a hook is never looser than running it alone. Laravel applies the extender each
+time it builds the contract, so the hook is wrapped however it was bound: before the package registers or after, with
+`bind()`, `singleton()` or `scoped()`, a scoped closure that names the contract by its return type included, by a
+deferred provider, or the package's default when nothing else is bound, which holds none of the listed hooks, so none
+runs twice. An extender a sibling package registered on the contract before the package applies to the bound hook first,
+and the listed hooks run before the hook it returns; an extender registered after the package receives the wrapped hook,
+`ListedGrantHooks`, so one typed to another class fails. Laravel applies no extender to an instance it is handed later,
+so the grant service wraps the hook it calls as well, unless it already is wrapped: a hook bound with `instance()` after
+the package registers, and a hook bound in any way after an instance the package wrapped when it registered, run after
+the listed hooks too. When an extender registered after the package decorates the wrapped hook and the grant service
+wraps the decoration again, the listed hooks still run once, first. With no hook listed nothing is extended, and the
+bound hook stands alone.
+
+The wrapped hook builds the listed hooks from its container at its first use and keeps them, so registering the package
+builds none of them, and they share the bound hook's lifetime: built afresh for each queue job and in each Octane
+sandbox when it is scoped, bound with `bind()` or the default, and kept with it when it is a singleton or an instance.
+The package resolves the bound hook while it registers only when the hook was resolved before and a callback watches
+the contract with `rebinding()` or `refresh()`: Laravel then hands that callback the wrapped hook. Registering the
+package again in the same container wraps nothing twice.
 
 ```php
 'grant_hooks' => [
@@ -3356,7 +3586,10 @@ hook refuses stops the import, with what was written before it kept.
   use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
   use SineMacula\Laravel\Authorization\Support\Reference;
 
-  DB::transaction(function () use ($person, $principal, $tenant, $membership) {
+  // The client of a routed request alone: console and queued work have none.
+  $request = request()->route() === null ? null : request();
+
+  DB::transaction(function () use ($person, $principal, $tenant, $membership, $request) {
       // Saved first, so the hook is handed its key; a refusal rolls it back.
       $membership->save();
 
@@ -3378,6 +3611,8 @@ hook refuses stops the import, with what was written before it kept.
               reasons: [WideningReason::MEMBERSHIP],
           )],
           observedAt: now('UTC')->toImmutable(),
+          ip: $request?->ip(),
+          userAgent: $request?->userAgent(),
       ));
   });
   ```
@@ -3891,6 +4126,8 @@ php artisan authorization:why user:1 posts:delete post:42 --tenant=team:7
 php artisan authorization:review holders role:1 --rooted-within=team:7 --output=holders.jsonl
 php artisan authorization:policy:validate --database
 php artisan authorization:prune --pretend
+php artisan authorization:usage-heartbeat
+php artisan authorization:usage-prune --pretend
 php artisan authorization:check
 ```
 
@@ -3902,6 +4139,12 @@ Gate hook: enabled (the package answers every ability it declares through Gate::
 ```
 
 It is the start of the configuration report: each setting and seam it comes to report adds a line.
+
+Each command's class names its command in a public `NAME` constant, the name its signature declares, so a schedule, a
+test or a sibling package can refer to it without repeating the string: `PruneGrantsCommand::NAME` is
+`authorization:prune`, and so on for `CheckConfigurationCommand`, `GrantRoleCommand`, `RevokeRoleCommand`,
+`ListRolesCommand`, `ListPermissionsCommand`, `SyncPermissionsCommand`, `MigrateSpatieCommand`,
+`ValidatePolicyCommand`, `WhyCommand` and `ReviewCommand`, all in `SineMacula\Laravel\Authorization\Console`.
 
 The listing commands are administrative views: they list every role or permission, platform-wide and tenant-owned
 alike, and show each one's owner. `grant` and `revoke` write through the grant service and look the role up within the
@@ -3929,8 +4172,14 @@ than making checks correct. Like `model:prune`, it takes `--pretend`, which coun
 boundaries apart from the grants as a run does, and `--chunk`, and is scheduled like any command:
 
 ```php
-Schedule::command('authorization:prune')->daily();
+use SineMacula\Laravel\Authorization\Console\PruneGrantsCommand;
+
+Schedule::command(PruneGrantsCommand::NAME)->daily();
 ```
+
+`authorization:usage-heartbeat` extends the coverage of [usage tracking](#usage-tracking) to now, so a quiet site stays
+covered, and records nothing while tracking is off; `authorization:usage-prune` removes the usage of grants that no
+longer exist and coverage older than `authorization.usage.retention` days, and takes `--pretend`.
 
 #### Explaining a check from the console
 
@@ -4061,11 +4310,12 @@ php artisan authorization:review holders permission:01a1be88-d4e0-7153-8120-e043
 php artisan authorization:review holdings user:1 --rooted-within=team:7
 php artisan authorization:review expiring --everywhere --from=2026-12-01 --until=2027-01-01 --output=expiring.jsonl
 php artisan authorization:review granted_by --actor=user:7 --everywhere --output=granted.jsonl --force
+php artisan authorization:review unused --since=2026-09-01 --everywhere --output=unused.jsonl
 ```
 
 | Argument or option  | What it names                                                                                                                                                                                                               | When omitted                                         |
 |---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------|
-| `{query}`           | `holders`, `holdings`, `expiring` or `granted_by`                                                                                                                                                                           | Required                                             |
+| `{query}`           | `holders`, `holdings`, `expiring`, `granted_by` or `unused`                                                                                                                                                                 | Required                                             |
 | `{reference}`       | For `holders`, the role, permission or policy as `role:{key}`, `permission:{key}` or `policy:{key}`, or its morph type; for `holdings`, the saved subject as `{morph type}:{key}`, resolved by the console subject resolver | Required for those two; refused for the others       |
 | `--tenant`          | Review what applies in the tenant, as `{morph type}:{key}`, read as `authorization:why` reads it                                                                                                                            | The platform, when no scope option is given          |
 | `--rooted-within`   | Review the grants made in the tenant or below it                                                                                                                                                                            |                                                      |
@@ -4073,6 +4323,7 @@ php artisan authorization:review granted_by --actor=user:7 --everywhere --output
 | `--application`     | `none`, `any` or the application's name                                                                                                                                                                                     | `none` for a tenant or the platform, `any` otherwise |
 | `--from`, `--until` | For `expiring`, the window `[from, until)`, each a date and time, in UTC when it names no zone                                                                                                                              | Required for `expiring`; refused for the others      |
 | `--actor`           | For `granted_by`, the actor as `{morph type}:{key}`, matched exactly as stored                                                                                                                                              | Required for `granted_by`; refused for the others    |
+| `--since`           | For `unused`, the instant to look back to, a date and time, in UTC when it names no zone                                                                                                                                    | Required for `unused`; refused for the others        |
 | `--direct-only`     | For `holders`, the direct grants alone                                                                                                                                                                                      | Every route; refused for the others                  |
 | `--output`          | The file to write, which must not exist                                                                                                                                                                                     | The standard output                                  |
 | `--force`           | Overwrite the `--output` file when it exists                                                                                                                                                                                | An existing file is refused                          |

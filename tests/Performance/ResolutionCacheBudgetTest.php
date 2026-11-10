@@ -40,10 +40,12 @@ final class ResolutionCacheBudgetTest extends TestCase
     private const string PERMISSION_READ = 'posts:read';
 
     /**
-     * A primed memo-tier read must stay under ~1μs per call. Observed ~2μs per
-     * call on the reference machine; budget is 5× that for headroom against CI
-     * variance while still catching a runaway `in_array` or accidental store
-     * lookup regression.
+     * A primed memo-tier read must stay cheap. Observed about 0.5μs per call on
+     * the reference machine (5ms for the loop). The CI job that collects
+     * coverage runs it under PCOV, where it takes about 0.1s and has gone to
+     * 0.13s on a slow runner, so the budget is 0.25s: still about 50× the
+     * reference figure, which a runaway `in_array` or an accidental store
+     * lookup per read would exceed.
      *
      * @return void
      */
@@ -65,7 +67,7 @@ final class ResolutionCacheBudgetTest extends TestCase
         $elapsed = \microtime(true) - $start;
 
         self::assertLessThan(
-            0.1,
+            0.25,
             $elapsed,
             "ResolutionCache memo-tier read budget exceeded ({$elapsed}s for 10,000 hits).",
         );

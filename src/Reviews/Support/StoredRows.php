@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Usage\GrantUsageKey;
 
 /**
  * The stored rows a review of expiries or of an actor lists, one row for each,
@@ -37,8 +38,15 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * only when the tenant sees its role too, as a check reaches it only through
  * that role.
  *
+ * - Unused: the live grants of each kind, roles and permissions granted and
+ *   policies attached to grantees, that show no observed use from the review's
+ *   `since`, or the grant's creation when later, to the review's instant (see
+ *   `unused()`).
+ *
  * Each kind is read in the review's order, one query of at most the room left,
- * a later page resuming after the last row of the page before by its keyset.
+ * a later page resuming after the last row of the page before by its keyset; an
+ * unused review's kinds are read a fixed chunk at a time instead, since its
+ * filter may pass over any number of grants.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,6 +73,42 @@ final class StoredRows
         $isExpiring = $query->kind === ReviewKind::EXPIRING;
 
         self::collectAll($run, $rows, $isExpiring ? self::window($query) : self::grantedBy($query), $isExpiring);
+
+        return true;
+    }
+
+    /**
+     * Collect the live grants of each kind, roles and permissions granted and
+     * policies attached to grantees, whose route shows no observed use in its
+     * window, unused or unknown, as the collector's filter keeps them (see
+     * `ReviewUsage::isUnobserved()`). Each kind is read in the review's order a
+     * fixed chunk at a time, what the store keeps of the chunk's routes read in
+     * one lookup, until the rows are full or none is left. Every grantee is
+     * known, so the review is complete.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewUsage  $usage
+     * @return bool
+     *
+     * @throws \UnexpectedValueException
+     */
+    public static function unused(ReviewRun $run, RowCollector $rows, ReviewUsage $usage): bool
+    {
+        $role = Definitions::morph(GrantTarget::ROLE);
+        $live = static function (Builder $stored, string $table) use ($run): void {
+            $run->live($stored, $table);
+        };
+
+        $kinds = [
+            [SourceKind::ROLE_GRANT, GrantTarget::ROLE, null],
+            [SourceKind::PERMISSION_GRANT, GrantTarget::PERMISSION, null],
+            [SourceKind::POLICY_ATTACHMENT, GrantTarget::POLICY, false],
+        ];
+
+        foreach ($kinds as [$source, $kind, $isToRole]) {
+            self::collectUnobserved($rows, $source, $kind, self::grants($run, $kind, $isToRole, $role, $live), $usage);
+        }
 
         return true;
     }
@@ -189,6 +233,48 @@ final class StoredRows
             };
 
             $rows->route($source, $row->grantee, $row, new Reference($type, $row->targetId), $chain);
+        }
+    }
+
+    /**
+     * Collect the rows of the source the collector keeps, reading its grants a
+     * fixed chunk at a time, the room the page leaves when it starts or
+     * `GrantRows::CHUNK`, whichever is more, each chunk's routes looked up in
+     * one go first, resuming after the last grant read, until the rows are full
+     * or none is left; a chunk is never smaller for the rows already kept, so
+     * the reads grow with the grants passed over, never one for each.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind  $source
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewUsage  $usage
+     * @return void
+     *
+     * @throws \UnexpectedValueException
+     */
+    private static function collectUnobserved(RowCollector $rows, SourceKind $source, GrantTarget $kind, Builder $query, ReviewUsage $usage): void
+    {
+        $type  = Definitions::morph($kind);
+        $after = $rows->resumeAt($source);
+        $size  = \max($rows->room(), GrantRows::CHUNK);
+        $chain = static fn (GrantRow $row): array => $source === SourceKind::ROLE_GRANT ? [$row->targetId] : [];
+
+        while (!$rows->isFull() && !$rows->isPast($source)) {
+            $read = GrantRows::page(self::resumed(clone $query, $kind, false, $after), $kind->value, $size);
+
+            $usage->prime(\array_map(static fn (GrantRow $row): string => GrantUsageKey::ofStored($source, $row, new Reference($type, $row->targetId), $chain($row)), $read));
+
+            foreach ($read as $row) {
+                $rows->route($source, $row->grantee, $row, new Reference($type, $row->targetId), $chain($row));
+            }
+
+            if (\count($read) < $size) {
+                return;
+            }
+
+            $last  = $read[\count($read) - 1];
+            $after = [$source->position(), $type, $last->targetId, ...$last->orderKey(), ...RowCollector::routeKey($chain($last), [])];
         }
     }
 

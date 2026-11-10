@@ -25,6 +25,19 @@ use Tests\TestCase;
 final class ListPermissionsCommandTest extends TestCase
 {
     /**
+     * The command is registered under its `NAME` constant, the name its
+     * signature declares.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:list-permissions', ListPermissionsCommand::NAME);
+        self::assertInstanceOf(ListPermissionsCommand::class, Artisan::all()[ListPermissionsCommand::NAME] ?? null);
+        self::assertSame(ListPermissionsCommand::NAME, Artisan::all()[ListPermissionsCommand::NAME]->getName());
+    }
+
+    /**
      * Command outputs a table of permissions.
      *
      * @return void

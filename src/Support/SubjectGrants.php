@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Resolvers\BoundaryResolver;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Usage\WeighedGrants;
 
 /**
  * The grants a decision about a subject considers: the subject's own, and its
@@ -112,13 +113,15 @@ final class SubjectGrants
      * grant that reaches the scope counts, and one that has expired never does.
      * The names are matched by the wildcard rules (see `HeldPermissions`), the
      * subject's first, so the identity's are read only when the subject's own
-     * do not match.
+     * do not match. Given what a tracked check weighed, the grantee whose
+     * permission matched is noted on it (see `Usage\WeighedGrants`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Usage\WeighedGrants|null  $weighed
      * @return string|null
      */
-    public static function permissionFor(Subject $subject, string $action): ?string
+    public static function permissionFor(Subject $subject, string $action, ?WeighedGrants $weighed = null): ?string
     {
         if (self::isInactive($subject)) {
             return null;
@@ -128,6 +131,8 @@ final class SubjectGrants
             $held = $grantee instanceof SupportsPermissions ? HeldPermissions::match($grantee->getPermissions(), $action) : null;
 
             if ($held !== null) {
+                $weighed?->notePermission($held, $grantee);
+
                 return $held;
             }
         }

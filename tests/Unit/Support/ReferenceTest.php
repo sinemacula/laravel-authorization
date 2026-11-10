@@ -10,6 +10,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Cache\PrincipalCacheKey;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -157,5 +158,54 @@ final class ReferenceTest extends TestCase
         self::assertNull(Reference::tenantOf($platform));
         self::assertNull(Reference::tenantOf($partial));
         self::assertNull(Reference::tenantOf($odd));
+    }
+
+    /**
+     * A tenant's reference is its morph type and `getKey()`, its primary key
+     * for an Eloquent tenant, whatever other identifier it carries: the pair
+     * the tenant scope keys grants and caches by and the pair a row it owns
+     * reads back, for an Eloquent tenant and for any other alike.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     */
+    public function testATenantIsReferencedByItsKeyWhateverItsOtherIdentifiers(): void
+    {
+        $model = (new class extends Model {})->forceFill(['id' => 7, 'slug' => 'acme']);
+
+        Relation::morphMap(['account' => $model::class]);
+
+        $other = new class implements AuthorizableTenant {
+            /**
+             * Return the tenant's key.
+             *
+             * @return string
+             */
+            #[\Override]
+            public function getKey(): string
+            {
+                return '7';
+            }
+
+            /**
+             * Return the tenant's morph type.
+             *
+             * @return string
+             */
+            #[\Override]
+            public function getMorphClass(): string
+            {
+                return 'account';
+            }
+        };
+
+        $owned = (new class extends Model {})->forceFill(['tenant_type' => 'account', 'tenant_id' => '7']);
+
+        self::assertEquals(new Reference('account', '7'), Reference::of($model));
+        self::assertSame(['account', '7'], TenantScope::extractTenantPair($model));
+        self::assertSame(['account', '7'], TenantScope::extractTenantPair($other));
+        self::assertEquals(Reference::of($model), Reference::tenantOf($owned));
+        self::assertEquals(new Reference(...TenantScope::extractTenantPair($other)), Reference::tenantOf($owned));
     }
 }

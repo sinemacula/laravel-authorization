@@ -45,6 +45,19 @@ final class PruneGrantsCommandTest extends TestCase
     }
 
     /**
+     * The command is registered under its `NAME` constant, the name its
+     * signature declares.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:prune', PruneGrantsCommand::NAME);
+        self::assertInstanceOf(PruneGrantsCommand::class, Artisan::all()[PruneGrantsCommand::NAME] ?? null);
+        self::assertSame(PruneGrantsCommand::NAME, Artisan::all()[PruneGrantsCommand::NAME]->getName());
+    }
+
+    /**
      * The command removes expired grants, the grants, boundaries and inline
      * policies of grantees that are gone, and the resource policies of records
      * that are gone, and says how many, counting the boundaries apart from the

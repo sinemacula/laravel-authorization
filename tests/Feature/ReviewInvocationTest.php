@@ -48,13 +48,13 @@ final class ReviewInvocationTest extends TestCase
     {
         $holders = ['query' => 'holders', 'reference' => 'role:' . self::KEY];
 
-        yield 'an unknown query' => [['query' => 'everyone'], [], 'The query must be holders, holdings, expiring or granted_by.'];
-        yield 'no query' => [[], [], 'The query must be holders, holdings, expiring or granted_by.'];
+        yield 'an unknown query' => [['query' => 'everyone'], [], 'The query must be holders, holdings, expiring, granted_by or unused.'];
+        yield 'no query' => [[], [], 'The query must be holders, holdings, expiring, granted_by or unused.'];
         yield 'holders with no reference' => [['query' => 'holders'], [], 'The holders and holdings queries name a reference as {type}:{key}.'];
         yield 'expiring with a reference' => [
             ['query' => 'expiring', 'reference' => 'role:1'],
             ['from' => 'now', 'until' => 'tomorrow'],
-            'The expiring and granted_by queries take no reference.',
+            'The expiring, granted_by and unused queries take no reference.',
         ];
         yield 'direct only for an actor' => [['query' => 'granted_by'], ['actor' => 'u:a', 'direct-only' => true], 'The --direct-only option is taken by the holders query alone.'];
         yield 'a window for holders' => [$holders, ['from' => 'now'], 'The --from option is taken by the expiring query alone.'];
@@ -62,6 +62,13 @@ final class ReviewInvocationTest extends TestCase
         yield 'expiring with no start' => [['query' => 'expiring'], ['until' => 'tomorrow'], 'The expiring query needs the --from option.'];
         yield 'expiring with no end' => [['query' => 'expiring'], ['from' => 'now'], 'The expiring query needs the --until option.'];
         yield 'an actor\'s grants with no actor' => [['query' => 'granted_by'], [], 'The granted_by query needs the --actor option.'];
+        yield 'unused grants with no instant' => [['query' => 'unused'], [], 'The unused query needs the --since option.'];
+        yield 'an instant for an actor' => [['query' => 'granted_by'], ['actor' => 'u:a', 'since' => '2026-01-01'], 'The --since option is taken by the unused query alone.'];
+        yield 'unused grants with a reference' => [
+            ['query' => 'unused', 'reference' => 'role:1'],
+            ['since' => '2026-01-01'],
+            'The expiring, granted_by and unused queries take no reference.',
+        ];
         $several = 'Give at most one of the --tenant, --rooted-within and --everywhere options.';
 
         yield 'two scopes' => [$holders, ['tenant' => 'team:1', 'everywhere' => true], $several];
@@ -232,6 +239,26 @@ final class ReviewInvocationTest extends TestCase
         $this->expectExceptionMessage('An expiry window ends after it starts.');
 
         ReviewInvocation::of(['query' => 'expiring'], ['from' => '2026-12-02', 'until' => '2026-12-01'])->query($resolver);
+    }
+
+    /**
+     * An unused review looks back to the instant `--since` names, read in UTC
+     * when it names no zone; one that is no date is refused, naming the option.
+     *
+     * @return void
+     */
+    public function testAnUnusedReviewLooksBackToItsInstant(): void
+    {
+        $resolver = self::unused();
+        $query    = ReviewInvocation::of(['query' => 'unused'], ['since' => '2026-12-01T02:00:00+02:00', 'everywhere' => true])->query($resolver);
+
+        self::assertSame(ReviewKind::UNUSED, $query->kind);
+        self::assertSame('2026-12-01T00:00:00+00:00', $query->since()?->toIso8601String());
+        self::assertSame(ScopeSelection::EVERYWHERE, $query->scope->selection);
+
+        $this->expectExceptionMessage('The --since option must be a date and time (e.g. 2026-12-01T00:00:00Z).');
+
+        ReviewInvocation::of(['query' => 'unused'], ['since' => 'never'])->query($resolver);
     }
 
     /**

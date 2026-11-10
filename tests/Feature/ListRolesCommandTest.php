@@ -26,6 +26,19 @@ use Tests\TestCase;
 final class ListRolesCommandTest extends TestCase
 {
     /**
+     * The command is registered under its `NAME` constant, the name its
+     * signature declares.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:list-roles', ListRolesCommand::NAME);
+        self::assertInstanceOf(ListRolesCommand::class, Artisan::all()[ListRolesCommand::NAME] ?? null);
+        self::assertSame(ListRolesCommand::NAME, Artisan::all()[ListRolesCommand::NAME]->getName());
+    }
+
+    /**
      * Command outputs a table of roles.
      *
      * @return void

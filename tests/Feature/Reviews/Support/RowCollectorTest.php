@@ -169,6 +169,28 @@ final class RowCollectorTest extends TestCase
     }
 
     /**
+     * A collector with a filter keeps only the rows it keeps, and counts only
+     * those against its limit and truncation.
+     *
+     * @return void
+     */
+    public function testAFilterKeepsOnlyTheRowsItKeeps(): void
+    {
+        $rows = new RowCollector(ReviewRun::of(ReviewScope::everywhere()), 1, null, static fn (ReviewRow $row): bool => $row->subject->id !== 'b');
+
+        foreach (['a', 'b'] as $grantee) {
+            $rows->route(SourceKind::ROLE_GRANT, new Reference('u', $grantee), self::grant($grantee, 'r', null), new Reference('role', 'r'));
+        }
+
+        self::assertSame([1, false, false], [$rows->room(), $rows->isFull(), $rows->isTruncated()]);
+
+        $rows->route(SourceKind::ROLE_GRANT, new Reference('u', 'c'), self::grant('c', 'r', null), new Reference('role', 'r'));
+
+        self::assertSame([0, true, true], [$rows->room(), $rows->isFull(), $rows->isTruncated()]);
+        self::assertSame(['a'], \array_map(static fn (ReviewRow $row): string => $row->subject->id, $rows->rows()));
+    }
+
+    /**
      * Rows come in the order collected, or sorted by kind, target, grantee,
      * scope and route when asked.
      *

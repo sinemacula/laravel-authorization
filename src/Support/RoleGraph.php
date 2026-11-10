@@ -229,9 +229,30 @@ final class RoleGraph
      */
     public static function keysWithin(array $reach, array $held): ?array
     {
+        $chains = self::chainsWithin($reach, $held);
+
+        return $chains === null ? null : self::keysOf($chains);
+    }
+
+    /**
+     * Return the chain of each held role the tenant scope shows, by its key:
+     * the role, then, when the hierarchy is enabled, each ancestor from its
+     * parent up to the root, reading the roles `reach()` returned afresh; or
+     * null when a role now has a parent `reach()` did not return, because the
+     * hierarchy moved after it was read. A resolution tracking grant usage
+     * reads which role a grant came through from it.
+     *
+     * @param  array<string, string|null>  $reach
+     * @param  list<string>  $held
+     * @return array<string, list<string>>|null
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     */
+    public static function chainsWithin(array $reach, array $held): ?array
+    {
         $visible   = self::load(\array_keys($reach));
         $hierarchy = self::isHierarchyEnabled();
-        $keys      = [];
+        $chains    = [];
 
         foreach ($visible as $role) {
             if ($hierarchy && $role->parent_id !== null && !\array_key_exists($role->parent_id, $reach)) {
@@ -240,11 +261,40 @@ final class RoleGraph
         }
 
         foreach (\array_intersect($held, \array_keys($visible)) as $role) {
-            $keys[] = $role;
+            $above = $hierarchy ? self::chain($visible[$role], $visible) : [];
 
-            foreach ($hierarchy ? self::chain($visible[$role], $visible) : [] as $ancestor) {
-                $keys[] = $ancestor->id;
-            }
+            $chains[$role] = [$role, ...\array_reverse(\array_map(static fn (Role $ancestor): string => $ancestor->id, $above))];
+        }
+
+        return $chains;
+    }
+
+    /**
+     * Return the permissions the roles of the chains carry, as
+     * `permissionsWithin()` reads them, in the same one query, with the key and
+     * name of each permission by the key of each role carrying it.
+     *
+     * @param  array<string, list<string>>  $chains
+     * @return \SineMacula\Laravel\Authorization\Support\InheritedPermissions
+     */
+    public static function carriedWithin(array $chains): InheritedPermissions
+    {
+        return self::permissions(self::keysOf($chains), true);
+    }
+
+    /**
+     * Return the key of every role of the chains, each held role followed by
+     * its ancestors from the root down, as `keysWithin()` lists them.
+     *
+     * @param  array<string, list<string>>  $chains
+     * @return list<string>
+     */
+    public static function keysOf(array $chains): array
+    {
+        $keys = [];
+
+        foreach ($chains as $chain) {
+            \array_push($keys, $chain[0], ...\array_reverse(\array_slice($chain, 1)));
         }
 
         return $keys;
@@ -256,21 +306,28 @@ final class RoleGraph
      * the permission model.
      *
      * @param  list<string>  $roleKeys
+     * @param  bool  $isByRole
      * @return \SineMacula\Laravel\Authorization\Support\InheritedPermissions
      */
-    private static function permissions(array $roleKeys): InheritedPermissions
+    private static function permissions(array $roleKeys, bool $isByRole = false): InheritedPermissions
     {
         if ($roleKeys === []) {
-            return new InheritedPermissions([], null);
+            return new InheritedPermissions([], null, $isByRole ? [] : null);
         }
 
         [$query, $model, $pivot] = self::permissionQuery($roleKeys);
 
-        /** @var list<array{name: string, expires_at: string|null}> $rows */
+        $columns = [$model->qualifyColumn('name') . ' as name', $pivot . '.expires_at as expires_at'];
+
+        if ($isByRole) {
+            \array_push($columns, $pivot . '.role_id as role_id', $model->getQualifiedKeyName() . ' as permission_id');
+        }
+
+        /** @var list<array{name: string, expires_at: string|null, role_id?: int|string, permission_id?: int|string}> $rows */
         $rows = $query
             ->toBase()
             ->distinct()
-            ->get([$model->qualifyColumn('name') . ' as name', $pivot . '.expires_at as expires_at'])
+            ->get($columns)
             ->map(static fn (object $row): array => (array) $row)
             ->all();
 
@@ -288,7 +345,28 @@ final class RoleGraph
             $nearest = \min($nearest ?? \PHP_INT_MAX, Carbon::parse($row['expires_at'], 'UTC')->getTimestamp() - $now);
         }
 
-        return new InheritedPermissions(\array_values($names), $nearest);
+        return new InheritedPermissions(\array_values($names), $nearest, $isByRole ? self::byRole($rows) : null);
+    }
+
+    /**
+     * Return the key and name of each permission the rows read, by the key of
+     * the role carrying it, each once.
+     *
+     * @param  list<array{name: string, expires_at: string|null, role_id?: int|string, permission_id?: int|string}>  $rows
+     * @return array<string, list<array{id: string, name: string}>>
+     */
+    private static function byRole(array $rows): array
+    {
+        $carried = [];
+
+        foreach ($rows as $row) {
+            $role = (string) ($row['role_id'] ?? '');
+            $id   = (string) ($row['permission_id'] ?? '');
+
+            $carried[$role][$id] = ['id' => $id, 'name' => $row['name']];
+        }
+
+        return \array_map(\array_values(...), $carried);
     }
 
     /**
