@@ -6,6 +6,7 @@ namespace Benchmarks\Runtime;
 
 use Benchmarks\Support\BenchmarkCase;
 use Benchmarks\Support\BenchmarkFixtures;
+use Benchmarks\Support\BenchmarkPermissions;
 use Illuminate\Support\Str;
 use PhpBench\Attributes as Bench;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
@@ -45,8 +46,8 @@ final class AuthorizationManagerBench extends BenchmarkCase
     private ?BenchmarkIdentity $user = null;
 
     /**
-     * Bench setUp — boot the application, seed a role carrying the fixture
-     * permissions, attach an allow-and-deny policy, and resolve the
+     * Bench setUp — boot the application, declare the fixture permissions, seed
+     * a role carrying them, attach an allow-and-deny policy, and resolve the
      * container-bound manager.
      *
      * @return void
@@ -54,6 +55,8 @@ final class AuthorizationManagerBench extends BenchmarkCase
     public function setUp(): void
     {
         $app = $this->boot();
+
+        $app['config']->set('authorization.permission_providers', [BenchmarkPermissions::class]);
 
         $this->resetFixtureTables();
 
@@ -116,7 +119,7 @@ final class AuthorizationManagerBench extends BenchmarkCase
     #[Bench\Revs(100)]
     public function benchPolicyAllow(): void
     {
-        $this->getManager()->for($this->getUser())->can('reports:read');
+        $this->getManager()->for($this->getUser())->can(BenchmarkPermissions::POLICY_ACTION);
     }
 
     /**
@@ -202,7 +205,7 @@ final class AuthorizationManagerBench extends BenchmarkCase
             'name'     => 'bench-policy',
             'document' => [
                 'statements' => [
-                    ['effect' => 'allow', 'actions' => ['reports:read']],
+                    ['effect' => 'allow', 'actions' => [BenchmarkPermissions::POLICY_ACTION]],
                     ['effect' => 'deny', 'actions' => ['posts:delete']],
                 ],
             ],
