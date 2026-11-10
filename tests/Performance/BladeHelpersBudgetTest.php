@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
+use Tests\Concerns\MeasuresTime;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
@@ -38,6 +39,8 @@ use Tests\TestCase;
 #[CoversClass(BladeHelpers::class)]
 final class BladeHelpersBudgetTest extends TestCase
 {
+    use MeasuresTime;
+
     /**
      * 50 `@role` directive calls must complete in under 100ms on the reference
      * machine (~15μs per call observed).
@@ -65,7 +68,7 @@ final class BladeHelpersBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(
+        $this->assertWithinBudget(
             0.1,
             $elapsed,
             "BladeHelpers::hasRole() budget exceeded ({$elapsed}s for 50 directive calls).",
@@ -107,7 +110,7 @@ final class BladeHelpersBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(
+        $this->assertWithinBudget(
             0.2,
             $elapsed,
             "BladeHelpers::hasPermission() budget exceeded ({$elapsed}s for 50 directive calls).",

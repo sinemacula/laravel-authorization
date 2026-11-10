@@ -69,12 +69,12 @@ final class UsagePruneCommandTest extends TestCase
         self::assertSame(0, Artisan::call('authorization:usage-prune', ['--pretend' => true]));
         self::assertSame('Would prune the usage of 1 grant route(s) whose grant no longer exists and 1 coverage period(s) older than 30 day(s).', \trim(Artisan::output()));
 
-        self::assertSame([1, 1], [DB::table('authorization_grant_usage')->count(), DB::table('authorization_usage_coverage')->count()]);
+        self::assertSame([1, 1], [DB::table('grant_usage')->count(), DB::table('usage_coverage')->count()]);
 
         self::assertSame(0, Artisan::call('authorization:usage-prune'));
         self::assertSame('Pruned the usage of 1 grant route(s) whose grant no longer exists and 1 coverage period(s) older than 30 day(s).', \trim(Artisan::output()));
 
-        self::assertSame([0, 0], [DB::table('authorization_grant_usage')->count(), DB::table('authorization_usage_coverage')->count()]);
+        self::assertSame([0, 0], [DB::table('grant_usage')->count(), DB::table('usage_coverage')->count()]);
     }
 
     /**

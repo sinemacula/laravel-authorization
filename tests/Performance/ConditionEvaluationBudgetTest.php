@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
+use Tests\Concerns\MeasuresTime;
 
 /**
  * Performance budget for `Statement::conditionsSatisfiedBy()`.
@@ -30,12 +31,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 #[CoversClass(Statement::class)]
 final class ConditionEvaluationBudgetTest extends TestCase
 {
+    use MeasuresTime;
+
     /**
      * Evaluating a 20-operator condition chain 1,000 times must complete in
-     * under a second. Observed ~70μs per call on the reference machine (≈70ms
-     * total). The CI job that collects coverage runs the loop under PCOV, which
-     * took it to about half a second, so the budget is ~14× the reference
-     * figure to tolerate that instrumentation and runner variance.
+     * under half a second. Observed ~70μs per call on the reference machine
+     * (≈70ms total); the budget is ~7× that to tolerate runner variance, and is
+     * enforced outside coverage runs.
      *
      * @return void
      */
@@ -58,8 +60,8 @@ final class ConditionEvaluationBudgetTest extends TestCase
 
         $elapsed = \microtime(true) - $start;
 
-        self::assertLessThan(
-            1.0,
+        $this->assertWithinBudget(
+            0.5,
             $elapsed,
             "Statement::conditionsSatisfiedBy() budget exceeded ({$elapsed}s for 1,000 iterations of a 20-operator chain).",
         );

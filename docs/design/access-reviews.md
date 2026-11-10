@@ -290,20 +290,19 @@ still left out.
     stored grant once, and each observation as its route's key, its grant's index and its bucket.
 
 25. **Storage (N102).** `Contracts\GrantUsageStore` (`record()`, `lastObserved()`, `coverage()`), bound to
-    `Usage\DatabaseGrantUsageStore` and rebindable. `authorization_grant_usage` is keyed by the route's key
-    (`Usage\GrantUsageKey`: a SHA-256 digest of the source kind, target, grantee, tenant and application as stored, and
-    the role path, the roles the route runs through; the same key a review row of the route carries), keeps the stored
-    grant's unique columns, its creation when observed and the last bucket; a write is made only when the observation
-    is newer (the grant's creation first, then the bucket), compared in the update itself, so duplicate and
-    out-of-order delivery change nothing. The routes are written in the order of their keys, a hundred to a
-    transaction, the missing rows inserted before any is rewritten and no row read under a lock, so concurrent writers
-    take their locks in one order; a transaction that deadlocks or waits too long for a lock is tried three times in
-    all, and a batch that still fails throws before the coverage is extended. `authorization_usage_coverage` holds the
-    periods tracking was on, each flush extending the latest or opening one when the gap exceeds two intervals; a
-    batch naming a `lostSince` first cuts the coverage back to two intervals and a second before it, so the time lost
-    stays uncovered; `authorization:usage-heartbeat` extends it with no observations, and records nothing while
-    tracking is off. `authorization:usage-prune` removes the usage
-    of routes whose grant no longer exists and the coverage older than `authorization.usage.retention` days.
+    `Usage\DatabaseGrantUsageStore` and rebindable. `grant_usage` is keyed by the route's key (`Usage\GrantUsageKey`: a
+    SHA-256 digest of the source kind, target, grantee, tenant and application as stored, and the role path, the roles
+    the route runs through; the same key a review row of the route carries), keeps the stored grant's unique columns,
+    its creation when observed and the last bucket; a write is made only when the observation is newer (the grant's
+    creation first, then the bucket), compared in the update itself, so duplicate and out-of-order delivery change
+    nothing. The routes are written in the order of their keys, a hundred to a transaction, the missing rows inserted
+    before any is rewritten and no row read under a lock, so concurrent writers take their locks in one order; a
+    transaction that deadlocks or waits too long for a lock is tried three times in all, and a batch that still fails
+    throws before the coverage is extended. `usage_coverage` holds the periods tracking was on, each flush extending the
+    latest or opening one when the gap exceeds two intervals; a batch naming a `lostSince` first cuts the coverage back
+    to two intervals and a second before it, so the time lost stays uncovered; `authorization:usage-heartbeat` extends
+    it with no observations, and records nothing while tracking is off. `authorization:usage-prune` removes the usage of
+    routes whose grant no longer exists and the coverage older than `authorization.usage.retention` days.
 
 26. **Regrants.** A grant revoked and made again is a new row created later; an observation through a grant created
     before the current one is ignored (`ObservedUse::isOf()`), and a regrant's observation replaces the old one in the

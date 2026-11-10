@@ -74,8 +74,8 @@ return [
         'resource_policies'        => env('AUTHORIZATION_TABLE_RESOURCE_POLICIES', 'resource_policies'),
         'authorizable_boundaries'  => env('AUTHORIZATION_TABLE_AUTHORIZABLE_BOUNDARIES', 'authorizable_boundaries'),
         'guardrails'               => env('AUTHORIZATION_TABLE_GUARDRAILS', 'guardrails'),
-        'grant_usage'              => env('AUTHORIZATION_TABLE_GRANT_USAGE', 'authorization_grant_usage'),
-        'usage_coverage'           => env('AUTHORIZATION_TABLE_USAGE_COVERAGE', 'authorization_usage_coverage'),
+        'grant_usage'              => env('AUTHORIZATION_TABLE_GRANT_USAGE', 'grant_usage'),
+        'usage_coverage'           => env('AUTHORIZATION_TABLE_USAGE_COVERAGE', 'usage_coverage'),
     ],
 
     /*

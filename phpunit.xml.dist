@@ -15,6 +15,12 @@
         <testsuite name="Feature">
             <directory suffix="Test.php">./tests/Feature</directory>
         </testsuite>
+        <!--
+            Wall-clock budgets in the Performance suite are compared only
+            when code coverage is not being collected (see
+            Tests\Concerns\MeasuresTime); query, row and memory budgets are
+            always enforced.
+        -->
         <testsuite name="Performance">
             <directory suffix="Test.php">./tests/Performance</directory>
         </testsuite>
