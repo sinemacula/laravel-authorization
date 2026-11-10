@@ -8,21 +8,18 @@ use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 
 /**
- * The ordered composite of grant hooks, and the package's default binding of
- * the grant hook contract (AUTHZ-11.3).
+ * The ordered composite of grant hooks (AUTHZ-11.3), and, holding none, the
+ * package's default binding of the grant hook contract.
  *
- * It holds the hooks `authorization.grant_hooks` lists, each built from the
- * container, and calls them in the order listed: the first that throws stops
- * the rest, and its exception refuses the call. With none listed it does
- * nothing, and the grant service then classifies nothing, since there is no
- * hook to call. The list is validated at boot, and there is no way to add a
- * hook at run time: an application lists its hooks in the config, or binds its
- * own hook on the contract in place of this one.
- *
- * When the config lists hooks and a sibling package or the application bound a
- * hook on the contract before the package registered, the composite holds that
- * hook too, after the listed ones (N107): every hook runs, and any of them may
- * refuse, so nothing either would refuse is let through.
+ * It calls its hooks in order: the first that throws stops the rest, and its
+ * exception refuses the call. `fromConfig()` builds it from the hooks
+ * `authorization.grant_hooks` lists, each built from the container. The list is
+ * validated at boot, and there is no way to add a hook at run time: an
+ * application lists its hooks in the config, or binds its own hook on the
+ * contract. The listed hooks run before whatever the contract resolves to, this
+ * default included, through `ListedGrantHooks` (N108). With none listed the
+ * default does nothing, and the grant service then classifies nothing, since
+ * there is no hook to call.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,38 +53,6 @@ final readonly class GrantHooks implements GrantHook
         $hooks = \array_map(static fn (string $class): object => $container->make($class), $classes);
 
         return new self($hooks);
-    }
-
-    /**
-     * Return the composite of the hooks `authorization.grant_hooks` lists,
-     * followed by the hook bound under the key, when one is (N107).
-     *
-     * The key holds what was bound on the contract before the package
-     * registered, so that hook runs after every listed one.
-     *
-     * @param  \Illuminate\Contracts\Container\Container  $container
-     * @param  string  $key
-     * @return self
-     *
-     * @throws \UnexpectedValueException
-     */
-    public static function composed(Container $container, string $key): self
-    {
-        $listed = self::fromConfig($container);
-
-        if (!$container->bound($key)) {
-            return $listed;
-        }
-
-        $earlier = $container->make($key);
-
-        if (!$earlier instanceof GrantHook) {
-            $type = \get_debug_type($earlier);
-
-            throw new \UnexpectedValueException('The grant hook bound on ' . GrantHook::class . " before the package registered resolves to {$type}, which does not implement it.");
-        }
-
-        return new self([...$listed->hooks, $earlier]);
     }
 
     /**

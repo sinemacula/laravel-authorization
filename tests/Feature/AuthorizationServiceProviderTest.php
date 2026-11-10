@@ -56,6 +56,7 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
+use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
@@ -94,6 +95,7 @@ use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\CatalogueReadingProvider;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
+use Tests\Feature\Stubs\DeferredBindingProvider;
 use Tests\Feature\Stubs\FixedConsoleSubjectResolver;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\InjectedRequirementChecker;
@@ -169,6 +171,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     protected function tearDown(): void
     {
         SwitchableSubjectResolver::$tenant = null;
+        DeferredBindingProvider::$objects  = [];
         Carbon::setTestNow();
 
         parent::tearDown();
@@ -463,8 +466,8 @@ final class AuthorizationServiceProviderTest extends TestCase
      * binding it, the configuration that names a class other than the package's
      * default for it, and the class it then resolves: the configured class, or
      * the declared resolver around the configured resource tenant resolver. The
-     * grant hooks, composed with an earlier binding rather than replacing it
-     * (N107), are tested in `Feature\Hooks\ComposedGrantHooksTest`.
+     * grant hooks, run before whatever the contract resolves to rather than
+     * replacing it (N108), are tested in `Feature\Hooks\ListedGrantHooksTest`.
      *
      * @return iterable<string, array{class-string, string, class-string, class-string, string}>
      */
@@ -605,6 +608,128 @@ final class AuthorizationServiceProviderTest extends TestCase
         $bound = self::registerOverABinding($app, 'instance', $contract);
 
         self::assertSame($bound, $app->make($contract));
+    }
+
+    /**
+     * Provide every seam the configuration names a class for, the configuration
+     * that names a class other than the package's default for it, and the class
+     * it then resolves.
+     *
+     * @return iterable<string, array{class-string, string, class-string, class-string}>
+     */
+    public static function configuredSeamProvider(): iterable
+    {
+        foreach (self::configuredSeamBindingProvider() as [$seam, $key, $configured, $class, $method]) {
+            if ($method !== 'bind') {
+                continue;
+            }
+
+            yield $seam => [$seam, $key, $configured, $class];
+        }
+    }
+
+    /**
+     * A class the configuration names replaces the binding of a deferred
+     * provider the application knows of when the package registers: the
+     * provider is loaded first, and its binding replaced (N106).
+     *
+     * @param  class-string  $contract
+     * @param  string  $key
+     * @param  class-string  $configured
+     * @param  class-string  $class
+     * @return void
+     */
+    #[DataProvider('configuredSeamProvider')]
+    public function testAConfiguredClassReplacesADeferredProvidersBinding(string $contract, string $key, string $configured, string $class): void
+    {
+        $app   = $this->configuredSeam($contract, $key, $configured);
+        $bound = self::deferBinding($app, $contract);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        self::assertTrue($app->providerIsLoaded(DeferredBindingProvider::class));
+
+        $resolved = $app->make($contract);
+
+        self::assertNotSame($bound, $resolved);
+        self::assertInstanceOf($class, $resolved);
+    }
+
+    /**
+     * A seam the configuration leaves to the package's default leaves a
+     * deferred provider that binds it deferred, and its binding stands once the
+     * seam is resolved (N103).
+     *
+     * @param  class-string  $contract
+     * @param  string  $key
+     * @param  class-string  $default
+     * @return void
+     */
+    #[DataProvider('configuredDefaultProvider')]
+    public function testADeferredProviderOfASeamLeftToItsDefaultStaysDeferred(string $contract, string $key, string $default): void
+    {
+        $app   = $this->configuredSeam($contract, $key, $default);
+        $bound = self::deferBinding($app, $contract);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        self::assertFalse($app->providerIsLoaded(DeferredBindingProvider::class));
+        self::assertSame($bound, $app->make($contract));
+    }
+
+    /**
+     * The application learns of the deferred providers of its configuration and
+     * of package discovery only once it has registered every eager provider, so
+     * a class the configuration names replaces the binding of one it learns of
+     * after the package registered as it boots (N106).
+     *
+     * @return void
+     */
+    public function testAConfiguredClassReplacesADeferredProvidersBindingAsTheApplicationBoots(): void
+    {
+        $app = self::freshApplication();
+
+        try {
+            (new AuthorizationServiceProvider($app))->register();
+
+            $bound = self::deferBinding($app, SubjectResolver::class);
+
+            $app->boot();
+
+            self::assertTrue($app->providerIsLoaded(DeferredBindingProvider::class));
+
+            $resolved = $app->make(SubjectResolver::class);
+
+            self::assertNotSame($bound, $resolved);
+            self::assertInstanceOf(StubSubjectResolver::class, $resolved);
+        } finally {
+            Container::setInstance($this->application());
+        }
+    }
+
+    /**
+     * A binding made after the package registered still replaces the class the
+     * configuration names once the application boots, when no deferred provider
+     * binds the seam (N106).
+     *
+     * @return void
+     */
+    public function testABindingMadeAfterRegistrationStandsOnceTheApplicationBoots(): void
+    {
+        $app = self::freshApplication();
+
+        try {
+            (new AuthorizationServiceProvider($app))->register();
+
+            $bound = self::createStub(SubjectResolver::class);
+
+            $app->instance(SubjectResolver::class, $bound);
+            $app->boot();
+
+            self::assertSame($bound, $app->make(SubjectResolver::class));
+        } finally {
+            Container::setInstance($this->application());
+        }
     }
 
     /**
@@ -1316,10 +1441,10 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
-     * The grant hook is the composite of the configured hooks, holding none by
-     * default and each configured class in order once configured, rebuilt for
-     * each job; a hook the application binds on the contract replaces it and is
-     * kept.
+     * The grant hook is the composite holding no hook by default, rebuilt for
+     * each job; once the configuration lists hooks, the package registered
+     * again wraps it so they run first (N108), and a hook the application binds
+     * on the contract is wrapped in its place.
      *
      * @return void
      */
@@ -1333,23 +1458,23 @@ final class AuthorizationServiceProviderTest extends TestCase
         self::assertTrue($default->isEmpty());
         self::assertSame($default, $app->make(GrantHook::class));
 
+        $app->forgetScopedInstances();
+
+        self::assertNotSame($default, $app->make(GrantHook::class));
+
         /** @var \Illuminate\Config\Repository $config */
         $config = $app->make(ConfigRepository::class);
         $config->set('authorization.grant_hooks', [RefusingGrantHook::class, RecordingGrantHook::class]);
 
-        $app->forgetScopedInstances();
+        (new AuthorizationServiceProvider($app))->register();
 
-        $configured = $app->make(GrantHook::class);
-
-        self::assertInstanceOf(GrantHooks::class, $configured);
-        self::assertSame([RefusingGrantHook::class, RecordingGrantHook::class], \array_map(static fn (object $hook): string => $hook::class, $configured->hooks()));
+        self::assertInstanceOf(ListedGrantHooks::class, $app->make(GrantHook::class));
 
         $own = new RecordingGrantHook;
 
-        $app->instance(GrantHook::class, $own);
-        $app->forgetScopedInstances();
+        $app->bind(GrantHook::class, static fn (): GrantHook => $own);
 
-        self::assertSame($own, $app->make(GrantHook::class));
+        self::assertInstanceOf(ListedGrantHooks::class, $app->make(GrantHook::class));
     }
 
     /**
@@ -1923,6 +2048,25 @@ final class AuthorizationServiceProviderTest extends TestCase
         self::bindBy($app, $method, $contract, $bound);
 
         (new AuthorizationServiceProvider($app))->register();
+
+        return $bound;
+    }
+
+    /**
+     * Have a deferred provider bind a stub on the contract, as a sibling
+     * package would, tell the application of it, and return the stub.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @param  class-string  $contract
+     * @return object
+     */
+    private static function deferBinding(Application $app, string $contract): object
+    {
+        $bound = self::createStub($contract);
+
+        DeferredBindingProvider::$objects = [$contract => $bound];
+
+        $app->addDeferredServices([$contract => DeferredBindingProvider::class]);
 
         return $bound;
     }
