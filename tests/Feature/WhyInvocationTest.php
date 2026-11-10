@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Console\Support\WhyInvocation;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -22,6 +23,7 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Feature\Stubs\CredentialScopesSource;
 use Tests\Feature\Stubs\FailingContextSource;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubRequirementChecker;
@@ -359,6 +361,50 @@ final class WhyInvocationTest extends TestCase
         self::assertTrue($proved);
         self::assertCount(1, $checker->calls);
         self::assertSame('session-1', $checker->calls[0][1]->session);
+    }
+
+    /**
+     * A subject on the platform is explained there when no tenant is given,
+     * keeping its marker, and placed in the tenant given otherwise; either way
+     * it has no session and no credential's scopes, so the scopes its resolver
+     * gave it cap nothing.
+     *
+     * @return void
+     */
+    public function testExplainsASubjectOnThePlatformWithoutItsScopes(): void
+    {
+        $ambient = self::createTenant('tenant-5');
+        $tenant  = self::createTenant('tenant-6');
+        $user    = StubIdentity::create(['id' => 'user-3']);
+        $source  = new CredentialScopesSource;
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+
+        $this->actAsTenant($ambient);
+        $this->app?->instance(SessionPolicySource::class, $source);
+        $this->app?->forgetInstance('authorization');
+        $this->app?->forgetInstance(AuthorizationManager::class);
+
+        $subject  = new Subject($user, $user, null, null, 'web', 'session-1', [], true);
+        $platform = self::of(['action' => 'posts:read'], [])->explain(self::manager(), $subject);
+        $asked    = \array_pop($source->calls);
+
+        self::assertTrue($platform->isAllowed());
+        self::assertNull($platform->evidence?->request?->decided->tenant);
+        self::assertNotNull($asked);
+        self::assertTrue($asked->platform);
+        self::assertNull($asked->scopes);
+        self::assertNull($asked->session);
+
+        $inTenant = self::of(['action' => 'posts:read'], ['tenant' => StubTenant::class . ':tenant-6'])->explain(self::manager(), $subject);
+        $asked    = \array_pop($source->calls);
+
+        self::assertTrue($inTenant->isAllowed());
+        self::assertEquals(Reference::of($tenant), $inTenant->evidence?->request?->decided->tenant);
+        self::assertNotNull($asked);
+        self::assertFalse($asked->platform);
+        self::assertNull($asked->scopes);
+        self::assertSame([StubTenant::class, 'tenant-5'], TenantScope::currentTenant());
     }
 
     /**

@@ -31,10 +31,11 @@ use SineMacula\Laravel\Authorization\Subject;
  * the key column cannot hold included, without naming the failure.
  *
  * The subject keeps its principal, its identity and its guard, and loses the
- * tenant, the application and any session the subject resolver gave it, so
- * nothing is taken from whoever is signed in to the console. The bound subject
- * resolver is read on every call, so one bound after this resolver was built is
- * honoured.
+ * tenant, the application, any session, any credential's scopes and any
+ * platform marker the subject resolver gave it, so nothing is taken from
+ * whoever is signed in to the console, and where it is decided is the command's
+ * to name. The bound subject resolver is read on every call, so one bound after
+ * this resolver was built is honoured.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,7 +55,8 @@ final readonly class ReferenceSubjectResolver implements ConsoleSubjectResolver
 
     /**
      * Resolve the saved subject the reference names, with its principal,
-     * identity and guard, and no tenant, application or session.
+     * identity and guard, and no tenant, application, session, credential's
+     * scopes or platform marker.
      *
      * @param  string  $reference
      * @return \SineMacula\Laravel\Authorization\Subject

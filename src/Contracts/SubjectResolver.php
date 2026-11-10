@@ -15,10 +15,22 @@ use SineMacula\Laravel\Authorization\Subject;
  * its subject takes it from here, and the tenant scope reads the active tenant
  * from here.
  *
+ * A resolver may fill the subject's `scopes` from the credential it reads, for
+ * the session policy source to cap its checks with, null for a credential
+ * carrying no cap and an empty list for one carrying none granted (N121), and
+ * may mark the request's subject acting on the platform, a job's or a console
+ * command's acting for no tenant, with `platform` (N120), which names no
+ * tenant. The marker does not move `forUser()` or a model named through
+ * `for()`: both are decided in the scope in place, which for a request whose
+ * subject names no tenant is already the platform, and which an explicit
+ * `AuthorizationScope::within()` replaces. Only a `Subject` a caller passes to
+ * `for()` carrying the marker is decided on the platform whatever scope is in
+ * place.
+ *
  * The shipped default reads Laravel's authenticated user on the default guard,
- * with no tenant and the guard's name as the application. An application with
- * principals or tenants, or the `sinemacula/laravel-iam` umbrella, binds its
- * own implementation.
+ * with no tenant and the guard's name as the application, and fills neither. An
+ * application with principals or tenants, or the `sinemacula/laravel-iam`
+ * umbrella, binds its own implementation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

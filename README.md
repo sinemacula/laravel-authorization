@@ -221,6 +221,14 @@ only from it: without a tenant, only platform-wide roles and permissions are vis
 'subject_resolver' => App\Authorization\CurrentSubject::class,
 ```
 
+A resolver can say more about the subject than who and where. `scopes` carries the scopes of the credential the subject
+acts with, such as an API token's, for the session policy source to cap its checks with (see
+[Session caps and machines](#session-caps-and-machines)): null when the credential carries no cap, and `[]` when it
+carries none granted, which allows nothing. `platform` marks a subject acting on the platform, as a queued job or a
+console command acting for no tenant does: it names no tenant, and `for()` of it decides on the platform whatever tenant
+is in place (see [The programmatic API](#the-programmatic-api)). Marking the request's subject moves neither
+`forUser()` nor a model named through `for()` out of the scope in place. The shipped resolver sets neither.
+
 Every seam the package gives a default for can also be bound directly on its contract, from any service provider: the
 subject resolver, the tenant tree, the identity directory, the grant hook, the console subject resolver, the resource
 tenant resolver, the policy store, the policy resolver, the action catalogue, the context key catalogue, the
@@ -1224,6 +1232,23 @@ final class CredentialScopes implements SessionPolicySource
     public function scopesFor(Subject $subject): ?array
     {
         return $this->credential->isHeldBy($subject->subject) ? $this->credential->scopes() : null;
+    }
+}
+```
+
+A source may read the scopes from the subject itself: a subject resolver that reads the credential can put its scopes on
+the `Subject` it returns, as `scopes`, null for a credential carrying no cap and `[]` for one carrying none granted, and
+the source hands them on. The subject reaches the source as the resolver made it. `for()` of a model makes a subject
+that is no request's credential, so it carries no scopes, as it carries no session; only the request's own model, named
+while its subject has no session, is that subject itself, scopes included. The default source still answers null,
+whatever the subject carries.
+
+```php
+final class SubjectScopes implements SessionPolicySource
+{
+    public function scopesFor(Subject $subject): ?array
+    {
+        return $subject->scopes;
     }
 }
 ```
@@ -2539,14 +2564,15 @@ Authorization::lastDecision();            // the decision of the last action $sc
 Authorization::lastDecisionProvenance();  // DecisionProvenance: a Reference to $user as subject and identity
 ```
 
-**`for()` and the scope.** A model given to `for()` is decided in the request's tenant and application, as the subject
-resolver reports them. A resolved `Subject` is taken as it is, keeping its identity, guard and session, and when it
-names a tenant or an application, every check through the manager is decided there: its tenant, or the platform when it
-names none, and its application, or none, are put in place of the request's, both as the subject's and as the scope of
-the grants that count, for each `check()`, `can()`, `cannot()`, `any()`, `all()`, `authorize()`, `checkMany()`,
-`canEach()`, `filterAuthorized()`, `explain()` and query scoped through it with `whereAuthorized()`. The request's are
-restored once each is decided, even when it throws, and nothing is kept between calls or requests. A `Subject` naming
-neither is decided in the request's scope, as a model is. So a subject in another tenant needs no wrapping:
+**`for()` and the scope.** A model given to `for()` is decided in the scope in place: the request's tenant and
+application, as the subject resolver reports them, or those an `AuthorizationScope::within()` puts in place. A resolved
+`Subject` is taken as it is, keeping its identity, guard and session, and when it names a tenant or an application,
+every check through the manager is decided there: its tenant, or the platform when it names none, and its application,
+or none, are put in place of the request's, both as the subject's and as the scope of the grants that count, for each
+`check()`, `can()`, `cannot()`, `any()`, `all()`, `authorize()`, `checkMany()`, `canEach()`, `filterAuthorized()`,
+`explain()` and query scoped through it with `whereAuthorized()`. The request's are restored once each is decided, even
+when it throws, and nothing is kept between calls or requests. A `Subject` naming neither, and not on the platform (see
+below), is decided in the scope in place, as a model is. So a subject in another tenant needs no wrapping:
 
 ```php
 use SineMacula\Laravel\Authorization\Subject;
@@ -2561,10 +2587,29 @@ $scope = AuthorizationScope::tenant($account, 'admin');
 $scope->within(fn () => Authorization::for($scope->subjectIn($member))->can('posts:update', $post));
 ```
 
-`permissionsFor()` lists in the scope it is given, which wins over the subject's, and a preview from `previewFor()`
-keeps its own scope (see [Preview](#preview)). The subject's tenant is read when a check is decided, not by `for()`, so
-a `Subject` whose tenant cannot be read, a plain object that is neither a model nor an `AuthorizableTenant`, is refused
-with `InvalidTenantException` by each check through the manager, before anything is decided.
+**A subject on the platform.** A `Subject` built with `platform: true` acts on the platform, as a queued job or a
+console command acting for no tenant does, and names no tenant, so one naming a tenant too is refused with
+`InvalidArgumentException`. Every check through `for()` of it is decided on the platform, on its application, or on
+none, whatever tenant is in place, the request's or one an `AuthorizationScope::within()` puts there, so a grant held
+only in that tenant does not allow it, and the scope in place is restored afterwards, exactly as for a subject naming a
+tenant. Only a `Subject` the caller passes is moved so. A request whose own subject is on the platform, and so names no
+tenant, is already decided on the platform, and so are a model it names through `for()` and a user through `forUser()`,
+with the Gate, `@can`, `can:` and application access, which decide through `forUser()`. Inside an explicit
+`AuthorizationScope::within()` of a tenant, every one of them is decided in that tenant, and only a `Subject` passed
+with `platform: true` still decides on the platform:
+
+```php
+use SineMacula\Laravel\Authorization\Subject;
+
+// In a queued job: decided on the platform's grants, never the tenant in place.
+Authorization::for(new Subject($user, platform: true))->can('reports:export');
+```
+
+`permissionsFor()` lists in the scope it is given, which wins over the subject's, a subject on the platform included,
+and a preview from `previewFor()` keeps its own scope (see [Preview](#preview)). The subject's tenant is read when a
+check is decided, not by `for()`, so a `Subject` whose tenant cannot be read, a plain object that is neither a model nor
+an `AuthorizableTenant`, is refused with `InvalidTenantException` by each check through the manager, before anything is
+decided.
 
 The last decision is kept with its provenance, a `DecisionProvenance` of references and names alone: `subject` and
 `identity`, references to the principal the decision was about and its identity, null for a guest; `previewer`, whoever
@@ -2895,7 +2940,10 @@ proved; the caller's step-up counts for the admission alone. A preview's `author
 `InsufficientAuthenticationException`: a denial for a requirement made of the subject throws a plain
 `AuthorizationException`, carrying the decision, since no step-up by the caller could meet it. The subject is evaluated
 in the caller's request context: the `request`, `environment` and `authentication` namespaces are the caller's
-request's, which is no prediction of what the subject would see when signed in.
+request's, which is no prediction of what the subject would see when signed in. A resolved `Subject` keeps the scopes
+its credential carries, so they still cap the preview, and its platform marker: previewed with no scope given, a
+`Subject` given on the platform is previewed on the platform, on its application, rather than in the request's tenant,
+while a model is previewed in the request's scope, whatever marker the request's subject carries.
 
 **What is recorded.** Every decision about the subject dispatches `DecisionEvaluated`, or `AuthorizationFailed` for an
 `authorize()` refusal, with `subject` the previewed subject and `previewer` the caller, in the scope the decision was

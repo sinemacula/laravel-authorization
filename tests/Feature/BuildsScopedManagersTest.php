@@ -4,8 +4,10 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Concerns\BuildsScopedManagers;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
@@ -20,8 +22,11 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ScopesQueries;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
+use Tests\Feature\Stubs\RequestSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSubjectResolver;
@@ -159,6 +164,115 @@ final class BuildsScopedManagersTest extends TestCase
     }
 
     /**
+     * `for()` of a `Subject` on the platform decides there while the request is
+     * in a tenant, so a grant held in that tenant does not allow it and one
+     * held on the platform does, while the same subject without the marker
+     * decides in the request's tenant; the request's tenant stays in place.
+     *
+     * @return void
+     */
+    public function testForOfASubjectOnThePlatformDecidesThere(): void
+    {
+        [$user, $first] = self::heldInFirstTenant('scoped-12');
+
+        $this->resolveRequest(StubIdentity::create(['id' => 'scoped-13']), $first);
+        $user->givePermission(Permission::create(['name' => 'posts:update']));
+
+        $onPlatform = Authorization::for(new Subject($user, $user, platform: true));
+
+        self::assertFalse($onPlatform->can('posts:read'));
+        self::assertTrue($onPlatform->can('posts:update'));
+        self::assertTrue(Authorization::for(new Subject($user, $user))->can('posts:read'));
+        self::assertSame([$first->getMorphClass(), 'tenant-a'], TenantScope::currentTenant());
+    }
+
+    /**
+     * A request whose subject is on the platform is decided there outside any
+     * scope, about itself, a model named through `for()` and the user
+     * `forUser()` translates alike, and inside an explicit tenant scope every
+     * one of them, the Gate included, is decided in that tenant.
+     *
+     * @return void
+     */
+    public function testAnExplicitTenantScopeWinsForARequestOnThePlatform(): void
+    {
+        [$user, $first] = self::heldInFirstTenant('scoped-14');
+
+        self::declareAbilities();
+        $user->givePermission(Permission::create(['name' => 'posts:create']), null, Reference::of($first));
+
+        $inFirst = AuthorizationScope::tenant($first);
+
+        $this->actAs(new Subject($user, $user, platform: true));
+
+        self::assertFalse(Authorization::can('posts:create'));
+        self::assertFalse(Authorization::for($user)->can('posts:create'));
+        self::assertFalse(Authorization::forUser($user)->can('posts:create'));
+        self::assertFalse(Gate::forUser($user)->allows('posts:create'));
+        self::assertTrue($inFirst->within(static fn (): bool => Authorization::can('posts:create')));
+        self::assertTrue($inFirst->within(static fn (): bool => Authorization::for($user)->can('posts:create')));
+        self::assertTrue($inFirst->within(static fn (): bool => Authorization::forUser($user)->can('posts:create')));
+        self::assertTrue($inFirst->within(static fn (): bool => Gate::forUser($user)->allows('posts:create')));
+    }
+
+    /**
+     * Inside an explicit tenant scope, a `Subject` passed to `for()` carrying
+     * the platform marker is still decided on the platform, so a grant held in
+     * that tenant does not allow it and one held on the platform does, and the
+     * tenant scope is back in place afterwards.
+     *
+     * @return void
+     */
+    public function testASubjectPassedOnThePlatformIsDecidedThereInsideATenantScope(): void
+    {
+        [$user, $first] = self::heldInFirstTenant('scoped-15');
+
+        $user->givePermission(Permission::create(['name' => 'posts:update']));
+
+        $this->actAs(new Subject($user, $user, platform: true));
+
+        $decided = AuthorizationScope::tenant($first)->within(static function () use ($user): array {
+            $onPlatform = Authorization::for(new Subject($user, $user, platform: true));
+
+            return [$onPlatform->can('posts:read'), $onPlatform->can('posts:update'), TenantScope::currentTenant()];
+        });
+
+        self::assertSame([false, true, [$first->getMorphClass(), 'tenant-a']], $decided);
+        self::assertNull(TenantScope::currentTenant());
+    }
+
+    /**
+     * A preview of a `Subject` on the platform, given no scope, is made on the
+     * platform, on the subject's application, whatever tenant the request is
+     * in, and one of a subject without the marker in the request's tenant.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testAPreviewOfASubjectOnThePlatformIsMadeThere(): void
+    {
+        [$user, $first] = self::heldInFirstTenant('scoped-16');
+
+        $previewer = StubIdentity::create(['id' => 'scoped-17']);
+
+        $previewer->givePermission(Permission::create(['name' => PackagePermissions::SUBJECT_PREVIEW]));
+
+        $this->resolveRequest($previewer, $first);
+
+        $onPlatform = Authorization::previewFor(new Subject($user, $user, platform: true))->can('posts:read');
+        $platform   = Authorization::lastDecisionProvenance();
+        $inTenant   = Authorization::previewFor(new Subject($user, $user))->can('posts:read');
+        $tenant     = Authorization::lastDecisionProvenance();
+
+        self::assertFalse($onPlatform);
+        self::assertNotNull($platform);
+        self::assertNull($platform->tenant);
+        self::assertTrue($inTenant);
+        self::assertSame('tenant-a', $tenant?->tenant?->id);
+    }
+
+    /**
      * A `Subject` whose tenant names no record is taken by `for()`, its tenant
      * read only when a check is decided, which refuses it before anything is
      * decided, as each form adapting it does; and `forActor()` is refused on a
@@ -259,6 +373,37 @@ final class BuildsScopedManagersTest extends TestCase
         ]);
 
         self::assertSame([], $resolved);
+    }
+
+    /**
+     * Resolve the subject given as the request's, translating a user the Gate
+     * hands over into the same request, and build the manager afresh for it.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @return void
+     */
+    private function actAs(Subject $subject): void
+    {
+        $this->app?->instance(SubjectResolver::class, new RequestSubjectResolver($subject));
+
+        foreach (['authorization', AuthorizationManager::class, ResolvedTenant::class] as $abstract) {
+            $this->app?->forgetInstance($abstract);
+        }
+
+        Authorization::clearResolvedInstance('authorization');
+    }
+
+    /**
+     * Declare the stub permission enum's abilities, so the Gate hook answers
+     * them.
+     *
+     * @return void
+     */
+    private static function declareAbilities(): void
+    {
+        config(['authorization.permission_enums' => [PermissionEnum::class]]);
+
+        (new AuthorizationServiceProvider(app()))->boot();
     }
 
     /**

@@ -181,6 +181,32 @@ final class AuthorizationScopeTest extends TestCase
     }
 
     /**
+     * The subject in the scope keeps its credential's scopes, an empty list
+     * apart from null, and its platform marker in the platform's scope, while a
+     * tenant's scope places a subject on the platform in its tenant, and the
+     * platform's never marks a subject that was not on it.
+     *
+     * @return void
+     */
+    public function testTheSubjectInTheScopeKeepsItsScopesAndItsMarkerOnThePlatform(): void
+    {
+        $user     = new StubIdentity;
+        $platform = AuthorizationScope::platform('admin');
+        $tenant   = AuthorizationScope::tenant(new Reference('accounts', '7'));
+        $marked   = new Subject($user, $user, null, 'web', 'api', 'session-1', ['posts:read'], true);
+
+        self::assertSame(['posts:read'], $platform->subjectIn($marked)->scopes);
+        self::assertTrue($platform->subjectIn($marked)->platform);
+        self::assertSame('admin', $platform->subjectIn($marked)->application);
+        self::assertSame(['posts:read'], $tenant->subjectIn($marked)->scopes);
+        self::assertFalse($tenant->subjectIn($marked)->platform);
+        self::assertSame($tenant->tenant, $tenant->subjectIn($marked)->tenant);
+        self::assertSame([], $platform->subjectIn(new Subject($user, scopes: []))->scopes);
+        self::assertNull($platform->subjectIn(new Subject($user))->scopes);
+        self::assertFalse($platform->subjectIn(new Subject($user))->platform);
+    }
+
+    /**
      * A reference without a key is refused as a tenant, as a model without one
      * is, when the scope is made.
      *

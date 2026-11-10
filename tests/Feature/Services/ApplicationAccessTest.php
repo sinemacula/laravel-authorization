@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\RefusesThePackage;
+use Tests\Feature\Stubs\RequestSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSessionPolicySource;
@@ -135,6 +136,36 @@ final class ApplicationAccessTest extends TestCase
         self::assertTrue(self::access()->mayUse('admin', $user, $own));
         self::assertFalse(self::access()->mayUse('mobile', $user, $own));
         self::assertFalse(self::access()->mayUse('admin', $user, null));
+    }
+
+    /**
+     * A resolver marking the subjects it returns as on the platform moves no
+     * admission: the check is still decided on the application asked about and
+     * in the tenant given, so a grant there admits and one on the resolver's
+     * own application or elsewhere does not.
+     *
+     * @return void
+     */
+    public function testASubjectOnThePlatformIsDecidedOnTheApplicationAndTenantAskedAbout(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-1']);
+        $own   = self::createTenant('tenant-a');
+        $other = self::createTenant('tenant-b');
+
+        Permission::create(['name' => 'admin:access']);
+        Permission::create(['name' => 'mobile:access']);
+        $user->givePermission('admin:access', application: 'admin');
+        $user->givePermission('mobile:access', application: 'web');
+        $user->givePermission('mobile:access', tenant: $own, application: 'mobile');
+
+        $this->app?->instance(SubjectResolver::class, new RequestSubjectResolver(new Subject($user, $user, null, 'web', platform: true)));
+        $this->app?->forgetInstance(ResolvedTenant::class);
+
+        self::assertTrue(self::access()->mayUse('admin', $user, null));
+        self::assertFalse(self::access()->mayUse('mobile', $user, null));
+        self::assertTrue(self::access()->mayUse('mobile', $user, $own));
+        self::assertFalse(self::access()->mayUse('mobile', $user, $other));
+        self::assertSame('web', TenantScope::currentApplication());
     }
 
     /**

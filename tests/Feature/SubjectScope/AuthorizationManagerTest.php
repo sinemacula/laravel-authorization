@@ -371,6 +371,202 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * A subject on the platform is decided on the platform's grants while the
+     * request is in a tenant: a grant held in that tenant does not allow it,
+     * the same grant held on the platform does, its application still applies,
+     * and the request's tenant and application are back in place afterwards.
+     *
+     * @return void
+     */
+    public function testASubjectOnThePlatformDecidesOnThePlatformsGrants(): void
+    {
+        [$member, $staff] = $this->heldInTheRequestsTenantAndOnThePlatform();
+
+        self::assertFalse(Authorization::for(new Subject($member, $member, platform: true))->can(self::CREATE));
+        self::assertSame([null, null], self::provenance());
+        self::assertTrue(Authorization::for(new Subject($member, $member))->can(self::CREATE));
+        self::assertSame(['tenant-b', 'web'], self::provenance());
+        self::assertTrue(Authorization::for(new Subject($staff, $staff, platform: true))->can(self::CREATE));
+        self::assertSame([null, null], self::provenance());
+        self::assertTrue(Authorization::for(new Subject($this->user, $this->user, null, 'admin', platform: true))->can(self::DELETE));
+        self::assertSame([null, 'admin'], self::provenance());
+        self::assertFalse(Authorization::for(new Subject($this->user, $this->user, platform: true))->can(self::DELETE));
+        self::assertSame([$this->second->getMorphClass(), 'tenant-b'], TenantScope::currentTenant());
+        self::assertSame('web', TenantScope::currentApplication());
+    }
+
+    /**
+     * A subject on the platform is decided as `AuthorizationScope::within()`
+     * around `for()` of the subject in the platform's scope decides it, so
+     * wrapping the call gives the same decision, made in the same scope.
+     *
+     * @return void
+     */
+    public function testTheDecisionOnThePlatformIsTheOneTheWithinFormMakes(): void
+    {
+        [$member, $staff] = $this->heldInTheRequestsTenantAndOnThePlatform();
+
+        foreach (['member' => $member, 'staff' => $staff, 'user' => $this->user] as $label => $user) {
+            foreach ([null, 'admin'] as $application) {
+                $scope   = AuthorizationScope::platform($application);
+                $subject = new Subject($user, $user, null, $application, platform: true);
+
+                foreach ([self::CREATE, self::DELETE] as $action) {
+                    $within      = $scope->within(static fn (): Decision => Authorization::for($scope->subjectIn($subject))->check($action));
+                    $withinScope = self::provenance();
+                    $direct      = Authorization::for($subject)->check($action);
+                    $directScope = self::provenance();
+                    $message     = $action . ' about ' . $label . ' on ' . ($application ?? 'none');
+
+                    self::assertSame([$within->effect, $within->reason], [$direct->effect, $direct->reason], $message);
+                    self::assertSame($withinScope, $directScope, $message);
+                    self::assertSame([null, $application], $directScope, $message);
+                }
+            }
+        }
+    }
+
+    /**
+     * Every method of the manager decides a subject on the platform there: the
+     * single checks, the bulk checks, the explanation, the listing on the
+     * platform and a query scoped through the manager, a grant held in the
+     * request's tenant allowing none of them, and one held on the platform
+     * allowing each.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    public function testEveryMethodDecidesASubjectOnThePlatformThere(): void
+    {
+        ScopedPost::query()->create(['title' => 'one']);
+
+        [$member, $staff] = $this->heldInTheRequestsTenantAndOnThePlatform();
+
+        $denied  = Authorization::for(new Subject($member, $member, platform: true));
+        $allowed = Authorization::for(new Subject($staff, $staff, platform: true));
+
+        self::assertTrue($allowed->check(self::CREATE)->isAllowed());
+        self::assertFalse($allowed->cannot(self::CREATE));
+        self::assertTrue($allowed->any([self::DELETE, self::CREATE]));
+        self::assertTrue($allowed->all([self::CREATE]));
+        self::assertSame(['a' => true], \array_map(static fn (Decision $decision): bool => $decision->isAllowed(), $allowed->checkMany(['a' => new CheckInput(self::CREATE)])));
+        self::assertSame(['x' => true], $allowed->canEach(self::CREATE, ['x' => null]));
+        self::assertSame(['x' => null], $allowed->filterAuthorized(self::CREATE, ['x' => null]));
+        self::assertTrue($allowed->explain(self::CREATE)->isAllowed());
+        self::assertSame([null, null], self::provenance());
+        self::assertSame([self::CREATE], $allowed->permissionsFor(null, AuthorizationScope::platform()));
+        self::assertSame(['one'], self::titles($allowed));
+
+        $allowed->authorize(self::CREATE);
+
+        self::assertFalse($denied->check(self::CREATE)->isAllowed());
+        self::assertTrue($denied->cannot(self::CREATE));
+        self::assertFalse($denied->any([self::DELETE, self::CREATE]));
+        self::assertFalse($denied->all([self::CREATE]));
+        self::assertSame(['a' => false], \array_map(static fn (Decision $decision): bool => $decision->isAllowed(), $denied->checkMany(['a' => new CheckInput(self::CREATE)])));
+        self::assertSame(['x' => false], $denied->canEach(self::CREATE, ['x' => null]));
+        self::assertSame([], $denied->filterAuthorized(self::CREATE, ['x' => null]));
+        self::assertFalse($denied->explain(self::CREATE)->isAllowed());
+        self::assertSame([null, null], self::provenance());
+        self::assertSame([], $denied->permissionsFor(null, AuthorizationScope::platform()));
+        self::assertSame([], self::titles($denied));
+        self::assertTrue(Authorization::for(new Subject($member, $member))->can(self::CREATE));
+
+        try {
+            $denied->authorize(self::CREATE);
+
+            self::fail('The check is refused.');
+        } catch (AuthorizationException $exception) {
+            self::assertSame(DecisionReason::NO_MATCH, $exception->getDecision()?->reason);
+        }
+
+        self::assertSame([$this->second->getMorphClass(), 'tenant-b'], TenantScope::currentTenant());
+    }
+
+    /**
+     * A listing for a subject on the platform is made in the scope it is given,
+     * which wins over the subject's, as it does for a subject naming a tenant:
+     * on the platform, and in a tenant, where the subject is placed.
+     *
+     * @return void
+     */
+    public function testAListingForASubjectOnThePlatformIsMadeInTheScopeItIsGiven(): void
+    {
+        [$member] = $this->heldInTheRequestsTenantAndOnThePlatform();
+
+        $onPlatform = Authorization::for(new Subject($member, $member, platform: true));
+
+        self::assertSame([], $onPlatform->permissionsFor(null, AuthorizationScope::platform()));
+        self::assertSame([self::CREATE], $onPlatform->permissionsFor(null, AuthorizationScope::tenant($this->second)));
+        self::assertSame([self::CREATE], Authorization::permissionsFor(new Subject($member, $member, platform: true), AuthorizationScope::current()));
+    }
+
+    /**
+     * A check about a subject on the platform that throws leaves the request's
+     * tenant and application in place, and the next check of the request is
+     * decided there.
+     *
+     * @return void
+     */
+    public function testTheRequestsScopeIsRestoredAfterAnExceptionOnThePlatform(): void
+    {
+        $provider = new FailingResourceAttributes;
+
+        $this->app?->instance(FailingResourceAttributes::class, $provider);
+        config(['authorization.attributes.resources' => ['posts' => FailingResourceAttributes::class]]);
+
+        $this->app?->forgetInstance(CheckContextFactory::class);
+        $this->resolveRequest(StubIdentity::create(['id' => 'request-user-2']), $this->second, 'web');
+
+        $policy = EvaluationPolicy::fromArray(['name' => 'status', 'statements' => [
+            ['effect' => 'allow', 'actions' => [self::DELETE], 'conditions' => ['eq' => ['resource.status' => 'published']]],
+        ]]);
+
+        $resource = ResourceReference::record('posts', 'p1');
+        $manager  = Authorization::for(new Subject($this->user, $this->user, null, 'admin', platform: true))->withPolicies([$policy]);
+
+        $calls = [
+            static fn (): mixed => $manager->check(self::DELETE, $resource),
+            static fn (): mixed => $manager->checkMany([new CheckInput(self::DELETE, $resource)]),
+            static fn (): mixed => $manager->explain(self::DELETE, $resource),
+        ];
+
+        foreach ($calls as $call) {
+            try {
+                $call();
+
+                self::fail('The check throws.');
+            } catch (AttributeProviderFailed) {
+                self::assertSame([$this->second->getMorphClass(), 'tenant-b'], TenantScope::currentTenant());
+                self::assertSame('web', TenantScope::currentApplication());
+            }
+        }
+
+        self::assertSame(3, $provider->calls);
+        self::assertFalse(Authorization::for($this->user)->can(self::CREATE));
+        self::assertSame(['tenant-b', 'web'], self::provenance());
+    }
+
+    /**
+     * Return a member holding the first action in the request's tenant alone,
+     * and a member of staff holding it on the platform, for every application.
+     *
+     * @return array{0: \Tests\Feature\Stubs\StubIdentity, 1: \Tests\Feature\Stubs\StubIdentity}
+     */
+    private function heldInTheRequestsTenantAndOnThePlatform(): array
+    {
+        $member = StubIdentity::create(['id' => 'member-1']);
+        $staff  = StubIdentity::create(['id' => 'staff-1']);
+
+        $member->givePermission(self::CREATE, null, $this->second);
+        $staff->givePermission(self::CREATE);
+
+        return [$member, $staff];
+    }
+
+    /**
      * Return the user as a subject naming the tenant and the application.
      *
      * @param  \Tests\Feature\Stubs\StubTenant|null  $tenant

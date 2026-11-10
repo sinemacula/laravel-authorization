@@ -24,11 +24,15 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * The previewer is the real caller, the subject the manager `previewFor()` was
  * called on decides about, its session kept, never inferred later from the
  * target, the authenticated user or a listener. The target is the subject
- * previewed, with no session: a resolved `Subject` keeps its principal and its
- * identity but loses its session, and a model is named as `for()` names it, so
- * no authentication requirement made of the target is ever met, whatever the
- * previewer has proved. The scope is the tenant and application the target is
- * evaluated in, given, or the request's when the preview was built.
+ * previewed, with no session: a resolved `Subject` keeps its principal, its
+ * identity, its credential's scopes and its platform marker but loses its
+ * session, and a model is named as `for()` names it, so no authentication
+ * requirement made of the target is ever met, whatever the previewer has
+ * proved, while the scopes it carries still cap its checks. The scope is the
+ * tenant and application the target is evaluated in, given, or, when none is,
+ * the platform for a `Subject` given carrying the platform marker (N120), and
+ * the request's when the preview was built for any other target, a model
+ * included, whatever marker it carries.
  *
  * Every use of the preview (`run()`), each check, each batch, each listing and
  * each compile of a query scoped through it, is admitted afresh (see
@@ -92,22 +96,28 @@ final readonly class PreviewContext
 
     /**
      * Return the preview of the target, a resolved `Subject` or a model, by the
-     * previewer, admitted through the previewer's manager, in the scope. The
-     * target loses any session; a model is named in the previewer's request, as
-     * `for()` names it. A previewer that names no record, a guest included, is
-     * refused as `subject_unresolved` before anything is decided, and a target
-     * that names no record is refused with `InvalidPreviewException`, since no
-     * preview event could name either.
+     * previewer, admitted through the previewer's manager, in the scope, or,
+     * for none, on the platform, on the target's application, for a `Subject`
+     * given carrying the platform marker (N120), and the request's tenant and
+     * application, captured now, for any other target, a model included. The
+     * target loses any session, and keeps its credential's scopes and its
+     * platform marker, so a preview is capped as the target's checks are; a
+     * model is named in the previewer's request, as `for()` names it. A
+     * previewer that names no record, a guest included, is refused as
+     * `subject_unresolved` before anything is decided, and a target that names
+     * no record is refused with `InvalidPreviewException`, since no preview
+     * event could name either.
      *
      * @param  \SineMacula\Laravel\Authorization\AuthorizationManager  $admitter
      * @param  object  $target
-     * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
+     * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope|null  $scope
      * @return self
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
      */
-    public static function of(AuthorizationManager $admitter, object $target, AuthorizationScope $scope): self
+    public static function of(AuthorizationManager $admitter, object $target, ?AuthorizationScope $scope = null): self
     {
         $previewer = $admitter->currentSubject();
         $reference = DecisionProvenance::of($previewer)->subject ?? throw self::unresolved();
@@ -117,7 +127,8 @@ final readonly class PreviewContext
         // A copy of its own, with no session, so the previewer's subject is
         // never taken for the target, even when it previews itself.
         $named   = $target instanceof Subject ? $target : $previewer->withSubject($target);
-        $subject = new Subject($named->subject, $named->identity, $named->tenant, $named->application, $named->guard);
+        $subject = new Subject($named->subject, $named->identity, $named->tenant, $named->application, $named->guard, scopes: $named->scopes, platform: $named->platform);
+        $scope ??= $target instanceof Subject && $target->platform ? AuthorizationScope::platform($target->application) : AuthorizationScope::current();
 
         $about     = DecisionProvenance::of($subject);
         $previewed = $about->subject ?? throw InvalidPreviewException::unidentified();

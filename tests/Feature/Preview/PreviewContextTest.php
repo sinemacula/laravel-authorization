@@ -7,6 +7,7 @@ namespace Tests\Feature\Preview;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -24,6 +25,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Feature\Stubs\CredentialScopesSource;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
@@ -106,6 +108,85 @@ final class PreviewContextTest extends TestCase
         self::assertSame('admin', $preview->currentSubject()->application);
         self::assertSame('api', $preview->currentSubject()->guard);
         self::assertNull($preview->currentSubject()->session);
+    }
+
+    /**
+     * A resolved `Subject` previewed keeps its credential's scopes and its
+     * platform marker, losing only its session, so its credential still caps
+     * what the preview allows.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testAResolvedSubjectKeepsItsScopesAndItsMarker(): void
+    {
+        $this->app?->instance(SessionPolicySource::class, new CredentialScopesSource);
+
+        $caller  = self::previewer();
+        $target  = self::target('target', ['posts:read', 'posts:edit']);
+        $preview = $this->signIn($caller)->previewFor(new Subject($target, $target, null, null, 'web', 'their-session', ['posts:read'], true));
+
+        self::assertSame(['posts:read'], $preview->currentSubject()?->scopes);
+        self::assertTrue($preview->currentSubject()->platform);
+        self::assertNull($preview->currentSubject()->session);
+        self::assertTrue($preview->can('posts:read'));
+        self::assertSame(DecisionReason::SESSION_POLICY, $preview->check('posts:edit')->reason);
+    }
+
+    /**
+     * A target on the platform, given no scope, is previewed on the platform,
+     * on its application, whatever tenant the request is in, and any other
+     * target in the request's scope; a scope given is the preview's, and places
+     * a target on the platform in its tenant.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testATargetOnThePlatformIsPreviewedThereByDefault(): void
+    {
+        $caller = self::previewer();
+        $target = self::target();
+        $tenant = StubTenant::query()->create(['id' => 'theirs', 'name' => 'theirs']);
+
+        $target->givePermission(self::permission('posts:edit'), null, $tenant);
+
+        $manager    = $this->signIn($caller, 'session-1', $tenant);
+        $onPlatform = new Subject($target, $target, null, 'admin', platform: true);
+        $context    = PreviewContext::of($manager, $onPlatform);
+
+        self::assertNull($context->scope->tenant);
+        self::assertSame('admin', $context->scope->application);
+        self::assertSame('theirs', PreviewContext::of($manager, new Subject($target, $target))->scope->tenant?->id);
+        self::assertFalse($manager->previewFor($onPlatform)->can('posts:edit'));
+        self::assertTrue($manager->previewFor($onPlatform)->can('posts:read'));
+        self::assertTrue($manager->previewFor(new Subject($target, $target))->can('posts:edit'));
+        self::assertTrue($manager->previewFor($onPlatform, AuthorizationScope::tenant($tenant))->can('posts:edit'));
+        self::assertSame([$tenant->getMorphClass(), 'theirs'], TenantScope::currentTenant());
+    }
+
+    /**
+     * A model target, given no scope, is previewed in the scope in place even
+     * when the previewer is on the platform and so names the model with the
+     * marker, while a `Subject` given carrying the marker is previewed on the
+     * platform there.
+     *
+     * @return void
+     */
+    public function testAModelTargetIsPreviewedInTheScopeInPlace(): void
+    {
+        $caller   = self::previewer();
+        $target   = self::target();
+        $tenant   = StubTenant::query()->create(['id' => 'theirs', 'name' => 'theirs']);
+        $admitter = $this->signIn($caller)->for(new Subject($caller, $caller, null, null, 'web', 'session-1', platform: true));
+
+        $scopes = AuthorizationScope::tenant($tenant)->within(static fn (): array => [
+            PreviewContext::of($admitter, $target)->scope->tenant?->id,
+            PreviewContext::of($admitter, new Subject($target, $target, platform: true))->scope->tenant,
+        ]);
+
+        self::assertSame(['theirs', null], $scopes);
     }
 
     /**

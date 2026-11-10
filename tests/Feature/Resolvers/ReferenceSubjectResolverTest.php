@@ -126,6 +126,28 @@ final class ReferenceSubjectResolverTest extends TestCase
     }
 
     /**
+     * The credential's scopes and the platform marker the subject resolver
+     * gives are dropped with its session, so the command names where the
+     * subject is decided, and no credential caps it.
+     *
+     * @return void
+     */
+    public function testTheScopesAndThePlatformMarkerAreDropped(): void
+    {
+        $principal = StubIdentity::create(['id' => 'principal-9']);
+        $person    = StubSecondIdentity::create(['id' => 'person-9']);
+
+        $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, $person, null, ['posts:read'], true));
+
+        $subject = $this->resolver()->resolve(StubSecondIdentity::class . ':person-9');
+
+        self::assertSame($principal, $subject->subject);
+        self::assertNull($subject->scopes);
+        self::assertFalse($subject->platform);
+        self::assertNull($subject->session);
+    }
+
+    /**
      * The subject resolver is read on every call, so one bound after the
      * console resolver was built is honoured.
      *
