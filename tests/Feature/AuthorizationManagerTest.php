@@ -54,6 +54,7 @@ use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -569,12 +570,13 @@ final class AuthorizationManagerTest extends TestCase
 
     /**
      * The permission catalogue reads the configured enums when it is read,
-     * after the boot validation, so `permissionsFor()` skips an enum not backed
-     * by strings rather than fail with a TypeError mid-request.
+     * after the boot validation, so `permissionsFor()` refuses an enum not
+     * backed by strings, naming the entry, rather than skip it or fail with a
+     * TypeError mid-request.
      *
      * @return void
      */
-    public function testPermissionsForSkipsAnEnumNotBackedByStrings(): void
+    public function testPermissionsForRefusesAnEnumNotBackedByStrings(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->container()->make('config');
@@ -584,7 +586,10 @@ final class AuthorizationManagerTest extends TestCase
 
         $user->givePermission(Permission::create(['name' => PermissionEnum::POSTS_DELETE->value]));
 
-        self::assertSame([PermissionEnum::POSTS_DELETE->value], Authorization::permissionsFor($user, AuthorizationScope::current()));
+        $this->expectException(InvalidAuthorizationConfigException::class);
+        $this->expectExceptionMessage('Invalid authorization config at \'authorization.permission_enums.0\'');
+
+        Authorization::permissionsFor($user, AuthorizationScope::current());
     }
 
     /**

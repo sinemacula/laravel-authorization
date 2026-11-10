@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Administration;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
-use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -53,7 +53,7 @@ final class OperationGrantee
     public static function isRole(Reference $grantee): bool
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class = config('authorization.models.role', Role::class);
+        $class = ModelClasses::get('role');
 
         return $grantee->type === (new $class)->getMorphClass();
     }

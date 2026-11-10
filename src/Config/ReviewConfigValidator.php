@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Config;
 
-use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 
 /**
@@ -13,8 +12,10 @@ use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
  *
  * The block must be an array, and its one setting, `limit`, the most rows an
  * access review returns unless it sets its own (see `Reviews\ReviewQuery`), a
- * whole number of at least 1. A block that does not set it takes the default;
- * any other key is refused, so a misspelt setting fails at boot rather than
+ * whole number of at least 1, an int or a string written as a whole number, as
+ * the environment gives one (N117). A block that does not set it takes the
+ * default, and one that sets it to null is refused; any other key is refused,
+ * naming its path (N116), so a misspelt setting fails at boot rather than
  * leaving the default in place. The same check refuses a limit changed after
  * boot when a review reads it, so a review never falls back to another bound.
  *
@@ -41,17 +42,9 @@ final class ReviewConfigValidator
      */
     public static function validate(mixed $config): void
     {
-        if (!\is_array($config)) {
-            throw new InvalidAuthorizationConfigException(self::KEY, 'expected an array of settings, got ' . self::describe($config) . '.');
-        }
+        $block = ConfigBlock::of(self::KEY, $config, self::SETTINGS);
 
-        $unknown = \array_values(\array_diff(\array_keys($config), self::SETTINGS));
-
-        if ($unknown !== []) {
-            throw new InvalidAuthorizationConfigException(self::KEY, "unknown setting '{$unknown[0]}'; expected one of " . \implode(', ', self::SETTINGS) . '.');
-        }
-
-        self::limit(\array_key_exists('limit', $config) ? $config['limit'] : ReviewQuery::DEFAULT_LIMIT);
+        self::limit(ConfigBlock::entry($block, 'limit', ReviewQuery::DEFAULT_LIMIT));
     }
 
     /**
@@ -65,22 +58,6 @@ final class ReviewConfigValidator
      */
     public static function limit(mixed $limit): int
     {
-        if (\is_int($limit) && $limit >= 1) {
-            return $limit;
-        }
-
-        throw new InvalidAuthorizationConfigException(self::KEY . '.limit', 'expected a whole number of at least 1, got ' . self::describe($limit) . '.');
-    }
-
-    /**
-     * Describe a value for a message: a scalar as its literal, anything else by
-     * its type, each followed by its type.
-     *
-     * @param  mixed  $value
-     * @return string
-     */
-    private static function describe(mixed $value): string
-    {
-        return \var_export(\is_scalar($value) ? $value : \get_debug_type($value), true) . ' (' . \get_debug_type($value) . ')';
+        return IntegerSetting::require(self::KEY . '.limit', $limit, 1);
     }
 }

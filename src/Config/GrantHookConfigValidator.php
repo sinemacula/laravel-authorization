@@ -30,14 +30,16 @@ final class GrantHookConfigValidator
 
     /**
      * Validate the supplied `grant_hooks` config, throwing on the first
-     * failure.
+     * failure, and return the classes it lists. The listed hooks are read
+     * through here at run time too, before any is built, so a value changed
+     * after boot is refused there, never cast.
      *
      * @param  mixed  $config
-     * @return void
+     * @return list<class-string<\SineMacula\Laravel\Authorization\Contracts\GrantHook>>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    public static function validate(mixed $config): void
+    public static function validate(mixed $config): array
     {
         if (!\is_array($config) || !\array_is_list($config)) {
             throw new InvalidAuthorizationConfigException(self::KEY, 'expected a list of class names, got ' . \get_debug_type($config) . '.');
@@ -58,5 +60,8 @@ final class GrantHookConfigValidator
 
             $seen[$name] = true;
         }
+
+        /** @var list<class-string<\SineMacula\Laravel\Authorization\Contracts\GrantHook>> */
+        return $config;
     }
 }

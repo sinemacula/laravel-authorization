@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Administration;
 
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -75,7 +76,7 @@ final class RoleParent
     private static function isLiftable(string $key): bool
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class  = config('authorization.models.role', Role::class);
+        $class  = ModelClasses::get('role');
         $parent = $class::query()->withoutGlobalScopes()->useWritePdo()->find($key);
 
         return $parent instanceof Role && Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $parent);

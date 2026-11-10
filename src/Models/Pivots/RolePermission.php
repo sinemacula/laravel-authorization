@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Models\Pivots;
 
 use Illuminate\Database\Eloquent\Relations\Pivot;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Enums\OrphanSide;
@@ -126,7 +127,7 @@ final class RolePermission extends Pivot
     private function resolveRoleParent(string $roleId): Role
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
-        $roleClass = config('authorization.models.role', Role::class);
+        $roleClass = ModelClasses::get('role');
 
         $parent = $this->pivotParent;
 
@@ -168,7 +169,7 @@ final class RolePermission extends Pivot
     private function resolvePermissionParent(string $permissionId): Permission
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $permissionClass */
-        $permissionClass = config('authorization.models.permission', Permission::class);
+        $permissionClass = ModelClasses::get('permission');
 
         $parent = $this->pivotParent;
 

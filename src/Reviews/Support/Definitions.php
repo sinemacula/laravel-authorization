@@ -7,11 +7,10 @@ namespace SineMacula\Laravel\Authorization\Reviews\Support;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Str;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\KeyAsText;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
-use SineMacula\Laravel\Authorization\Models\Permission;
-use SineMacula\Laravel\Authorization\Models\Policy;
-use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
  * The configured definition models an access review names its targets by: their
@@ -105,8 +104,7 @@ final class Definitions
      */
     public static function edges(): string
     {
-        /** @var string */
-        return config('authorization.tables.role_permissions', 'role_permissions');
+        return TableNames::get('role_permissions');
     }
 
     /**
@@ -117,14 +115,8 @@ final class Definitions
      */
     private static function model(GrantTarget $target): Model
     {
-        [$key, $default] = match ($target) {
-            GrantTarget::ROLE       => ['role', Role::class],
-            GrantTarget::PERMISSION => ['permission', Permission::class],
-            GrantTarget::POLICY     => ['policy', Policy::class],
-        };
-
         /** @var class-string<\Illuminate\Database\Eloquent\Model> $class */
-        $class = config('authorization.models.' . $key, $default);
+        $class = ModelClasses::get($target->value);
 
         return new $class;
     }

@@ -6,6 +6,8 @@ namespace SineMacula\Laravel\Authorization\Administration;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder as QueryBuilder;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
@@ -14,8 +16,6 @@ use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
-use SineMacula\Laravel\Authorization\Models\Policy as StoredPolicy;
-use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
@@ -202,7 +202,7 @@ final class PossessionLimits
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $role */
-        $role  = config('authorization.models.role', Role::class);
+        $role  = ModelClasses::get('role');
         $roles = \array_keys(RoleGraph::reach(self::keys('authorizable_roles', 'role_id', $grantees, $reach)));
         $held  = [...$grantees, ...\array_map(static fn (string $key): Reference => new Reference((new $role)->getMorphClass(), $key), $roles)];
 
@@ -239,8 +239,7 @@ final class PossessionLimits
             return [];
         }
 
-        /** @var string $name */
-        $name  = config('authorization.tables.' . $table, $table);
+        $name  = TableNames::get($table);
         $query = $reach->constrain(AuthorizationConnection::connection()->table($name)->useWritePdo(), $name);
 
         if ($grantees === null) {
@@ -274,12 +273,11 @@ final class PossessionLimits
     private static function hydrated(array $keys): array
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class    = config('authorization.models.policy', StoredPolicy::class);
+        $class    = ModelClasses::get('policy');
         $model    = new $class;
         $policies = [];
 
-        /** @var string $table */
-        $table = config('authorization.tables.policies', 'policies');
+        $table = TableNames::get('policies');
 
         $sorted = \array_unique($keys);
 

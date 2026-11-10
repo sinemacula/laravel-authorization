@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Reviews;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Config\ReviewConfigValidator;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Reviews\Enums\ReviewKind;
@@ -271,7 +272,7 @@ final readonly class ReviewQuery
      */
     public static function defaultLimit(): int
     {
-        return ReviewConfigValidator::limit(config('authorization.reviews.limit', self::DEFAULT_LIMIT));
+        return ReviewConfigValidator::limit(ConfigValue::get('reviews.limit', self::DEFAULT_LIMIT));
     }
 
     /**

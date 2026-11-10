@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Console;
 
 use Illuminate\Console\Command;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -155,7 +156,7 @@ final class ValidatePolicyCommand extends Command
     private function checkDatabase(PolicyValidator $validator): void
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
+        $class = ModelClasses::get('policy');
 
         /** @var \Illuminate\Support\LazyCollection<int, \SineMacula\Laravel\Authorization\Models\Policy> $policies */
         // @phpstan-ignore staticMethod.dynamicCall

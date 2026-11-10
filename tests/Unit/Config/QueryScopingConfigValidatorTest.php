@@ -22,7 +22,9 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 final class QueryScopingConfigValidatorTest extends TestCase
 {
     /**
-     * No block, an empty one and whole limits of at least 1 are accepted.
+     * An empty block, whose limits take their defaults, and whole limits of at
+     * least 1, written as ints or as the environment gives whole numbers, are
+     * accepted.
      *
      * @return void
      */
@@ -30,6 +32,7 @@ final class QueryScopingConfigValidatorTest extends TestCase
     {
         QueryScopingConfigValidator::validate([]);
         QueryScopingConfigValidator::validate(['max_anchors' => 1, 'max_scopes' => 16, 'max_attachments' => 64]);
+        QueryScopingConfigValidator::validate(['max_anchors' => '1', 'max_scopes' => '16', 'max_attachments' => '64']);
 
         self::assertSame(['max_anchors', 'max_scopes', 'max_attachments'], QueryScopingConfigValidator::LIMITS);
     }
@@ -43,13 +46,19 @@ final class QueryScopingConfigValidatorTest extends TestCase
     {
         $whole = 'expected a whole number of at least 1, got ';
 
-        yield 'not an array' => ['64', 'authorization.query_scoping', 'expected an array of limits, got \'64\' (string).'];
-        $unknown = 'unknown limit \'max_classes\'; expected one of max_anchors, max_scopes, max_attachments.';
+        yield 'not an array' => ['64', 'authorization.query_scoping', 'expected an array, got \'64\' (string).'];
+        yield 'null' => [null, 'authorization.query_scoping', 'expected an array, got \'null\' (null).'];
+        $unknown = 'unknown key \'max_classes\'; expected one of max_anchors, max_scopes, max_attachments.';
 
-        yield 'an unknown limit' => [['max_classes' => 4], 'authorization.query_scoping', $unknown];
+        yield 'an unknown limit' => [['max_classes' => 4], 'authorization.query_scoping.max_classes', $unknown];
         yield 'zero' => [['max_scopes' => 0], 'authorization.query_scoping.max_scopes', $whole . '0 (int).'];
+        yield 'zero as a string' => [['max_scopes' => '0'], 'authorization.query_scoping.max_scopes', $whole . '\'0\' (string).'];
         yield 'negative' => [['max_anchors' => -1], 'authorization.query_scoping.max_anchors', $whole . '-1 (int).'];
-        yield 'a string' => [['max_attachments' => '64'], 'authorization.query_scoping.max_attachments', $whole . '\'64\' (string).'];
+        yield 'a null limit' => [['max_anchors' => null], 'authorization.query_scoping.max_anchors', $whole . '\'null\' (null).'];
+        yield 'a string not a whole number' => [['max_attachments' => '12abc'], 'authorization.query_scoping.max_attachments', $whole . '\'12abc\' (string).'];
+        yield 'an exponent' => [['max_attachments' => '1e3'], 'authorization.query_scoping.max_attachments', $whole . '\'1e3\' (string).'];
+        yield 'a padded string' => [['max_attachments' => ' 5'], 'authorization.query_scoping.max_attachments', $whole . '\' 5\' (string).'];
+        yield 'an empty string' => [['max_attachments' => ''], 'authorization.query_scoping.max_attachments', $whole . '\'\' (string).'];
         yield 'a float' => [['max_scopes' => 1.5], 'authorization.query_scoping.max_scopes', $whole . '1.5 (float).'];
         yield 'a list' => [['max_scopes' => [1]], 'authorization.query_scoping.max_scopes', $whole . '\'array\' (array).'];
     }

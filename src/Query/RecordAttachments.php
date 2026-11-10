@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Query;
 
 use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Connection;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
@@ -277,7 +278,6 @@ final class RecordAttachments
      */
     private static function table(): string
     {
-        /** @var string */
-        return config('authorization.tables.resource_policies', 'resource_policies');
+        return TableNames::get('resource_policies');
     }
 }

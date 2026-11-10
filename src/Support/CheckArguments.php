@@ -4,8 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
-use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
@@ -131,7 +131,7 @@ final class CheckArguments
     private static function namesARole(string $name): bool
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class = config('authorization.models.role', Role::class);
+        $class = ModelClasses::get('role');
 
         return $class::query()->withoutGlobalScope(TenantScope::class)->where('name', $name)->exists();
     }

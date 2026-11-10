@@ -23,7 +23,8 @@ use Tests\TestCase;
 final class UsageConfigValidatorTest extends TestCase
 {
     /**
-     * Every setting is optional, and each accepts its least value.
+     * Every setting is optional, each accepts its least value, and a whole
+     * number is accepted as the environment gives one too.
      *
      * @return void
      */
@@ -37,6 +38,9 @@ final class UsageConfigValidatorTest extends TestCase
         self::assertSame(1, UsageConfigValidator::whole('retention', 1));
         self::assertNull(UsageConfigValidator::name('queue', null));
         self::assertTrue(UsageConfigValidator::enabled(true));
+        self::assertSame(3600, UsageConfigValidator::whole('interval', '3600'));
+        self::assertSame(250, UsageConfigValidator::whole('batch', '250'));
+        UsageConfigValidator::validate(['interval' => '60', 'batch' => '1', 'retention' => '400']);
     }
 
     /**
@@ -46,20 +50,28 @@ final class UsageConfigValidatorTest extends TestCase
      */
     public static function refused(): iterable
     {
-        yield 'not an array' => ['on', 'authorization.usage', 'expected an array of settings, got "on" (string).'];
+        yield 'not an array' => ['on', 'authorization.usage', 'expected an array, got \'on\' (string).'];
+        yield 'null' => [null, 'authorization.usage', 'expected an array, got \'null\' (null).'];
         yield 'an unknown setting' => [
             ['enable' => true],
-            'authorization.usage',
-            'unknown setting \'enable\'; expected one of enabled, interval, batch, connection, queue, retention.',
+            'authorization.usage.enable',
+            'unknown key \'enable\'; expected one of enabled, interval, batch, connection, queue, retention.',
         ];
         yield 'an unknown setting after a known one' => [
             ['enabled' => true, 'enable' => 1],
-            'authorization.usage',
-            'unknown setting \'enable\'; expected one of enabled, interval, batch, connection, queue, retention.',
+            'authorization.usage.enable',
+            'unknown key \'enable\'; expected one of enabled, interval, batch, connection, queue, retention.',
         ];
+        yield 'enabled as a string of 0' => [['enabled' => '0'], 'authorization.usage.enabled', 'expected a boolean, got "0" (string).'];
+        yield 'enabled as off' => [['enabled' => 'off'], 'authorization.usage.enabled', 'expected a boolean, got "off" (string).'];
+        yield 'enabled as null' => [['enabled' => null], 'authorization.usage.enabled', 'expected a boolean, got null (null).'];
         yield 'enabled that is no boolean' => [['enabled' => 1], 'authorization.usage.enabled', 'expected a boolean, got 1 (int).'];
         yield 'an interval under a minute' => [['interval' => 59], 'authorization.usage.interval', 'expected a whole number of at least 60, got 59 (int).'];
-        yield 'an interval that is no number' => [['interval' => '3600'], 'authorization.usage.interval', 'expected a whole number of at least 60, got "3600" (string).'];
+        yield 'an interval that is no whole number' => [['interval' => '12abc'], 'authorization.usage.interval', 'expected a whole number of at least 60, got "12abc" (string).'];
+        yield 'an interval as an exponent' => [['interval' => '1e3'], 'authorization.usage.interval', 'expected a whole number of at least 60, got "1e3" (string).'];
+        yield 'an interval padded' => [['interval' => ' 3600'], 'authorization.usage.interval', 'expected a whole number of at least 60, got " 3600" (string).'];
+        yield 'an interval under a minute as a string' => [['interval' => '59'], 'authorization.usage.interval', 'expected a whole number of at least 60, got "59" (string).'];
+        yield 'an empty interval' => [['interval' => ''], 'authorization.usage.interval', 'expected a whole number of at least 60, got "" (string).'];
         yield 'an empty batch' => [['batch' => 0], 'authorization.usage.batch', 'expected a whole number of at least 1, got 0 (int).'];
         yield 'an interval with a slash' => [['interval' => 'a/b'], 'authorization.usage.interval', 'expected a whole number of at least 60, got "a/b" (string).'];
         yield 'an interval of invalid text' => [['interval' => "\xB1"], 'authorization.usage.interval', 'expected a whole number of at least 60, got "\ufffd" (string).'];

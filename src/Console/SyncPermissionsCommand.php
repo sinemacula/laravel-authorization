@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Console;
 
 use Illuminate\Console\Command;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Console\Support\ActorOption;
 use SineMacula\Laravel\Authorization\Console\Support\PermissionDiff;
 use SineMacula\Laravel\Authorization\Console\Support\PermissionDiffBuilder;
@@ -307,7 +308,7 @@ final class SyncPermissionsCommand extends Command
     private function permissionModel(): Permission
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
-        $class = config('authorization.models.permission', Permission::class);
+        $class = ModelClasses::get('permission');
 
         return new $class;
     }

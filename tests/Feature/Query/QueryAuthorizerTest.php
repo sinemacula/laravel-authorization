@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Query\Dialects\SqliteDialect;
@@ -423,8 +424,9 @@ final class QueryAuthorizerTest extends TestCase
      * applies to everyone, its allow to the subjects it names, as `check()`
      * weighs it; an override, which reads no attachment, ignores it. The
      * policies one scope attaches to records are at most
-     * `authorization.query_scoping.max_attachments`, or 64 when it is not set
-     * to a whole number; more are refused.
+     * `authorization.query_scoping.max_attachments`, or 64 when it is not set;
+     * more are refused, and so is a limit that is not a whole number of at
+     * least one.
      *
      * @return void
      *
@@ -465,7 +467,7 @@ final class QueryAuthorizerTest extends TestCase
             self::attachToResource([ScopedPost::class, (string) $id], [['effect' => 'deny', 'actions' => ['posts:view']]]);
         }
 
-        $config?->set('authorization.query_scoping.max_attachments', 'many');
+        $config?->set('authorization.query_scoping', []);
 
         self::assertStringContainsString('EXISTS', $compile());
 
@@ -473,10 +475,26 @@ final class QueryAuthorizerTest extends TestCase
 
         self::assertSame([RefusalReason::TOO_MANY_ATTACHMENTS], self::refusalOf($compile)->reasons());
 
-        $config?->set('authorization.query_scoping.max_attachments', 'many');
+        $config?->set('authorization.query_scoping.max_attachments', '63');
+
+        self::assertSame([RefusalReason::TOO_MANY_ATTACHMENTS], self::refusalOf($compile)->reasons());
+
+        $config?->set('authorization.query_scoping', []);
         self::attachToResource([ScopedPost::class, '68'], [['effect' => 'deny', 'actions' => ['posts:view']]]);
 
         self::assertSame([RefusalReason::TOO_MANY_ATTACHMENTS], self::refusalOf($compile)->reasons());
+
+        foreach (['many', 0, null] as $limit) {
+            $config?->set('authorization.query_scoping.max_attachments', $limit);
+
+            try {
+                $compile();
+
+                self::fail('The attachment limit ' . \var_export($limit, true) . ' was not refused.');
+            } catch (InvalidAuthorizationConfigException $exception) {
+                self::assertSame('authorization.query_scoping.max_attachments', $exception->getConfigKey());
+            }
+        }
     }
 
     /**

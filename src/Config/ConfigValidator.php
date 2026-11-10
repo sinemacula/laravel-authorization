@@ -5,23 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Config;
 
 use Illuminate\Contracts\Container\Container;
-use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
-use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
-use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
-use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
-use SineMacula\Laravel\Authorization\Contracts\TenantTree;
-use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
-use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
-use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
-use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
-use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 
 /**
  * Boot-time validator for the shipped authorization config.
@@ -34,6 +23,15 @@ use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
  * `InvalidAuthorizationConfigException` carries the offending key and a
  * human-readable reason.
  *
+ * The config must be an array, and it and every block whose keys the package
+ * defines may set only those keys (N116), so a misspelt key is refused, naming
+ * its full path, rather than leaving its default in place. A key left out takes
+ * its default; a key set to null is refused, except where null means off or
+ * none: `connection`, `policy_store`, `cache.store`, `usage.connection`,
+ * `usage.queue` and `log_channel`. Whole numbers and switches are read as the
+ * environment writes them (N117): see `IntegerSetting` and
+ * `SwitchConfigValidator`.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -41,8 +39,16 @@ use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
  */
 final class ConfigValidator
 {
+    /** @var list<string> The keys the authorization config may set. */
+    public const array KEYS = [
+        'models', 'connection', 'tables', 'defaults', 'permission_enums', 'permission_providers', 'gate', 'log_channel', 'policy_store',
+        'policies', 'query_scoping', 'bulk', 'context', 'attributes', 'subject_resolver', 'tenant_tree', 'identity_directory',
+        'application_access', 'resource_tenant_resolver', 'requirement_checker', 'session', 'cache', 'hierarchy', 'rank',
+        'administration', 'reviews', 'usage', 'grant_hooks',
+    ];
+
     /** @var array<string, class-string<\Illuminate\Database\Eloquent\Model>> The package model each `models.*` key must be or extend. */
-    private const array MODELS = [
+    public const array MODELS = [
         'role'       => Role::class,
         'permission' => Permission::class,
         'policy'     => Policy::class,
@@ -52,48 +58,66 @@ final class ConfigValidator
      * Validate the supplied authorization config. Throws on the first failure
      * encountered — consumers fix one key at a time.
      *
-     * @param  array<string, mixed>  $config
+     * @param  mixed  $config
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    public static function validate(array $config, Container $container): void
+    public static function validate(mixed $config, Container $container): void
     {
-        // A key holding null reads as its default, except where only a missing
-        // key does, so that a null set on purpose is validated as given.
-        $value = static fn (string $key, mixed $default = null): mixed => $config[$key] ?? $default;
-        $given = static fn (string $key, mixed $default): mixed => \array_key_exists($key, $config) ? $config[$key] : $default;
+        $root  = ConfigBlock::of('authorization', $config, self::KEYS);
+        $given = static fn (string $key, mixed $default = []): mixed => ConfigBlock::entry($root, $key, $default);
 
-        self::validateConnection($value('connection'), $container);
-        self::validateModels($value('models', []));
-        self::validatePermissionEnums($value('permission_enums', []));
-        self::validatePermissionProviders($value('permission_providers', []));
-        self::validateGate($given('gate', []));
-        self::validateSubjectResolver($value('subject_resolver'));
-        self::validateTenantTree($value('tenant_tree'));
-        ImplementationConfigValidator::validate(
-            'authorization.identity_directory',
-            $given('identity_directory', GuardUserIdentityDirectory::class),
-            IdentityDirectory::class,
-            'an identity directory class is required; set it to \\' . GuardUserIdentityDirectory::class . ' for the default.',
-        );
-        self::validateApplicationAccess($value('application_access', []));
-        self::validateResourceTenantResolver($value('resource_tenant_resolver'));
-        RequirementCheckerConfigValidator::validate($given('requirement_checker', RefusingRequirementChecker::class));
-        self::validatePolicyStore($value('policy_store'));
-        self::validateCacheStore($config['cache']['store'] ?? null, $container);
-        self::validateCacheTtl($config['cache']['ttl'] ?? 300);
-        self::validatePolicyLimits($config['policies']['limits'] ?? []);
-        ContextConfigValidator::validate($value('context', []), $container);
-        AttributeConfigValidator::validate($value('attributes', []), $container);
-        SessionConfigValidator::validate($value('session', []), $container);
-        QueryScopingConfigValidator::validate($value('query_scoping', []));
-        BulkConfigValidator::validate($value('bulk', []));
-        AdministrationConfigValidator::validate($value('administration', []));
-        ReviewConfigValidator::validate($value('reviews', []));
-        UsageConfigValidator::validateIn($config);
-        GrantHookConfigValidator::validate($given('grant_hooks', []));
+        NamedEntryConfigValidator::connection($given('connection', null), $container);
+        TableConfigValidator::validate($given('tables'));
+        NamedEntryConfigValidator::defaults($given('defaults'), $container);
+        NamedEntryConfigValidator::logChannel($given('log_channel', null), $container);
+        self::validateModels($given('models'));
+        self::permissionEnums($given('permission_enums'));
+        self::permissionProviders($given('permission_providers'));
+        SeamConfigValidator::validate($root);
+        self::validateApplicationAccess($given('application_access'));
+
+        foreach (SwitchConfigValidator::SWITCHES as $switch) {
+            SwitchConfigValidator::validate($switch, $given($switch));
+        }
+
+        CacheConfigValidator::validate($given('cache'), $container);
+        PolicyConfigValidator::validate($given('policies'));
+        ContextConfigValidator::validate($given('context'), $container);
+        AttributeConfigValidator::validate($given('attributes'), $container);
+        SessionConfigValidator::validate($given('session'), $container);
+        QueryScopingConfigValidator::validate($given('query_scoping'));
+        BulkConfigValidator::validate($given('bulk'));
+        AdministrationConfigValidator::validate($given('administration'));
+        ReviewConfigValidator::validate($given('reviews'));
+        $usage = $given('usage');
+
+        UsageConfigValidator::validate($usage);
+        NamedEntryConfigValidator::queueConnection(\is_array($usage) ? ConfigBlock::entry($usage, 'connection', null) : null, $container);
+        GrantHookConfigValidator::validate($given('grant_hooks'));
+    }
+
+    /**
+     * Render a short debug description of a mixed value for use inside
+     * exception messages.
+     *
+     * Every value — scalar or otherwise — is rendered in the same shape: the
+     * literal followed by the parenthesised debug type. Operators grepping
+     * production logs for misconfiguration get predictable output regardless of
+     * the value's runtime type.
+     *
+     * @param  mixed  $value
+     * @return string
+     */
+    public static function describe(mixed $value): string
+    {
+        $literal = \is_scalar($value)
+            ? \var_export($value, true)
+            : \var_export(\get_debug_type($value), true);
+
+        return $literal . ' (' . \get_debug_type($value) . ')';
     }
 
     /**
@@ -101,9 +125,8 @@ final class ConfigValidator
      * `PermissionEnum` contract and is backed by strings: an entry of
      * `permission_enums` the validation accepts.
      *
-     * The permission catalogue reads the configured enums at run time, after
-     * boot, so it skips an entry for which this is false rather than fail on
-     * it.
+     * The configuration refuses an entry of `permission_enums` for which this
+     * is false.
      *
      * @param  mixed  $class
      * @return bool
@@ -118,38 +141,73 @@ final class ConfigValidator
     }
 
     /**
-     * Validate that `connection`, when set, names a connection the application
-     * configures under `database.connections`. Null or an empty name selects
-     * the application's default connection.
+     * Return the entries of `permission_enums`, refusing a value that is not an
+     * array, or an entry that is not an enum implementing the `PermissionEnum`
+     * contract backed by strings. The permission catalogue reads the list
+     * through here at run time, so an entry changed after boot is refused there
+     * too, never skipped.
      *
      * @param  mixed  $value
-     * @param  \Illuminate\Contracts\Container\Container  $container
-     * @return void
+     * @return array<array-key, class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum>>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    private static function validateConnection(mixed $value, Container $container): void
+    public static function permissionEnums(mixed $value): array
     {
-        if ($value === null || $value === '') {
-            return;
+        if (!\is_array($value)) {
+            throw new InvalidAuthorizationConfigException('authorization.permission_enums', 'expected an array of enum class names, got ' . \get_debug_type($value) . '.');
         }
 
-        if (!\is_string($value)) {
-            throw new InvalidAuthorizationConfigException('authorization.connection', 'expected a database connection name, got ' . self::describe($value) . '.');
+        foreach ($value as $index => $class) {
+            self::validatePermissionEnumEntry($index, $class);
         }
 
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $container->make('config');
-
-        if (!\is_array($config->get('database.connections.' . $value))) {
-            throw new InvalidAuthorizationConfigException('authorization.connection', "database connection '{$value}' is not configured.");
-        }
+        /** @var array<array-key, class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum>> */
+        return $value;
     }
 
     /**
-     * Validate that every configured `models.*` entry names the package model
-     * or a subclass of it. A key left out falls back to the package model, so
-     * only the keys present are checked.
+     * Return the entries of `permission_providers`, refusing a value that is
+     * not an array, or an entry that is not a class implementing the
+     * `PermissionProvider` contract. The permission catalogue reads the list
+     * through here at run time, before it resolves any provider, so an entry
+     * changed after boot is refused there too.
+     *
+     * @param  mixed  $value
+     * @return array<array-key, class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionProvider>>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function permissionProviders(mixed $value): array
+    {
+        if (!\is_array($value)) {
+            throw new InvalidAuthorizationConfigException('authorization.permission_providers', 'expected an array of class names, got ' . \get_debug_type($value) . '.');
+        }
+
+        foreach ($value as $index => $class) {
+            if (!\is_string($class) || $class === '') {
+                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", 'entry must be a non-empty class-string.');
+            }
+
+            if (!\class_exists($class)) {
+                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", "class '{$class}' does not exist.");
+            }
+
+            if (!\is_subclass_of($class, PermissionProvider::class)) {
+                $reason = "class '{$class}' does not implement " . PermissionProvider::class . '.';
+
+                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", $reason);
+            }
+        }
+
+        /** @var array<array-key, class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionProvider>> */
+        return $value;
+    }
+
+    /**
+     * Validate that `models` sets no key but the three models, and that each
+     * entry it sets names the package model or a subclass of it. A key left out
+     * falls back to the package model, so only the keys present are checked.
      *
      * @param  mixed  $value
      * @return void
@@ -158,9 +216,7 @@ final class ConfigValidator
      */
     private static function validateModels(mixed $value): void
     {
-        if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException('authorization.models', 'expected an array of model class names, got ' . self::describe($value) . '.');
-        }
+        $value = ConfigBlock::of('authorization.models', $value, \array_keys(self::MODELS));
 
         foreach (self::MODELS as $key => $base) {
             if (!\array_key_exists($key, $value)) {
@@ -194,26 +250,6 @@ final class ConfigValidator
 
         if (!\is_a($class, $base, allow_string: true)) {
             throw new InvalidAuthorizationConfigException($configKey, "class '{$class}' is neither {$base} nor a subclass of it.");
-        }
-    }
-
-    /**
-     * Validate that every entry in `permission_enums` resolves to a class
-     * implementing the `PermissionEnum` contract.
-     *
-     * @param  mixed  $value
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validatePermissionEnums(mixed $value): void
-    {
-        if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException('authorization.permission_enums', 'expected an array of enum class names, got ' . \get_debug_type($value) . '.');
-        }
-
-        foreach ($value as $index => $class) {
-            self::validatePermissionEnumEntry($index, $class);
         }
     }
 
@@ -263,107 +299,6 @@ final class ConfigValidator
     }
 
     /**
-     * Validate that every entry in `permission_providers` resolves to a class
-     * implementing the `PermissionProvider` contract.
-     *
-     * @param  mixed  $value
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validatePermissionProviders(mixed $value): void
-    {
-        if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException('authorization.permission_providers', 'expected an array of class names, got ' . \get_debug_type($value) . '.');
-        }
-
-        foreach ($value as $index => $class) {
-            if (!\is_string($class) || $class === '') {
-                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", 'entry must be a non-empty class-string.');
-            }
-
-            if (!\class_exists($class)) {
-                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", "class '{$class}' does not exist.");
-            }
-
-            if (!\is_subclass_of($class, PermissionProvider::class)) {
-                $reason = "class '{$class}' does not implement " . PermissionProvider::class . '.';
-
-                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", $reason);
-            }
-        }
-    }
-
-    /**
-     * Validate that `gate` is an array whose `enabled` switch, when present, is
-     * strictly true or false. Anything else, `null`, `0`, `'false'` or `'off'`
-     * among it, is refused rather than read as either, since it decides whether
-     * the package answers the Gate at all.
-     *
-     * @param  mixed  $value
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validateGate(mixed $value): void
-    {
-        if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException('authorization.gate', 'expected an array, got ' . self::describe($value) . '.');
-        }
-
-        if (\array_key_exists('enabled', $value) && !\is_bool($value['enabled'])) {
-            throw new InvalidAuthorizationConfigException('authorization.gate.enabled', 'expected true or false, got ' . self::describe($value['enabled']) . '.');
-        }
-    }
-
-    /**
-     * Validate that `subject_resolver` resolves to a class implementing
-     * `SubjectResolver`. Null is refused rather than read as "no subject", so a
-     * missing resolver fails at boot instead of changing who checks are about.
-     *
-     * @param  mixed  $value
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validateSubjectResolver(mixed $value): void
-    {
-        if ($value === null) {
-            $reason = 'a subject resolver class is required; set it to \\' . AuthGuardSubjectResolver::class
-                . ' to decide about the user Laravel authenticated.';
-
-            throw new InvalidAuthorizationConfigException('authorization.subject_resolver', $reason);
-        }
-
-        self::assertImplementsContract(
-            $value,
-            SubjectResolver::class,
-            'authorization.subject_resolver',
-        );
-    }
-
-    /**
-     * Validate that `tenant_tree` resolves to a class implementing
-     * `TenantTree`. Null is refused rather than read as a flat tree, so a
-     * missing tree fails at boot instead of changing where grants apply.
-     *
-     * @param  mixed  $value
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validateTenantTree(mixed $value): void
-    {
-        if ($value === null) {
-            $reason = 'a tenant tree class is required; set it to \\' . FlatTenantTree::class . ' for a flat set of tenants.';
-
-            throw new InvalidAuthorizationConfigException('authorization.tenant_tree', $reason);
-        }
-
-        self::assertImplementsContract($value, TenantTree::class, 'authorization.tenant_tree');
-    }
-
-    /**
      * Validate that `application_access` maps application names to the
      * permission names they require, each a non-empty string.
      *
@@ -383,176 +318,5 @@ final class ConfigValidator
                 throw new InvalidAuthorizationConfigException('authorization.application_access', 'each application name must map to a permission name, both non-empty strings.');
             }
         }
-    }
-
-    /**
-     * Validate that `resource_tenant_resolver` resolves to a class implementing
-     * `ResourceTenantResolver`. Null is refused rather than read as no tenant,
-     * so a missing resolver fails at boot.
-     *
-     * @param  mixed  $value
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validateResourceTenantResolver(mixed $value): void
-    {
-        if ($value === null) {
-            $reason = 'a resource tenant resolver class is required; set it to \\' . NoResourceTenant::class . ' to read no resource\'s tenant.';
-
-            throw new InvalidAuthorizationConfigException('authorization.resource_tenant_resolver', $reason);
-        }
-
-        self::assertImplementsContract($value, ResourceTenantResolver::class, 'authorization.resource_tenant_resolver');
-    }
-
-    /**
-     * Validate that `policy_store`, when set, resolves to a class implementing
-     * `PolicyStore`.
-     *
-     * @param  mixed  $value
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validatePolicyStore(mixed $value): void
-    {
-        if ($value === null) {
-            return;
-        }
-
-        self::assertImplementsContract(
-            $value,
-            PolicyStore::class,
-            'authorization.policy_store',
-        );
-    }
-
-    /**
-     * Validate that `cache.store`, when set, resolves through the Laravel cache
-     * manager. Uses a try/catch because the cache manager throws
-     * `InvalidArgumentException` on an unknown store name — we swap that for
-     * the typed config exception.
-     *
-     * @param  mixed  $value
-     * @param  \Illuminate\Contracts\Container\Container  $container
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validateCacheStore(mixed $value, Container $container): void
-    {
-        if ($value === null) {
-            return;
-        }
-
-        if (!\is_string($value) || $value === '') {
-            throw new InvalidAuthorizationConfigException('authorization.cache.store', 'expected a cache-store name string, got ' . self::describe($value) . '.');
-        }
-
-        if (!$container->bound('cache')) {
-            return;
-        }
-
-        try {
-            $container->make('cache')->store($value);
-        } catch (\Throwable $exception) {
-            throw new InvalidAuthorizationConfigException('authorization.cache.store', "cache store '{$value}' is not configured: " . $exception->getMessage());
-        }
-    }
-
-    /**
-     * Validate that `cache.ttl`, the longest an entry lives, is a whole number
-     * of seconds of at least 1. There is no "forever": an entry that missed an
-     * invalidation would otherwise never heal.
-     *
-     * @param  mixed  $value
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validateCacheTtl(mixed $value): void
-    {
-        if (\is_int($value) && $value >= 1) {
-            return;
-        }
-
-        throw new InvalidAuthorizationConfigException('authorization.cache.ttl', 'expected a whole number of seconds of at least 1, got ' . self::describe($value) . '.');
-    }
-
-    /**
-     * Validate that `policies.limits` is an array, and that each limit it sets
-     * is a whole number of at least 1. A limit it does not set takes its
-     * default.
-     *
-     * @param  mixed  $value
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validatePolicyLimits(mixed $value): void
-    {
-        if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException('authorization.policies.limits', 'expected an array of limits, got ' . self::describe($value) . '.');
-        }
-
-        foreach (PolicyLimits::KEYS as $key) {
-            if (!isset($value[$key])) {
-                continue;
-            }
-
-            $limit = $value[$key];
-
-            if (!\is_int($limit) || $limit < 1) {
-                throw new InvalidAuthorizationConfigException("authorization.policies.limits.{$key}", 'expected a whole number of at least 1, got ' . self::describe($limit) . '.');
-            }
-        }
-    }
-
-    /**
-     * Shared contract-implementation check for `subject_resolver` and
-     * `policy_store`.
-     *
-     * @param  mixed  $value
-     * @param  class-string  $contract
-     * @param  string  $configKey
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function assertImplementsContract(mixed $value, string $contract, string $configKey): void
-    {
-        if (!\is_string($value) || $value === '') {
-            throw new InvalidAuthorizationConfigException($configKey, 'expected a class-string, got ' . self::describe($value) . '.');
-        }
-
-        if (!\class_exists($value)) {
-            throw new InvalidAuthorizationConfigException($configKey, "class '{$value}' does not exist.");
-        }
-
-        if (!\is_subclass_of($value, $contract) && !\is_a($value, $contract, allow_string: true)) {
-            throw new InvalidAuthorizationConfigException($configKey, "class '{$value}' does not implement {$contract}.");
-        }
-    }
-
-    /**
-     * Render a short debug description of a mixed value for use inside
-     * exception messages.
-     *
-     * Every value — scalar or otherwise — is rendered in the same shape: the
-     * literal followed by the parenthesised debug type. Operators grepping
-     * production logs for misconfiguration get predictable output regardless of
-     * the value's runtime type.
-     *
-     * @param  mixed  $value
-     * @return string
-     */
-    private static function describe(mixed $value): string
-    {
-        $literal = \is_scalar($value)
-            ? \var_export($value, true)
-            : \var_export(\get_debug_type($value), true);
-
-        return $literal . ' (' . \get_debug_type($value) . ')';
     }
 }

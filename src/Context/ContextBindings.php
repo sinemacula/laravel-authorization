@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Context;
 
 use Illuminate\Contracts\Foundation\Application;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
+use SineMacula\Laravel\Authorization\Config\ContextConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
@@ -19,7 +21,9 @@ use SineMacula\Laravel\Authorization\Contracts\RequestContext;
  * The key catalogue is built from `authorization.context.keys` and the factory
  * from the bound trusted sources and the sources
  * `authorization.context.sources` lists, each resolved from the container. Both
- * read a configuration the service provider validated at boot.
+ * read a configuration the service provider validated at boot, and check its
+ * shape again as they read it, so a value changed after boot is refused with
+ * `InvalidAuthorizationConfigException`, never cast or skipped.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,11 +55,11 @@ final class ContextBindings
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \InvalidArgumentException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function catalogue(Application $app): DeclaredContextKeyCatalogue
     {
-        /** @var array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>> $keys */
-        $keys = (array) $app['config']->get('authorization.context.keys', []);
+        $keys = ContextConfigValidator::keyMap(ConfigValue::get('context.keys', [], $app['config']));
 
         $assurance = static fn (): AssuranceKeys => AssuranceKeys::of($app->bound(AuthenticationContext::class) ? $app->make(AuthenticationContext::class) : null);
 
@@ -73,11 +77,11 @@ final class ContextBindings
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \InvalidArgumentException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function factory(Application $app): CheckContextFactory
     {
-        /** @var list<class-string<\SineMacula\Laravel\Authorization\Contracts\ContextSource>> $classes */
-        $classes = (array) $app['config']->get('authorization.context.sources', []);
+        $classes = ContextConfigValidator::sources(ConfigValue::get('context.sources', [], $app['config']));
 
         return new CheckContextFactory(
             authentication: $app->make(AuthenticationContext::class),

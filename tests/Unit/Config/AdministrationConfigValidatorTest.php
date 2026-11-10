@@ -22,8 +22,9 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 final class AdministrationConfigValidatorTest extends TestCase
 {
     /**
-     * No block, an empty one, a whole `max_impact` of at least 1 and a whole
-     * `retries` of at least 0 are accepted.
+     * An empty block, whose limits take their defaults, a whole `max_impact` of
+     * at least 1 and a whole `retries` of at least 0 are accepted, written as
+     * ints or as the environment gives whole numbers.
      *
      * @return void
      */
@@ -34,6 +35,8 @@ final class AdministrationConfigValidatorTest extends TestCase
         AdministrationConfigValidator::validate(['max_impact' => 1000]);
         AdministrationConfigValidator::validate(['retries' => 0]);
         AdministrationConfigValidator::validate(['max_impact' => 5, 'retries' => 7]);
+        AdministrationConfigValidator::validate(['max_impact' => '1000', 'retries' => '0']);
+        AdministrationConfigValidator::validate(['max_impact' => '1', 'retries' => '2']);
 
         self::assertSame(['max_impact', 'retries'], AdministrationConfigValidator::LIMITS);
         self::assertSame('authorization.administration', AdministrationConfigValidator::KEY);
@@ -49,21 +52,29 @@ final class AdministrationConfigValidatorTest extends TestCase
         $whole = 'expected a whole number of at least 1, got ';
         $tries = 'expected a whole number of at least 0, got ';
 
-        yield 'not an array' => ['1000', 'authorization.administration', 'expected an array of limits, got \'1000\' (string).'];
-        yield 'an unknown limit' => [['max_holders' => 4], 'authorization.administration', 'unknown limit \'max_holders\'; expected one of max_impact, retries.'];
+        yield 'not an array' => ['1000', 'authorization.administration', 'expected an array, got \'1000\' (string).'];
+        yield 'null' => [null, 'authorization.administration', 'expected an array, got \'null\' (null).'];
+        yield 'an unknown limit' => [['max_holders' => 4], 'authorization.administration.max_holders', 'unknown key \'max_holders\'; expected one of max_impact, retries.'];
         yield 'an unknown limit after one' => [
             ['max_impact' => 5, 'max_holders' => 4],
-            'authorization.administration',
-            'unknown limit \'max_holders\'; expected one of max_impact, retries.',
+            'authorization.administration.max_holders',
+            'unknown key \'max_holders\'; expected one of max_impact, retries.',
         ];
-        yield 'a list of limits' => [[5], 'authorization.administration', 'unknown limit \'0\'; expected one of max_impact, retries.'];
+        yield 'a list of limits' => [[5], 'authorization.administration.0', 'unknown key \'0\'; expected one of max_impact, retries.'];
         yield 'zero' => [['max_impact' => 0], 'authorization.administration.max_impact', $whole . '0 (int).'];
+        yield 'zero as a string' => [['max_impact' => '0'], 'authorization.administration.max_impact', $whole . '\'0\' (string).'];
         yield 'negative' => [['max_impact' => -1], 'authorization.administration.max_impact', $whole . '-1 (int).'];
-        yield 'a string' => [['max_impact' => '1000'], 'authorization.administration.max_impact', $whole . '\'1000\' (string).'];
+        yield 'a null max_impact' => [['max_impact' => null], 'authorization.administration.max_impact', $whole . '\'null\' (null).'];
+        yield 'a string not a whole number' => [['max_impact' => '12abc'], 'authorization.administration.max_impact', $whole . '\'12abc\' (string).'];
+        yield 'an exponent' => [['max_impact' => '1e3'], 'authorization.administration.max_impact', $whole . '\'1e3\' (string).'];
+        yield 'a padded string' => [['max_impact' => ' 5'], 'authorization.administration.max_impact', $whole . '\' 5\' (string).'];
+        yield 'an empty string' => [['max_impact' => ''], 'authorization.administration.max_impact', $whole . '\'\' (string).'];
         yield 'a float' => [['max_impact' => 1.5], 'authorization.administration.max_impact', $whole . '1.5 (float).'];
         yield 'a list' => [['max_impact' => [1]], 'authorization.administration.max_impact', $whole . '\'array\' (array).'];
         yield 'negative retries' => [['retries' => -1], 'authorization.administration.retries', $tries . '-1 (int).'];
-        yield 'retries as a string' => [['retries' => '2'], 'authorization.administration.retries', $tries . '\'2\' (string).'];
+        yield 'negative retries as a string' => [['retries' => '-1'], 'authorization.administration.retries', $tries . '\'-1\' (string).'];
+        yield 'null retries' => [['retries' => null], 'authorization.administration.retries', $tries . '\'null\' (null).'];
+        yield 'retries not a whole number' => [['retries' => '2.0'], 'authorization.administration.retries', $tries . '\'2.0\' (string).'];
         yield 'fractional retries' => [['retries' => 0.5], 'authorization.administration.retries', $tries . '0.5 (float).'];
         yield 'retries checked after a valid limit' => [['max_impact' => 3, 'retries' => true], 'authorization.administration.retries', $tries . 'true (bool).'];
     }

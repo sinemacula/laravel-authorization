@@ -22,7 +22,10 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * - `retention`: how many days coverage is kept, a whole number of at least 1,
  *   400 by default.
  *
- * Any other key is refused, so a misspelt setting fails at boot rather than
+ * Whole numbers are ints or strings written as whole numbers, as the
+ * environment gives them, and `enabled` a real boolean (N117). A setting set to
+ * null is refused, but for `connection` and `queue`. Any other key is refused,
+ * naming its path (N116), so a misspelt setting fails at boot rather than
  * leaving the default in place. The same checks refuse a setting changed after
  * boot when it is read (see `Usage\UsageTracking`).
  *
@@ -43,20 +46,6 @@ final class UsageConfigValidator
     public const array SETTINGS = ['enabled', 'interval', 'batch', 'connection', 'queue', 'retention'];
 
     /**
-     * Validate the `usage` block of the supplied authorization config, a
-     * missing block as an empty one, throwing on the first failure.
-     *
-     * @param  array<string, mixed>  $config
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    public static function validateIn(array $config): void
-    {
-        self::validate($config['usage'] ?? []);
-    }
-
-    /**
      * Validate the supplied `usage` config, throwing on the first failure.
      *
      * @param  mixed  $config
@@ -66,15 +55,7 @@ final class UsageConfigValidator
      */
     public static function validate(mixed $config): void
     {
-        if (!\is_array($config)) {
-            throw new InvalidAuthorizationConfigException(self::KEY, 'expected an array of settings, got ' . self::describe($config) . '.');
-        }
-
-        $unknown = \array_values(\array_diff(\array_keys($config), self::SETTINGS));
-
-        if ($unknown !== []) {
-            throw new InvalidAuthorizationConfigException(self::KEY, "unknown setting '{$unknown[0]}'; expected one of " . \implode(', ', self::SETTINGS) . '.');
-        }
+        $config = ConfigBlock::of(self::KEY, $config, self::SETTINGS);
 
         if (\array_key_exists('enabled', $config)) {
             self::enabled($config['enabled']);
@@ -117,10 +98,11 @@ final class UsageConfigValidator
      */
     public static function whole(string $setting, mixed $value): int
     {
-        $least = self::WHOLE[$setting];
+        $least   = self::WHOLE[$setting];
+        $integer = IntegerSetting::of($value);
 
-        if (\is_int($value) && $value >= $least) {
-            return $value;
+        if ($integer !== null && $integer >= $least) {
+            return $integer;
         }
 
         throw new InvalidAuthorizationConfigException(self::KEY . '.' . $setting, "expected a whole number of at least {$least}, got " . self::describe($value) . '.');

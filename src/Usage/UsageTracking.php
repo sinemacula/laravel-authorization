@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Usage;
 
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Config\UsageConfigValidator;
 
 /**
@@ -40,7 +41,7 @@ final class UsageTracking
      */
     public static function isEnabled(): bool
     {
-        return UsageConfigValidator::enabled(config('authorization.usage.enabled', false));
+        return UsageConfigValidator::enabled(ConfigValue::get('usage.enabled', false));
     }
 
     /**
@@ -50,7 +51,7 @@ final class UsageTracking
      */
     public static function interval(): int
     {
-        return UsageConfigValidator::whole('interval', config('authorization.usage.interval', self::INTERVAL));
+        return UsageConfigValidator::whole('interval', ConfigValue::get('usage.interval', self::INTERVAL));
     }
 
     /**
@@ -61,7 +62,7 @@ final class UsageTracking
      */
     public static function batch(): int
     {
-        return UsageConfigValidator::whole('batch', config('authorization.usage.batch', self::BATCH));
+        return UsageConfigValidator::whole('batch', ConfigValue::get('usage.batch', self::BATCH));
     }
 
     /**
@@ -71,7 +72,7 @@ final class UsageTracking
      */
     public static function retention(): int
     {
-        return UsageConfigValidator::whole('retention', config('authorization.usage.retention', self::RETENTION));
+        return UsageConfigValidator::whole('retention', ConfigValue::get('usage.retention', self::RETENTION));
     }
 
     /**
@@ -82,7 +83,7 @@ final class UsageTracking
      */
     public static function connection(): ?string
     {
-        return UsageConfigValidator::name('connection', config('authorization.usage.connection'));
+        return UsageConfigValidator::name('connection', ConfigValue::get('usage.connection'));
     }
 
     /**
@@ -93,7 +94,7 @@ final class UsageTracking
      */
     public static function queue(): ?string
     {
-        return UsageConfigValidator::name('queue', config('authorization.usage.queue'));
+        return UsageConfigValidator::name('queue', ConfigValue::get('usage.queue'));
     }
 
     /**

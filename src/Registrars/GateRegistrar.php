@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Registrars;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Gate;
+use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Support\DeclaredAbilities;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -55,15 +56,18 @@ final readonly class GateRegistrar
     ) {}
 
     /**
-     * Determine whether the configuration turns the Gate hook on: unless
-     * `authorization.gate.enabled` is false, it does.
+     * Determine whether the configuration turns the Gate hook on: when
+     * `authorization.gate.enabled` is true or left out, it does, and when it is
+     * false, it does not. Any other value is refused, never read as either.
      *
      * @param  \Illuminate\Contracts\Config\Repository  $config
      * @return bool
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function isEnabled(ConfigRepository $config): bool
     {
-        return $config->get('authorization.gate.enabled', true) !== false;
+        return SwitchConfigValidator::isEnabled('gate', $config);
     }
 
     /**

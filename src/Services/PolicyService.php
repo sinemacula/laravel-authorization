@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -80,7 +81,7 @@ final class PolicyService
     public function create(string $name, array|string $document, ?string $description = null, ?ActingContext $actor = null, AuthorizableTenant|Model|null $tenant = null): Policy
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
+        $class = ModelClasses::get('policy');
 
         return RecordWriter::save($actor, PackagePermissions::POLICY_CREATE, static fn (): Policy => RecordWriter::ownedBy(new $class, $tenant), [
             'name'        => $name,
@@ -110,7 +111,7 @@ final class PolicyService
         $reference = self::owner($owner);
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
+        $class = ModelClasses::get('policy');
 
         return RecordWriter::save($actor, PackagePermissions::POLICY_CREATE, static fn (): Policy => new $class, [
             'name'        => $name,
@@ -191,7 +192,7 @@ final class PolicyService
     public function list(?ActingContext $actor = null): Collection
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
+        $class = ModelClasses::get('policy');
 
         return $class::query()->orderBy('name')->get();
     }

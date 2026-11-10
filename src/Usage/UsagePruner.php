@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Usage;
 
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\KeyAsText;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
@@ -42,12 +43,12 @@ final class UsagePruner
         $usage = 0;
 
         foreach (GrantTarget::cases() as $kind) {
-            $orphans = self::orphansOf(self::table('grant_usage', 'grant_usage'), $kind);
+            $orphans = self::orphansOf(self::table('grant_usage'), $kind);
 
             $usage += $pretend ? $orphans->count() : $orphans->delete();
         }
 
-        $expired = self::table('usage_coverage', 'usage_coverage')
+        $expired = self::table('usage_coverage')
             ->where('covered_until', '<', Carbon::now('UTC')->subDays($retention)->format('Y-m-d H:i:s'));
 
         return [$usage, $pretend ? $expired->count() : $expired->delete()];
@@ -104,15 +105,11 @@ final class UsagePruner
      * Query the configured table on the package's connection, on the write
      * connection.
      *
-     * @param  string  $key
-     * @param  string  $default
+     * @param  non-empty-string  $key
      * @return \Illuminate\Database\Query\Builder
      */
-    private static function table(string $key, string $default): Builder
+    private static function table(string $key): Builder
     {
-        /** @var string $table */
-        $table = config('authorization.tables.' . $key, $default);
-
-        return AuthorizationConnection::connection()->table($table)->useWritePdo();
+        return AuthorizationConnection::connection()->table(TableNames::get($key))->useWritePdo();
     }
 }

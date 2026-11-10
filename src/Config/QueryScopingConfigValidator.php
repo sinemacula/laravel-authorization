@@ -4,16 +4,16 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Config;
 
-use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
-
 /**
  * Boot-time validator for the `authorization.query_scoping` config
  * (AUTHZ-10.1), run by `ConfigValidator`.
  *
  * The block must be an array, and each limit it sets (`max_anchors`,
- * `max_scopes`, `max_attachments`) a whole number of at least 1. A limit it
- * does not set takes its default; any other key is refused, so a misspelt limit
- * fails at boot rather than leaving its default in place.
+ * `max_scopes`, `max_attachments`) a whole number of at least 1, an int or a
+ * string written as a whole number, as the environment gives one (N117). A
+ * limit it does not set takes its default, and one set to null is refused; any
+ * other key is refused, naming its path (N116), so a misspelt limit fails at
+ * boot rather than leaving its default in place.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,30 +39,8 @@ final class QueryScopingConfigValidator
      */
     public static function validate(mixed $config): void
     {
-        if (!\is_array($config)) {
-            throw new InvalidAuthorizationConfigException(self::KEY, 'expected an array of limits, got ' . self::describe($config) . '.');
+        foreach (ConfigBlock::of(self::KEY, $config, self::LIMITS) as $key => $limit) {
+            IntegerSetting::require(self::KEY . ".{$key}", $limit, 1);
         }
-
-        foreach ($config as $key => $limit) {
-            if (!\in_array($key, self::LIMITS, true)) {
-                throw new InvalidAuthorizationConfigException(self::KEY, "unknown limit '{$key}'; expected one of " . \implode(', ', self::LIMITS) . '.');
-            }
-
-            if (!\is_int($limit) || $limit < 1) {
-                throw new InvalidAuthorizationConfigException(self::KEY . ".{$key}", 'expected a whole number of at least 1, got ' . self::describe($limit) . '.');
-            }
-        }
-    }
-
-    /**
-     * Describe a value for a message: a scalar as its literal, anything else by
-     * its type, each followed by its type.
-     *
-     * @param  mixed  $value
-     * @return string
-     */
-    private static function describe(mixed $value): string
-    {
-        return \var_export(\is_scalar($value) ? $value : \get_debug_type($value), true) . ' (' . \get_debug_type($value) . ')';
     }
 }

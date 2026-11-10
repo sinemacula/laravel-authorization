@@ -6,6 +6,9 @@ namespace SineMacula\Laravel\Authorization\Database;
 
 use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
+use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
  * The database connection the package's tables live on.
@@ -25,15 +28,24 @@ final class AuthorizationConnection
     /**
      * Return the configured connection name, or null for the application's
      * default connection. An empty name counts as unset, so an empty
-     * environment variable selects the default connection.
+     * environment variable selects the default connection. Any other value that
+     * is not a string is refused, never read as the default connection.
      *
      * @return string|null
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function name(): ?string
     {
-        $name = config('authorization.connection');
+        $name = ConfigValue::get('connection');
 
-        return \is_string($name) && $name !== '' ? $name : null;
+        if ($name === null || $name === '') {
+            return null;
+        }
+
+        return \is_string($name)
+            ? $name
+            : throw new InvalidAuthorizationConfigException('authorization.connection', 'expected a database connection name, got ' . ConfigValidator::describe($name) . '.');
     }
 
     /**

@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Hooks;
 
 use Illuminate\Contracts\Container\Container;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
+use SineMacula\Laravel\Authorization\Config\GrantHookConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 
 /**
@@ -39,15 +41,17 @@ final readonly class GrantHooks implements GrantHook
 
     /**
      * Return the composite of the hooks `authorization.grant_hooks` lists, in
-     * the order listed, each built from the container.
+     * the order listed, each built from the container, refusing a list that
+     * boot would refuse before building any.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @return self
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function fromConfig(Container $container): self
     {
-        /** @var list<class-string<\SineMacula\Laravel\Authorization\Contracts\GrantHook>> $classes */
-        $classes = (array) config('authorization.grant_hooks', []);
+        $classes = GrantHookConfigValidator::validate(ConfigValue::get('grant_hooks', []));
 
         /** @var list<\SineMacula\Laravel\Authorization\Contracts\GrantHook> $hooks */
         $hooks = \array_map(static fn (string $class): object => $container->make($class), $classes);

@@ -22,8 +22,9 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 final class ReviewConfigValidatorTest extends TestCase
 {
     /**
-     * No block, an empty one and a whole `limit` of at least 1 are accepted,
-     * and a whole limit is returned as it is.
+     * An empty block, whose limit takes its default, and a whole `limit` of at
+     * least 1, written as an int or as the environment gives a whole number,
+     * are accepted, and the limit is returned as an int.
      *
      * @return void
      */
@@ -35,6 +36,8 @@ final class ReviewConfigValidatorTest extends TestCase
 
         self::assertSame(1, ReviewConfigValidator::limit(1));
         self::assertSame(250, ReviewConfigValidator::limit(250));
+        self::assertSame(1000, ReviewConfigValidator::limit('1000'));
+        ReviewConfigValidator::validate(['limit' => '1']);
         self::assertSame(['limit'], ReviewConfigValidator::SETTINGS);
         self::assertSame('authorization.reviews', ReviewConfigValidator::KEY);
     }
@@ -48,12 +51,17 @@ final class ReviewConfigValidatorTest extends TestCase
     {
         $whole = 'expected a whole number of at least 1, got ';
 
-        yield 'not an array' => ['1000', 'authorization.reviews', 'expected an array of settings, got \'1000\' (string).'];
-        yield 'an unknown setting' => [['max_rows' => 4], 'authorization.reviews', 'unknown setting \'max_rows\'; expected one of limit.'];
-        yield 'an unknown setting after one' => [['limit' => 5, 'max_rows' => 4], 'authorization.reviews', 'unknown setting \'max_rows\'; expected one of limit.'];
+        yield 'not an array' => ['1000', 'authorization.reviews', 'expected an array, got \'1000\' (string).'];
+        yield 'null' => [null, 'authorization.reviews', 'expected an array, got \'null\' (null).'];
+        yield 'an unknown setting' => [['max_rows' => 4], 'authorization.reviews.max_rows', 'unknown key \'max_rows\'; expected one of limit.'];
+        yield 'an unknown setting after one' => [['limit' => 5, 'max_rows' => 4], 'authorization.reviews.max_rows', 'unknown key \'max_rows\'; expected one of limit.'];
         yield 'zero' => [['limit' => 0], 'authorization.reviews.limit', $whole . '0 (int).'];
+        yield 'zero as a string' => [['limit' => '0'], 'authorization.reviews.limit', $whole . '\'0\' (string).'];
         yield 'negative' => [['limit' => -1], 'authorization.reviews.limit', $whole . '-1 (int).'];
-        yield 'a string' => [['limit' => '1000'], 'authorization.reviews.limit', $whole . '\'1000\' (string).'];
+        yield 'a string not a whole number' => [['limit' => '12abc'], 'authorization.reviews.limit', $whole . '\'12abc\' (string).'];
+        yield 'an exponent' => [['limit' => '1e3'], 'authorization.reviews.limit', $whole . '\'1e3\' (string).'];
+        yield 'a padded string' => [['limit' => ' 5'], 'authorization.reviews.limit', $whole . '\' 5\' (string).'];
+        yield 'an empty string' => [['limit' => ''], 'authorization.reviews.limit', $whole . '\'\' (string).'];
         yield 'a float' => [['limit' => 1.5], 'authorization.reviews.limit', $whole . '1.5 (float).'];
         yield 'a null' => [['limit' => null], 'authorization.reviews.limit', $whole . '\'null\' (null).'];
         yield 'a list' => [['limit' => [1]], 'authorization.reviews.limit', $whole . '\'array\' (array).'];

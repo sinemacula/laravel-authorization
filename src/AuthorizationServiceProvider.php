@@ -13,7 +13,10 @@ use Illuminate\Foundation\Http\Kernel as HttpKernel;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Config\CacheConfigValidator;
+use SineMacula\Laravel\Authorization\Config\ConfigBlock;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Console\CheckConfigurationCommand;
 use SineMacula\Laravel\Authorization\Console\GrantRoleCommand;
 use SineMacula\Laravel\Authorization\Console\ListPermissionsCommand;
@@ -166,7 +169,11 @@ final class AuthorizationServiceProvider extends ServiceProvider
     #[\Override]
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__ . '/../config/authorization.php', 'authorization');
+        // A configuration that is not an array is kept as it is, for the boot
+        // to refuse naming it, as merging the defaults into it would fail.
+        if (\is_array($this->app['config']->get('authorization', []))) {
+            $this->mergeConfigFrom(__DIR__ . '/../config/authorization.php', 'authorization');
+        }
 
         $this->registerConfiguredDefaults();
         $this->registerResourceTenantResolver();
@@ -190,6 +197,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * application registers once the package has booted.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public function boot(): void
     {
@@ -244,10 +253,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     protected function validateConfig(): void
     {
-        /** @var array<string, mixed> $config */
-        $config = (array) $this->app['config']->get('authorization', []);
-
-        ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($this->app['config']->get('authorization', []), $this->app);
     }
 
     /**
@@ -323,14 +329,15 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * declaration, as `whereAuthorized()` reads it, and passes every other to
      * the configured one. A class the configuration names in place of the
      * package's default replaces a binding made before the package registers
-     * (N106).
+     * (N106). A value naming no such class binds the default, for the boot to
+     * refuse.
      *
      * @return void
      */
     protected function registerResourceTenantResolver(): void
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver> $class */
-        $class = $this->app['config']->get('authorization.resource_tenant_resolver', NoResourceTenant::class);
+        $class = $this->seams()->configuredClass('authorization.resource_tenant_resolver', ResourceTenantResolver::class, NoResourceTenant::class);
 
         $declared = static fn (Application $app): DeclaredResourceTenant => new DeclaredResourceTenant($app->make($class));
 
@@ -361,14 +368,14 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * request or job so any state it keeps does not reach the next one. The
      * package has no store of its own, so a configured one replaces a binding
      * made before the package registers (N106), and gives way to one made
-     * afterwards.
+     * afterwards. A value naming no such class binds none, for the boot to
+     * refuse.
      *
      * @return void
      */
     protected function registerPolicyStore(): void
     {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\PolicyStore>|null $class */
-        $class = $this->app['config']->get('authorization.policy_store');
+        $class = $this->seams()->configuredClass('authorization.policy_store', PolicyStore::class, null);
 
         if ($class === null) {
             return;
@@ -381,19 +388,19 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * Bind the resolution cache that memoises policy, permission, and role
      * lookups per-principal. Always on for in-memory memoisation, scoped to the
      * request or job; consults `authorization.cache.store` for optional
-     * cross-request persistence.
+     * cross-request persistence. The store, the lifetime and the prefix are
+     * read through the checks the boot runs, so a value changed after boot is
+     * refused rather than cast or ignored.
      *
      * @return void
      */
     protected function registerResolutionCache(): void
     {
         $this->app->scoped(ResolutionCache::class, static function (Application $app): ResolutionCache {
-            /** @var string|null $storeName */
-            $storeName = $app['config']->get('authorization.cache.store');
-            /** @var int $ttl */
-            $ttl = (int) $app['config']->get('authorization.cache.ttl', 300);
-            /** @var string $prefix */
-            $prefix = (string) $app['config']->get('authorization.cache.prefix', 'authorization');
+            $cache     = ConfigValue::block('cache', $app['config']);
+            $storeName = CacheConfigValidator::storeName(ConfigBlock::entry($cache, 'store', null));
+            $ttl       = CacheConfigValidator::ttl(ConfigBlock::entry($cache, 'ttl', CacheConfigValidator::TTL));
+            $prefix    = CacheConfigValidator::prefix(ConfigBlock::entry($cache, 'prefix', CacheConfigValidator::PREFIX));
 
             $store = null;
 
@@ -462,7 +469,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
     protected function registerPolicyEvaluator(): void
     {
         $this->app->scoped(PolicyEvaluator::class);
-        $this->app->scoped(SessionScopes::class, static fn (Application $app): SessionScopes => SessionScopes::fromConfig($app['config']->get('authorization.session.scopes', [])));
+        $this->app->scoped(SessionScopes::class, static fn (Application $app): SessionScopes => SessionScopes::fromConfig(ConfigValue::get('session.scopes', [], $app['config'])));
 
         $seams = $this->seams();
 

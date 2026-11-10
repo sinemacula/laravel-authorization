@@ -8,7 +8,8 @@ use Illuminate\Contracts\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
-use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
@@ -78,10 +79,9 @@ final readonly class GuardrailResolver
         $pins->guardrails();
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
+        $class = ModelClasses::get('policy');
 
-        /** @var string $table */
-        $table = config('authorization.tables.guardrails', 'guardrails');
+        $table = TableNames::get('guardrails');
 
         $model = new $class;
         $rows  = $class::query()->withoutGlobalScopes()->useWritePdo()

@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -472,24 +473,32 @@ final class AuthorizationManagerTest extends TestCase
 
     /**
      * An entry of the configured enums the boot validation would refuse is
-     * skipped by the catalogue, as it is read after boot, rather than failing
-     * mid-request.
+     * refused by the catalogue, as it is read after boot, naming the entry,
+     * rather than skipped or failing with a `TypeError` mid-request.
      *
      * @return void
      */
-    public function testAnEnumEntryTheValidationWouldRefuseIsSkipped(): void
+    public function testAnEnumEntryTheValidationWouldRefuseIsRefused(): void
     {
         $user = $this->resolve(StubIdentity::create(['id' => 'user-1']));
 
         $user->givePermission(Permission::create(['name' => self::CREATE]));
 
-        $this->config()->set('authorization.permission_enums', [123, \stdClass::class, ['nested'], null, IntBackedPermissionEnum::class]);
-
-        self::assertSame([], Authorization::permissionsFor($user, AuthorizationScope::current()));
-
-        $this->config()->set('authorization.permission_enums', [IntBackedPermissionEnum::class, PermissionEnum::class]);
+        $this->config()->set('authorization.permission_enums', [PermissionEnum::class]);
 
         self::assertSame([self::CREATE], Authorization::permissionsFor($user, AuthorizationScope::current()));
+
+        foreach ([123, \stdClass::class, ['nested'], null, IntBackedPermissionEnum::class] as $entry) {
+            $this->config()->set('authorization.permission_enums', [PermissionEnum::class, $entry]);
+
+            try {
+                Authorization::permissionsFor($user, AuthorizationScope::current());
+
+                self::fail('The entry ' . \var_export($entry, true) . ' was not refused.');
+            } catch (InvalidAuthorizationConfigException $exception) {
+                self::assertSame('authorization.permission_enums.1', $exception->getConfigKey());
+            }
+        }
     }
 
     /**

@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Administration;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
@@ -152,8 +153,7 @@ final class Narrowing
      */
     private static function boundaryOf(OperationChange $change): ?array
     {
-        /** @var string $table */
-        $table  = config('authorization.tables.authorizable_boundaries', 'authorizable_boundaries');
+        $table  = TableNames::get('authorizable_boundaries');
         $tenant = $change->scope->tenant;
         $query  = AuthorizationConnection::connection()->table($table)->useWritePdo()
             ->where('authorizable_type', $change->grantee->type)
@@ -255,8 +255,7 @@ final class Narrowing
             return true;
         }
 
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_policies', 'authorizable_policies');
+        $table = TableNames::get('authorizable_policies');
 
         $keys = AuthorizationConnection::connection()->table($table)
             ->useWritePdo()

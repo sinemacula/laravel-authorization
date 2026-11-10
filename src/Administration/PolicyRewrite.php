@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Administration;
 
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -91,8 +92,7 @@ final class PolicyRewrite
      */
     private static function unbounded(Policy $policy, OperationChange $across, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_boundaries', 'authorizable_boundaries');
+        $table = TableNames::get('authorizable_boundaries');
 
         $isBoundary = AuthorizationConnection::connection()->table($table)->useWritePdo()->where('policy_id', $policy->getKey())->exists();
 

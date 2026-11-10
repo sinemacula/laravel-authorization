@@ -5,6 +5,10 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Administration;
 
 use Illuminate\Database\Query\Builder;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
@@ -12,7 +16,6 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\StatementValidator;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
-use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -92,16 +95,16 @@ final class AffectedHolders
 
     /**
      * Return the most rows a read of what a change reaches takes:
-     * `authorization.administration.max_impact`, or the default when it is not
-     * a positive whole number.
+     * `authorization.administration.max_impact`, or the default when it is left
+     * out, refusing one that is not a whole number of at least one.
      *
      * @return int
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function limit(): int
     {
-        $limit = config('authorization.administration.max_impact', self::DEFAULT_LIMIT);
-
-        return \is_int($limit) && $limit > 0 ? $limit : self::DEFAULT_LIMIT;
+        return ConfigValue::integer('administration.max_impact', self::DEFAULT_LIMIT, 1);
     }
 
     /**
@@ -341,8 +344,7 @@ final class AffectedHolders
      */
     private static function withRolesBelow(array $keys): array
     {
-        /** @var bool $hierarchy */
-        $hierarchy = config('authorization.hierarchy.enabled', true);
+        $hierarchy = SwitchConfigValidator::isEnabled('hierarchy');
 
         if (!$hierarchy) {
             self::pin(self::table('roles')->whereIn('id', $keys));
@@ -351,7 +353,7 @@ final class AffectedHolders
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class      = config('authorization.models.role', Role::class);
+        $class      = ModelClasses::get('role');
         $model      = new $class;
         $connection = $model->getConnection();
         $grammar    = $connection->getQueryGrammar();
@@ -403,8 +405,7 @@ final class AffectedHolders
      */
     private static function table(string $key): Builder
     {
-        /** @var string $table */
-        $table = config('authorization.tables.' . $key, $key);
+        $table = TableNames::get($key);
 
         return AuthorizationConnection::connection()->table($table)->useWritePdo();
     }
@@ -417,7 +418,7 @@ final class AffectedHolders
     private static function roleType(): string
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class = config('authorization.models.role', Role::class);
+        $class = ModelClasses::get('role');
 
         return (new $class)->getMorphClass();
     }

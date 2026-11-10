@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Preview\PreviewAttributes;
 use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Reviews\Enums\ReviewKind;
@@ -270,7 +271,8 @@ final class AttributeProvidersTest extends TestCase
     /**
      * A provider that cannot be resolved, or that does not implement its
      * namespace's contract, fails the read with `AttributeProviderFailed`, and
-     * fails reading the declarations outright.
+     * fails reading the declarations outright. Read from the configuration,
+     * such an entry is refused before any provider is resolved.
      *
      * @return void
      */
@@ -278,7 +280,15 @@ final class AttributeProvidersTest extends TestCase
     {
         $this->container->instance('not-a-provider', new \stdClass);
 
-        $providers = $this->configured(['post' => 'App\Missing'], ['user' => 'not-a-provider']);
+        try {
+            $this->configured(['post' => 'App\Missing'], []);
+
+            self::fail('A configured provider that is not a provider class is refused.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame('authorization.attributes.resources.post', $exception->getConfigKey());
+        }
+
+        $providers = $this->unchecked(['post' => 'App\Missing'], ['user' => 'not-a-provider']);
 
         $reads = [
             'resource' => static fn (): array => $providers->resourceValues(ResourceReference::record('post', '1')),
@@ -298,12 +308,14 @@ final class AttributeProvidersTest extends TestCase
         $this->expectException(\UnexpectedValueException::class);
         $this->expectExceptionMessage('Attribute provider \'not-a-provider\' does not implement ' . SubjectAttributeProvider::class . '.');
 
-        $this->configured([], ['user' => 'not-a-provider'])->declarations();
+        $this->unchecked([], ['user' => 'not-a-provider'])->declarations();
     }
 
     /**
      * A resource provider registered as a subject's, or the other way round,
-     * does not implement the contract its namespace calls for.
+     * does not implement the contract its namespace calls for: the
+     * configuration refuses it, and the providers given it directly refuse it
+     * when resolved.
      *
      * @return void
      */
@@ -311,10 +323,18 @@ final class AttributeProvidersTest extends TestCase
     {
         $this->container->instance(ConflictingResourceAttributes::class, new ConflictingResourceAttributes);
 
+        try {
+            $this->configured([], ['user' => ConflictingResourceAttributes::class]);
+
+            self::fail('A configured provider of the wrong kind is refused.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame('authorization.attributes.subjects.user', $exception->getConfigKey());
+        }
+
         $this->expectException(\UnexpectedValueException::class);
         $this->expectExceptionMessage('Attribute provider \'' . ConflictingResourceAttributes::class . '\' does not implement ' . SubjectAttributeProvider::class . '.');
 
-        $this->configured([], ['user' => ConflictingResourceAttributes::class])->declarations();
+        $this->unchecked([], ['user' => ConflictingResourceAttributes::class])->declarations();
     }
 
     /**
@@ -357,19 +377,32 @@ final class AttributeProvidersTest extends TestCase
 
     /**
      * A null `resources` or `subjects`, which the configuration validator
-     * accepts, registers no provider.
+     * refuses, is refused when the providers are read too, never taken as no
+     * providers; a list left out registers none.
      *
      * @return void
      */
-    public function testFromConfigTakesANullListAsNoProviders(): void
+    public function testFromConfigRefusesANullList(): void
     {
-        $this->container->instance('config', new Repository(['authorization' => ['attributes' => ['resources' => null, 'subjects' => null]]]));
+        $this->container->instance('config', new Repository(['authorization' => ['attributes' => []]]));
 
         $providers = AttributeProviders::fromConfig($this->container);
 
         self::assertSame(['resource' => self::packageDeclarations()], $providers->declarations());
         self::assertSame([], $providers->resourceValues(ResourceReference::record('post', '1')));
         self::assertSame([], $providers->subjectValues(new \stdClass, 'user'));
+
+        foreach (['resources', 'subjects'] as $key) {
+            $this->container->instance('config', new Repository(['authorization' => ['attributes' => [$key => null]]]));
+
+            try {
+                AttributeProviders::fromConfig($this->container);
+
+                self::fail("A null `{$key}` is refused.");
+            } catch (InvalidAuthorizationConfigException $exception) {
+                self::assertSame("authorization.attributes.{$key}", $exception->getConfigKey());
+            }
+        }
     }
 
     /**
@@ -489,6 +522,7 @@ final class AttributeProvidersTest extends TestCase
      * @return \SineMacula\Laravel\Authorization\Context\AttributeProviders
      *
      * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     private function configured(array $resources, array $subjects): AttributeProviders
     {
@@ -510,5 +544,19 @@ final class AttributeProvidersTest extends TestCase
             PreviewAttributes::class   => (new PreviewAttributes)->attributes(),
             ReviewAttributes::class    => (new ReviewAttributes)->attributes(),
         ];
+    }
+
+    /**
+     * Return the providers given the classes directly, as the configuration
+     * would refuse them, so a class that is no provider of its namespace is met
+     * only when it is resolved.
+     *
+     * @param  array<string, string>  $resources
+     * @param  array<string, string>  $subjects
+     * @return \SineMacula\Laravel\Authorization\Context\AttributeProviders
+     */
+    private function unchecked(array $resources, array $subjects): AttributeProviders
+    {
+        return (new \ReflectionClass(AttributeProviders::class))->newInstance($this->container, $resources, $subjects);
     }
 }

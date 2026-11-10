@@ -7,6 +7,8 @@ namespace SineMacula\Laravel\Authorization\Support;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 
@@ -24,12 +26,14 @@ use SineMacula\Laravel\Authorization\Models\Permission;
  * declared twice for the same guard is kept once when both declarations agree
  * and refused when their description or category differ.
  *
- * Nothing here touches the database. The configured classes are assumed to have
- * passed the config validation, but the configuration is read when the
- * catalogue is, after boot, so an entry of `authorization.permission_enums` the
- * validation would refuse (anything but an enum implementing `PermissionEnum`
- * backed by strings) is skipped rather than failing with a `TypeError`. A
- * definition that breaks the rules above is refused with
+ * Nothing here touches the database. The configuration is read when the
+ * catalogue is, after boot, so both lists are checked again as boot checks them
+ * before anything is read or resolved: an entry of
+ * `authorization.permission_enums` that is not an enum implementing
+ * `PermissionEnum` backed by strings, or an entry of
+ * `authorization.permission_providers` that is not a class implementing
+ * `PermissionProvider`, is refused with `InvalidAuthorizationConfigException`,
+ * never skipped. A definition that breaks the rules above is refused with
  * `InvalidPermissionCatalogueException`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -64,6 +68,7 @@ final readonly class PermissionCatalogue
      * @return list<\SineMacula\Laravel\Authorization\Support\PermissionDefinition>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public function definitions(): array
     {
@@ -97,23 +102,20 @@ final readonly class PermissionCatalogue
 
     /**
      * Return the definitions every case of every configured enum declares, each
-     * with the case that declares it, skipping an entry that is not an enum
-     * implementing `PermissionEnum` backed by strings.
+     * with the case that declares it, refusing a list holding an entry that is
+     * not an enum implementing `PermissionEnum` backed by strings.
      *
      * @return list<array{string, \SineMacula\Laravel\Authorization\Support\PermissionDefinition}>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     private function enumDefinitions(): array
     {
-        $enums       = (array) $this->config->get('authorization.permission_enums', []);
+        $enums       = ConfigValidator::permissionEnums(ConfigValue::get('permission_enums', [], $this->config));
         $definitions = [];
 
         foreach ($enums as $enum) {
-            if (!ConfigValidator::isStringBackedPermissionEnum($enum)) {
-                continue;
-            }
-
             foreach ($enum::cases() as $case) {
                 foreach ($this->reader->definitions($case) as $definition) {
                     $definitions[] = [$enum . '::' . $case->name, $definition];
@@ -126,16 +128,17 @@ final readonly class PermissionCatalogue
 
     /**
      * Return the definitions every configured provider returns, each with the
-     * provider that returns it.
+     * provider that returns it, refusing a list holding an entry that is not a
+     * class implementing `PermissionProvider` before any is resolved.
      *
      * @return list<array{string, \SineMacula\Laravel\Authorization\Support\PermissionDefinition}>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     private function providerDefinitions(): array
     {
-        /** @var list<class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionProvider>> $providers */
-        $providers   = $this->config->get('authorization.permission_providers', []);
+        $providers   = ConfigValidator::permissionProviders(ConfigValue::get('permission_providers', [], $this->config));
         $definitions = [];
 
         foreach ($providers as $provider) {
@@ -169,7 +172,7 @@ final readonly class PermissionCatalogue
     private function assertValid(string $source, PermissionDefinition $definition): void
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $model */
-        $model = $this->config->get('authorization.models.permission', Permission::class);
+        $model = ModelClasses::get('permission', $this->config);
 
         if (!$model::isValidAuthorizationName($definition->name)) {
             $reason = "'{$definition->name}' is not a valid permission name: allowed characters are letters, digits,"

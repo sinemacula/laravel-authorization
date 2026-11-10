@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
+use SineMacula\Laravel\Authorization\Config\SessionConfigValidator;
+
 /**
  * The scope map (`authorization.session.scopes`): what each scope a credential
  * may carry names, as action patterns (AUTHZ-7.5).
@@ -11,8 +13,10 @@ namespace SineMacula\Laravel\Authorization\Support;
  * A scope mapped to a list of patterns names those patterns; a scope listed on
  * its own, by a numeric key, names itself, as does every scope the map does not
  * name: by default a scope is an action or an action pattern. The map is
- * validated when the application boots (see `SessionConfigValidator`), so an
- * entry of any other shape is skipped here.
+ * validated when the application boots (see `SessionConfigValidator`), and its
+ * shape again when it is built here, so an entry of any other shape changed
+ * after boot is refused with `InvalidAuthorizationConfigException`, never
+ * skipped.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,28 +36,16 @@ final readonly class SessionScopes
 
     /**
      * Build the scope map from its configuration: each scope keyed to a list of
-     * patterns, or listed on its own to name itself.
+     * patterns, or listed on its own to name itself, refusing any other shape.
      *
      * @param  mixed  $value
      * @return self
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function fromConfig(mixed $value): self
     {
-        $map = [];
-
-        foreach (\is_array($value) ? $value : [] as $scope => $patterns) {
-            if (\is_int($scope)) {
-                [$scope, $patterns] = [$patterns, [$patterns]];
-            }
-
-            if (!\is_string($scope) || !\is_array($patterns)) {
-                continue;
-            }
-
-            $map[$scope] = self::stringsOf($patterns);
-        }
-
-        return new self($map);
+        return new self(SessionConfigValidator::scopeMap($value));
     }
 
     /**
@@ -95,26 +87,5 @@ final readonly class SessionScopes
     public function names(): array
     {
         return \array_map(\strval(...), \array_keys($this->map));
-    }
-
-    /**
-     * Return the entries of a scope's list that are strings, in order.
-     *
-     * @param  array<array-key, mixed>  $patterns
-     * @return list<string>
-     */
-    private static function stringsOf(array $patterns): array
-    {
-        $strings = [];
-
-        foreach ($patterns as $pattern) {
-            if (!\is_string($pattern)) {
-                continue;
-            }
-
-            $strings[] = $pattern;
-        }
-
-        return $strings;
     }
 }
