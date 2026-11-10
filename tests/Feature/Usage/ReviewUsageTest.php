@@ -221,7 +221,7 @@ final class ReviewUsageTest extends TestCase
 
         self::assertSame([UsageStatus::UNKNOWN, UsageStatus::UNUSED], [$rows[0]->usage?->status, $rows[1]->usage?->status]);
 
-        DB::table('authorization_usage_coverage')->delete();
+        DB::table('usage_coverage')->delete();
 
         $this->store(['2026-11-09 06:00:00', '2026-11-09 07:00:00', '2026-11-09 08:00:00']);
 

@@ -401,7 +401,7 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
     private static function usage(): Builder
     {
         /** @var string $table */
-        $table = config('authorization.tables.grant_usage', 'authorization_grant_usage');
+        $table = config('authorization.tables.grant_usage', 'grant_usage');
 
         return AuthorizationConnection::connection()->table($table)->useWritePdo();
     }
@@ -414,7 +414,7 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
     private static function periods(): Builder
     {
         /** @var string $table */
-        $table = config('authorization.tables.usage_coverage', 'authorization_usage_coverage');
+        $table = config('authorization.tables.usage_coverage', 'usage_coverage');
 
         return AuthorizationConnection::connection()->table($table)->useWritePdo();
     }
