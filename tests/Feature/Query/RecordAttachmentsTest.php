@@ -11,6 +11,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Query\RecordAttachments;
 use SineMacula\Laravel\Authorization\Query\Refusal;
@@ -106,7 +107,7 @@ final class RecordAttachmentsTest extends TestCase
         foreach ($attached as [$read, $condition, $isDenyOnly]) {
             self::assertTrue($isDenyOnly);
 
-            $byPolicy[$read->name] = ScopedDocument::query()->whereRaw($condition)->pluck('code')->all();
+            $byPolicy[$read->name] = ScopedDocument::query()->whereRaw(new ComposedExpression($condition))->pluck('code')->all();
         }
 
         self::assertSame([], $screen->refusals());
@@ -222,7 +223,7 @@ final class RecordAttachmentsTest extends TestCase
         $checked   = \array_values(\array_filter(['abc', 'ABC', 'abd'], $isAllowed));
 
         self::assertSame(['abc', 'ABC'], $checked);
-        self::assertSame($checked, ScopedDocument::query()->whereRaw($attached[0][1])->orderBy('row_id')->pluck('code')->all());
+        self::assertSame($checked, ScopedDocument::query()->whereRaw(new ComposedExpression($attached[0][1]))->orderBy('row_id')->pluck('code')->all());
     }
 
     /**
@@ -279,7 +280,7 @@ final class RecordAttachmentsTest extends TestCase
 
             self::assertCount(1, $attached);
 
-            return ScopedPost::query()->whereRaw($attached[0][1])->orderBy('id')->pluck('title')->all();
+            return ScopedPost::query()->whereRaw(new ComposedExpression($attached[0][1]))->orderBy('id')->pluck('title')->all();
         });
 
         self::assertSame(['everywhere'], $kept('web'));
@@ -325,7 +326,7 @@ final class RecordAttachmentsTest extends TestCase
                 $titles = [];
 
                 foreach ($attachments->inScope('posts:view', $screen, false) as [, $condition]) {
-                    \array_push($titles, ...ScopedPost::query()->whereRaw($condition)->pluck('title')->all());
+                    \array_push($titles, ...ScopedPost::query()->whereRaw(new ComposedExpression($condition))->pluck('title')->all());
                 }
 
                 return $titles;

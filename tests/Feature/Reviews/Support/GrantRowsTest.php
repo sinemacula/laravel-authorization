@@ -235,13 +235,13 @@ final class GrantRowsTest extends TestCase
         foreach (self::drivers() as $driver) {
             $column = static fn (string $name): string => self::wrappedOn($driver, 'authorizable_roles.' . $name);
             $bytes  = static fn (string $name): string => match (true) {
-                $driver === 'sqlite'                       => $column($name) . ' collate binary',
-                $driver === 'pgsql' && $name !== 'role_id' => $column($name) . ' collate "C"',
-                $driver === 'pgsql'                        => 'cast(' . $column($name) . ' as text) collate "C"',
-                $driver === 'mysql' && $name !== 'role_id' => $column($name),
-                default                                    => 'cast(' . $column($name) . ' as binary)',
+                $driver === 'sqlite'                       => $column($name) . ' collate binary asc',
+                $driver === 'pgsql' && $name !== 'role_id' => $column($name) . ' collate "C" asc',
+                $driver === 'pgsql'                        => 'cast(' . $column($name) . ' as text) collate "C" asc',
+                $driver === 'mysql' && $name !== 'role_id' => $column($name) . ' asc',
+                default                                    => 'cast(' . $column($name) . ' as binary) asc',
             };
-            $tagged = static fn (string $name): string => 'case when ' . $column($name) . ' is null then 0 else 1 end, ' . $bytes($name);
+            $tagged = static fn (string $name): string => 'case when ' . $column($name) . ' is null then 0 else 1 end asc, ' . $bytes($name);
             $scope  = [
                 $bytes('authorizable_type'),
                 $bytes('authorizable_id'),

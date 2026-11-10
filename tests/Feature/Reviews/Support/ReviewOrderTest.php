@@ -126,12 +126,12 @@ final class ReviewOrderTest extends TestCase
             $table   = self::wrappedOn($driver, 'review_order_values');
 
             self::assertSame(
-                "select * from {$table} order by case when {$wrapped} is null then 0 else 1 end, " . $bytes[$driver]($wrapped),
+                "select * from {$table} order by case when {$wrapped} is null then 0 else 1 end asc, " . $bytes[$driver]($wrapped) . ' asc',
                 ReviewOrder::by(self::queryOn($driver, 'review_order_values'), 'review_order_values.value', true)->toSql(),
                 $driver,
             );
             self::assertSame(
-                "select * from {$table} order by " . $bytes[$driver]($wrapped),
+                "select * from {$table} order by " . $bytes[$driver]($wrapped) . ' asc',
                 ReviewOrder::by(self::queryOn($driver, 'review_order_values'), 'review_order_values.value')->toSql(),
                 $driver,
             );
@@ -150,7 +150,7 @@ final class ReviewOrderTest extends TestCase
         $sqlite = self::queryOn('sqlite', 'review_order_values');
         $query  = new Builder(self::createStub(ConnectionInterface::class), $sqlite->getGrammar(), $sqlite->getProcessor());
 
-        self::assertSame('select * from "review_order_values" order by "value"', ReviewOrder::by($query->from('review_order_values'), 'value')->toSql());
+        self::assertSame('select * from "review_order_values" order by "value" asc', ReviewOrder::by($query->from('review_order_values'), 'value')->toSql());
 
         $compared = new Builder(self::createStub(ConnectionInterface::class), $sqlite->getGrammar(), $sqlite->getProcessor());
 

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
@@ -94,7 +95,7 @@ final class TenantMembershipTest extends TestCase
         }
 
         $membership = self::membership(new ScopedTicket);
-        $titles     = static fn (string $condition): array => ScopedTicket::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all();
+        $titles     = static fn (string $condition): array => ScopedTicket::query()->whereRaw(new ComposedExpression($condition))->orderBy('id')->pluck('title')->all();
 
         self::assertSame(['none'], $titles($membership->ofNone()));
         self::assertSame(['five'], $titles($membership->present()));
@@ -177,7 +178,7 @@ final class TenantMembershipTest extends TestCase
         self::assertSame(['five', 'seven'], self::titles($within));
         $tickets = self::membership(new ScopedTicket)->within(new Reference('teams', '5'));
 
-        self::assertSame(['five', 'seven', 'padded'], ScopedTicket::query()->whereRaw($tickets)->orderBy('id')->pluck('title')->all());
+        self::assertSame(['five', 'seven', 'padded'], ScopedTicket::query()->whereRaw(new ComposedExpression($tickets))->orderBy('id')->pluck('title')->all());
     }
 
     /**
@@ -396,6 +397,6 @@ final class TenantMembershipTest extends TestCase
     private static function titles(string $condition): array
     {
         /** @var list<string> */
-        return TenantScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all();
+        return TenantScopedPost::query()->whereRaw(new ComposedExpression($condition))->orderBy('id')->pluck('title')->all();
     }
 }

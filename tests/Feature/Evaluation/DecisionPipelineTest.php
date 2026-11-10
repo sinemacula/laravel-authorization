@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionEvidence;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
@@ -734,7 +735,7 @@ final class DecisionPipelineTest extends TestCase
         $condition = $this->pipeline()->queryAuthorizer()->compile($subject, new ScopedPost, 'posts:view');
 
         self::assertStringContainsString('EXISTS', $condition);
-        self::assertSame([2], ScopedPost::query()->whereRaw($condition)->pluck('id')->all());
+        self::assertSame([2], ScopedPost::query()->whereRaw(new ComposedExpression($condition))->pluck('id')->all());
         self::assertStringNotContainsString('EXISTS', $this->pipeline()->withPolicies([])->queryAuthorizer()->compile($subject, new ScopedPost, 'posts:view'));
     }
 

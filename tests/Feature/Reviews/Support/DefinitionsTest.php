@@ -7,6 +7,7 @@ namespace Tests\Feature\Reviews\Support;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -76,7 +77,7 @@ final class DefinitionsTest extends TestCase
         $role->forceFill(['name' => 'keyed'])->save();
 
         $isPostgres = AuthorizationConnection::connection()->getDriverName() === 'pgsql';
-        $texts      = AuthorizationConnection::connection()->table('roles')->selectRaw($read . ' as id_text')->pluck('id_text')->all();
+        $texts      = AuthorizationConnection::connection()->table('roles')->select(new ComposedExpression($read . ' as id_text'))->pluck('id_text')->all();
 
         self::assertSame($isPostgres ? 'cast("roles"."id" as text)' : $query->getGrammar()->wrap('roles.id'), $read);
         self::assertSame([$role->getKey()], $texts);
