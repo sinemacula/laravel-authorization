@@ -9,6 +9,7 @@ use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 
@@ -63,7 +64,8 @@ final readonly class PermissionCatalogue
     /**
      * Return every permission the package, the configured enums and the
      * configured providers declare, in the order they are declared, the
-     * package's first.
+     * package's first, refusing, before any provider runs, while the package is
+     * not healthy (see `PackageState`).
      *
      * @return list<\SineMacula\Laravel\Authorization\Support\PermissionDefinition>
      *
@@ -71,6 +73,26 @@ final readonly class PermissionCatalogue
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public function definitions(): array
+    {
+        PackageState::guard($this->container);
+
+        return $this->declared();
+    }
+
+    /**
+     * Return every permission the package, the configured enums and the
+     * configured providers declare, as `definitions()` does, without asking
+     * where the package stands: the read of the action catalogue, which the
+     * boot's validation checks the session scopes against before the package is
+     * healthy, and which a policy is checked against only by operations that
+     * refused already.
+     *
+     * @return list<\SineMacula\Laravel\Authorization\Support\PermissionDefinition>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public function declared(): array
     {
         $definitions = [];
 

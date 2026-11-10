@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Registrars;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Grammars\Grammar;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Query\AuthorizedQuery;
 
 /**
@@ -31,6 +32,10 @@ use SineMacula\Laravel\Authorization\Query\AuthorizedQuery;
  * the application's filters, ordering, selects and pagination keep working. It
  * is called on the query that runs: inside a `where` group or a relation's
  * definition it refuses when the query runs.
+ *
+ * The macro stays registered whatever the package's state, and refuses while
+ * the package is not healthy (see `PackageState`), before the manager is
+ * resolved.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,6 +81,8 @@ final class QueryScopeRegistrar
      */
     public static function scope(Builder $builder, string $action, array $context = [], ?AuthorizationManager $authorization = null): Builder
     {
+        PackageState::guardCurrent();
+
         $scope = self::manager($authorization)->queryScope($builder->getModel(), $action, $context);
 
         $scope->assertScopable($builder->getQuery());

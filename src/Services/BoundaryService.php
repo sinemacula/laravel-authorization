@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
@@ -95,6 +96,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * `administration.unprovable` unless the actor is also allowed
  * `authorization:administration.unbounded` on the same operation.
  *
+ * Every operation refuses while the package is not healthy (see
+ * `PackageState`), before it reads or writes.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -118,6 +122,8 @@ final class BoundaryService
      */
     public function set(Model|Reference $grantee, Policy $policy, Model|Reference|null $tenant = null, bool $includeSubtree = true, ?ActingContext $actor = null): GrantOutcome
     {
+        PackageState::guardCurrent();
+
         $reference = self::grantee($grantee);
         $named     = GrantScopes::named($tenant);
 
@@ -164,6 +170,8 @@ final class BoundaryService
      */
     public function remove(Model|Reference $grantee, Model|Reference|null $tenant = null, ?ActingContext $actor = null): bool
     {
+        PackageState::guardCurrent();
+
         $reference = self::grantee($grantee);
         $named     = GrantScopes::named($tenant);
 
@@ -217,6 +225,8 @@ final class BoundaryService
      */
     public function removeAll(Model|Reference $grantee, ?ActingContext $actor = null): int
     {
+        PackageState::guardCurrent();
+
         $reference = self::grantee($grantee);
 
         /** @var int<0, max> */

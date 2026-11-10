@@ -4,14 +4,23 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Diagnostics\Settings;
 
+use SineMacula\Laravel\Authorization\Diagnostics\BootCheck;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\BootCheckOutcome;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 
 /**
  * Read every setting the shipped configuration defines, then each key the
  * configuration sets that the package does not define, as the report shows
  * them, with what the check found of each.
+ *
+ * Given the outcome of each check the diagnostic boot ran by building what a
+ * setting names, a setting whose check failed is shown as `failed_at_boot`, and
+ * one the boot left unchecked, as the structural check found an issue, as
+ * `not_run`; without them, a setting whose checks were left to the boot is
+ * shown as `checked_at_boot`, as a boot that completed ran them, and they
+ * passed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,6 +34,7 @@ final readonly class SettingsReader
      *
      * @param  mixed  $root
      * @param  \SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings  $findings
+     * @param  list<\SineMacula\Laravel\Authorization\Diagnostics\BootCheck>  $bootChecks
      */
     public function __construct(
 
@@ -33,6 +43,9 @@ final readonly class SettingsReader
 
         /** What the check of it found. */
         private ConfigFindings $findings,
+
+        /** The outcome of each check the diagnostic boot ran by building what a setting names, none when it did not run. */
+        private array $bootChecks = [],
     ) {}
 
     /**
@@ -94,25 +107,43 @@ final readonly class SettingsReader
     }
 
     /**
-     * Return what the check found of the setting under the path: its own issues
-     * and those of what it holds first, then a refusal of a block it sits in,
-     * which left it unchecked, then whether it was checked at boot.
+     * Return what the check found of the setting under the path: a check the
+     * diagnostic boot ran on it that failed first, then its own issues and
+     * those of what it holds, then a refusal of a block it sits in, which left
+     * it unchecked, then whether its checks were left to the boot, and what
+     * became of them.
      *
      * @param  string  $path
      * @return string
      */
     private function status(string $path): string
     {
-        $own   = \array_filter($this->findings->issues, static fn (ConfigIssue $issue): bool => $issue->path === $path || \str_starts_with($issue->path, "{$path}."));
-        $above = \array_filter($this->findings->issues, static fn (ConfigIssue $issue): bool => \str_starts_with($path, "{$issue->path}."));
-        $kinds = \array_map(static fn (ConfigIssue $issue): string => $issue->kind(), $own);
+        $own     = \array_filter($this->findings->issues, static fn (ConfigIssue $issue): bool => $issue->path === $path || \str_starts_with($issue->path, "{$path}."));
+        $above   = \array_filter($this->findings->issues, static fn (ConfigIssue $issue): bool => \str_starts_with($path, "{$issue->path}."));
+        $kinds   = \array_map(static fn (ConfigIssue $issue): string => $issue->kind(), $own);
+        $outcome = $this->outcomeOf($path);
 
         return match (true) {
+            $outcome === BootCheckOutcome::FAILED                  => 'failed_at_boot',
             \in_array('refusal', $kinds, true)                     => 'refused',
             \in_array('internal', $kinds, true)                    => 'unchecked',
             $kinds !== [] || $above !== []                         => 'skipped',
-            \in_array($path, $this->findings->checkedAtBoot, true) => 'checked_at_boot',
+            \in_array($path, $this->findings->checkedAtBoot, true) => $outcome === BootCheckOutcome::NOT_RUN ? 'not_run' : 'checked_at_boot',
             default                                                => 'ok',
         };
+    }
+
+    /**
+     * Return what became of the check the diagnostic boot ran on the setting
+     * under the path, or null when it ran none.
+     *
+     * @param  string  $path
+     * @return \SineMacula\Laravel\Authorization\Diagnostics\Enums\BootCheckOutcome|null
+     */
+    private function outcomeOf(string $path): ?BootCheckOutcome
+    {
+        $checks = \array_filter($this->bootChecks, static fn (BootCheck $check): bool => $check->path === $path);
+
+        return \array_values($checks)[0]->outcome ?? null;
     }
 }

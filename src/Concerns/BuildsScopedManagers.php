@@ -78,6 +78,8 @@ trait BuildsScopedManagers
      */
     public function for(object $subject): self
     {
+        $this->state?->ensureHealthy();
+
         $this->refuseOnPreview('for');
 
         if (!$subject instanceof Subject) {
@@ -106,6 +108,8 @@ trait BuildsScopedManagers
      */
     public function forActor(Subject $subject): self
     {
+        $this->state?->ensureHealthy();
+
         $this->refuseOnPreview('forActor');
 
         return $this->scopedTo($subject);
@@ -125,6 +129,8 @@ trait BuildsScopedManagers
      */
     public function forUser(?object $user): self
     {
+        $this->state?->ensureHealthy();
+
         $this->refuseOnPreview('forUser');
 
         return $this->scopedTo($user === null ? null : $this->subjectResolver->forUser($user));
@@ -145,6 +151,8 @@ trait BuildsScopedManagers
      */
     public function withPolicies(array $policies): self
     {
+        $this->state?->ensureHealthy();
+
         if ($this->preview !== null) {
             throw InvalidPreviewException::hypothetical();
         }
@@ -193,6 +201,8 @@ trait BuildsScopedManagers
      */
     public function previewFor(object $subject, ?AuthorizationScope $scope = null): self
     {
+        $this->state?->ensureHealthy();
+
         $this->refuseOnPreview('previewFor');
         $this->refuseAlteredPipeline();
 
@@ -224,6 +234,8 @@ trait BuildsScopedManagers
      */
     public function capped(array $actions): self
     {
+        $this->state?->ensureHealthy();
+
         $scoped           = clone $this;
         $scoped->pipeline = $this->pipeline->capped($actions);
 
@@ -251,6 +263,8 @@ trait BuildsScopedManagers
      */
     public function withoutSessionCaps(): self
     {
+        $this->state?->ensureHealthy();
+
         $this->refuseOnPreview('withoutSessionCaps');
 
         $scoped           = clone $this;

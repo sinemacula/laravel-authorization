@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Support;
 
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Subject;
 
 /**
@@ -24,6 +25,9 @@ use SineMacula\Laravel\Authorization\Subject;
  * the guard; the permission helpers refuse it, since no guard changes the
  * decision.
  *
+ * Each helper, and so each directive, refuses while the package is not healthy
+ * (see `PackageState`), before the manager is resolved.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -42,6 +46,8 @@ final class BladeHelpers
      */
     public static function currentSubject(): ?Subject
     {
+        PackageState::guardCurrent();
+
         return AuthorizationManager::instance()?->currentSubject();
     }
 
@@ -56,6 +62,8 @@ final class BladeHelpers
      */
     public static function hasRole(array|string $roles, ?string $guard = null): bool
     {
+        PackageState::guardCurrent();
+
         $guard   = CheckArguments::guard($guard);
         $subject = self::currentSubject();
 
@@ -83,6 +91,8 @@ final class BladeHelpers
      */
     public static function hasAllRoles(array|string $roles, ?string $guard = null): bool
     {
+        PackageState::guardCurrent();
+
         $guard    = CheckArguments::guard($guard);
         $subject  = self::currentSubject();
         $required = CheckArguments::names($roles);
@@ -112,6 +122,8 @@ final class BladeHelpers
      */
     public static function hasPermission(array|string $permissions, ?string $guard = null): bool
     {
+        PackageState::guardCurrent();
+
         CheckArguments::refuseGuard('permission', $guard);
 
         $manager = AuthorizationManager::instance();
@@ -137,6 +149,8 @@ final class BladeHelpers
      */
     public static function hasAllPermissions(array|string $permissions, ?string $guard = null): bool
     {
+        PackageState::guardCurrent();
+
         CheckArguments::refuseGuard('permission', $guard);
 
         $manager  = AuthorizationManager::instance();

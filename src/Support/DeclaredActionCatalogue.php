@@ -76,7 +76,7 @@ final class DeclaredActionCatalogue implements ActionCatalogue
 
         $names = [];
 
-        foreach ($this->catalogue->definitions() as $definition) {
+        foreach ($this->catalogue->declared() as $definition) {
             if (PackagePermissions::isDeclared($definition->name)) {
                 continue;
             }

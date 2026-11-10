@@ -46,6 +46,8 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\PackageStatus;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -908,6 +910,7 @@ final class AuthorizationServiceProviderTest extends TestCase
 
         try {
             (new AuthorizationServiceProvider($app))->register();
+            self::bootPackage($app);
 
             $resolutions = new \ArrayObject;
 
@@ -972,6 +975,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             ));
 
             (new AuthorizationServiceProvider($app))->register();
+            self::bootPackage($app);
 
             self::assertInstanceOf(StubSubjectResolver::class, $app->make(SubjectResolver::class, ['subject' => new \stdClass]));
 
@@ -998,6 +1002,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             $app->instance(TenantTree::class, self::createStub(TenantTree::class));
 
             (new AuthorizationServiceProvider($app))->register();
+            $app->boot();
 
             $app->make(SubjectResolver::class);
             $app->make(TenantTree::class);
@@ -2014,6 +2019,34 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
+     * The package registered and booted as the application booted is healthy,
+     * the application not booting for diagnosis; registering again, as the
+     * suite does, keeps the same state where it stands, and booting the
+     * provider validates the configuration again.
+     *
+     * @return void
+     */
+    public function testRegisteringAgainKeepsWhereThePackageStands(): void
+    {
+        $app   = $this->application();
+        $state = PackageState::of($app);
+
+        self::assertNotNull($state);
+        self::assertSame(PackageStatus::HEALTHY, $state->status());
+        self::assertTrue($state->isDecided());
+        self::assertFalse($state->isDiagnostic());
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        self::assertSame($state, PackageState::of($app));
+        self::assertSame(PackageStatus::HEALTHY, $state->status());
+
+        (new AuthorizationServiceProvider($app))->boot();
+
+        self::assertSame(PackageStatus::HEALTHY, $state->status());
+    }
+
+    /**
      * isPackageDefault() is true only while the contract holds the package's
      * own default: a class the application configured, a binding made
      * afterwards, an instance, an unbound contract and a closure no class
@@ -2190,7 +2223,8 @@ final class AuthorizationServiceProviderTest extends TestCase
 
     /**
      * Bind a stub on the contract the way the method names, as a sibling
-     * package would, register the package, and return the stub.
+     * package would, register the package, boot the application and the
+     * package, and return the stub.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @param  string  $method
@@ -2205,7 +2239,25 @@ final class AuthorizationServiceProviderTest extends TestCase
 
         (new AuthorizationServiceProvider($app))->register();
 
+        self::bootPackage($app);
+
         return $bound;
+    }
+
+    /**
+     * Boot the application, which binds the classes the configuration names,
+     * and mark the package healthy, as its boot does once the configuration
+     * validates, so its operations run; the configuration these tests hold
+     * names no database, so it would not validate.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return void
+     */
+    private static function bootPackage(Application $app): void
+    {
+        $app->boot();
+
+        PackageState::of($app)?->healthy();
     }
 
     /**

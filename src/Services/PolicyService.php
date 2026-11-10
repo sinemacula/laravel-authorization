@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
@@ -56,6 +57,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * actor, its mode and the action, once the write commits; the actor is never
  * read from the authenticated user.
  *
+ * Every operation refuses while the package is not healthy (see
+ * `PackageState`), before it reads or writes.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -80,6 +84,8 @@ final class PolicyService
      */
     public function create(string $name, array|string $document, ?string $description = null, ?ActingContext $actor = null, AuthorizableTenant|Model|null $tenant = null): Policy
     {
+        PackageState::guardCurrent();
+
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
         $class = ModelClasses::get('policy');
 
@@ -108,6 +114,8 @@ final class PolicyService
      */
     public function createInline(Model|Reference $owner, string $name, array|string $document, ?string $description = null, ?ActingContext $actor = null): Policy
     {
+        PackageState::guardCurrent();
+
         $reference = self::owner($owner);
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
@@ -134,6 +142,8 @@ final class PolicyService
      */
     public function rename(Policy $policy, string $name, ?ActingContext $actor = null): Policy
     {
+        PackageState::guardCurrent();
+
         return RecordWriter::save($actor, PackagePermissions::POLICY_RENAME, static fn (): Policy => RecordWriter::existing('policy', $policy), ['name' => $name]);
     }
 
@@ -149,6 +159,8 @@ final class PolicyService
      */
     public function describe(Policy $policy, ?string $description, ?ActingContext $actor = null): Policy
     {
+        PackageState::guardCurrent();
+
         return RecordWriter::save($actor, PackagePermissions::POLICY_UPDATE, static fn (): Policy => RecordWriter::existing('policy', $policy), ['description' => $description]);
     }
 
@@ -165,6 +177,8 @@ final class PolicyService
      */
     public function rewrite(Policy $policy, array|string $document, ?ActingContext $actor = null): Policy
     {
+        PackageState::guardCurrent();
+
         return RecordWriter::save($actor, PackagePermissions::POLICY_UPDATE, static fn (): Policy => RecordWriter::existing('policy', $policy), ['document' => $document]);
     }
 
@@ -180,6 +194,8 @@ final class PolicyService
      */
     public function delete(Policy $policy, ?ActingContext $actor = null): void
     {
+        PackageState::guardCurrent();
+
         RecordWriter::delete($actor, PackagePermissions::POLICY_DELETE, static fn (): Policy => RecordWriter::existing('policy', $policy));
     }
 
@@ -191,6 +207,8 @@ final class PolicyService
      */
     public function list(?ActingContext $actor = null): Collection
     {
+        PackageState::guardCurrent();
+
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
         $class = ModelClasses::get('policy');
 

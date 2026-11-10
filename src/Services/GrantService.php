@@ -9,6 +9,7 @@ use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
@@ -149,6 +150,9 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * policy whose statements name `principals` is refused for any grantee with
  * `ResourcePolicyException` (see `PolicyPrincipals`).
  *
+ * Every operation refuses while the package is not healthy (see
+ * `PackageState`), before it reads or writes.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -179,6 +183,8 @@ final class GrantService
         bool $includeSubtree = true,
         ?string $application = null,
     ): GrantOutcome {
+        PackageState::guardCurrent();
+
         return $this->grant(GrantTarget::ROLE, $grantee, $role, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
     }
 
@@ -200,6 +206,8 @@ final class GrantService
      */
     public function revokeRole(Model|Reference $grantee, Role|string $role, ?ActingContext $actor = null, Model|Reference|null $tenant = null, ?string $application = null): int
     {
+        PackageState::guardCurrent();
+
         return $this->revoke(GrantTarget::ROLE, $grantee, $role, $actor, $tenant, $application);
     }
 
@@ -231,6 +239,8 @@ final class GrantService
         bool $includeSubtree = true,
         ?string $application = null,
     ): SyncResult {
+        PackageState::guardCurrent();
+
         return $this->sync(GrantTarget::ROLE, $grantee, $roles, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
     }
 
@@ -258,6 +268,8 @@ final class GrantService
         bool $includeSubtree = true,
         ?string $application = null,
     ): GrantOutcome {
+        PackageState::guardCurrent();
+
         return $this->grant(GrantTarget::PERMISSION, $grantee, $permission, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
     }
 
@@ -284,6 +296,8 @@ final class GrantService
         Model|Reference|null $tenant = null,
         ?string $application = null,
     ): int {
+        PackageState::guardCurrent();
+
         return $this->revoke(GrantTarget::PERMISSION, $grantee, $permission, $actor, $tenant, $application);
     }
 
@@ -311,6 +325,8 @@ final class GrantService
         bool $includeSubtree = true,
         ?string $application = null,
     ): SyncResult {
+        PackageState::guardCurrent();
+
         return $this->sync(GrantTarget::PERMISSION, $grantee, $permissions, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
     }
 
@@ -339,6 +355,8 @@ final class GrantService
         bool $includeSubtree = true,
         ?string $application = null,
     ): GrantOutcome {
+        PackageState::guardCurrent();
+
         return $this->grant(GrantTarget::POLICY, $grantee, $policy, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
     }
 
@@ -357,6 +375,8 @@ final class GrantService
      */
     public function detachPolicy(Model|Reference $grantee, Policy $policy, ?ActingContext $actor = null, Model|Reference|null $tenant = null, ?string $application = null): int
     {
+        PackageState::guardCurrent();
+
         return $this->revoke(GrantTarget::POLICY, $grantee, $policy, $actor, $tenant, $application);
     }
 
@@ -384,6 +404,8 @@ final class GrantService
         bool $includeSubtree = true,
         ?string $application = null,
     ): SyncResult {
+        PackageState::guardCurrent();
+
         return $this->sync(GrantTarget::POLICY, $grantee, $policies, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
     }
 
@@ -406,6 +428,8 @@ final class GrantService
      */
     public function revokeAll(Model|Reference $grantee, ?ActingContext $actor = null): int
     {
+        PackageState::guardCurrent();
+
         $reference = self::grantee($grantee);
         $actions   = [PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE];
         $operation = Operation::begin($actor, $actions);

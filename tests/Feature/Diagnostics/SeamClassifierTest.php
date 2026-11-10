@@ -750,7 +750,9 @@ final class SeamClassifierTest extends TestCase
 
     /**
      * Return a new application holding the authorization configuration given,
-     * with the package registered in it between the two callbacks.
+     * with the package registered in it between the two callbacks, then booted,
+     * which binds the classes the configuration names and extends the grant
+     * hook.
      *
      * @param  array<string, mixed>  $authorization
      * @param  (\Closure(\Illuminate\Foundation\Application): mixed)|null  $before
@@ -772,6 +774,8 @@ final class SeamClassifierTest extends TestCase
         if ($after !== null) {
             $after($app);
         }
+
+        $app->boot();
 
         return $app;
     }

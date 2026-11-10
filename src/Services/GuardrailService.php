@@ -9,6 +9,7 @@ use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Guardrail\GuardrailRemoved;
@@ -89,6 +90,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * guardrail entry shares, so the change takes effect on the next check in every
  * worker.
  *
+ * Every operation refuses while the package is not healthy (see
+ * `PackageState`), before it reads or writes.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -110,6 +114,8 @@ final class GuardrailService
      */
     public function set(Policy $policy, Model|Reference|null $tenant, ActingContext $actor): GrantOutcome
     {
+        PackageState::guardCurrent();
+
         $named = GrantScopes::named($tenant);
 
         $operation = Operation::begin($actor, [PackagePermissions::GUARDRAIL_MANAGE]);
@@ -149,6 +155,8 @@ final class GuardrailService
      */
     public function remove(Policy $policy, Model|Reference|null $tenant, ActingContext $actor): bool
     {
+        PackageState::guardCurrent();
+
         $named = GrantScopes::named($tenant);
 
         $operation = Operation::begin($actor, [PackagePermissions::GUARDRAIL_MANAGE]);

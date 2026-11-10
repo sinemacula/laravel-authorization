@@ -64,4 +64,27 @@ final class DeclarationsTest extends TestCase
         self::assertNull($declarations->for('Third'));
         self::assertFalse(\class_exists('Not\A\Loaded\Class', false));
     }
+
+    /**
+     * A command that runs `authorization:check` in the same process is declared
+     * by its exact name, once however often declared, in the order first
+     * declared.
+     *
+     * @return void
+     */
+    public function testComposingCommandsAreDeclaredByName(): void
+    {
+        $declarations = new Declarations;
+
+        self::assertSame([], $declarations->composingCommands());
+
+        $declarations->composingCommand('acme:check');
+        $declarations->composingCommand('suite:doctor');
+        $declarations->composingCommand('acme:check');
+
+        self::assertSame(['acme:check', 'suite:doctor'], $declarations->composingCommands());
+        self::assertTrue($declarations->isComposing('acme:check'));
+        self::assertFalse($declarations->isComposing('acme:ch'));
+        self::assertFalse($declarations->isComposing('ACME:CHECK'));
+    }
 }

@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
@@ -41,6 +42,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * application's own code, never an endpoint for user-controlled administration.
  * `givePermissionTo()` and `revokePermissionTo()` take no actor, so they are
  * always trusted.
+ *
+ * The permission checks refuse while the package is not healthy (see
+ * `PackageState`), before the resolution cache is read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -235,6 +239,8 @@ trait HasPermissions // @phpstan-ignore trait.unused
      */
     public function getPermissions(): array
     {
+        PackageState::guardCurrent();
+
         $resolve = fn (ResolutionPins $pins): Resolution => GrantResolver::permissions($this->permissions(), $this->roles(), $pins);
 
         return ResolutionCache::instance()?->rememberPermissions($this, $resolve) ?? $resolve(new ResolutionPins)->value;

@@ -60,6 +60,18 @@ final class BindingRegistry
     }
 
     /**
+     * Forget the record of the contract, as when the package binds nothing to
+     * it after all.
+     *
+     * @param  string  $contract
+     * @return void
+     */
+    public function forget(string $contract): void
+    {
+        unset($this->records[$contract]);
+    }
+
+    /**
      * Return the record of the contract, or null when the package bound none.
      *
      * @param  string  $contract

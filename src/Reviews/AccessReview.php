@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Reviews\Enums\ReviewKind;
 use SineMacula\Laravel\Authorization\Reviews\Support\HolderRoutes;
 use SineMacula\Laravel\Authorization\Reviews\Support\HoldingRoutes;
@@ -81,6 +82,9 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  * stream and an export share one read: one query construction, admission and
  * projection (D22).
  *
+ * Every review refuses while the package is not healthy (see `PackageState`),
+ * before the reviewer is admitted or a row read.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -113,6 +117,8 @@ final readonly class AccessReview
      */
     public function review(ReviewQuery $query, ActingContext $reviewer): ReviewResult
     {
+        PackageState::guard($this->container);
+
         ReviewAdmission::admit($reviewer, ReviewResource::of($query));
 
         return self::resultOf($this->read($query, ReviewPosition::start()));
@@ -128,6 +134,8 @@ final readonly class AccessReview
      */
     public function trusted(ReviewQuery $query): ReviewResult
     {
+        PackageState::guard($this->container);
+
         return self::resultOf($this->read($query, ReviewPosition::start()));
     }
 
@@ -152,6 +160,8 @@ final readonly class AccessReview
      */
     public function page(ReviewQuery $query, ActingContext $reviewer, ?string $cursor = null, ?int $limit = null): ReviewPage
     {
+        PackageState::guard($this->container);
+
         ReviewAdmission::admit($reviewer, ReviewResource::of($query));
 
         return $this->pageOf($query, $reviewer, $cursor, $limit);
@@ -174,6 +184,8 @@ final readonly class AccessReview
      */
     public function trustedPage(ReviewQuery $query, ?string $cursor = null, ?int $limit = null): ReviewPage
     {
+        PackageState::guard($this->container);
+
         return $this->pageOf($query, null, $cursor, $limit);
     }
 
@@ -192,6 +204,8 @@ final readonly class AccessReview
      */
     public function stream(ReviewQuery $query, ActingContext $reviewer, int $chunk = self::CHUNK): iterable
     {
+        PackageState::guard($this->container);
+
         return self::rowsOf($this->pages($query->withLimit($chunk), self::admission($reviewer, $query)));
     }
 
@@ -207,6 +221,8 @@ final readonly class AccessReview
      */
     public function trustedStream(ReviewQuery $query, int $chunk = self::CHUNK): iterable
     {
+        PackageState::guard($this->container);
+
         return self::rowsOf($this->pages($query->withLimit($chunk), null));
     }
 
@@ -234,6 +250,8 @@ final readonly class AccessReview
      */
     public function export(ReviewQuery $query, ActingContext $reviewer, mixed $sink, int $chunk = self::CHUNK): int
     {
+        PackageState::guard($this->container);
+
         return $this->exportTo($query, $sink, $chunk, self::admission($reviewer, $query, PackagePermissions::REVIEW_READ, PackagePermissions::REVIEW_EXPORT));
     }
 
@@ -254,6 +272,8 @@ final readonly class AccessReview
      */
     public function trustedExport(ReviewQuery $query, mixed $sink, int $chunk = self::CHUNK): int
     {
+        PackageState::guard($this->container);
+
         return $this->exportTo($query, $sink, $chunk, null);
     }
 

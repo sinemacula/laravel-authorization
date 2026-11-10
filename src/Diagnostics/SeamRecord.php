@@ -12,12 +12,14 @@ namespace SineMacula\Laravel\Authorization\Diagnostics;
  * hook, the decorator running the configured hooks that replaced an instance
  * held at once.
  *
- * The record is taken once, as the package registers, and never changes. The
- * report compares what supplies the contract at the time it runs (see
- * `CurrentBinding::supplier()`) with the objects recorded here, by identity, to
- * tell the package's binding from one made before it registered and one made
- * after: both the closure and the instance held before are recorded, and either
- * matches.
+ * The record is taken as the package binds the seam, as it registers, or, for a
+ * class the configuration names, as the application boots, when it is bound,
+ * still recording what was bound before the package registered, and never
+ * changes. The report compares what supplies the contract at the time it runs
+ * (see `CurrentBinding::supplier()`) with the objects recorded here, by
+ * identity, to tell the package's binding from one made before it registered
+ * and one made after: both the closure and the instance held before are
+ * recorded, and either matches.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

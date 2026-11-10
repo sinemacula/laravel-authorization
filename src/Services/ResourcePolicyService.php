@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyAttached;
@@ -90,6 +91,9 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * action alone, while detaching one that denies is refused as
  * `administration.unprovable`.
  *
+ * Every operation refuses while the package is not healthy (see
+ * `PackageState`), before it reads or writes.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -119,6 +123,8 @@ final class ResourcePolicyService
         ?string $application = null,
         ?ActingContext $actor = null,
     ): GrantOutcome {
+        PackageState::guardCurrent();
+
         $reference = self::resource($resource);
         $named     = new GrantScope(GrantScopes::named($tenant), $application, $includeSubtree);
 
@@ -161,6 +167,8 @@ final class ResourcePolicyService
      */
     public function detach(Policy $policy, mixed $resource, Model|Reference|null $tenant = null, ?string $application = null, ?ActingContext $actor = null): int
     {
+        PackageState::guardCurrent();
+
         $reference = self::resource($resource);
         $named     = GrantScopes::named($tenant) ?? Reference::tenantOf($policy);
 
@@ -204,6 +212,8 @@ final class ResourcePolicyService
      */
     public function detachAll(mixed $resource, ?ActingContext $actor = null): int
     {
+        PackageState::guardCurrent();
+
         $reference = self::record($resource);
 
         /** @var int<0, max> */

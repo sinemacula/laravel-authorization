@@ -31,14 +31,18 @@ use SineMacula\Laravel\Authorization\Diagnostics\Settings\SettingsReader;
  * Build the configuration report from the container, the live configuration and
  * what the package recorded as it registered, without building any seam (N113).
  *
- * The configuration is checked as the boot checks it, collecting every issue,
- * by its structural checks alone (see `StructuralCheck`): on an application
- * that booted, the boot's checks passed, so issues show what changed since, or
- * what a test set. Each seam is read from the binding table, the instances
- * held, the extenders, the aliases and the deferred services, and compared by
- * identity with the package's record and the siblings' declarations (see
- * `SeamClassifier`); nothing is resolved, rebound, refreshed or extended, and
- * whether each seam was resolved is the same after inspecting as before.
+ * When the application booted for diagnosis (see `DiagnosticMode`), the report
+ * holds what that boot found, every issue and the outcome of each check it ran
+ * by building what a setting names, rather than checking again (see
+ * `PackageState`). Otherwise the configuration is checked as the boot checks
+ * it, collecting every issue, by its structural checks alone (see
+ * `StructuralCheck`): on an application that booted, the boot's checks passed,
+ * so issues show what changed since, or what a test set. Each seam is read from
+ * the binding table, the instances held, the extenders, the aliases and the
+ * deferred services, and compared by identity with the package's record and the
+ * siblings' declarations (see `SeamClassifier`); nothing is resolved, rebound,
+ * refreshed or extended, and whether each seam was resolved is the same after
+ * inspecting as before.
  *
  * Each part of the report is read on its own: a part that cannot be read is
  * left empty and makes the report incomplete, naming the part, and the rest is
@@ -92,13 +96,15 @@ final readonly class Inspector
      */
     public function inspect(): ConfigurationReport
     {
+        [$stored, $bootChecks] = $this->stored();
+
         $parts    = new ReportParts;
         $root     = $parts->read('configuration', fn (): mixed => $this->config->get('authorization', []), []);
-        $findings = $parts->read('issues', fn (): ConfigFindings => ConfigValidator::issues($root, $this->container), new ConfigFindings([], []));
+        $findings = $parts->read('issues', fn (): ConfigFindings => $stored ?? ConfigValidator::issues($root, $this->container), new ConfigFindings([], []));
         $seams    = $parts->read('seams', $this->seams(...), []);
 
         return new ConfigurationReport(
-            settings: $parts->read('settings', static fn (): array => (new SettingsReader($root, $findings))->rows(), []),
+            settings: $parts->read('settings', static fn (): array => (new SettingsReader($root, $findings, $bootChecks))->rows(), []),
             seams: $seams,
             grantHooks: $parts->read(
                 'grant_hooks',
@@ -109,6 +115,21 @@ final readonly class Inspector
             integrations: $parts->read('integrations', fn (): array => (new IntegrationReader($this->container, $this->config))->read(), []),
             issues: [...$findings->issues, ...$parts->failures()],
         );
+    }
+
+    /**
+     * Return what the boot found and the outcome of each check it ran by
+     * building what a setting names, when the application booted for diagnosis,
+     * else nothing.
+     *
+     * @return array{\SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings|null, list<\SineMacula\Laravel\Authorization\Diagnostics\BootCheck>}
+     */
+    private function stored(): array
+    {
+        $state    = PackageState::of($this->container);
+        $findings = $state?->isDiagnostic() === true ? $state->findings() : null;
+
+        return $findings === null ? [null, []] : [$findings, $state->bootChecks()];
     }
 
     /**

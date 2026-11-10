@@ -27,8 +27,18 @@ use SineMacula\Laravel\Authorization\Diagnostics\Enums\Lifetime;
  * `factory()` with the classes it may build and when it decides. Naming the
  * closure bound lets the report tell the sibling's adapter, still bound, from a
  * binding made later over it; a declaration naming none is shown beside
- * whatever is bound. Declarations are data only: nothing is loaded or built,
- * and each application holds its own, as an instance of its container.
+ * whatever is bound.
+ *
+ * A sibling whose command runs `authorization:check` in the same process, as a
+ * check of its own that composes the package's, declares that command's name
+ * with `composingCommand()` in its `register()`, so the console running it
+ * boots the package for diagnosis, as it does for `authorization:check` (see
+ * `DiagnosticMode`). It is read as the application boots, after every provider
+ * registered, so a sibling registered after the package counts; a deferred
+ * provider registers too late for it to count.
+ *
+ * Declarations are data only: nothing is loaded or built, and each application
+ * holds its own, as an instance of its container.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,6 +47,9 @@ final class Declarations
 {
     /** @var array<string, \SineMacula\Laravel\Authorization\Diagnostics\Declaration> Each declaration, keyed by its contract. */
     private array $declarations = [];
+
+    /** @var array<string, true> The name of each command declared to run `authorization:check` in the same process. */
+    private array $composingCommands = [];
 
     /**
      * Return the declarations the container holds, holding new ones first when
@@ -113,5 +126,40 @@ final class Declarations
     public function all(): array
     {
         return $this->declarations;
+    }
+
+    /**
+     * Declare a command that runs `authorization:check` in the same process, by
+     * the name the console runs it under.
+     *
+     * @param  string  $name
+     * @return void
+     */
+    public function composingCommand(string $name): void
+    {
+        $this->composingCommands[$name] = true;
+    }
+
+    /**
+     * Determine whether the command of the name was declared to run
+     * `authorization:check` in the same process.
+     *
+     * @param  string  $name
+     * @return bool
+     */
+    public function isComposing(string $name): bool
+    {
+        return isset($this->composingCommands[$name]);
+    }
+
+    /**
+     * Return the name of every command declared to run `authorization:check` in
+     * the same process, in the order declared.
+     *
+     * @return list<string>
+     */
+    public function composingCommands(): array
+    {
+        return \array_map(\strval(...), \array_keys($this->composingCommands));
     }
 }

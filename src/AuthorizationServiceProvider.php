@@ -15,7 +15,6 @@ use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Config\CacheConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ConfigBlock;
-use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Console\CheckConfigurationCommand;
 use SineMacula\Laravel\Authorization\Console\GrantRoleCommand;
@@ -44,6 +43,8 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Diagnostics\GuardedBoot;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
@@ -53,6 +54,7 @@ use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\PendingRegistration;
 use SineMacula\Laravel\Authorization\Registrars\QueryScopeRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\SeamBindings;
 use SineMacula\Laravel\Authorization\Registrars\UsageRegistrar;
@@ -79,7 +81,6 @@ use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
-use SineMacula\Laravel\Authorization\Support\ClassName;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
@@ -147,6 +148,28 @@ use SineMacula\Laravel\Authorization\Usage\UsageTracking;
  * as a sibling package that binds over the package's defaults tells them from
  * the application's own bindings by that closure's declaring class.
  *
+ * Registering binds the defaults alone. Binding a class the configuration names
+ * in place of a default, which autoloads it, may load a deferred provider and
+ * calls the callbacks watching the contract, and extending the grant hook with
+ * the hooks it lists, which applies at once to an instance held, run as the
+ * application boots, after every provider registered and before any boots (see
+ * `PendingRegistration`), with the outcome binding them at once gave. A
+ * provider that resolves one of these seams while it registers gets the
+ * package's default, never the class configured, nor the configured hooks.
+ *
+ * The configuration is validated as the application boots (see `GuardedBoot`).
+ * Every operation of the package refuses until the validation passed, so an
+ * application whose boot threw and that goes on serving refuses rather than
+ * running unvalidated (see `PackageState`). While the process runs a check
+ * command (see `DiagnosticMode`), a refused configuration does not throw: the
+ * structural check collects every issue first, and none of the steps left to
+ * the boot runs when it finds any, the checks that build what the configuration
+ * names run only when it finds none, and the package refuses every operation,
+ * registering `authorization:check` alone among its commands, no Gate hook and
+ * no usage tracking, while its Blade directives, query macros and middleware
+ * aliases stay registered, so a compiled view, a builder or a route reaches a
+ * refusal rather than literal text or a missing macro.
+ *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
  * touch model booting.
@@ -178,6 +201,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
     #[\Override]
     public function register(): void
     {
+        PackageState::start($this->app);
+
         // A configuration that is not an array is kept as it is, for the boot
         // to refuse naming it, as merging the defaults into it would fail.
         if (\is_array($this->app['config']->get('authorization', []))) {
@@ -196,6 +221,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->registerManagementServices();
 
         (new UsageRegistrar($this->app))->register($this->seams());
+
+        (new GuardedBoot($this->app))->schedule();
     }
 
     /**
@@ -203,7 +230,9 @@ final class AuthorizationServiceProvider extends ServiceProvider
      *
      * The Gate hook is registered right after the configuration is validated,
      * before anything else, so it runs before every `Gate::before` callback an
-     * application registers once the package has booted.
+     * application registers once the package has booted. While the package
+     * refuses, the hook, every command but `authorization:check` and the usage
+     * tracking are not registered.
      *
      * @return void
      *
@@ -211,17 +240,24 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->validateConfig();
+        $isHealthy = (new GuardedBoot($this->app))->validate();
 
-        (new GateRegistrar($this->app))->register();
+        if ($isHealthy) {
+            (new GateRegistrar($this->app))->register();
+        }
 
         $this->loadTranslationsFrom(__DIR__ . '/../lang', 'authorization');
         $this->offerPublishing();
-        $this->registerCommands();
+        $this->registerCommands($isHealthy);
         $this->registerRouteMiddleware();
 
         (new BladeDirectiveRegistrar($this->app))->register();
         (new QueryScopeRegistrar)->register();
+
+        if (!$isHealthy) {
+            return;
+        }
+
         (new UsageRegistrar($this->app))->boot();
     }
 
@@ -232,7 +268,10 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * A sibling that registers after the package uses this to replace the
      * package's default with its own adapter, while leaving standing a binding
      * the application made before the sibling registered. An unbound contract,
-     * an instance and any binding the package did not make answer false.
+     * an instance and any binding the package did not make answer false, as
+     * does a contract the configuration names a class for, which is bound
+     * through a closure the package's registrar declares as soon as the package
+     * registers, the class itself as the application boots.
      *
      * @param  \Illuminate\Container\Container  $container
      * @param  string  $contract
@@ -252,28 +291,21 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Fail fast on a malformed `authorization` config. Runs before any binding
-     * is resolved so a typo surfaces as a clear typed exception rather than a
-     * deep stack trace from the first `can()` call in production.
-     *
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    protected function validateConfig(): void
-    {
-        ConfigValidator::validate($this->app['config']->get('authorization', []), $this->app);
-    }
-
-    /**
      * Register the package's Artisan commands when the application is running
-     * in the console.
+     * in the console: `authorization:check` alone while the package refuses.
      *
+     * @param  bool  $isHealthy
      * @return void
      */
-    protected function registerCommands(): void
+    protected function registerCommands(bool $isHealthy = true): void
     {
         if (!$this->app->runningInConsole()) {
+            return;
+        }
+
+        if (!$isHealthy) {
+            $this->commands([CheckConfigurationCommand::class]);
+
             return;
         }
 
@@ -345,16 +377,14 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     protected function registerResourceTenantResolver(): void
     {
-        $key = 'authorization.resource_tenant_resolver';
+        $declared = static fn (string $class): \Closure => static function (Application $app) use ($class): DeclaredResourceTenant {
+            /** @var \SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver $fallback */
+            $fallback = $app->make($class);
 
-        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver> $class */
-        $class      = $this->seams()->configuredClass($key, ResourceTenantResolver::class, NoResourceTenant::class);
-        $configured = !ClassName::areSame($class, NoResourceTenant::class);
-        $class      = $configured ? $class : NoResourceTenant::class;
+            return new DeclaredResourceTenant($fallback);
+        };
 
-        $declared = static fn (Application $app): DeclaredResourceTenant => new DeclaredResourceTenant($app->make($class));
-
-        $this->seams()->bindDefault(ResourceTenantResolver::class, $declared, $configured, $key, $class);
+        $this->seams()->bindConfigured(ResourceTenantResolver::class, 'authorization.resource_tenant_resolver', NoResourceTenant::class, $declared);
     }
 
     /**
@@ -369,6 +399,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->forgetResolutionsOnRebinding(ResolvedTenant::class);
 
         $this->app->scoped(ResolvedTenant::class, static function (Container $app): ResolvedTenant {
+            PackageState::guard($app);
+
             /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
             $resolver = $app->make(SubjectResolver::class);
 
@@ -388,13 +420,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     protected function registerPolicyStore(): void
     {
-        $class = $this->seams()->configuredClass('authorization.policy_store', PolicyStore::class, null);
-
-        if ($class === null) {
-            return;
-        }
-
-        $this->seams()->bindDefault(PolicyStore::class, $class, true, 'authorization.policy_store');
+        $this->seams()->bindConfigured(PolicyStore::class, 'authorization.policy_store', null);
     }
 
     /**
@@ -507,6 +533,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
     protected function registerAuthorizationManager(): void
     {
         $this->app->scoped('authorization', static fn (Application $app): AuthorizationManager => new AuthorizationManager(
+            state: PackageState::guard($app),
             evaluator: $app->make(PolicyEvaluator::class),
             subjectResolver: $app->make(SubjectResolver::class),
             policyResolver: $app->make(PolicyResolver::class),
@@ -698,7 +725,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
     /**
      * Return the registrar of the seams an application may bind itself, handed
-     * the closure that builds the closure each contract is bound to.
+     * the closure that builds the closure each contract is bound to and the
+     * steps left to the application's boot.
      *
      * The provider declares that closure, so a sibling package that reads the
      * binding table tells the package's default from the application's own
@@ -709,6 +737,6 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     private function seams(): SeamBindings
     {
-        return new SeamBindings($this->app, static fn (string $key): \Closure => static fn (Application $app): mixed => $app->make($key));
+        return new SeamBindings($this->app, static fn (string $key): \Closure => static fn (Application $app): mixed => $app->make($key), PendingRegistration::of($this->app));
     }
 }

@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Support;
 
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
@@ -64,14 +65,20 @@ final class ResolvedTenant
     ) {}
 
     /**
-     * Resolve the subject's tenant and application through the given resolver.
+     * Resolve the subject's tenant and application through the given resolver,
+     * refusing, before the resolver is asked, while the package of the current
+     * application is not healthy (see `PackageState`).
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\SubjectResolver  $resolver
      * @param  string|null  $guard
      * @return self
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function from(SubjectResolver $resolver, ?string $guard = null): self
     {
+        PackageState::guardCurrent();
+
         $subject = $resolver->resolve();
 
         return new self($resolver, $subject?->tenant, $subject?->application, $guard);
