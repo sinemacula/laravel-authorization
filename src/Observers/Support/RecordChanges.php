@@ -110,7 +110,7 @@ final class RecordChanges
      * Return a reference to every row a many-to-many relation links the model
      * to, read from the pivot table, so no scope hides a row.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\BelongsToMany<\Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model>  $relation
+     * @param  \Illuminate\Database\Eloquent\Relations\BelongsToMany<covariant \Illuminate\Database\Eloquent\Model, *, *>  $relation
      * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
      */
     public static function linked(BelongsToMany $relation): array

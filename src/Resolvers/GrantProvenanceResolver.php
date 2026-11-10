@@ -47,6 +47,9 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  * or a policy store, is asked as an everyday check asks it, and each of its
  * grants recorded as `unavailable`.
  *
+ * @phpstan-import-type PolicyGrants from \SineMacula\Laravel\Authorization\Resolvers\GrantResolver
+ * @phpstan-import-type RoleGrants from \SineMacula\Laravel\Authorization\Resolvers\GrantResolver
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -268,7 +271,7 @@ final class GrantProvenanceResolver
      * scope.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $grantee
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  PolicyGrants  $grants
      * @param  bool  $isIdentity
      * @return array<string, list<\SineMacula\Laravel\Authorization\Evaluation\GrantProvenance>>
      *
@@ -326,7 +329,7 @@ final class GrantProvenanceResolver
      * the grantee holds and to their ancestors, each through the path from the
      * role held to the role it is attached to.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $roles
+     * @param  RoleGrants  $roles
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $reference
      * @param  bool  $isIdentity
      * @param  array<string, list<\SineMacula\Laravel\Authorization\Evaluation\GrantProvenance>>  $provenance
@@ -365,7 +368,7 @@ final class GrantProvenanceResolver
      * once, in the order of the keys; a policy whose document cannot be read
      * throws, as `GrantResolver::hydrate()` does.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  PolicyGrants  $grants
      * @param  list<string>  $keys
      * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
      *
@@ -433,7 +436,7 @@ final class GrantProvenanceResolver
      * Return the grants of the relation, with where each was made, read on the
      * write connection.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<covariant \Illuminate\Database\Eloquent\Model, *, *>  $grants
      * @return \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>
      */
     private static function held(MorphToMany $grants): EloquentCollection

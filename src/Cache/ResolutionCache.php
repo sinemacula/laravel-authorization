@@ -116,7 +116,13 @@ final readonly class ResolutionCache
     public function rememberPolicies(object $grantee, \Closure $resolve): array
     {
         /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
-        return $this->remember('policies', $grantee, $resolve, ResolutionCodec::policies(...), ResolutionCodec::encodePolicy(...));
+        return $this->remember(
+            'policies',
+            $grantee,
+            static fn (ResolutionPins $pins): Resolution => ResolutionCodec::policyResolution($resolve($pins)),
+            ResolutionCodec::policies(...),
+            ResolutionCodec::encodePolicy(...),
+        );
     }
 
     /**
@@ -137,7 +143,13 @@ final readonly class ResolutionCache
     public function rememberBoundaries(object $grantee, \Closure $resolve): array
     {
         /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
-        return $this->remember('boundaries', $grantee, $resolve, ResolutionCodec::policies(...), ResolutionCodec::encodePolicy(...));
+        return $this->remember(
+            'boundaries',
+            $grantee,
+            static fn (ResolutionPins $pins): Resolution => ResolutionCodec::policyResolution($resolve($pins)),
+            ResolutionCodec::policies(...),
+            ResolutionCodec::encodePolicy(...),
+        );
     }
 
     /**
@@ -182,7 +194,14 @@ final readonly class ResolutionCache
         $kind = $id === null ? 'resource-type-policies' : 'resource-policies';
 
         /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
-        return $this->remember($kind, new Reference($type, $id ?? '*'), $resolve, ResolutionCodec::policies(...), ResolutionCodec::encodePolicy(...), false);
+        return $this->remember(
+            $kind,
+            new Reference($type, $id ?? '*'),
+            static fn (ResolutionPins $pins): Resolution => ResolutionCodec::policyResolution($resolve($pins)),
+            ResolutionCodec::policies(...),
+            ResolutionCodec::encodePolicy(...),
+            false,
+        );
     }
 
     /**
@@ -251,9 +270,8 @@ final readonly class ResolutionCache
         $writes = [];
 
         foreach ($resolve($pins, $missing) as $id => $resolution) {
-            /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> $policies */
-            $policies   = $this->keep('resource-policies', new Reference($type, (string) $id), $resolution, $pins, $held, ResolutionCodec::encodePolicy(...), $writes);
-            $found[$id] = $policies;
+            $resolved   = ResolutionCodec::policyResolution($resolution);
+            $found[$id] = $this->keep('resource-policies', new Reference($type, (string) $id), $resolved, $pins, $held, ResolutionCodec::encodePolicy(...), $writes);
         }
 
         $this->store?->putMany($writes);
@@ -277,7 +295,14 @@ final readonly class ResolutionCache
     public function rememberGuardrails(\Closure $resolve): array
     {
         /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
-        return $this->remember('guardrails', new Reference('guardrails', '*'), $resolve, ResolutionCodec::policies(...), ResolutionCodec::encodePolicy(...), false);
+        return $this->remember(
+            'guardrails',
+            new Reference('guardrails', '*'),
+            static fn (ResolutionPins $pins): Resolution => ResolutionCodec::policyResolution($resolve($pins)),
+            ResolutionCodec::policies(...),
+            ResolutionCodec::encodePolicy(...),
+            false,
+        );
     }
 
     /**
@@ -451,11 +476,13 @@ final readonly class ResolutionCache
      * resolution finds when nothing it read changed as it ran. The grantee's
      * version is pinned first, unless the entry is not a grantee's.
      *
+     * @template TValue
+     *
      * @param  string  $kind
      * @param  object  $grantee
-     * @param  \Closure(\SineMacula\Laravel\Authorization\Cache\ResolutionPins): \SineMacula\Laravel\Authorization\Cache\Resolution<mixed>  $resolve
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Cache\ResolutionPins): \SineMacula\Laravel\Authorization\Cache\Resolution<TValue>  $resolve
      * @param  \Closure(array<mixed>): list<mixed>  $decode
-     * @param  (\Closure(mixed): mixed)|null  $encode
+     * @param  (\Closure(TValue): mixed)|null  $encode
      * @param  bool  $isGrantee
      * @return list<mixed>
      */
@@ -495,14 +522,19 @@ final readonly class ResolutionCache
      * entry is added to them, under its lifetime, to be written with the rest
      * at once, rather than written now.
      *
+     * @template TValue
+     *
      * @param  string  $kind
      * @param  object  $grantee
-     * @param  \SineMacula\Laravel\Authorization\Cache\Resolution<mixed>  $resolution
+     * @param  \SineMacula\Laravel\Authorization\Cache\Resolution<TValue>  $resolution
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @param  bool  $held
-     * @param  (\Closure(mixed): mixed)|null  $encode
+     * @param  (\Closure(TValue): mixed)|null  $encode
      * @param  array<int, array<string, array<string, mixed>>>|null  $writes
-     * @return list<mixed>
+     *
+     * @param-out ($writes is null ? null : array<int, array<string, array<string, mixed>>>) $writes
+     *
+     * @return list<TValue>
      */
     private function keep(string $kind, object $grantee, Resolution $resolution, ResolutionPins $pins, bool $held, ?\Closure $encode, ?array &$writes = null): array
     {

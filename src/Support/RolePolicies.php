@@ -35,6 +35,8 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * hierarchy that moves while the resolution runs is seen, and the resolution is
  * returned but marked unstable.
  *
+ * @phpstan-import-type RoleGrants from \SineMacula\Laravel\Authorization\Resolvers\GrantResolver
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -71,8 +73,7 @@ final class RolePolicies
      * given columns, so a resolution can tell whether any role's policy can
      * apply.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
-     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $roles
+     * @param  RoleGrants  $roles
      * @param  list<string>  $columns
      * @return \Illuminate\Database\Query\Builder
      */
@@ -99,8 +100,7 @@ final class RolePolicies
      * attachment is to, so it can say which route each policy came through.
      *
      * @param  \Illuminate\Database\Eloquent\Collection<int, covariant \Illuminate\Database\Eloquent\Model>  $held
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
-     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $roles
+     * @param  RoleGrants  $roles
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \SineMacula\Laravel\Authorization\Support\InheritedPolicies
      *
@@ -127,7 +127,7 @@ final class RolePolicies
         $grants = $rows === [] ? [] : $held->map(static fn (Model $role): mixed => self::grantExpiry($role))->all();
 
         return new InheritedPolicies(
-            \array_column($rows, 'policy_id'),
+            \array_values(\array_filter(\array_column($rows, 'policy_id'), \is_string(...))),
             GrantExpiry::nearest(GrantExpiry::nearest(null, \array_column($rows, 'expires_at')), $grants),
             $within !== null,
             $chains,
@@ -203,8 +203,7 @@ final class RolePolicies
      * and their hierarchy afresh, for a resolution whose hierarchy moved while
      * it ran.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
-     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $roles
+     * @param  RoleGrants  $roles
      * @param  list<string>  $keys
      * @return list<string>
      *

@@ -33,7 +33,7 @@ final class GrantRelation extends MorphToMany
      * Constrain an eager load to the grantees' grants, by their keys as
      * strings.
      *
-     * @param  array<int, \Illuminate\Database\Eloquent\Model>  $models
+     * @param  array<int, TDeclaringModel>  $models
      * @return void
      */
     #[\Override]
