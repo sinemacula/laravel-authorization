@@ -23,14 +23,16 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * - A role held gives a route for each permission or policy a role of its chain
  *   carries, through the chain up to that role, and, beside it, the route of
  *   the role granted and, when the carrier is an ancestor, the route by which
- *   the ancestor is held, so the role grant and the ancestor it reaches count
- *   as used with what they carried.
+ *   the ancestor is held, so the role grant and the ancestor it comes through
+ *   count as used with what they carried.
  *
  * Everything is read from the rows the resolution itself reads (see
  * `GrantResolver`), in the scope in place, so the routes follow the same live
  * and scope rules as the names, and cost no query of their own. The routes are
  * those an access review lists for the same grants, by the same key (see
- * `GrantUsageKey`).
+ * `GrantUsageKey`), kept as a route map (see `RouteMap`): each grant and each
+ * route once, a role's grant and the ancestor it comes through referenced by
+ * everything the role carries rather than copied into each.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -67,19 +69,19 @@ final class RouteSources
      * @param  \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>  $held
      * @param  array<string, list<string>>  $chains
      * @param  \SineMacula\Laravel\Authorization\Support\InheritedPermissions  $inherited
-     * @return array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>
+     * @return \SineMacula\Laravel\Authorization\Usage\RouteMap
      */
-    public static function permissions(Model $grantee, EloquentCollection $granted, EloquentCollection $held, array $chains, InheritedPermissions $inherited): array
+    public static function permissions(Model $grantee, EloquentCollection $granted, EloquentCollection $held, array $chains, InheritedPermissions $inherited): RouteMap
     {
         $reference = Reference::of($grantee);
         $type      = Definitions::morph(GrantTarget::PERMISSION);
-        $routes    = [];
+        $map       = new RouteMapBuilder;
 
         foreach ($granted as $permission) {
             $grant = StoredGrant::throughPivot(GrantTarget::PERMISSION, $permission, $reference);
             $name  = $permission->getAttribute('name');
 
-            $routes[\is_scalar($name) ? (string) $name : ''][] = GrantRoute::to(SourceKind::PERMISSION_GRANT, new Reference($type, $grant->grantId), [], $grant);
+            $map->give(\is_scalar($name) ? (string) $name : '', $map->route(GrantRoute::to(SourceKind::PERMISSION_GRANT, new Reference($type, $grant->grantId), [], $grant)));
         }
 
         $carried = [];
@@ -90,7 +92,9 @@ final class RouteSources
             }
         }
 
-        return self::merged($routes, self::throughRoles($reference, $held, $chains, $carried, SourceKind::ROLE_PERMISSION, $type));
+        self::throughRoles($map, $reference, $held, $chains, $carried, SourceKind::ROLE_PERMISSION, $type);
+
+        return $map->build();
     }
 
     /**
@@ -103,9 +107,9 @@ final class RouteSources
      * @param  array<int, array<string, mixed>>  $own
      * @param  \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>|null  $held
      * @param  \SineMacula\Laravel\Authorization\Support\InheritedPolicies  $inherited
-     * @return array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>|null
+     * @return \SineMacula\Laravel\Authorization\Usage\RouteMap|null
      */
-    public static function policies(Model $grantee, array $own, ?EloquentCollection $held, InheritedPolicies $inherited): ?array
+    public static function policies(Model $grantee, array $own, ?EloquentCollection $held, InheritedPolicies $inherited): ?RouteMap
     {
         if ($held !== null && $inherited->chains === null) {
             return null;
@@ -113,71 +117,58 @@ final class RouteSources
 
         $reference = Reference::of($grantee);
         $type      = Definitions::morph(GrantTarget::POLICY);
-        $routes    = [];
+        $map       = new RouteMapBuilder;
 
         foreach ($own as $row) {
             $key   = \is_scalar($row['policy_id'] ?? null) ? (string) $row['policy_id'] : '';
             $grant = StoredGrant::of(GrantTarget::POLICY, $key, $reference, $row);
 
-            $routes[$key][] = GrantRoute::to(SourceKind::POLICY_ATTACHMENT, new Reference($type, $key), [], $grant);
+            $map->give($key, $map->route(GrantRoute::to(SourceKind::POLICY_ATTACHMENT, new Reference($type, $key), [], $grant)));
         }
 
         $carried = \array_map(static fn (array $policies): array => \array_map(static fn (string $policy): array => [$policy, $policy], $policies), $inherited->byRole);
 
-        return self::merged($routes, self::throughRoles($reference, $held ?? new EloquentCollection, $inherited->chains ?? [], $carried, SourceKind::ROLE_POLICY, $type));
+        self::throughRoles($map, $reference, $held ?? new EloquentCollection, $inherited->chains ?? [], $carried, SourceKind::ROLE_POLICY, $type);
+
+        return $map->build();
     }
 
     /**
-     * Return the routes through each role held, by what each carries: for each
+     * Keep the routes through each role held, by what each carries: for each
      * role of its chain and each thing that role carries, the route through the
      * chain up to it, the route of the role granted and, for an ancestor, the
-     * route by which the ancestor is held.
+     * route by which the ancestor is held, the last two kept once each however
+     * much the role carries.
      *
+     * @param  \SineMacula\Laravel\Authorization\Usage\RouteMapBuilder  $map
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>  $held
      * @param  array<string, list<string>>  $chains
      * @param  array<array-key, list<array{string, string}>>  $carried
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind  $kind
      * @param  string  $type
-     * @return array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>
+     * @return void
      */
-    private static function throughRoles(Reference $grantee, EloquentCollection $held, array $chains, array $carried, SourceKind $kind, string $type): array
+    private static function throughRoles(RouteMapBuilder $map, Reference $grantee, EloquentCollection $held, array $chains, array $carried, SourceKind $kind, string $type): void
     {
-        $role   = Definitions::morph(GrantTarget::ROLE);
-        $routes = [];
+        $role = Definitions::morph(GrantTarget::ROLE);
 
         foreach ($held as $model) {
             $grant   = StoredGrant::throughPivot(GrantTarget::ROLE, $model, $grantee);
             $chain   = $chains[$grant->grantId] ?? [];
-            $granted = GrantRoute::to(SourceKind::ROLE_GRANT, new Reference($role, $grant->grantId), [$grant->grantId], $grant);
+            $granted = null;
 
             foreach ($chain as $depth => $carrier) {
                 $path    = \array_slice($chain, 0, $depth + 1);
-                $reached = $depth === 0 ? [] : [GrantRoute::to(SourceKind::ROLE_INHERITED, new Reference($role, $carrier), $path, $grant)];
+                $reached = null;
 
                 foreach ($carried[$carrier] ?? [] as [$name, $id]) {
-                    $routes[$name] = [...$routes[$name] ?? [], GrantRoute::to($kind, new Reference($type, $id), $path, $grant), $granted, ...$reached];
+                    $granted ??= $map->route(GrantRoute::to(SourceKind::ROLE_GRANT, new Reference($role, $grant->grantId), [$grant->grantId], $grant));
+                    $reached ??= $depth === 0 ? $granted : $map->route(GrantRoute::to(SourceKind::ROLE_INHERITED, new Reference($role, $carrier), $path, $grant));
+
+                    $map->give($name, $map->route(GrantRoute::to($kind, new Reference($type, $id), $path, $grant)), $granted, $reached);
                 }
             }
         }
-
-        return $routes;
-    }
-
-    /**
-     * Return the routes of both sets, by what each gives, each set's in its
-     * order.
-     *
-     * @param  array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>  $routes
-     * @param  array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>  $more
-     * @return array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>
-     */
-    private static function merged(array $routes, array $more): array
-    {
-        foreach ($more as $key => $list) {
-            $routes[$key] = [...$routes[$key] ?? [], ...$list];
-        }
-
-        return $routes;
     }
 }

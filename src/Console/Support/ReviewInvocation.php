@@ -26,7 +26,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * `InvalidArgumentException`, whose message names the argument or option and
  * never a value it was given:
  *
- * - The query is `holders`, `holdings`, `expiring` or `granted_by`.
+ * - The query is `holders`, `holdings`, `expiring`, `granted_by` or `unused`.
  * - `holders` takes the role, permission or policy as `{type}:{key}`, its type
  *   `role`, `permission` or `policy`, or the definition's morph type; and
  *   `--direct-only` to list its direct grants alone. `holdings` takes the saved

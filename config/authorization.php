@@ -683,12 +683,13 @@ return [
     | Opt-in tracking of which grants are used, for the unused-grant review
     | (`ReviewQuery::unused()`) and the `usage` field of every review row. Off
     | by default, and free when off: checks do no extra work and nothing is read
-    | or written. When on, every live grant route behind an allowed check, and
-    | every policy whose statement decided a check, is noted in memory, at most
-    | once an `interval` (in seconds, at least 60) per worker, and sent as one
-    | queued job at the end of each request, job or command, or once a worker
-    | holds `batch` observations. `connection` and `queue` name where the job
-    | goes; null takes the defaults. Coverage, the periods tracking was on, is
+    | or written. When on, every live grant route an allowed check rested on,
+    | and every policy whose statement decided a check, is noted in memory, at
+    | most once an `interval` (in seconds, at least 60) per worker, and sent as
+    | queued jobs at the end of each request, job or command, never from within
+    | a check; each job carries at most `batch` observations, about 110 KB at
+    | worst for the default 250. `connection` and `queue` name where the jobs
+    | go; null takes the defaults. Coverage, the periods tracking was on, is
     | kept for `retention` days (`authorization:usage-prune`). Schedule
     | `authorization:usage-heartbeat` once an interval so a quiet site stays
     | covered.
@@ -698,7 +699,7 @@ return [
     'usage' => [
         'enabled'    => (bool) env('AUTHORIZATION_USAGE_ENABLED', false),
         'interval'   => (int) env('AUTHORIZATION_USAGE_INTERVAL', 3600),
-        'batch'      => (int) env('AUTHORIZATION_USAGE_BATCH', 1000),
+        'batch'      => (int) env('AUTHORIZATION_USAGE_BATCH', 250),
         'connection' => env('AUTHORIZATION_USAGE_QUEUE_CONNECTION'),
         'queue'      => env('AUTHORIZATION_USAGE_QUEUE'),
         'retention'  => (int) env('AUTHORIZATION_USAGE_RETENTION_DAYS', 400),

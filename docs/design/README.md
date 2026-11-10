@@ -94,7 +94,10 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   its exact truncation, the `authorization:review.read` admission through `check()` with the reach rule, the refusal
   that discloses nothing, and the explicit trusted path; then the keyset pages and their signed cursors bound to their
   review, readmission on every page and the frozen instant of a live scan, lazy streams, the versioned JSON Lines
-  export under `authorization:review.export`, `authorization:review`, and the review indexes.
+  export under `authorization:review.export`, `authorization:review`, and the review indexes; then opt-in grant usage
+  tracking: what counts and what never counts, the bucketed in-memory notes flushed by queued jobs, the usage and
+  coverage tables, the `GrantUsageStore` contract, the heartbeat and pruning, the coverage rule behind `used`, `unused`
+  and `unknown`, regrants, `unused()` and the `usage` field.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

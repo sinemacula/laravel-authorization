@@ -64,8 +64,8 @@ final class GrantResolverTest extends TestCase
         self::assertSame($plain[0]->value, $routed[0]->value);
         self::assertEquals($plain[1]->value, $routed[1]->value);
         self::assertSame([null, null], [$plain[0]->routes, $plain[1]->routes]);
-        self::assertEqualsCanonicalizing(['posts:read', 'posts:write'], \array_keys($routed[0]->routes ?? []));
-        self::assertCount(2, $routed[1]->routes ?? []);
+        self::assertEqualsCanonicalizing(['posts:read', 'posts:write'], $routed[0]->routes?->names() ?? []);
+        self::assertCount(2, $routed[1]->routes?->names() ?? []);
     }
 
     /**

@@ -62,7 +62,7 @@ final class UsagePruneCommandTest extends TestCase
             'last_observed_at'  => Carbon::parse('2026-01-01 00:00:00')->getTimestamp(),
         ];
 
-        (new DatabaseGrantUsageStore)->record(new UsageBatch([$observation], Carbon::parse('2026-01-01 00:00:00')->getTimestamp()));
+        (new DatabaseGrantUsageStore)->record(UsageBatch::of([$observation], Carbon::parse('2026-01-01 00:00:00')->getTimestamp()));
 
         Carbon::setTestNow('2026-11-09 00:00:00');
 

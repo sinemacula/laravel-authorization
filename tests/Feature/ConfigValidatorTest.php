@@ -385,7 +385,7 @@ final class ConfigValidatorTest extends TestCase
     {
         $config = $this->authorizationConfig();
 
-        self::assertSame(['enabled' => false, 'interval' => 3600, 'batch' => 1000, 'connection' => null, 'queue' => null, 'retention' => 400], $config['usage']);
+        self::assertSame(['enabled' => false, 'interval' => 3600, 'batch' => 250, 'connection' => null, 'queue' => null, 'retention' => 400], $config['usage']);
 
         ConfigValidator::validate($config, $this->app);
 

@@ -21,10 +21,21 @@ use SineMacula\Laravel\Authorization\Database\UtcDateTime;
  * later one, changes nothing: a route's row is written only when the
  * observation is newer than what it keeps, the grant's creation first, then the
  * bucket, each compared in the update itself, so two workers writing the same
- * route at once keep the newer. Coverage is extended under a row lock on the
- * latest period: a batch at or before that period's end leaves it as it is; one
- * within two intervals of it extends it; any later one opens a new period at
- * the batch's instant. Every read is on the write connection.
+ * route at once keep the newer. The routes are written in the order of their
+ * keys, a hundred to a transaction, the rows missing inserted before any is
+ * rewritten and no row read under a lock, so two workers writing the same
+ * routes take their locks in the same order. A transaction that deadlocks or
+ * waits too long for a lock is tried again, three times in all; one that still
+ * fails throws, and the coverage is not extended.
+ *
+ * Coverage is extended under a row lock on the latest period: a batch at or
+ * before that period's end leaves it as it is; one within two intervals of it
+ * extends it; any later one opens a new period at the batch's instant. A batch
+ * that names observations dropped before it first cuts every period back to two
+ * intervals and a second before the earliest bucket dropped, so with the two
+ * intervals a review allows past a period's end the time lost stays uncovered
+ * and its routes read `unknown`; the batch then opens a new period. Every read
+ * is on the write connection.
  *
  * @phpstan-import-type Observation from \SineMacula\Laravel\Authorization\Usage\UsageBatch
  *
@@ -33,8 +44,11 @@ use SineMacula\Laravel\Authorization\Database\UtcDateTime;
  */
 final class DatabaseGrantUsageStore implements GrantUsageStore
 {
-    /** @var int How many routes one statement reads or writes at most. */
-    private const int CHUNK = 500;
+    /** @var int How many routes one statement reads, or one transaction writes, at most. */
+    private const int CHUNK = 100;
+
+    /** @var int How many times a transaction is tried, in all, when it deadlocks or waits too long for a lock. */
+    private const int ATTEMPTS = 3;
 
     /** @var string The format every instant is stored in, in UTC. */
     private const string FORMAT = 'Y-m-d H:i:s';
@@ -51,11 +65,11 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
     #[\Override]
     public function record(UsageBatch $batch): void
     {
-        foreach (\array_chunk(self::newestOf($batch->observations), self::CHUNK) as $chunk) {
+        foreach (\array_chunk(self::newestOf($batch->observations()), self::CHUNK) as $chunk) {
             self::upsert($chunk);
         }
 
-        self::extend($batch->at);
+        self::extend($batch->at, $batch->lostSince);
     }
 
     /**
@@ -69,13 +83,11 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
     {
         $found = [];
 
-        foreach (\array_chunk(\array_values(\array_unique($keys)), self::CHUNK) as $chunk) {
+        foreach (\array_chunk($keys, self::CHUNK) as $chunk) {
             foreach (self::usage()->whereIn('grant_key', $chunk)->get(['grant_key', 'grant_created_at', 'last_observed_at']) as $row) {
-                $columns  = (array) $row;
-                $created  = self::instant($columns['grant_created_at'] ?? null);
-                $observed = self::instant($columns['last_observed_at'] ?? null) ?? CarbonImmutable::createFromTimestampUTC(0);
+                [$key, $created, $observed] = self::keptIn($row);
 
-                $found[(string) self::text($columns['grant_key'] ?? null)] = new ObservedUse($observed, $created);
+                $found[$key] = new ObservedUse($observed, $created);
             }
         }
 
@@ -103,14 +115,8 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
 
         foreach ($rows as $row) {
             $columns = (array) $row;
-            $start   = self::instant($columns['covered_from'] ?? null);
-            $end     = self::instant($columns['covered_until'] ?? null);
 
-            if ($start === null || $end === null) {
-                continue;
-            }
-
-            $periods[] = new CoveragePeriod($start, $end);
+            $periods[] = new CoveragePeriod(self::required($columns['covered_from'] ?? null), self::required($columns['covered_until'] ?? null));
         }
 
         return $periods;
@@ -118,10 +124,11 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
 
     /**
      * Return the newest observation of each route among the observations, as
-     * the store compares them: the grant's creation first, then the bucket.
+     * the store compares them: the grant's creation first, then the bucket, in
+     * the order of their keys.
      *
      * @param  list<Observation>  $observations
-     * @return list<Observation>
+     * @return array<string, Observation>
      */
     private static function newestOf(array $observations): array
     {
@@ -137,14 +144,18 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
             $newest[$observation['grant_key']] = $observation;
         }
 
-        return \array_values($newest);
+        \ksort($newest, \SORT_STRING);
+
+        return $newest;
     }
 
     /**
-     * Write each observation of the chunk whose route has no row, and rewrite
-     * the row of each whose observation is newer than it, in one transaction. A
-     * route a concurrent writer inserted first is then rewritten when the
-     * observation is newer.
+     * Write each observation of the chunk whose route has no row, then rewrite
+     * the row of each whose observation is newer than what it keeps, in one
+     * transaction, tried again when it deadlocks or waits too long for a lock.
+     * What the rows keep is read first without a lock, so a route a concurrent
+     * writer inserted first is rewritten too, when the observation is newer
+     * than what it wrote, and the update itself compares them.
      *
      * @param  list<Observation>  $chunk
      * @return void
@@ -155,23 +166,20 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
     {
         AuthorizationConnection::connection()->transaction(static function () use ($chunk): void {
             $kept    = self::keptOf(\array_column($chunk, 'grant_key'));
-            $missing = \array_values(\array_filter($chunk, static fn (array $observation): bool => !isset($kept[$observation['grant_key']])));
             $isNewer = static fn (array $observation): bool => isset($kept[$observation['grant_key']]) && self::isNewer($observation, ...$kept[$observation['grant_key']]);
+            $missing = \array_filter($chunk, static fn (array $observation): bool => !isset($kept[$observation['grant_key']]));
             $newer   = \array_filter($chunk, $isNewer);
-
-            // A route a concurrent writer inserted first is rewritten too, when
-            // the observation is newer than what it wrote.
             $isRaced = $missing !== [] && self::usage()->insertOrIgnore(\array_map(self::row(...), $missing)) !== \count($missing);
 
-            foreach ([...$newer, ...$isRaced ? $missing : []] as $observation) {
+            foreach ($isRaced ? $chunk : $newer as $observation) {
                 self::rewrite($observation);
             }
-        });
+        }, self::ATTEMPTS);
     }
 
     /**
-     * Return what the rows of the routes with the keys keep, under a row lock,
-     * each as the grant's creation and the bucket, by the route's key.
+     * Return what the rows of the routes with the keys keep, each as the
+     * grant's creation and the bucket, by the route's key.
      *
      * @param  list<string>  $keys
      * @return array<string, array{int|null, int}>
@@ -180,15 +188,28 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
     {
         $kept = [];
 
-        foreach (self::usage()->whereIn('grant_key', $keys)->lockForUpdate()->get(['grant_key', 'grant_created_at', 'last_observed_at']) as $row) {
-            $columns  = (array) $row;
-            $created  = self::instant($columns['grant_created_at'] ?? null)?->getTimestamp();
-            $observed = self::instant($columns['last_observed_at'] ?? null)?->getTimestamp() ?? 0;
+        foreach (self::usage()->whereIn('grant_key', $keys)->get(['grant_key', 'grant_created_at', 'last_observed_at']) as $row) {
+            [$key, $created, $observed] = self::keptIn($row);
 
-            $kept[(string) self::text($columns['grant_key'] ?? null)] = [$created, $observed];
+            $kept[$key] = [$created?->getTimestamp(), $observed->getTimestamp()];
         }
 
         return $kept;
+    }
+
+    /**
+     * Return the route's key, the grant's creation and the bucket a usage row
+     * keeps.
+     *
+     * @param  object  $row
+     * @return array{string, \Carbon\CarbonImmutable|null, \Carbon\CarbonImmutable}
+     */
+    private static function keptIn(object $row): array
+    {
+        $columns = (array) $row;
+        $key     = $columns['grant_key'] ?? null;
+
+        return [\is_scalar($key) ? (string) $key : '', self::instant($columns['grant_created_at'] ?? null), self::required($columns['last_observed_at'] ?? null)];
     }
 
     /**
@@ -242,29 +263,71 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
 
     /**
      * Extend the coverage to the instant, under a row lock on the latest
-     * period: leave it when it already reaches the instant, extend it when it
+     * period, in a transaction tried again when it deadlocks or waits too long
+     * for a lock: first, when observations were dropped since the bucket
+     * starting at `lostSince`, cut the coverage back before it; then leave the
+     * latest period when it already reaches the instant, extend it when it
      * ended within two intervals of it, or open a new period at the instant.
      *
      * @param  int  $at
+     * @param  int|null  $lostSince
      * @return void
      *
      * @throws \Throwable
      */
-    private static function extend(int $at): void
+    private static function extend(int $at, ?int $lostSince): void
     {
         $gap = 2 * UsageTracking::interval();
 
-        AuthorizationConnection::connection()->transaction(static function () use ($at, $gap): void {
+        AuthorizationConnection::connection()->transaction(static function () use ($at, $lostSince, $gap): void {
+            if ($lostSince !== null) {
+                self::cut($lostSince - $gap - 1, $at);
+            }
+
             $last  = self::periods()->orderByDesc('covered_until')->orderByDesc('id')->lockForUpdate()->first(['id', 'covered_until']);
-            $id    = $last === null ? null : ((array) $last)['id'] ?? null;
-            $until = $last === null ? null : self::instant(((array) $last)['covered_until'] ?? null)?->getTimestamp();
+            $until = $last === null ? null : self::required(((array) $last)['covered_until'] ?? null)->getTimestamp();
 
             match (true) {
-                $until !== null && $until >= $at        => null,
-                $until !== null && $at - $until <= $gap => self::periods()->where('id', $id)->update(['covered_until' => self::stored($at)]),
-                default                                 => self::periods()->insert(['covered_from' => self::stored($at), 'covered_until' => self::stored($at)]),
+                $until === null || $at - $until > $gap => self::periods()->insert(['covered_from' => self::stored($at), 'covered_until' => self::stored($at)]),
+                $until < $at                           => self::periods()->where('id', ((array) $last)['id'] ?? null)->update(['covered_until' => self::stored($at)]),
+                default                                => null,
             };
-        });
+        }, self::ATTEMPTS);
+    }
+
+    /**
+     * Remove the coverage between the instants: a period that starts before the
+     * cut is ended there, one that ends after the instant then starts there,
+     * and one wholly between them is removed.
+     *
+     * @param  int  $cut
+     * @param  int  $at
+     * @return void
+     */
+    private static function cut(int $cut, int $at): void
+    {
+        $overlapping = self::periods()
+            ->where('covered_until', '>', self::stored($cut))
+            ->where('covered_from', '<', self::stored($at))
+            ->lockForUpdate()
+            ->get(['id', 'covered_from', 'covered_until']);
+
+        foreach ($overlapping as $period) {
+            $columns = (array) $period;
+            $from    = self::required($columns['covered_from'] ?? null)->getTimestamp();
+            $until   = self::required($columns['covered_until'] ?? null)->getTimestamp();
+            $row     = self::periods()->where('id', $columns['id'] ?? null);
+
+            if ($from < $cut && $until > $at) {
+                self::periods()->insert(['covered_from' => self::stored($at), 'covered_until' => self::stored($until)]);
+            }
+
+            match (true) {
+                $from < $cut => $row->update(['covered_until' => self::stored($cut)]),
+                $until > $at => $row->update(['covered_from' => self::stored($at)]),
+                default      => $row->delete(),
+            };
+        }
     }
 
     /**
@@ -315,14 +378,17 @@ final class DatabaseGrantUsageStore implements GrantUsageStore
     }
 
     /**
-     * Return the value as a string, or null when it is none.
+     * Return the stored UTC wall-clock time of a column that is never null as
+     * an instant.
      *
      * @param  mixed  $value
-     * @return string|null
+     * @return \Carbon\CarbonImmutable
+     *
+     * @throws \UnexpectedValueException
      */
-    private static function text(mixed $value): ?string
+    private static function required(mixed $value): CarbonImmutable
     {
-        return \is_scalar($value) ? (string) $value : null;
+        return self::instant($value) ?? throw new \UnexpectedValueException('A grant usage table holds no time where one is required.');
     }
 
     /**

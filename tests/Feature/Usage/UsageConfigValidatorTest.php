@@ -33,7 +33,8 @@ final class UsageConfigValidatorTest extends TestCase
         UsageConfigValidator::validate(['enabled' => false, 'interval' => 60, 'batch' => 1, 'retention' => 1, 'connection' => null, 'queue' => 'usage']);
 
         self::assertSame(60, UsageConfigValidator::whole('interval', 60));
-        self::assertSame(1, UsageConfigValidator::whole('unknown', 1));
+        self::assertSame(1, UsageConfigValidator::whole('batch', 1));
+        self::assertSame(1, UsageConfigValidator::whole('retention', 1));
         self::assertNull(UsageConfigValidator::name('queue', null));
         self::assertTrue(UsageConfigValidator::enabled(true));
     }
@@ -51,10 +52,18 @@ final class UsageConfigValidatorTest extends TestCase
             'authorization.usage',
             'unknown setting \'enable\'; expected one of enabled, interval, batch, connection, queue, retention.',
         ];
+        yield 'an unknown setting after a known one' => [
+            ['enabled' => true, 'enable' => 1],
+            'authorization.usage',
+            'unknown setting \'enable\'; expected one of enabled, interval, batch, connection, queue, retention.',
+        ];
         yield 'enabled that is no boolean' => [['enabled' => 1], 'authorization.usage.enabled', 'expected a boolean, got 1 (int).'];
         yield 'an interval under a minute' => [['interval' => 59], 'authorization.usage.interval', 'expected a whole number of at least 60, got 59 (int).'];
         yield 'an interval that is no number' => [['interval' => '3600'], 'authorization.usage.interval', 'expected a whole number of at least 60, got "3600" (string).'];
         yield 'an empty batch' => [['batch' => 0], 'authorization.usage.batch', 'expected a whole number of at least 1, got 0 (int).'];
+        yield 'an interval with a slash' => [['interval' => 'a/b'], 'authorization.usage.interval', 'expected a whole number of at least 60, got "a/b" (string).'];
+        yield 'an interval of invalid text' => [['interval' => "\xB1"], 'authorization.usage.interval', 'expected a whole number of at least 60, got "\ufffd" (string).'];
+        yield 'no days kept' => [['retention' => 0], 'authorization.usage.retention', 'expected a whole number of at least 1, got 0 (int).'];
         yield 'no retention' => [['retention' => null], 'authorization.usage.retention', 'expected a whole number of at least 1, got null (null).'];
         yield 'an empty connection' => [['connection' => ''], 'authorization.usage.connection', 'expected a non-empty string or null, got "" (string).'];
         yield 'a queue that is no string' => [['queue' => ['usage']], 'authorization.usage.queue', 'expected a non-empty string or null, got array (array).'];

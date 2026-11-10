@@ -32,6 +32,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceScope;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 use SineMacula\Laravel\Authorization\Usage\DecisionRoutes;
 use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
+use SineMacula\Laravel\Authorization\Usage\WeighedGrants;
 
 /**
  * Decides a check for the authorization manager, stage by stage (AUTHZ-7.1).
@@ -57,13 +58,17 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
  * before explanations.
  *
  * A pipeline `tracking()` returns notes, while grant usage is tracked, the
- * grant routes each decision it makes used (N100, see `Usage\DecisionRoutes`),
- * read in the scope the decision was made in from what the resolution cache
- * keeps, once its administration stage, if any, is passed. The manager hands
- * its everyday checks to one; a preview, an explanation, a listing of
- * permissions, a scoped query and a review's admission are never tracked, and
- * neither is a further check an administration stage makes. Every other
- * pipeline notes nothing, and costs what it did before usage tracking.
+ * grant routes each decision it makes rested on (N100, see
+ * `Usage\DecisionRoutes`): the check notes which grantee's permission matched
+ * as it asks for it (see `Usage\WeighedGrants`), and the routes are read in the
+ * scope the decision was made in from what the resolution cache keeps, then
+ * noted once its administration stage, if any, is passed. Neither step reads
+ * anything the check did not, and neither ever throws into it: a failure is
+ * written to the log channel and the decision returned as it was made. The
+ * manager hands its everyday checks to one; a preview, an explanation, a
+ * listing of permissions, a scoped query and a review's admission are never
+ * tracked, and neither is a further check an administration stage makes. Every
+ * other pipeline notes nothing, and costs what it did before usage tracking.
  *
  * A bulk check decides each of its checks through `decide()` too, exactly as a
  * single check is decided; `prepare()` only reads ahead, in bulk, what those
@@ -325,7 +330,9 @@ final class DecisionPipeline
      *
      * Given a recorder, the check is explained: the policies and the permission
      * held are resolved with where each came from, noted with the recorder, and
-     * the context records each condition test (N89).
+     * the context records each condition test (N89). Given what a tracked check
+     * weighed, the grantee whose permission matched is noted on it, as the
+     * check asks for the permission (see `Usage\WeighedGrants`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -333,6 +340,7 @@ final class DecisionPipeline
      * @param  array<string, mixed>  $context
      * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
      * @param  \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder|null  $evidence
+     * @param  \SineMacula\Laravel\Authorization\Usage\WeighedGrants|null  $weighed
      * @return \SineMacula\Laravel\Authorization\Evaluation\CheckSources
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
@@ -346,6 +354,7 @@ final class DecisionPipeline
         array $context,
         ?ResourceAttributeBatch $attributes = null,
         ?EvidenceRecorder $evidence = null,
+        ?WeighedGrants $weighed = null,
     ): CheckSources {
         // The subject of a preview's use is admitted where its sources are
         // gathered, before any is read (see `Preview\PreviewAdmission`).
@@ -364,7 +373,7 @@ final class DecisionPipeline
             ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
 
         $permission = $evidence === null
-            ? static fn (): ?string => SubjectGrants::permissionFor($subject, $action)
+            ? static fn (): ?string => SubjectGrants::permissionFor($subject, $action, $weighed)
             : static fn (): ?string => $evidence->notePermission(GrantProvenanceResolver::permissionFor($subject, $action));
         $session = $this->isSessionless
             ? SessionCaps::of(null, $this->caps)
@@ -530,24 +539,30 @@ final class DecisionPipeline
         ?ResourceAttributeBatch $attributes,
         ?Reference $from = null,
     ): Decision {
-        $decision = $this->decideAlone($subject, $action, $resource, $context, $attributes, $this->evidence);
-
         $source = $resource?->source;
 
         // A review's admission is introspection, never use (N94), and a
-        // preview's admission is part of the preview (N100).
+        // preview's admission is part of the preview (N100), so neither is
+        // tracked.
+        $weighed = $this->usage === null || $source instanceof ReviewResource || $source instanceof PreviewResource
+            ? null
+            : new WeighedGrants($this->policyOverride === null && $this->policyResolver instanceof DefaultPolicyResolver, $this->policyOverride === null);
+
+        $decision = $this->decideAlone($subject, $action, $resource, $context, $attributes, $this->evidence, $weighed);
+
         if ($source instanceof ReviewResource) {
             return ReviewAdmission::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from));
         }
 
         // The routes are read before the administration stage, whose further
-        // checks may move the scope, and noted only when it keeps the verdict.
-        $used  = $this->usage === null || $source instanceof PreviewResource ? [] : DecisionRoutes::of($subject, $action, $decision, $this->policyOverride !== null);
+        // checks may move the scope, and noted only when it keeps the verdict;
+        // neither step ever throws into the check.
+        $used  = $weighed === null ? [] : DecisionRoutes::of($subject, $decision, $weighed);
         $final = $source instanceof OperationResource
             ? OperationConstraints::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from))
             : $decision;
 
-        if ($this->usage !== null && $final->isAllowed() === $decision->isAllowed()) {
+        if ($used !== [] && $final->isAllowed() === $decision->isAllowed()) {
             $this->usage->observe($used);
         }
 
@@ -597,8 +612,9 @@ final class DecisionPipeline
      * Decide the admitted action from every source, up to the allow, in the
      * scope in place, without the administration stage: a document that cannot
      * be read denies it as an invalid policy. Given a recorder, the check is
-     * explained (see `sources()`); a further check the administration stage
-     * makes never is.
+     * explained (see `sources()`), and given what a tracked check weighed, the
+     * grants it weighed are noted on it; a further check the administration
+     * stage makes is never either.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -606,6 +622,7 @@ final class DecisionPipeline
      * @param  array<string, mixed>  $context
      * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
      * @param  \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder|null  $evidence
+     * @param  \SineMacula\Laravel\Authorization\Usage\WeighedGrants|null  $weighed
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
     private function decideAlone(
@@ -615,9 +632,10 @@ final class DecisionPipeline
         array $context,
         ?ResourceAttributeBatch $attributes,
         ?EvidenceRecorder $evidence = null,
+        ?WeighedGrants $weighed = null,
     ): Decision {
         try {
-            $sources = $this->sources($subject, $action, $resource, $context, $attributes, $evidence);
+            $sources = $this->sources($subject, $action, $resource, $context, $attributes, $evidence, $weighed);
         } catch (InvalidPolicyDocumentException) {
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }

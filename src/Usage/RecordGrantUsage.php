@@ -14,7 +14,8 @@ use SineMacula\Laravel\Authorization\Contracts\GrantUsageStore;
  * `authorization.usage` names. Recording is monotonic and idempotent (see
  * `Contracts\GrantUsageStore`), so a job retried, delivered twice or run after
  * a later one changes nothing it should not; a job that fails or waits never
- * reaches a decision, which was made and returned before it was sent.
+ * reaches a decision, which was made and returned before it was sent, since
+ * jobs are sent only as a request, command or queued job ends.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

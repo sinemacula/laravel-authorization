@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Usage\RouteMap;
 
 /**
  * Two-tier cache (in-memory memo plus optional persistent store) for what a
@@ -293,14 +294,15 @@ final readonly class ResolutionCache
      *
      * @param  string  $kind
      * @param  object  $grantee
-     * @return array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>|null
+     * @return \SineMacula\Laravel\Authorization\Usage\RouteMap|null
      *
      * @phpstan-impure
      */
-    public function routesOf(string $kind, object $grantee): ?array
+    public function routesOf(string $kind, object $grantee): ?RouteMap
     {
-        /** @var array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>|null */
-        return $this->memo->get(self::ROUTES . ResolutionCodec::kindOf($kind, $this->isTrackingUsage) . ':' . PrincipalCacheKey::for($grantee))[0] ?? null;
+        $routes = $this->memo->get(self::ROUTES . ResolutionCodec::kindOf($kind, $this->isTrackingUsage) . ':' . PrincipalCacheKey::for($grantee))[0] ?? null;
+
+        return $routes instanceof RouteMap ? $routes : null;
     }
 
     /**

@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use SineMacula\Laravel\Authorization\Usage\GrantRoute;
+use SineMacula\Laravel\Authorization\Usage\RouteMap;
 use SineMacula\Laravel\Authorization\Usage\StoredGrant;
 
 /**
@@ -44,9 +44,9 @@ final class ResolutionTest extends TestCase
      */
     public function testRoutesAreKeptOnlyWhenGiven(): void
     {
-        $route = new GrantRoute('k', new StoredGrant(GrantTarget::PERMISSION, 'p', new Reference('user', 'u'), null, null, null, null));
+        $routes = new RouteMap([new StoredGrant(GrantTarget::PERMISSION, 'p', new Reference('user', 'u'), null, null, null, null)], [['k', 0]], ['posts:read' => [0]]);
 
         self::assertNull((new Resolution(['posts:read']))->routes);
-        self::assertSame(['posts:read' => [$route]], (new Resolution(['posts:read'], null, true, ['posts:read' => [$route]]))->routes);
+        self::assertSame($routes, (new Resolution(['posts:read'], null, true, $routes))->routes);
     }
 }

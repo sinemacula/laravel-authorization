@@ -9,7 +9,6 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Usage\GrantRoute;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Feature\Stubs\RecordingLogger;
 use Tests\TestCase;
@@ -71,8 +70,9 @@ final class ResolutionCacheTest extends TestCase
         $ann->getPolicies();
 
         self::assertSame(0, $queries);
-        self::assertSame(self::keys($permissions), self::keys($second->routesOf('permissions', $ann) ?? []));
-        self::assertSame(self::keys($policies), self::keys($second->routesOf('policies', $ann) ?? []));
+        self::assertEquals($permissions, $second->routesOf('permissions', $ann));
+        self::assertEquals($policies, $second->routesOf('policies', $ann));
+        self::assertCount(1, $permissions->routesFor('posts:read'));
         self::assertNull($second->routesOf('roles', $ann));
     }
 
@@ -105,7 +105,7 @@ final class ResolutionCacheTest extends TestCase
 
         self::assertSame(['posts:read'], $ann->getPermissions());
         self::assertGreaterThan(0, $queries);
-        self::assertCount(1, $tracked->routesOf('permissions', $ann)['posts:read'] ?? []);
+        self::assertCount(1, $tracked->routesOf('permissions', $ann)?->routesFor('posts:read') ?? []);
     }
 
     /**
@@ -133,7 +133,7 @@ final class ResolutionCacheTest extends TestCase
                 continue;
             }
 
-            $store->put($key, [...$entry, 'routes' => ['posts:read' => 'corrupt']], 300);
+            $store->put($key, [...$entry, 'routes' => ['grants' => [], 'routes' => [], 'index' => ['posts:read' => 'corrupt']]], 300);
         }
 
         $logger = new RecordingLogger;
@@ -143,7 +143,7 @@ final class ResolutionCacheTest extends TestCase
         $cache = $this->cache($store, true);
 
         self::assertSame(['posts:read'], $ann->getPermissions());
-        self::assertCount(1, $cache->routesOf('permissions', $ann)['posts:read'] ?? []);
+        self::assertCount(1, $cache->routesOf('permissions', $ann)?->routesFor('posts:read') ?? []);
         self::assertStringContainsString('discarding corrupt resolution-cache entry', $logger->messages()[0] ?? '');
     }
 
@@ -162,17 +162,6 @@ final class ResolutionCacheTest extends TestCase
         $this->app?->instance(ResolutionCache::class, $cache);
 
         return $cache;
-    }
-
-    /**
-     * Return the keys of the routes, by what each gives.
-     *
-     * @param  array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>  $routes
-     * @return array<string, list<string>>
-     */
-    private static function keys(array $routes): array
-    {
-        return \array_map(static fn (array $list): array => \array_map(static fn (GrantRoute $route): string => $route->key, $list), $routes);
     }
 
     /**

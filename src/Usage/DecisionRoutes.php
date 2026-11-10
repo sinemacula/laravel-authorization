@@ -5,32 +5,40 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Usage;
 
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
 /**
- * The grant routes a decision used (N100), found from what the resolution cache
- * keeps beside the subject's grants (see `ResolutionCache::routesOf()`), in the
- * scope the decision was made in, so a warm check finds them with no query.
+ * The grant routes a decision rested on (N100), found from what the resolution
+ * cache keeps beside the grants it weighed (see `ResolutionCache::routesOf()`),
+ * in the scope the decision was made in, by the rules forward resolution
+ * applied, so a check finds them with no query and nothing is recorded that the
+ * decision did not weigh.
  *
- * - An allowed decision a permission held allowed used every live route behind
- *   a permission that covers the action, the subject's and its identity's when
- *   the identity grants to it, redundant ones included: the direct grant, each
- *   role grant that carried it, with the ancestor it reached, and the
- *   identity's grant. The identity's permissions are resolved for it when the
- *   check did not need them, through the cache, so a warm check reads none.
- * - A decision one or more statements made, allow or deny, used each policy
- *   those statements belong to, by every route that attaches it to the subject
- *   or its identity, a policy that only denies included. A policy a policy
- *   store, a resource or a `withPolicies()` override supplied, a guardrail and
- *   a boundary are no grant, and use none.
+ * - An allowed decision a permission held allowed rested on every live route
+ *   behind that permission, redundant ones included, of the grantee whose
+ *   permission matched (see `WeighedGrants`): the subject's own, or its
+ *   granting identity's only when the subject's did not match, as
+ *   `SubjectGrants::permissionFor()` reads them. That is the direct grant, each
+ *   role grant that carried it, with the ancestor it reached.
+ * - A decision one or more statements made, allow or deny, rested on each
+ *   policy those statements belong to, by every route that attaches it to the
+ *   subject, when the check read the subject's attachments through the
+ *   package's policy resolver, or to its identity. An identity of the other
+ *   kind gives the check its deny statements alone (see
+ *   `SubjectGrants::identityPolicies()`), so its attachments count only for a
+ *   decision its denies made. A policy that only denies counts too. A policy a
+ *   policy store, a resource or a `withPolicies()` override supplied, a
+ *   guardrail and a boundary are no grant, and use none.
  *
  * A grantee whose grants the package does not resolve, a custom
  * `getPermissions()` or policy resolver say, keeps no routes, so its decisions
- * use none.
+ * use none. Finding the routes never throws into the check: a failure is
+ * written to the log channel and no route is used.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,114 +48,96 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 final class DecisionRoutes
 {
     /**
-     * Return the routes the decision about the subject on the action used, in
-     * the scope it was made in; none when the policies were overridden, for
-     * those of its statements.
+     * Return the routes the decision about the subject rested on, of the grants
+     * the check weighed, in the scope it was made in; none when they cannot be
+     * found.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
-     * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
-     * @param  bool  $isOverridden
+     * @param  \SineMacula\Laravel\Authorization\Usage\WeighedGrants  $weighed
      * @return list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>
      */
-    public static function of(Subject $subject, string $action, Decision $decision, bool $isOverridden): array
+    public static function of(Subject $subject, Decision $decision, WeighedGrants $weighed): array
     {
-        $cache = ResolutionCache::instance();
+        return rescue(static function () use ($subject, $decision, $weighed): array {
+            $cache = ResolutionCache::instance();
 
-        if ($cache === null) {
+            return $cache === null ? [] : [...self::permissionsOf($cache, $decision, $weighed), ...self::policiesOf($cache, $subject, $decision, $weighed)];
+        }, static function (\Throwable $exception): array {
+            AuthorizationLog::warning('Authorization: the grants a check used could not be found — ' . $exception->getMessage(), [
+                'reason' => $exception->getMessage(),
+            ]);
+
             return [];
-        }
-
-        $policies = $isOverridden ? [] : self::policiesOf($cache, $subject, $decision);
-
-        return [...self::permissionsOf($cache, $subject, $action, $decision), ...$policies];
+        }, false);
     }
 
     /**
-     * Return the routes behind every permission held that covers the action,
-     * when a permission held allowed the decision; none otherwise.
+     * Return the routes behind the permission held that allowed the decision,
+     * of the grantee whose permission matched; none otherwise.
      *
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionCache  $cache
-     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
-     * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
+     * @param  \SineMacula\Laravel\Authorization\Usage\WeighedGrants  $weighed
      * @return list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>
      */
-    private static function permissionsOf(ResolutionCache $cache, Subject $subject, string $action, Decision $decision): array
+    private static function permissionsOf(ResolutionCache $cache, Decision $decision, WeighedGrants $weighed): array
     {
-        $last = $decision->trace === [] ? null : $decision->trace[\array_key_last($decision->trace)];
+        $last       = $decision->trace === [] ? null : $decision->trace[\array_key_last($decision->trace)];
+        $permission = $decision->isAllowed() ? $last?->permission : null;
+        $grantee    = $permission === null ? null : $weighed->granteeOf($permission);
 
-        if (!$decision->isAllowed() || $last?->permission === null) {
-            return [];
-        }
-
-        $routes = [];
-
-        foreach ([$subject->subject, SubjectGrants::grantingIdentity($subject)] as $grantee) {
-            foreach (self::permissionRoutesOf($cache, $grantee) as $name => $list) {
-                if ($name !== $action && !\fnmatch($name, $action, \FNM_NOESCAPE)) {
-                    continue;
-                }
-
-                \array_push($routes, ...$list);
-            }
-        }
-
-        return $routes;
-    }
-
-    /**
-     * Return the routes behind each permission the grantee holds, resolving its
-     * permissions through the cache when it has not been yet; none for a
-     * grantee that holds no permissions, or whose resolution cannot say.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionCache  $cache
-     * @param  object|null  $grantee
-     * @return array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>
-     */
-    private static function permissionRoutesOf(ResolutionCache $cache, ?object $grantee): array
-    {
-        if (!$grantee instanceof SupportsPermissions) {
-            return [];
-        }
-
-        $routes = $cache->routesOf('permissions', $grantee);
-
-        if ($routes === null) {
-            $grantee->getPermissions();
-        }
-
-        return $routes ?? $cache->routesOf('permissions', $grantee) ?? [];
+        return $permission === null || $grantee === null ? [] : $cache->routesOf('permissions', $grantee)?->routesFor($permission) ?? [];
     }
 
     /**
      * Return the routes behind every policy one of the decision's statements
-     * belongs to, attached to the subject or to its identity.
+     * belongs to, attached to the subject or to its identity, as far as the
+     * check weighed each.
      *
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionCache  $cache
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
+     * @param  \SineMacula\Laravel\Authorization\Usage\WeighedGrants  $weighed
      * @return list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>
      */
-    private static function policiesOf(ResolutionCache $cache, Subject $subject, Decision $decision): array
+    private static function policiesOf(ResolutionCache $cache, Subject $subject, Decision $decision, WeighedGrants $weighed): array
     {
-        $keys = self::policyKeysOf($decision);
-
-        if ($keys === []) {
-            return [];
-        }
-
+        $keys   = self::policyKeysOf($decision);
         $routes = [];
 
-        foreach ($subject->identity === $subject->subject ? [$subject->subject] : [$subject->subject, $subject->identity] as $grantee) {
-            $attached = \is_object($grantee) ? $cache->routesOf('policies', $grantee) ?? [] : [];
+        foreach ($keys === [] ? [] : self::policyGranteesOf($subject, $decision, $weighed) as $grantee) {
+            $attached = $cache->routesOf('policies', $grantee);
 
             foreach ($keys as $key) {
-                \array_push($routes, ...$attached[$key] ?? []);
+                \array_push($routes, ...$attached?->routesFor($key) ?? []);
             }
         }
 
         return $routes;
+    }
+
+    /**
+     * Return the grantees whose attached policies the decision's statements may
+     * belong to: the subject, when the check read its attachments through the
+     * package's policy resolver, which reads an identity's alone, and its
+     * identity when that is another model whose attachments the check read, one
+     * of the other kind only for a decision its denies made.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
+     * @param  \SineMacula\Laravel\Authorization\Usage\WeighedGrants  $weighed
+     * @return list<object>
+     */
+    private static function policyGranteesOf(Subject $subject, Decision $decision, WeighedGrants $weighed): array
+    {
+        $identity   = $subject->identity === $subject->subject ? null : $subject->identity;
+        $isWeighed  = $identity !== null && $weighed->areIdentityPoliciesWeighed;
+        $isIdentity = $isWeighed         && (SubjectGrants::grantingIdentity($subject) !== null || $decision->stage === DecisionStage::DENY);
+
+        $isSubject = $weighed->areSubjectPoliciesWeighed && $subject->subject instanceof AuthorizableIdentity;
+
+        return \array_values(\array_filter([$isSubject ? $subject->subject : null, $isIdentity ? $identity : null], \is_object(...)));
     }
 
     /**

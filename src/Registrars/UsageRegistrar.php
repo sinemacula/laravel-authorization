@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Registrars;
 
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Queue\Events\JobExceptionOccurred;
@@ -22,10 +23,17 @@ use SineMacula\Laravel\Authorization\Usage\UsageTracking;
  * long as the worker runs, so its noting of each route once a bucket holds
  * across the requests and jobs it serves.
  *
- * `boot()`, only while tracking is on, has the recorder flush what it noted as
- * the application terminates, at the end of each request and command, and after
- * each queued job, processed or failed; with tracking off it registers nothing,
- * so nothing listens and nothing runs.
+ * `boot()`, only while tracking is on, has each recorder flush what it noted as
+ * the container that resolved it terminates, at the end of each request and
+ * command, and after each queued job, processed or failed. Each container is
+ * watched from its first resolution of a recorder, on that container, as
+ * `forgetResolutionsOnRebinding()` watches a rebinding, so an Octane sandbox,
+ * which resolves a recorder of its own, flushes that one as it terminates, and
+ * nothing is built on the application it was cloned from; a recorder no check
+ * built is never built to flush. The containers are held weakly, so a sandbox
+ * thrown away is forgotten, and the queue's events are listened for once,
+ * flushing the recorder of each container still held. With tracking off it
+ * registers nothing, so nothing listens and nothing runs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,8 +67,9 @@ final readonly class UsageRegistrar
     }
 
     /**
-     * Have the recorder flush what it noted at the end of each request, command
-     * and queued job, while tracking is on.
+     * Have each recorder flush what it noted at the end of each request,
+     * command and queued job of the container that resolved it, while tracking
+     * is on.
      *
      * @return void
      */
@@ -70,17 +79,26 @@ final readonly class UsageRegistrar
             return;
         }
 
-        $app   = $this->app;
-        $flush = static function () use ($app): void {
-            if (!$app->resolved(GrantUsageRecorder::class)) {
+        /** @var \WeakMap<\Illuminate\Contracts\Container\Container, \SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder> $recorders */
+        $recorders = new \WeakMap;
+
+        $this->app->afterResolving(GrantUsageRecorder::class, static function (GrantUsageRecorder $recorder, Container $container) use ($recorders): void {
+            $isWatched             = isset($recorders[$container]);
+            $recorders[$container] = $recorder;
+
+            if ($isWatched || !$container instanceof Application) {
                 return;
             }
 
-            $app->make(GrantUsageRecorder::class)->flush();
-        };
+            $container->terminating(static function () use ($container, $recorders): void {
+                $recorders[$container]->flush();
+            });
+        });
 
-        $app->terminating($flush);
-
-        $app->make(Dispatcher::class)->listen([JobProcessed::class, JobExceptionOccurred::class], $flush);
+        $this->app->make(Dispatcher::class)->listen([JobProcessed::class, JobExceptionOccurred::class], static function () use ($recorders): void {
+            foreach ($recorders as $recorder) {
+                $recorder->flush();
+            }
+        });
     }
 }

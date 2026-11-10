@@ -252,6 +252,13 @@ final class ReviewCommandTest extends TestCase
 
         self::assertSame(2, $kernel->handle($line, $out));
         self::assertStringContainsString('The --tenant option must be given a value.', $out->fetch());
+
+        foreach ([['holders', 'role:x'], ['unused', '--everywhere']] as $arguments) {
+            $out = new BufferedOutput;
+
+            self::assertSame(2, $kernel->handle(new ArgvInput(['artisan', 'authorization:review', ...$arguments, '--since']), $out));
+            self::assertStringContainsString('The --since option must be given a value.', $out->fetch());
+        }
     }
 
     /**

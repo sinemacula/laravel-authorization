@@ -23,7 +23,10 @@ use SineMacula\Laravel\Authorization\Usage\UsageBatch;
  *   ignored, and one of a grant created after it replaces it. It then extends
  *   the coverage to the batch's instant, opening a new period when the gap
  *   since the last one ended exceeds two intervals. A batch with no
- *   observations only extends the coverage, as the heartbeat does.
+ *   observations only extends the coverage, as the heartbeat does. A batch that
+ *   names a `lostSince`, the start of the earliest bucket the worker dropped
+ *   observations from, must not leave the time since then covered, so the
+ *   routes whose use was dropped read `unknown` rather than `unused`.
  * - `lastObserved()` returns what is kept for each of the route keys asked
  *   about that has any.
  * - `coverage()` returns the periods tracking was on that overlap the window.

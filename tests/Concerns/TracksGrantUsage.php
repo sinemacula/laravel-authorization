@@ -110,7 +110,7 @@ trait TracksGrantUsage
         $observations = [];
 
         foreach (\array_slice($jobs, $this->jobsRead) as $job) {
-            \array_push($observations, ...$job->batch->observations);
+            \array_push($observations, ...$job->batch->observations());
         }
 
         $this->jobsRead = \count($jobs);
@@ -148,7 +148,7 @@ trait TracksGrantUsage
 
         self::assertInstanceOf(GrantUsageStore::class, $store);
 
-        $store->record(new UsageBatch($observations, Carbon::now()->getTimestamp()));
+        $store->record(UsageBatch::of($observations, Carbon::now()->getTimestamp()));
 
         return \count($observations);
     }

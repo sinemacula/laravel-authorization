@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\InheritedPolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -66,7 +67,7 @@ final class RouteSourcesTest extends TestCase
         $resolution = GrantResolver::permissions($ann->permissions(), $ann->roles(), new ResolutionPins(null, true));
         $routes     = $resolution->routes ?? self::fail('No routes were kept.');
 
-        self::assertEqualsCanonicalizing(['posts:delete', 'posts:edit'], \array_keys($routes));
+        self::assertEqualsCanonicalizing(['posts:delete', 'posts:edit'], $routes->names());
         $delete = ['role_grant ann [editor] editor', 'role_inherited ann [editor>admin] admin', 'role_permission ann [editor>admin] posts:delete'];
         $edit   = [
             'permission_grant ann posts:edit',
@@ -76,12 +77,10 @@ final class RouteSourcesTest extends TestCase
             'role_permission ann [editor>admin] posts:edit',
         ];
 
-        self::assertSame(self::rowKeys($ann, $delete), self::keysOf($routes['posts:delete']));
-        self::assertSame(self::rowKeys($ann, $edit), self::keysOf($routes['posts:edit']));
-
-        $created = DB::table('authorizable_permissions')->value('created_at');
-
-        self::assertSame(Carbon::parse(\is_string($created) ? $created : '', 'UTC')->getTimestamp(), $routes['posts:edit'][0]->grant->createdAt);
+        self::assertSame(self::rowKeys($ann, $delete), self::keysOf($routes->routesFor('posts:delete')));
+        self::assertSame(self::rowKeys($ann, $edit), self::keysOf($routes->routesFor('posts:edit')));
+        self::assertSame([], $routes->routesFor('posts:read'));
+        self::assertSame(self::createdAt('authorizable_permissions'), $routes->routesFor('posts:edit')[0]->grant->createdAt);
     }
 
     /**
@@ -110,10 +109,83 @@ final class RouteSourcesTest extends TestCase
 
         $throughRole = ['role_grant ann [editor] editor', 'role_inherited ann [editor>admin] admin', 'role_policy ann [editor>admin] deny-admin'];
 
-        self::assertSame(self::rowKeys($ann, ['policy_attachment ann deny-own']), self::keysOf($routes[Reference::of($own)->id]));
-        self::assertSame(self::rowKeys($ann, $throughRole), self::keysOf($routes[Reference::of($role)->id]));
+        self::assertSame(self::rowKeys($ann, ['policy_attachment ann deny-own']), self::keysOf($routes->routesFor(Reference::of($own)->id)));
+        self::assertSame(self::rowKeys($ann, $throughRole), self::keysOf($routes->routesFor(Reference::of($role)->id)));
+        self::assertSame(self::createdAt('authorizable_policies'), $routes->routesFor(Reference::of($own)->id)[0]->grant->createdAt);
         self::assertNull(RouteSources::policies($ann, [], new EloquentCollection([$admin]), new InheritedPolicies(stable: false)));
         self::assertNull(GrantResolver::policies($ann->policies(), new ResolutionPins, RolePolicies::heldBy($ann))->routes);
+    }
+
+    /**
+     * Every route of a grant made in a tenant for an application carries the
+     * tenant and application it was stored with, a role's routes and a policy
+     * attachment's included, by the keys the review lists for those grants.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRoutesCarryTheScopeTheirGrantsWereMadeIn(): void
+    {
+        $this->tree();
+
+        $org    = self::tenant('org1');
+        $ann    = self::identity('ann');
+        $editor = self::role('editor');
+        $policy = self::policy('deny-own');
+
+        $editor->givePermissionTo(self::permission('posts:edit'));
+
+        self::grants()->grantPermission($ann, self::permission('posts:read'), null, null, $org, true, 'web');
+        self::grants()->grantRole($ann, $editor, null, null, $org, true, 'web');
+        self::grants()->attachPolicy($ann, $policy, null, null, $org, true, 'web');
+
+        [$permissions, $policies] = TenantScope::within($org, 'web', static fn (): array => [
+            GrantResolver::permissions($ann->permissions(), $ann->roles(), new ResolutionPins(null, true))->routes,
+            GrantResolver::policies($ann->policies(), new ResolutionPins(null, true), RolePolicies::heldBy($ann))->routes,
+        ]);
+
+        self::assertNotNull($permissions);
+        self::assertNotNull($policies);
+
+        $routes = [...$permissions->routesFor('posts:read'), ...$permissions->routesFor('posts:edit'), ...$policies->routesFor(Reference::of($policy)->id)];
+        $scope  = static fn (GrantRoute $route): string => \implode('|', [$route->grant->tenantType, $route->grant->tenantId, $route->grant->application]);
+        $scopes = \array_unique(\array_map($scope, $routes));
+
+        self::assertSame(['tenant|org1|web'], \array_values($scopes));
+        self::assertSame(
+            self::rowKeys($ann, ['permission_grant ann posts:read', 'role_grant ann [editor] editor', 'role_permission ann [editor] posts:edit', 'policy_attachment ann deny-own']),
+            self::keysOf($routes),
+        );
+    }
+
+    /**
+     * A role's grant, and the ancestor it reaches, are kept once however many
+     * permissions the role carries, each permission referencing them, so the
+     * routes kept grow with the grants and the permissions, never with both.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARolesRoutesAreKeptOnce(): void
+    {
+        $admin  = self::role('admin');
+        $editor = self::role('editor', $admin);
+        $ann    = self::identity('ann');
+
+        for ($index = 0; $index < 20; $index++) {
+            $admin->givePermissionTo(self::permission('posts:p' . $index));
+        }
+
+        self::grants()->grantRole($ann, $editor);
+
+        $routes = GrantResolver::permissions($ann->permissions(), $ann->roles(), new ResolutionPins(null, true))->routes ?? self::fail('No routes were kept.');
+
+        self::assertCount(1, $routes->grants);
+        self::assertCount(22, $routes->routes);
+        self::assertCount(20, $routes->names());
+        self::assertSame($routes->routesFor('posts:p0')[1]->key, $routes->routesFor('posts:p19')[1]->key);
     }
 
     /**
@@ -129,6 +201,20 @@ final class RouteSourcesTest extends TestCase
         \sort($keys);
 
         return $keys;
+    }
+
+    /**
+     * Return the creation of the only row of the grant table, as a UTC
+     * timestamp.
+     *
+     * @param  string  $table
+     * @return int
+     */
+    private static function createdAt(string $table): int
+    {
+        $created = DB::table($table)->value('created_at');
+
+        return Carbon::parse(\is_string($created) ? $created : '', 'UTC')->getTimestamp();
     }
 
     /**

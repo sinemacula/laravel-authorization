@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Cache;
 
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
-use SineMacula\Laravel\Authorization\Usage\GrantRoute;
+use SineMacula\Laravel\Authorization\Usage\RouteMap;
 
 /**
  * How the persistent tier of the resolution cache writes what a resolution
@@ -13,8 +13,8 @@ use SineMacula\Laravel\Authorization\Usage\GrantRoute;
  * their document and, for a resource policy, the resource it is attached to.
  * While grant usage is tracked, a grantee's permissions and policies are kept
  * under a kind of their own, with the routes of the grants behind them (see
- * `Usage\GrantRoute`), so an entry kept without them, before tracking was
- * turned on, is never read for one.
+ * `Usage\RouteMap`), so an entry kept without them, before tracking was turned
+ * on, is never read for one.
  *
  * Whatever is read back is checked against the shape it was written in, and an
  * entry that does not hold to it is refused with `UnexpectedValueException`, so
@@ -62,44 +62,25 @@ final class ResolutionCodec
      * Return what the persistent tier holds of the routes behind an entry, as
      * the entry's `routes`, or nothing for none.
      *
-     * @param  array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>|null  $routes
-     * @return array<string, array<string, list<array<string, mixed>>>>
+     * @param  \SineMacula\Laravel\Authorization\Usage\RouteMap|null  $routes
+     * @return array{routes?: array<string, mixed>}
      */
-    public static function encodeRoutes(?array $routes): array
+    public static function encodeRoutes(?RouteMap $routes): array
     {
-        if ($routes === null) {
-            return [];
-        }
-
-        return ['routes' => \array_map(static fn (array $list): array => \array_map(static fn (GrantRoute $route): array => $route->toArray(), $list), $routes)];
+        return $routes === null ? [] : ['routes' => $routes->toArray()];
     }
 
     /**
-     * Read stored routes back, by what each gives, refusing anything that is
-     * not routes.
+     * Read stored routes back, refusing anything that is not a route map.
      *
      * @param  mixed  $stored
-     * @return array<string, list<\SineMacula\Laravel\Authorization\Usage\GrantRoute>>
+     * @return \SineMacula\Laravel\Authorization\Usage\RouteMap
      *
      * @throws \UnexpectedValueException
      */
-    public static function routes(mixed $stored): array
+    public static function routes(mixed $stored): RouteMap
     {
-        if (!\is_array($stored)) {
-            throw new \UnexpectedValueException('Cached routes are not a map of routes.');
-        }
-
-        $routes = [];
-
-        foreach ($stored as $key => $list) {
-            if (!\is_array($list)) {
-                throw new \UnexpectedValueException('Cached routes are not a list.');
-            }
-
-            $routes[(string) $key] = \array_map(GrantRoute::fromArray(...), \array_values($list));
-        }
-
-        return $routes;
+        return RouteMap::fromArray($stored);
     }
 
     /**

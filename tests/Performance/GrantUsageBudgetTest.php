@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
 use SineMacula\Laravel\Authorization\Usage\RecordGrantUsage;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Concerns\TracksGrantUsage;
+use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\TestCase;
 
 /**
@@ -84,6 +85,36 @@ final class GrantUsageBudgetTest extends TestCase
         self::assertSame(0, $queries);
         self::assertLessThan(0.5, $elapsed, "Tracked check budget exceeded ({$elapsed}s for 1,000 checks).");
         self::assertCount(3, $this->keysObserved());
+    }
+
+    /**
+     * A subject whose identity grants to it, allowed by its own permission,
+     * reads cold exactly the queries it reads untracked: the identity's
+     * permissions, which the check never needed, are never resolved for
+     * tracking.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATrackedColdCheckNeverResolvesWhatTheCheckDidNot(): void
+    {
+        $person = self::identity('person');
+        $ann    = StubSecondIdentity::query()->create(['id' => 'ann']);
+        $admin  = self::role('admin');
+
+        $admin->givePermissionTo(self::permission('posts:write'));
+
+        self::grants()->grantPermission($ann, self::permission('posts:read'));
+        self::grants()->grantRole($person, $admin);
+
+        $tracked = $this->queriesOf(fn (): bool => $this->actAs($ann, $person)->check('posts:read')->isAllowed());
+
+        config(['authorization.usage.enabled' => false]);
+
+        $untracked = $this->queriesOf(fn (): bool => $this->actAs($ann, $person)->check('posts:read')->isAllowed());
+
+        self::assertSame($untracked, $tracked);
     }
 
     /**

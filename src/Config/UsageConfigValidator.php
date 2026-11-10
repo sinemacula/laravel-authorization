@@ -15,8 +15,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * - `enabled`: whether grant usage is tracked, a boolean, false by default;
  * - `interval`: the length of a usage bucket in seconds, a whole number of at
  *   least 60, 3600 by default;
- * - `batch`: how many observations a worker holds before it flushes them, a
- *   whole number of at least 1, 1000 by default;
+ * - `batch`: how many observations a recording job carries at most, a whole
+ *   number of at least 1, 250 by default;
  * - `connection` and `queue`: the queue connection and queue the recording job
  *   is sent to, each a non-empty string or null for the default;
  * - `retention`: how many days coverage is kept, a whole number of at least 1,
@@ -76,7 +76,9 @@ final class UsageConfigValidator
             throw new InvalidAuthorizationConfigException(self::KEY, "unknown setting '{$unknown[0]}'; expected one of " . \implode(', ', self::SETTINGS) . '.');
         }
 
-        self::enabled($config['enabled'] ?? false);
+        if (\array_key_exists('enabled', $config)) {
+            self::enabled($config['enabled']);
+        }
 
         foreach (\array_keys(self::WHOLE) as $setting) {
             if (!\array_key_exists($setting, $config)) {
@@ -107,7 +109,7 @@ final class UsageConfigValidator
     /**
      * Return the whole-number setting, refusing one below its least value.
      *
-     * @param  string  $setting
+     * @param  key-of<self::WHOLE>  $setting
      * @param  mixed  $value
      * @return int
      *
@@ -115,7 +117,7 @@ final class UsageConfigValidator
      */
     public static function whole(string $setting, mixed $value): int
     {
-        $least = self::WHOLE[$setting] ?? 1;
+        $least = self::WHOLE[$setting];
 
         if (\is_int($value) && $value >= $least) {
             return $value;

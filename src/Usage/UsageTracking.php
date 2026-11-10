@@ -27,8 +27,8 @@ final class UsageTracking
     /** @var int The length of a bucket, in seconds, when none is configured. */
     public const int INTERVAL = 3600;
 
-    /** @var int How many observations a worker holds before it flushes them, when none is configured. */
-    public const int BATCH = 1000;
+    /** @var int How many observations a recording job carries at most, when none is configured; about 110 KB at worst, well under a queue's usual limit on a job's size. */
+    public const int BATCH = 250;
 
     /** @var int How many days coverage is kept, when none is configured. */
     public const int RETENTION = 400;
@@ -54,7 +54,8 @@ final class UsageTracking
     }
 
     /**
-     * Return how many observations a worker holds before it flushes them.
+     * Return how many observations a recording job carries at most: once a
+     * worker notes that many it sets them aside as a job of their own.
      *
      * @return int
      */

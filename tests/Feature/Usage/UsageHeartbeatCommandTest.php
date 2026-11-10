@@ -68,7 +68,7 @@ final class UsageHeartbeatCommandTest extends TestCase
 
         self::assertSame([['2026-11-09 08:00:00', '2026-11-09 10:00:00']], \array_map($bounds, $periods));
         self::assertCount(3, $store->batches);
-        self::assertSame([], $store->batches[0]->observations);
+        self::assertSame([], $store->batches[0]->observations());
     }
 
     /**

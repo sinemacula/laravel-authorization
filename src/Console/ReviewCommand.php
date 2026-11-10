@@ -15,7 +15,8 @@ use Symfony\Component\Console\Output\OutputInterface;
 /**
  * Export an access review as JSON Lines (AUTHZ-11.6, N96, N97): who holds a
  * role, permission or policy, what a saved subject holds, what expires within a
- * window, or what an actor last granted, in the scope the options name.
+ * window, what an actor last granted, or which grants show no observed use
+ * since an instant (N94), in the scope the options name.
  *
  * The review runs on the trusted path (`AccessReview::trustedExport()`), as
  * scheduled system work, never as whoever is signed in to the console: the
@@ -46,7 +47,7 @@ final class ReviewCommand extends Command
     use RefusesInvocations;
 
     /** @var list<string> The options that take a value, refused when given without one. */
-    private const array VALUED = ['tenant', 'rooted-within', 'application', 'from', 'until', 'actor', 'output'];
+    private const array VALUED = ['tenant', 'rooted-within', 'application', 'from', 'until', 'actor', 'since', 'output'];
 
     /** @var string The console command signature. */
     protected $signature = <<<'EOD'

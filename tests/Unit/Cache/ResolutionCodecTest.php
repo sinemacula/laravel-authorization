@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCodec;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use SineMacula\Laravel\Authorization\Usage\GrantRoute;
+use SineMacula\Laravel\Authorization\Usage\RouteMap;
 use SineMacula\Laravel\Authorization\Usage\StoredGrant;
 
 /**
@@ -154,26 +154,21 @@ final class ResolutionCodecTest extends TestCase
 
     /**
      * Routes are written as plain values beside an entry, none for none, and
-     * read back as they were; anything but routes is refused.
+     * read back as they were; anything but a route map is refused.
      *
      * @return void
      */
     public function testWritesAndReadsRoutesBack(): void
     {
-        $route  = new GrantRoute('k', new StoredGrant(GrantTarget::ROLE, 'r', new Reference('user', 'u'), 'tenant', 't', null, 9));
-        $stored = ResolutionCodec::encodeRoutes(['posts:read' => [$route]]);
+        $routes = new RouteMap([new StoredGrant(GrantTarget::ROLE, 'r', new Reference('user', 'u'), 'tenant', 't', null, 9)], [['k', 0]], ['posts:read' => [0]]);
+        $stored = ResolutionCodec::encodeRoutes($routes);
 
         self::assertSame([], ResolutionCodec::encodeRoutes(null));
-        self::assertSame(['routes' => ['posts:read' => [$route->toArray()]]], $stored);
-        self::assertEquals(['posts:read' => [$route]], ResolutionCodec::routes($stored['routes']));
+        self::assertSame(['routes' => $routes->toArray()], $stored);
+        self::assertEquals($routes, ResolutionCodec::routes($stored['routes']));
 
-        foreach (['routes', ['posts:read' => 'route'], ['posts:read' => [['key' => 5]]]] as $corrupt) {
-            try {
-                ResolutionCodec::routes($corrupt);
-                self::fail('Corrupt routes were read back.');
-            } catch (\UnexpectedValueException) {
-                self::addToAssertionCount(1);
-            }
-        }
+        $this->expectException(\UnexpectedValueException::class);
+
+        ResolutionCodec::routes('routes');
     }
 }

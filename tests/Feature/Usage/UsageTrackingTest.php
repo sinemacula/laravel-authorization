@@ -30,13 +30,13 @@ final class UsageTrackingTest extends TestCase
     public function testTheDefaults(): void
     {
         self::assertFalse(UsageTracking::isEnabled());
-        self::assertSame([3600, 1000, 400], [UsageTracking::interval(), UsageTracking::batch(), UsageTracking::retention()]);
+        self::assertSame([3600, 250, 400], [UsageTracking::interval(), UsageTracking::batch(), UsageTracking::retention()]);
         self::assertSame([null, null], [UsageTracking::connection(), UsageTracking::queue()]);
 
         config(['authorization.usage' => []]);
 
         self::assertFalse(UsageTracking::isEnabled());
-        self::assertSame([3600, 1000, 400], [UsageTracking::interval(), UsageTracking::batch(), UsageTracking::retention()]);
+        self::assertSame([3600, 250, 400], [UsageTracking::interval(), UsageTracking::batch(), UsageTracking::retention()]);
     }
 
     /**

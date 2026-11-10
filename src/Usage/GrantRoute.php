@@ -14,8 +14,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * starts from (see `StoredGrant`).
  *
  * A resolution keeps the routes behind what it finds beside it in the
- * resolution cache, so a check finds those behind its decision from what the
- * cache holds, with no query.
+ * resolution cache, each once (see `RouteMap`), so a check finds those behind
+ * its decision from what the cache holds, with no query.
  *
  * @phpstan-import-type Observation from \SineMacula\Laravel\Authorization\Usage\UsageBatch
  *
@@ -66,33 +66,5 @@ final readonly class GrantRoute
     public function observedIn(int $bucket): array
     {
         return ['grant_key' => $this->key, ...$this->grant->toArray(), 'last_observed_at' => $bucket];
-    }
-
-    /**
-     * Return the route as the plain values a cache entry holds.
-     *
-     * @return array{key: string, grant: array<string, int|string|null>}
-     */
-    public function toArray(): array
-    {
-        return ['key' => $this->key, 'grant' => $this->grant->toArray()];
-    }
-
-    /**
-     * Return the route the plain values describe, refusing values that do not
-     * have its shape.
-     *
-     * @param  mixed  $values
-     * @return self
-     *
-     * @throws \UnexpectedValueException
-     */
-    public static function fromArray(mixed $values): self
-    {
-        if (!\is_array($values) || !\is_string($values['key'] ?? null)) {
-            throw new \UnexpectedValueException('A grant route is not the shape grant usage tracking keeps.');
-        }
-
-        return new self($values['key'], StoredGrant::fromArray($values['grant'] ?? null));
     }
 }

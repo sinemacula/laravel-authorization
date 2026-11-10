@@ -129,7 +129,9 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   in one order on every database and bounded by a limit. A review is admitted through `check()` as the reviewer under
   `authorization:review.read`, across the whole of a broad reach, or run as trusted work. It is read a page at a time
   by keyset with signed cursors, streamed a chunk at a time, or exported as versioned JSON Lines under
-  `authorization:review.export` as well, and `authorization:review` exports one from the console.
+  `authorization:review.export` as well, and `authorization:review` exports one from the console. With opt-in usage
+  tracking it also lists which grants show no observed use (`unused()`), every row carrying a `usage` status of
+  `used`, `unused` or `unknown`.
 - **Grant scope query**: `GrantScopeQuery` tells a trusted integration whether every grant of an identity and of the
   principals an application-bound identity directory lists lies within a tenant (`within`), any lies outside it
   (`outside`), or that cannot be told (`unknown`), and whether a principal holds a grant that applies in a tenant. It
@@ -3124,7 +3126,7 @@ in `config/authorization.php`, or with `AUTHORIZATION_USAGE_ENABLED=true`:
 'usage' => [
     'enabled'    => true,
     'interval'   => 3600,   // the bucket, in seconds; at least 60
-    'batch'      => 1000,   // the most observations a worker holds before it sends them
+    'batch'      => 250,    // the most observations one recording job carries
     'connection' => null,   // the queue connection the recording job goes to; null for the default
     'queue'      => null,   // the queue; null for the connection's default
     'retention'  => 400,    // the days coverage is kept
@@ -3132,19 +3134,25 @@ in `config/authorization.php`, or with `AUTHORIZATION_USAGE_ENABLED=true`:
 ```
 
 **The cost.** While tracking is on, a resolution of a grantee's permissions and policies also keeps the routes of the
-stored grants behind each, read from the rows it reads already and kept beside its entry in the resolution cache, so a
-cold check reads no more queries than before, and a warm check finds the routes behind its decision at a constant extra
-cost and with no query. A cache entry kept before tracking was turned on is never read for one, so turning it on
-resolves each grantee once more. The routes are noted in memory and sent to be recorded by a queued job, never written
-on the check.
+stored grants behind each, read from the rows it reads already and kept beside its entry in the resolution cache, each
+grant and route once however many permissions it gives. A check finds the routes behind its decision only among what it
+resolved itself, so a cold check runs the same queries as an untracked one (a subject's identity, say, is never
+resolved for tracking when the check did not need it), and a warm check finds the routes at a constant extra cost and
+with no query. A cache entry kept before tracking was turned on is never read for one, so turning it on resolves each
+grantee once more. The routes are noted in memory and sent to be recorded by a queued job, never on the check. No step
+tracking adds ever changes or breaks a check: one that fails is written to the log channel and the decision is
+returned as it was made.
 
-**What counts.** An allowed decision counts every live grant route behind the permission that allowed it, redundant
-ones included: the direct grant, each role grant that carried it with the ancestor role it reached, and the identity's
-grant, behind every held permission that covers the action. A policy counts whenever one of its statements decided,
-allow or deny, so a policy that only denies, doing its job, is used. These are everyday decisions and count: `check()`,
-`can()`, `cannot()`, `any()`, `all()`, `authorize()`, `checkMany()`, `canEach()`, `filterAuthorized()`, the Gate, the
-Blade directives and the middleware, and a delegated change's own check. A role check (`hasRole()`, `@role`, `role:`)
-is no decision and counts nothing.
+**What counts.** Only what a decision rested on counts, by the rules the check itself applied. An allowed decision
+counts every live grant route behind the permission that allowed it, redundant ones included: the direct grant, and each
+role grant that carried it with the ancestor role it came through. They are the routes of the grantee whose permission
+matched: the subject's own, or its identity's only when the subject's did not match, since the check asks for the
+identity's only then. A policy counts whenever one of its statements decided, allow or deny, so a policy that only
+denies, doing its job, is used, by its attachment to the subject or to its identity. An identity of the other kind (a
+machine's person, or a person's machine) gives a check its deny statements alone, so its attachment counts only for a
+decision its denies made. These are everyday decisions and count: `check()`, `can()`, `cannot()`, `any()`, `all()`,
+`authorize()`, `checkMany()`, `canEach()`, `filterAuthorized()`, the Gate, the Blade directives and the middleware, and
+a delegated change's own check. A role check (`hasRole()`, `@role`, `role:`) is no decision and counts nothing.
 
 **What never counts.** Only a decision the application acts on is use, so nothing else counts:
 
@@ -3158,23 +3166,32 @@ is no decision and counts nothing.
 | A delegated change's administration stage                                      | Its further checks weigh the change, and a refused change counts nothing it was allowed |
 | A permission from a custom `getPermissions()`                                  | A grantee whose grants the package does not resolve cannot say where they came from     |
 | A policy from a store, a resource, `withPolicies()`, a guardrail or a boundary | None of these is a grant a subject holds                                                |
+| An identity's grant when the subject's own matched                             | The check never asked for it, so the decision did not rest on it                        |
 
 **The interval.** Observations are bucketed by `interval` seconds, an hour by default: a bucket starts at a whole
 multiple of the interval in UTC, so every worker agrees where it starts. Each route is noted at most once a bucket per
-worker, and a review says a route was last used within the interval that starts at its `last_observed_at`.
+worker, and a review says a route was last used within the interval that starts at its `last_observed_at`. A queue
+worker or a command notes for as long as it runs; under Octane each request's sandbox notes for itself.
 
-**The queue.** What a worker notes is sent as one `RecordGrantUsage` job when the request, command or queued job ends,
-or as soon as the worker holds `batch` observations, so a long-running worker never holds more. The job goes to the
-`connection` and `queue` configured. Sending never reaches a decision: a queue that refuses the job is written to the
-log channel and its observations dropped, and a check never waits on the store. On the `sync` connection the job runs
-as it is sent, at the end of the request or as a batch fills.
+**The queue.** Nothing is sent from within a check, so a check never waits on the queue or the store, the `sync`
+connection included. What a worker notes is sent as `RecordGrantUsage` jobs when the request, command or queued job
+ends, to the `connection` and `queue` configured. Once a worker notes `batch` observations it sets them aside as a job
+of their own, so no job outgrows a queue's limit on a job's size: a job of the default 250 is about 110 KB at worst,
+well under SQS's 256 KB, and each observation adds about 450 bytes at worst, so lower `batch` for a queue with a
+smaller limit (Beanstalkd's default is 64 KB). A worker sets aside at most ten batches before it ends its request or
+job; past that it drops the oldest, and the next job names the earliest bucket dropped, from which the store does not
+extend the coverage, so the routes whose use was dropped read `unknown` rather than `unused`. A queue that refuses a
+job is written to the log channel, and its observations are dropped and named by the next job in the same way.
 
 **The tables and pruning.** The migration `2026_11_09_000001_create_grant_usage_tables` adds
 `authorization_grant_usage`, one row for each grant route with the start of the last bucket it was observed in and the
 creation of the grant it was observed through, keyed by a stable digest of its source kind, target, grantee, tenant,
-application and reach (the roles it runs through), and `authorization_usage_coverage`, the periods tracking was on,
-`[from, until)` in UTC. Both honour the configured table names (`tables.grant_usage`, `tables.usage_coverage`) and
-connection. A write never moves a route's last use backwards, so a job delivered twice or out of order changes nothing.
+application and role path (the roles it runs through, as in `role_path`), and `authorization_usage_coverage`, the
+periods tracking was on, `[from, until)` in UTC. Both honour the configured table names (`tables.grant_usage`,
+`tables.usage_coverage`) and connection. A write never moves a route's last use backwards, so a job delivered twice or
+out of order changes nothing. The routes are written in the order of their keys, a hundred to a transaction, with no
+row read under a lock, so two workers take their locks in the same order; a transaction that deadlocks or waits too
+long for a lock is tried again, three times in all, and a job that still fails extends no coverage.
 `authorization:usage-prune` removes the usage of every route whose stored grant no longer exists and the coverage older
 than `retention` days.
 
@@ -3188,13 +3205,14 @@ Schedule::command('authorization:usage-prune')->daily();
 ```
 
 **The store.** Usage is kept behind `Contracts\GrantUsageStore`: `record(UsageBatch $batch)` keeps a batch, each route
-only when its observation is newer, and extends the coverage to the batch's instant; `lastObserved(array $keys)` returns
+only when its observation is newer, and extends the coverage to the batch's instant, but never across the time since a
+`lostSince` the batch names; `lastObserved(array $keys)` returns
 what is kept of each route asked about; and `coverage($from, $until)` returns the periods that overlap a window. The
 package binds `Usage\DatabaseGrantUsageStore` on the tables above; bind your own to send usage elsewhere.
 
 **Coverage and unknown.** A row's window runs from the later of the review's `since` and the grant's creation to the
 review's instant. Its `usage` is `used` when its route was observed in a bucket that ends after the window starts;
-`unused` only when the coverage periods, each taken to reach two intervals past its end, cover the whole window and the
+`unused` only when the coverage periods, each taken to run two intervals past its end, cover the whole window and the
 route was never observed in it; and `unknown` otherwise: tracking is off, coverage of the window is incomplete (a
 window that starts before tracking began, or that a gap interrupts), or the route's source cannot report its use (a
 role's permission edge or policy attachment, a grantee with its own `getPermissions()` or `getPolicies()`, or, for a
@@ -3202,22 +3220,26 @@ policy, a policy resolver of your own). A missing observation alone is never tak
 `coverage_from` and `coverage_until` give the latest coverage period overlapping the window.
 
 **Regrants.** A grant revoked and made again is a new row, created later, and never inherits the old grant's use: an
-observation made through a grant created before the current one is ignored. A grant whose expiry or reach is rewritten
-in place keeps its creation, and so its use.
+observation made through a grant created before the current one is ignored. A grant whose expiry or reach
+(`include_subtree`) is rewritten in place, neither of which is part of its usage key, keeps its creation, and so its
+use.
 
 **The unused review.** `ReviewQuery::unused($scope, $since)` lists the live grants in the scope (roles and permissions
 granted, policies attached to grantees) with no observed use since the instant, each `unused` or `unknown`, and leaves
 out those used. It pages, streams and exports as every review does, admitted by the same `authorization:review.read`
-right, which never counts as use; `authorization:review unused --since=…` exports one. Every review row carries
-`usage`, read in one batched lookup a page. The row's shape stays `version: 1`, since the package is unreleased.
+right, which never counts as use; `authorization:review unused --since=…` exports one. It reads the grants a fixed
+chunk at a time, never fewer for the rows a page has kept, so the reads grow with the grants it passes over, never one
+for each. Every review row carries `usage`, read in one batched lookup a page, or a chunk for the unused review. The
+row's shape stays `version: 1`, since the package is unreleased.
 
 ```php
 $reviews->trusted(ReviewQuery::unused(ReviewScope::everywhere(), now()->subDays(90)));
 ```
 
-Recording lags: a worker's observations reach the store when it next sends them, so a grant used only in the last
-moments may read as unused until then, and observations a refused job carried are lost while other workers' jobs keep
-the coverage going.
+Recording lags: a worker's observations arrive at the store when its request, command or job ends, so a grant used only
+in the last moments may read as unused until then. Coverage is kept for the whole site, so observations a worker lost
+without naming them (a process killed before it sent them, say) are lost while other workers' jobs keep the coverage
+going.
 
 ### Grant scope query
 

@@ -13,8 +13,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 /**
  * The key grant usage is recorded under (N102): a stable digest of one grant
  * route, its source kind, its target, its grantee, its tenant and application
- * as stored, and its reach, the roles it runs through from the role granted up
- * to the one carrying the target.
+ * as stored, and its role path, the roles it runs through from the role granted
+ * up to the one carrying the target.
  *
  * A check and an access review build it from the same parts, so a route a check
  * observed and the review row of that route share it. The reach a grant's

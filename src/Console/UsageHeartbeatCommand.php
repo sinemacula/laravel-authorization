@@ -45,7 +45,7 @@ final class UsageHeartbeatCommand extends Command
             return self::SUCCESS;
         }
 
-        $store->record(new UsageBatch([], Carbon::now()->getTimestamp()));
+        $store->record(UsageBatch::of([], Carbon::now()->getTimestamp()));
 
         $this->info('Grant usage coverage extended to ' . Carbon::now('UTC')->format('Y-m-d\TH:i:s\Z') . '.');
 

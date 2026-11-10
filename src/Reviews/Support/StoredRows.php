@@ -39,11 +39,14 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageKey;
  * that role.
  *
  * - Unused: the live grants of each kind, roles and permissions granted and
- *   policies attached to grantees, that show no observed use since the review's
- *   instant (see `unused()`).
+ *   policies attached to grantees, that show no observed use from the review's
+ *   `since`, or the grant's creation when later, to the review's instant (see
+ *   `unused()`).
  *
  * Each kind is read in the review's order, one query of at most the room left,
- * a later page resuming after the last row of the page before by its keyset.
+ * a later page resuming after the last row of the page before by its keyset; an
+ * unused review's kinds are read a fixed chunk at a time instead, since its
+ * filter may pass over any number of grants.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -79,9 +82,9 @@ final class StoredRows
      * policies attached to grantees, whose route shows no observed use in its
      * window, unused or unknown, as the collector's filter keeps them (see
      * `ReviewUsage::isUnobserved()`). Each kind is read in the review's order a
-     * page of the room left at a time, what the store keeps of the page's
-     * routes read in one lookup, until the rows are full or none is left. Every
-     * grantee is known, so the review is complete.
+     * fixed chunk at a time, what the store keeps of the chunk's routes read in
+     * one lookup, until the rows are full or none is left. Every grantee is
+     * known, so the review is complete.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
@@ -235,9 +238,11 @@ final class StoredRows
 
     /**
      * Collect the rows of the source the collector keeps, reading its grants a
-     * page of the room left at a time, each page's routes looked up in one go
-     * first, resuming after the last grant read, until the rows are full or
-     * none is left.
+     * fixed chunk at a time, the room the page leaves when it starts or
+     * `GrantRows::CHUNK`, whichever is more, each chunk's routes looked up in
+     * one go first, resuming after the last grant read, until the rows are full
+     * or none is left; a chunk is never smaller for the rows already kept, so
+     * the reads grow with the grants passed over, never one for each.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind  $source
@@ -252,11 +257,11 @@ final class StoredRows
     {
         $type  = Definitions::morph($kind);
         $after = $rows->resumeAt($source);
+        $size  = \max($rows->room(), GrantRows::CHUNK);
+        $chain = static fn (GrantRow $row): array => $source === SourceKind::ROLE_GRANT ? [$row->targetId] : [];
 
         while (!$rows->isFull() && !$rows->isPast($source)) {
-            $room  = $rows->room();
-            $chain = static fn (GrantRow $row): array => $source === SourceKind::ROLE_GRANT ? [$row->targetId] : [];
-            $read  = GrantRows::page(self::resumed(clone $query, $kind, false, $after), $kind->value, $room);
+            $read = GrantRows::page(self::resumed(clone $query, $kind, false, $after), $kind->value, $size);
 
             $usage->prime(\array_map(static fn (GrantRow $row): string => GrantUsageKey::ofStored($source, $row, new Reference($type, $row->targetId), $chain($row)), $read));
 
@@ -264,7 +269,7 @@ final class StoredRows
                 $rows->route($source, $row->grantee, $row, new Reference($type, $row->targetId), $chain($row));
             }
 
-            if (\count($read) < $room) {
+            if (\count($read) < $size) {
                 return;
             }
 

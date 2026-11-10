@@ -51,7 +51,7 @@ use SineMacula\Laravel\Authorization\Usage\UsageTracking;
  */
 final class ReviewUsage
 {
-    /** @var array<string, false|\SineMacula\Laravel\Authorization\Usage\ObservedUse> What the store keeps of each route looked up, false for none. */
+    /** @var array<string, \SineMacula\Laravel\Authorization\Usage\ObservedUse|null> What the store keeps of each route looked up, null for none. */
     private array $observed = [];
 
     /** @var list<\SineMacula\Laravel\Authorization\Usage\CoveragePeriod> The periods tracking was on that were read. */
@@ -121,11 +121,11 @@ final class ReviewUsage
             return;
         }
 
-        $missing = \array_values(\array_filter(\array_unique($keys), fn (string $key): bool => !\array_key_exists($key, $this->observed)));
+        $missing = \array_map(\strval(...), \array_keys(\array_diff_key(\array_flip($keys), $this->observed)));
         $found   = $missing === [] ? [] : $this->store->lastObserved($missing);
 
         foreach ($missing as $key) {
-            $this->observed[$key] = $found[$key] ?? false;
+            $this->observed[$key] = $found[$key] ?? null;
         }
 
         $from = $this->since ?? $earliest;
@@ -179,8 +179,8 @@ final class ReviewUsage
             return RowUsage::unknown();
         }
 
-        $observed = $this->observed[GrantUsageKey::ofRow($row)] ?? false;
-        $use      = $observed instanceof ObservedUse && $observed->isOf($row->createdAt()) ? $observed : null;
+        $observed = $this->observed[GrantUsageKey::ofRow($row)] ?? null;
+        $use      = $observed?->isOf($row->createdAt()) === true ? $observed : null;
         $from     = self::later($this->since, $row->createdAt());
 
         [$span, $isCovered] = $from === null ? [null, false] : $this->coverageOf($from);

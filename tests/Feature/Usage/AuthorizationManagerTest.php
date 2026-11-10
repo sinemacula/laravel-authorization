@@ -22,6 +22,7 @@ use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Reviews\AccessReview;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use Tests\Concerns\ReviewsAccess;
@@ -50,9 +51,10 @@ final class AuthorizationManagerTest extends TestCase
 
     /**
      * An allow by a permission counts every live route behind it, redundant
-     * ones included: the direct grant, each role grant that carried it with the
-     * ancestor it reached, and the identity's grant; routes behind other
-     * permissions count nothing.
+     * ones included: the direct grant, and each role grant that carried it with
+     * the ancestor it reached; the identity's grant of it counts nothing, since
+     * the subject's own matched and the identity's was never asked for, and
+     * routes behind other permissions count nothing.
      *
      * @return void
      *
@@ -80,7 +82,6 @@ final class AuthorizationManagerTest extends TestCase
 
         $expected = self::keysHeld($ann, $identity, static fn ($row): bool => \in_array(self::describe($row), [
             'permission_grant ann posts:read',
-            'permission_grant ann via person posts:read',
             'role_grant ann [editor] editor',
             'role_inherited ann [editor>admin] admin',
             'role_permission ann [editor>admin] posts:read',
@@ -88,8 +89,45 @@ final class AuthorizationManagerTest extends TestCase
             'role_permission ann [writer] posts:read',
         ], true));
 
-        self::assertCount(7, $expected);
+        self::assertCount(6, $expected);
         self::assertSame($expected, $this->keysObserved());
+    }
+
+    /**
+     * A check in a tenant for an application counts the routes of the grants
+     * made there, by the keys the review lists for them, so their tenant and
+     * application are recorded as stored.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testACheckInATenantCountsTheGrantsMadeThere(): void
+    {
+        $this->tree();
+
+        $org    = self::tenant('org1');
+        $ann    = self::identity('ann');
+        $editor = self::role('editor');
+
+        $editor->givePermissionTo(self::permission('posts:edit'));
+
+        self::grants()->grantPermission($ann, self::permission('posts:read'), null, null, $org, true, 'web');
+        self::grants()->grantRole($ann, $editor, null, null, $org, true, 'web');
+
+        $manager = $this->actAs($ann);
+
+        self::assertTrue(TenantScope::within($org, 'web', static fn (): bool => $manager->check('posts:read')->isAllowed() && $manager->check('posts:edit')->isAllowed()));
+
+        $observed = $this->observed();
+        $keys     = \array_values(\array_unique(\array_map(static fn (array $one): string => (string) $one['grant_key'], $observed)));
+
+        \sort($keys);
+
+        self::assertSame(self::keysHeld($ann, null, self::targeting('posts:read', 'posts:edit', 'editor')), $keys);
+        $scopes = \array_map(static fn (array $one): array => [$one['tenant_type'], $one['tenant_id'], $one['application']], $observed);
+
+        self::assertSame([['tenant', 'org1', 'web']], \array_values(\array_unique($scopes, \SORT_REGULAR)));
     }
 
     /**

@@ -25,9 +25,10 @@ use Tests\TestCase;
 
 /**
  * Feature tests for how grant usage tracking is wired: the store bound, which
- * an application may rebind, and the recorder, one per worker; with tracking
- * off nothing listens, and with it on the recorder flushes as the application
- * terminates and after each queued job.
+ * an application may rebind, and the recorder, one per container; with tracking
+ * off nothing listens, and with it on each recorder flushes as the container
+ * that resolved it terminates, an Octane sandbox's included, and after each
+ * queued job.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -122,6 +123,37 @@ final class UsageRegistrarTest extends TestCase
         $app->terminate();
 
         Bus::assertDispatchedTimes(RecordGrantUsage::class, 3);
+    }
+
+    /**
+     * A container cloned from the application, as an Octane sandbox is, that
+     * resolves a recorder of its own flushes that one as it terminates, and
+     * never builds one on the application it was cloned from.
+     *
+     * @return void
+     */
+    public function testASandboxFlushesItsOwnRecorder(): void
+    {
+        $app = $this->application();
+
+        Bus::fake([RecordGrantUsage::class]);
+        config(['authorization.usage.enabled' => true]);
+
+        (new UsageRegistrar($app))->boot();
+
+        $sandbox  = clone $app;
+        $recorder = $sandbox->make(GrantUsageRecorder::class);
+
+        $recorder->observe([new GrantRoute('a', new StoredGrant(GrantTarget::PERMISSION, 'p', new Reference('user', 'ann'), null, null, null, null))]);
+        $sandbox->terminate();
+
+        self::assertFalse($app->resolved(GrantUsageRecorder::class));
+        Bus::assertDispatchedTimes(RecordGrantUsage::class, 1);
+
+        $recorder->observe([new GrantRoute('b', new StoredGrant(GrantTarget::PERMISSION, 'p', new Reference('user', 'ann'), null, null, null, null))]);
+        $sandbox->make(Dispatcher::class)->dispatch(new JobProcessed('sync', \Mockery::mock(Job::class)));
+
+        Bus::assertDispatchedTimes(RecordGrantUsage::class, 2);
     }
 
     /**

@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace Tests\Feature\Usage;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\GrantUsageStore;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
@@ -20,7 +22,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Usage\DatabaseGrantUsageStore;
 use SineMacula\Laravel\Authorization\Usage\GrantUsageKey;
 use SineMacula\Laravel\Authorization\Usage\UsageBatch;
+use Tests\Feature\Stubs\CodedPoliciesIdentity;
 use Tests\Feature\Stubs\CustomGrantsIdentity;
+use Tests\Feature\Stubs\FailingPermissionsIdentity;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Fixtures\Usage\CountingUsageStore;
 use Tests\TestCase;
@@ -152,6 +156,85 @@ final class ReviewUsageTest extends TestCase
     }
 
     /**
+     * Each kind of route is reported only as its grantee resolves the grants it
+     * rests on: a permission's by the package's permissions, a policy's by its
+     * policies, and a role's grant, or the ancestor it reaches, by both; a
+     * grantee type a morph map names is read as its class.
+     *
+     * @return void
+     */
+    public function testEachKindIsReportedAsItsGranteeResolvesIt(): void
+    {
+        $this->store(['2026-11-09 07:00:00', '2026-11-09 08:00:00', '2026-11-09 10:00:00', '2026-11-09 11:00:00']);
+
+        $statuses = fn (string $grantee): array => \array_map(
+            fn (SourceKind $kind): ?UsageStatus => $this->statusOf(self::row($kind, '2026-11-09 07:30:00', 'p', $grantee), '2026-11-09 08:00:00', self::AT),
+            [SourceKind::PERMISSION_GRANT, SourceKind::POLICY_ATTACHMENT, SourceKind::ROLE_GRANT, SourceKind::ROLE_INHERITED],
+        );
+
+        $unused  = UsageStatus::UNUSED;
+        $unknown = UsageStatus::UNKNOWN;
+
+        self::assertSame([$unused, $unused, $unused, $unused], $statuses(StubIdentity::class));
+        self::assertSame([$unknown, $unused, $unknown, $unknown], $statuses(FailingPermissionsIdentity::class));
+        self::assertSame([$unused, $unknown, $unknown, $unknown], $statuses(CodedPoliciesIdentity::class));
+
+        $morphs = Relation::morphMap();
+
+        try {
+            Relation::morphMap(['stub_identity' => StubIdentity::class]);
+
+            self::assertSame([$unused, $unused, $unused, $unused], $statuses('stub_identity'));
+        } finally {
+            Relation::morphMap($morphs, false);
+        }
+    }
+
+    /**
+     * Every row's window is read against the periods from the earliest window
+     * on the page, the review's `since` before any row's creation: a row
+     * created after a period's reach names no coverage, a row that records no
+     * creation is read from the review's `since` and leaves the others read
+     * from their own, and a period that ended before a later row's window still
+     * names its coverage for a row whose window it reaches.
+     *
+     * @return void
+     */
+    public function testEachRowsWindowIsReadFromItsOwnStart(): void
+    {
+        $this->store(['2026-11-09 03:00:00', '2026-11-09 04:00:00']);
+
+        $rows = $this->usage(ReviewQuery::holdings(new Reference('user', 'ann'), ReviewScope::everywhere()))->annotate([
+            self::row(SourceKind::PERMISSION_GRANT, '2026-11-09 03:30:00', 'early'),
+            self::row(SourceKind::PERMISSION_GRANT, '2026-11-09 10:00:00', 'late'),
+        ]);
+
+        self::assertSame(['2026-11-09T03:00:00Z', '2026-11-09T04:00:00Z'], self::coverageOf($rows[0]));
+        self::assertSame([null, null], self::coverageOf($rows[1]));
+
+        $this->store(['2026-11-09 07:00:00', '2026-11-09 08:00:00', '2026-11-09 09:00:00', '2026-11-09 10:00:00', '2026-11-09 11:00:00']);
+
+        $rows = $this->usage(ReviewQuery::holdings(new Reference('user', 'ann'), ReviewScope::everywhere()))->annotate([
+            self::row(SourceKind::PERMISSION_GRANT, null, 'none'),
+            self::row(SourceKind::PERMISSION_GRANT, '2026-11-09 07:30:00', 'made'),
+        ]);
+
+        self::assertSame([UsageStatus::UNKNOWN, UsageStatus::UNUSED], [$rows[0]->usage?->status, $rows[1]->usage?->status]);
+
+        DB::table('authorization_usage_coverage')->delete();
+
+        $this->store(['2026-11-09 06:00:00', '2026-11-09 07:00:00', '2026-11-09 08:00:00']);
+
+        $rows = $this->usage(ReviewQuery::unused(ReviewScope::everywhere(), self::at('2026-11-09 07:00:00')))->annotate([
+            self::row(SourceKind::PERMISSION_GRANT, null, 'none'),
+            self::row(SourceKind::PERMISSION_GRANT, '2026-11-09 11:00:00', 'made'),
+        ]);
+
+        self::assertSame(['2026-11-09T06:00:00Z', '2026-11-09T08:00:00Z'], self::coverageOf($rows[0]));
+        self::assertSame(UsageStatus::UNKNOWN, $rows[0]->usage?->status);
+    }
+
+    /**
      * Bind a counting store over the package's, its coverage extended by a
      * flush at each instant.
      *
@@ -165,7 +248,7 @@ final class ReviewUsageTest extends TestCase
         $store = new CountingUsageStore(new DatabaseGrantUsageStore);
 
         foreach ($flushes as $flush) {
-            $store->record(new UsageBatch([], self::at($flush)->getTimestamp()));
+            $store->record(UsageBatch::of([], self::at($flush)->getTimestamp()));
         }
 
         $this->app?->instance(GrantUsageStore::class, $store);
@@ -215,7 +298,7 @@ final class ReviewUsageTest extends TestCase
      */
     private static function observe(CountingUsageStore $store, ReviewRow $row, string $bucket, ?string $created = null): void
     {
-        $store->record(new UsageBatch([[
+        $store->record(UsageBatch::of([[
             'grant_key'         => GrantUsageKey::ofRow($row),
             'grant_source'      => 'permission',
             'grant_id'          => $row->target->id,
@@ -256,6 +339,17 @@ final class ReviewUsageTest extends TestCase
             null,
             GrantState::LIVE,
         );
+    }
+
+    /**
+     * Return the start and end of the row's coverage, as the row writes them.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewRow  $row
+     * @return array{string|null, string|null}
+     */
+    private static function coverageOf(ReviewRow $row): array
+    {
+        return [ReviewRow::instant($row->usage?->coverageFrom), ReviewRow::instant($row->usage?->coverageUntil)];
     }
 
     /**

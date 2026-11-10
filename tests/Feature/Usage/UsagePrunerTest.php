@@ -7,10 +7,12 @@ namespace Tests\Feature\Usage;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Usage\DatabaseGrantUsageStore;
 use SineMacula\Laravel\Authorization\Usage\UsageBatch;
 use SineMacula\Laravel\Authorization\Usage\UsagePruner;
+use Tests\Concerns\CompilesQueries;
 use Tests\Concerns\ReviewsAccess;
 use Tests\TestCase;
 
@@ -30,7 +32,7 @@ use Tests\TestCase;
 #[CoversClass(UsagePruner::class)]
 final class UsagePrunerTest extends TestCase
 {
-    use ReviewsAccess;
+    use CompilesQueries, ReviewsAccess;
 
     /**
      * Reset the clock.
@@ -81,7 +83,7 @@ final class UsagePrunerTest extends TestCase
             self::observation('policy', 'no-such-policy', $type, 'ann'),
         ];
 
-        (new DatabaseGrantUsageStore)->record(new UsageBatch([...$kept, ...$gone], Carbon::now()->getTimestamp()));
+        (new DatabaseGrantUsageStore)->record(UsageBatch::of([...$kept, ...$gone], Carbon::now()->getTimestamp()));
 
         self::assertSame([4, 0], UsagePruner::prune(400, true));
         self::assertSame(7, DB::table('authorization_grant_usage')->count());
@@ -99,8 +101,8 @@ final class UsagePrunerTest extends TestCase
     {
         $store = new DatabaseGrantUsageStore;
 
-        $store->record(new UsageBatch([], Carbon::parse('2026-01-01 00:00:00')->getTimestamp()));
-        $store->record(new UsageBatch([], Carbon::parse('2026-11-01 00:00:00')->getTimestamp()));
+        $store->record(UsageBatch::of([], Carbon::parse('2026-01-01 00:00:00')->getTimestamp()));
+        $store->record(UsageBatch::of([], Carbon::parse('2026-11-01 00:00:00')->getTimestamp()));
 
         Carbon::setTestNow('2026-11-09 00:00:00');
 
@@ -109,6 +111,27 @@ final class UsagePrunerTest extends TestCase
         $from = DB::table('authorization_usage_coverage')->pluck('covered_from')->all();
 
         self::assertSame(['2026-11-01 00:00:00'], \array_map(static fn (mixed $value): string => \substr(\is_string($value) ? $value : '', 0, 19), $from));
+    }
+
+    /**
+     * A usage row's grant key is compared with each grant table's key as text,
+     * which PostgreSQL casts from its `uuid` and every other database stores
+     * already, on each driver's grammar.
+     *
+     * @return void
+     */
+    public function testTheGrantKeyIsComparedAsTextOnEveryDriver(): void
+    {
+        foreach (self::drivers() as $driver) {
+            foreach (GrantTarget::cases() as $kind) {
+                $key      = self::wrappedOn($driver, $kind->table() . '.' . $kind->column());
+                $expected = ($driver === 'pgsql' ? "cast({$key} as text)" : $key) . ' = ' . self::wrappedOn($driver, 'authorization_grant_usage.grant_id');
+                $sql      = UsagePruner::orphansOf(self::queryOn($driver, 'authorization_grant_usage'), $kind)->toSql();
+
+                self::assertStringContainsString($expected, $sql, $driver);
+                self::assertStringContainsString('not exists', $sql, $driver);
+            }
+        }
     }
 
     /**

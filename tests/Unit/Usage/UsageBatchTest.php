@@ -20,29 +20,36 @@ use SineMacula\Laravel\Authorization\Usage\UsageBatch;
 final class UsageBatchTest extends TestCase
 {
     /**
-     * A batch keeps its observations, as plain values that survive being
-     * serialised for the queue, and the instant it was flushed at.
+     * A batch holds each stored grant once and each observation as its key, its
+     * grant's index and its bucket, survives being serialised for the queue,
+     * and gives each observation back whole, with the instant it was flushed at
+     * and the earliest bucket dropped before it.
      *
      * @return void
      */
-    public function testABatchSurvivesTheQueue(): void
+    public function testABatchIsCompactAndSurvivesTheQueue(): void
     {
-        $observation = [
-            'grant_key'         => 'k',
+        $observation = static fn (string $key, string $grantee, int $bucket): array => [
+            'grant_key'         => $key,
             'grant_source'      => 'role',
             'grant_id'          => 'r',
             'authorizable_type' => 'user',
-            'authorizable_id'   => 'u',
+            'authorizable_id'   => $grantee,
             'tenant_type'       => null,
             'tenant_id'         => null,
-            'application'       => null,
+            'application'       => 'web',
             'grant_created_at'  => 1,
-            'last_observed_at'  => 3600,
+            'last_observed_at'  => $bucket,
         ];
 
-        $batch = \unserialize(\serialize(new UsageBatch([$observation], 3700)));
+        $observations = [$observation('k1', 'u', 3600), $observation('k2', 'v', 3600), $observation('k3', 'u', 7200)];
+        $batch        = \unserialize(\serialize(UsageBatch::of($observations, 7300, 0)));
 
         self::assertInstanceOf(UsageBatch::class, $batch);
-        self::assertSame([[$observation], 3700], [$batch->observations, $batch->at]);
+        self::assertSame([['role', 'r', 'user', 'u', null, null, 'web', 1], ['role', 'r', 'user', 'v', null, null, 'web', 1]], $batch->grants);
+        self::assertSame([['k1', 0, 3600], ['k2', 1, 3600], ['k3', 0, 7200]], $batch->routes);
+        self::assertSame([$observations, 7300, 0], [$batch->observations(), $batch->at, $batch->lostSince]);
+        self::assertNull(UsageBatch::of([], 1)->lostSince);
+        self::assertSame([], UsageBatch::of([], 1)->observations());
     }
 }

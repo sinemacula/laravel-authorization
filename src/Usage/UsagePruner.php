@@ -8,6 +8,7 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Reviews\Support\Definitions;
 
 /**
  * Prunes the package's grant usage tables (N102): the row of every route whose
@@ -41,7 +42,7 @@ final class UsagePruner
         $usage = 0;
 
         foreach (GrantTarget::cases() as $kind) {
-            $orphans = self::orphans($kind);
+            $orphans = self::orphansOf(self::table('grant_usage', 'authorization_grant_usage'), $kind);
 
             $usage += $pretend ? $orphans->count() : $orphans->delete();
         }
@@ -53,30 +54,25 @@ final class UsagePruner
     }
 
     /**
-     * Query the usage rows of routes starting from a grant of the kind that no
-     * longer exists.
+     * Limit the query of the usage table to the rows of routes starting from a
+     * grant of the kind that no longer exists, the grant's key compared as text
+     * (see `Definitions::keyAsText()`).
      *
+     * @param  \Illuminate\Database\Query\Builder  $query
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @return \Illuminate\Database\Query\Builder
      */
-    private static function orphans(GrantTarget $kind): Builder
+    public static function orphansOf(Builder $query, GrantTarget $kind): Builder
     {
-        /** @var string $usage */
-        $usage      = config('authorization.tables.grant_usage', 'authorization_grant_usage');
-        $grants     = $kind->table();
-        $isPostgres = AuthorizationConnection::connection()->getDriverName() === 'pgsql';
+        $usage  = \is_string($query->from) ? $query->from : '';
+        $grants = $kind->table();
 
-        return self::table('grant_usage', 'authorization_grant_usage')
+        return $query
             ->where($usage . '.grant_source', $kind->value)
-            ->whereNotExists(static function (Builder $exists) use ($usage, $grants, $kind, $isPostgres): void {
-                $grammar = $exists->getGrammar();
-                $granted = $grammar->wrap($grants . '.' . $kind->column());
-
-                // PostgreSQL compares no uuid with text, so the key is compared
-                // as text there.
+            ->whereNotExists(static function (Builder $exists) use ($usage, $grants, $kind): void {
                 $exists->selectRaw('1')
                     ->from($grants)
-                    ->whereRaw(($isPostgres ? "cast({$granted} as text)" : $granted) . ' = ' . $grammar->wrap($usage . '.grant_id'))
+                    ->whereRaw(Definitions::keyAsText($exists, $grants . '.' . $kind->column()) . ' = ' . $exists->getGrammar()->wrap($usage . '.grant_id'))
                     ->whereColumn($grants . '.authorizable_type', $usage . '.authorizable_type')
                     ->whereColumn($grants . '.authorizable_id', $usage . '.authorizable_id');
 
