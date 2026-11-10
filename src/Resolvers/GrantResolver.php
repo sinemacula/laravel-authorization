@@ -271,22 +271,27 @@ final class GrantResolver
      * Read the grants of the relation, with their expiry, on the write
      * connection.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model>  $grants
-     * @return \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>
+     * @template TGranted of \Illuminate\Database\Eloquent\Model
+     *
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<TGranted, \Illuminate\Database\Eloquent\Model>  $grants
+     * @return \Illuminate\Database\Eloquent\Collection<int, TGranted>
      */
     private static function held(MorphToMany $grants): EloquentCollection
     {
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model> */
-        return $grants->useWritePdo()->get(); // @phpstan-ignore method.notFound
+        $grants->getQuery()->useWritePdo();
+
+        return $grants->get();
     }
 
     /**
      * Read the grants of the relation as `held()` reads them, with where each
      * was made when the resolution keeps the routes behind what it finds.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model>  $grants
+     * @template TGranted of \Illuminate\Database\Eloquent\Model
+     *
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<TGranted, \Illuminate\Database\Eloquent\Model>  $grants
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
-     * @return \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>
+     * @return \Illuminate\Database\Eloquent\Collection<int, TGranted>
      */
     private static function heldOf(MorphToMany $grants, ResolutionPins $pins): EloquentCollection
     {
