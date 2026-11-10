@@ -422,6 +422,23 @@ final class DecisionPipeline
     }
 
     /**
+     * Return the further checks of the subject outside a decision, with no
+     * context, each decided, and its sources gathered, in the scope in place
+     * when it is asked: what a right decided outside the administration stage
+     * needs to be weighed across a reach (see
+     * `Services\Support\GuardrailAuthority`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @return \SineMacula\Laravel\Authorization\Administration\FurtherChecks
+     *
+     * @internal
+     */
+    public function furtherChecksFor(Subject $subject): FurtherChecks
+    {
+        return $this->furtherChecks($subject, [], null, null);
+    }
+
+    /**
      * Admit the check, and decide it from the grants once it is admitted (see
      * `decide()`).
      *

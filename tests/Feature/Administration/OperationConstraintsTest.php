@@ -432,7 +432,8 @@ final class OperationConstraintsTest extends TestCase
     /**
      * A change to the actor itself is never weighed by rank; one that may widen
      * authority asks for `authorization:administration.self`, and is refused as
-     * self without it, while one that only narrows asks nothing.
+     * self without it, while one that only narrows asks nothing; once allowed
+     * at its node, the self right is asked again across the change's reach.
      *
      * @return void
      *
@@ -463,9 +464,102 @@ final class OperationConstraintsTest extends TestCase
 
         self::assertTrue(OperationConstraints::weigh($allowed, PackagePermissions::ROLE_GRANT, $grant, $identity)->isAllowed());
         self::assertSame(
-            [PackagePermissions::ROLE_GRANT, PackagePermissions::ADMINISTRATION_SELF, PackagePermissions::ROLE_GRANT, PackagePermissions::ADMINISTRATION_SELF],
+            [
+                PackagePermissions::ROLE_GRANT,
+                PackagePermissions::ADMINISTRATION_SELF,
+                PackagePermissions::ROLE_GRANT,
+                PackagePermissions::ADMINISTRATION_SELF,
+                PackagePermissions::ADMINISTRATION_SELF,
+            ],
             \array_column($this->asked, 0),
         );
+    }
+
+    /**
+     * The self right is weighed across the change's whole reach, as its action
+     * is (N79): an actor allowed `authorization:*` at the platform, but holding
+     * a role in one tenant whose policy denies
+     * `authorization:administration.self`, is refused a platform-wide grant to
+     * itself as self, though the right is allowed at the node the grant is
+     * decided at; with nothing to limit the right it is allowed, a grant in a
+     * tenant the deny does not reach still is, and a change that only narrows
+     * is never weighed by the self rule.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheSelfRightIsWeighedAcrossTheWholeReach(): void
+    {
+        [$admin, $check] = self::administrator();
+
+        $write  = Permission::query()->create(['name' => 'comments:write']);
+        $grant  = static fn (GrantScope $scope): Decision => $check(OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $admin, $write, $scope));
+        $revoke = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $admin, $write, GrantScope::platform());
+
+        self::assertTrue($grant(GrantScope::platform())->isAllowed());
+
+        self::restrictIn($admin, 't0', PackagePermissions::ADMINISTRATION_SELF);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_SELF, $grant(GrantScope::platform())->reason);
+        self::assertSame(DecisionStage::ADMINISTRATION, $grant(GrantScope::platform())->stage);
+        self::assertTrue($grant(new GrantScope(Reference::of(StubTenant::query()->create(['id' => 't1', 'name' => 't1'])), null, false))->isAllowed());
+        self::assertTrue($check($revoke)->isAllowed());
+    }
+
+    /**
+     * The unbounded right is weighed across the change's whole reach: a
+     * platform-wide removal of a boundary is allowed while nothing limits
+     * `authorization:administration.unbounded`, and refused as unprovable once
+     * the actor holds a role in one tenant whose policy denies it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheUnboundedRightIsWeighedAcrossTheWholeReach(): void
+    {
+        [$admin, $check] = self::administrator();
+
+        $cap    = Policy::create(['name' => 'cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+        $remove = OperationResource::revoke(PackagePermissions::BOUNDARY_REMOVE, self::user('user'), $cap, GrantScope::platform());
+
+        self::assertTrue($check($remove)->isAllowed());
+
+        self::restrictIn($admin, 't0', PackagePermissions::ADMINISTRATION_UNBOUNDED);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $check($remove)->reason);
+    }
+
+    /**
+     * The impersonated right is weighed across the whole reach of a change to a
+     * subject that may widen authority: a platform-wide grant made while
+     * impersonating is refused as impersonating once the actor holds a role in
+     * one tenant whose policy denies
+     * `authorization:administration.impersonated`, while a grant in a tenant
+     * the deny does not reach, and a change that only narrows, decided at its
+     * node alone, are still allowed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheImpersonatedRightIsWeighedAcrossAWideningChangesReach(): void
+    {
+        [$admin] = self::administrator();
+
+        $user   = self::user('user');
+        $edit   = Permission::query()->firstOrCreate(['name' => 'posts:edit']);
+        $acting = ActingContext::for($admin)->impersonatedBy(new Reference('support', '9'));
+        $grant  = static fn (GrantScope $scope): Decision => $acting->check(OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $user, $edit, $scope));
+
+        self::assertTrue($grant(GrantScope::platform())->isAllowed());
+
+        self::restrictIn($admin, 't0', PackagePermissions::ADMINISTRATION_IMPERSONATED);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_IMPERSONATING, $grant(GrantScope::platform())->reason);
+        self::assertTrue($grant(new GrantScope(Reference::of(StubTenant::query()->create(['id' => 't1', 'name' => 't1'])), null, false))->isAllowed());
+        self::assertTrue($acting->check(self::revoke($user))->isAllowed());
     }
 
     /**
@@ -647,6 +741,48 @@ final class OperationConstraintsTest extends TestCase
         };
 
         return new FurtherChecks($actor instanceof Subject ? $actor : new Subject($actor, $actor), $record, static fn (): CheckSources => self::noSources());
+    }
+
+    /**
+     * Return a senior administrator allowed `authorization:*` and `*:*` at the
+     * platform, and a callback deciding an operation as it.
+     *
+     * @return array{
+     *     \Tests\Feature\Stubs\StubIdentity,
+     *     \Closure(\SineMacula\Laravel\Authorization\Administration\OperationResource): \SineMacula\Laravel\Authorization\Evaluation\Decision
+     * }
+     *
+     * @throws \Throwable
+     */
+    private static function administrator(): array
+    {
+        $admin = self::senior('admin');
+
+        $admin->givePermission(Permission::query()->create(['name' => 'authorization:*']));
+        $admin->givePermission(Permission::query()->create(['name' => '*:*']));
+
+        return [$admin, static fn (OperationResource $operation): Decision => ActingContext::for($admin)->check($operation)];
+    }
+
+    /**
+     * Grant the actor, in a new tenant with the id, a role carrying a policy
+     * that denies the action.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $actor
+     * @param  string  $tenant
+     * @param  string  $action
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private static function restrictIn(StubIdentity $actor, string $tenant, string $action): void
+    {
+        $denied = StubTenant::query()->create(['id' => $tenant, 'name' => $tenant]);
+        $role   = Role::query()->create(['name' => 'restricted', 'rank' => 8]);
+        $policy = Policy::create(['name' => 'restricting', 'document' => ['statements' => [['effect' => 'deny', 'actions' => [$action]]]]]);
+
+        GrantService::instance()?->attachPolicy($role, $policy);
+        GrantService::instance()?->grantRole($actor, $role, tenant: $denied);
     }
 
     /**

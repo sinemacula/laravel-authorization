@@ -201,6 +201,23 @@ final readonly class ActingContext
     }
 
     /**
+     * Return the further checks of the acting subject, with the call's caps,
+     * each decided and gathered in the scope in place when it is asked, so a
+     * right decided outside the administration stage, the guardrail right, can
+     * be weighed across a reach (see `AdministeredScope`).
+     *
+     * @return \SineMacula\Laravel\Authorization\Administration\FurtherChecks
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     *
+     * @internal
+     */
+    public function furtherChecks(): FurtherChecks
+    {
+        return $this->manager()->furtherChecks() ?? throw self::unresolved();
+    }
+
+    /**
      * Decide the operation as `check()` does and throw when it is not allowed:
      * an `InsufficientAuthenticationException` for a step-up, else an
      * `AuthorizationException`, each carrying the decision, after the refusal

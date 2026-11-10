@@ -22,6 +22,11 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * - **bounded**: more holders than `authorization.administration.max_impact`
  *   allow, or some that cannot be read, refuse it as
  *   `administration.unprovable`, never approximated;
+ * - **impersonation**: a change made while impersonating needs
+ *   `authorization:administration.impersonated` across the whole reach, by the
+ *   rule the scope is weighed by, as well as at its node (see
+ *   `OperationConstraints`), or it is refused as
+ *   `administration.impersonating`;
  * - **scope** (N79): the actor must administer the whole reach the holders'
  *   grants can have, the definition's owner and every tenant below it in every
  *   application, or the platform for a platform definition (see
@@ -37,7 +42,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *   the reach, cannot be read;
  * - **self**: a change that reaches the actor itself, its principal or its
  *   identity, needs `authorization:administration.self` on the same operation,
- *   or it is refused as `administration.self`.
+ *   at its node and across the whole reach by the rule the scope is weighed by
+ *   (see `AdministeredScope::isAllowedAcross()`), or it is refused as
+ *   `administration.self`, so a self right denied or limited in any tenant the
+ *   reach holds refuses it.
  *
  * A change that reaches no holder widens no one, and passes.
  *
@@ -77,9 +85,10 @@ final class Impact
             return null;
         }
 
-        return self::scope($operation, $resource, $reach, $checks)
+        return self::impersonation($operation, $resource, $reach, $checks)
+            ?? self::scope($operation, $resource, $reach, $checks)
             ?? self::rank($operation, $reach, $holders, $checks, $granted)
-            ?? self::self($resource, $holders, $checks);
+            ?? self::self($resource, $reach, $holders, $checks);
     }
 
     /**
@@ -118,6 +127,25 @@ final class Impact
         $actor = RankComparison::rankIn($checks->subject, $operation->tenant, null);
 
         return $actor !== null && $actor < $rank ? null : DecisionReason::ADMINISTRATION_RANK;
+    }
+
+    /**
+     * Return `administration.impersonating` when the change is made while
+     * impersonating and the subject is not allowed
+     * `authorization:administration.impersonated` across the whole reach; its
+     * node was decided before the impact check (see `OperationConstraints`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
+     * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
+     */
+    private static function impersonation(OperationResource $operation, ResourceReference $resource, GrantScope $reach, FurtherChecks $checks): ?DecisionReason
+    {
+        $isRefused = $operation->impersonator !== null && AdministeredScope::refusalOf(PackagePermissions::ADMINISTRATION_IMPERSONATED, $resource, $reach, $checks) !== null;
+
+        return $isRefused ? DecisionReason::ADMINISTRATION_IMPERSONATING : null;
     }
 
     /**
@@ -194,17 +222,21 @@ final class Impact
     /**
      * Return `administration.self` when the holders include the actor itself
      * and the operation is not also allowed
-     * `authorization:administration.self`.
+     * `authorization:administration.self`, at its node and across the whole
+     * reach (see `AdministeredScope::isAllowedAcross()`).
      *
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
      * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $holders
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      */
-    private static function self(ResourceReference $resource, array $holders, FurtherChecks $checks): ?DecisionReason
+    private static function self(ResourceReference $resource, GrantScope $reach, array $holders, FurtherChecks $checks): ?DecisionReason
     {
         $reachesActor = \array_filter($holders, static fn (Reference $holder): bool => OperationGrantee::isActor($holder, $checks->subject)) !== [];
 
-        return $reachesActor && !$checks->decide(PackagePermissions::ADMINISTRATION_SELF, $resource)->isAllowed() ? DecisionReason::ADMINISTRATION_SELF : null;
+        $isRefused = $reachesActor && !AdministeredScope::isAllowedAcross(PackagePermissions::ADMINISTRATION_SELF, $resource, $reach, $checks);
+
+        return $isRefused ? DecisionReason::ADMINISTRATION_SELF : null;
     }
 }
