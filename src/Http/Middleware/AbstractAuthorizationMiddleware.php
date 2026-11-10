@@ -175,7 +175,7 @@ abstract class AbstractAuthorizationMiddleware
     /**
      * Refuse more than the two arguments every middleware takes.
      *
-     * @param  array<int, string>  $arguments
+     * @param  array<array-key, string>  $arguments
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
