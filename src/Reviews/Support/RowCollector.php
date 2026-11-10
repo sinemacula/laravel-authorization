@@ -21,6 +21,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * is known exactly: the review is truncated only when more rows were collected
  * than the limit, and only the limit's worth is returned.
  *
+ * A review of unused grants keeps only the rows its filter keeps (see
+ * `ReviewUsage::isUnobserved()`); a row it leaves out is not collected, so the
+ * limit and the truncation count the rows kept.
+ *
  * A later page collects only the rows after the last row of the page before, by
  * its sort key (`after`): a row at or before it is passed over, a source of
  * rows whose kind comes before the last row's is not read at all (see
@@ -60,6 +64,7 @@ final class RowCollector
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  int  $limit
      * @param  list<bool|int|string|null>|null  $after
+     * @param  (\Closure(\SineMacula\Laravel\Authorization\Reviews\ReviewRow): bool)|null  $keeps
      */
     public function __construct(
 
@@ -71,6 +76,9 @@ final class RowCollector
 
         /** The sort key of the last row of the page before; null for the first page. */
         private readonly ?array $after = null,
+
+        /** Whether a row is kept, as an unused review keeps only the rows with no observed use; null keeps every row. */
+        private readonly ?\Closure $keeps = null,
     ) {}
 
     /**
@@ -164,6 +172,10 @@ final class RowCollector
             $start->grantedBy,
             $this->stateOf($start, $rows),
         );
+
+        if ($this->keeps !== null && !($this->keeps)($row)) {
+            return;
+        }
 
         $this->entries[] = ['key' => $key, 'row' => $row];
     }

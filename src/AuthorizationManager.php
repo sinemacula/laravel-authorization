@@ -42,6 +42,7 @@ use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
+use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
 
 /**
  * Authorization manager — the facade-facing entry point.
@@ -93,6 +94,7 @@ final class AuthorizationManager
      * @param  \SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver|null  $resourcePolicies
      * @param  \SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver|null  $guardrails
      * @param  \SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver|null  $sessionCaps
+     * @param  \SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder|null  $usage
      */
     public function __construct(
 
@@ -128,6 +130,9 @@ final class AuthorizationManager
         // Makes the session caps of a check; null reads no credential's scopes,
         // so only `capped()` and a machine's missing scopes cap it.
         ?SessionCapResolver $sessionCaps = null,
+
+        /** Notes the grant routes everyday checks use while grant usage is tracked; null when it is not. */
+        private readonly ?GrantUsageRecorder $usage = null,
     ) {
         $this->pipeline = new DecisionPipeline($evaluator, $policyResolver, $contexts, $resourcePolicies, $guardrails, $sessionCaps);
     }
@@ -686,6 +691,11 @@ final class AuthorizationManager
      * dispatching alone; a preview's decisions name its previewer. The batch
      * `explain()` decides through explains its check.
      *
+     * While grant usage is tracked, an everyday check's batch decides through a
+     * pipeline that notes the grant routes each decision used (N100); a
+     * preview's, an explanation's and a listing's never do (N70, N86, N89),
+     * since none of them is a decision the application acts on.
+     *
      * @param  bool  $isDispatching
      * @param  bool  $isStoring
      * @param  bool  $isExplaining
@@ -693,8 +703,10 @@ final class AuthorizationManager
      */
     private function batch(bool $isDispatching = true, bool $isStoring = true, bool $isExplaining = false): CheckBatch
     {
+        $usage = $this->usage !== null && $isStoring && !$isExplaining && $this->preview === null ? $this->usage : null;
+
         return new CheckBatch(
-            $this->pipeline,
+            $usage === null ? $this->pipeline : $this->pipeline->tracking($usage),
             $this->lastDecisionStore,
             $this->subjectResolver,
             $this->events,

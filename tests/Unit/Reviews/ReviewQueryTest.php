@@ -157,6 +157,21 @@ final class ReviewQueryTest extends TestCase
     }
 
     /**
+     * A review of unused grants looks back to its instant in UTC, kept when it
+     * is bounded; every other review looks back to no instant.
+     *
+     * @return void
+     */
+    public function testAReviewOfUnusedGrantsLooksBackToItsInstant(): void
+    {
+        $query = ReviewQuery::unused(ReviewScope::everywhere(), new Carbon('2030-01-01 15:00:00', 'Europe/Paris'))->withLimit(3);
+
+        self::assertSame(ReviewKind::UNUSED, $query->kind);
+        self::assertSame(['2030-01-01 14:00:00', 'UTC', 3], [$query->since()?->format('Y-m-d H:i:s'), $query->since()?->getTimezone()->getName(), $query->limit]);
+        self::assertNull(ReviewQuery::expiring(ReviewScope::everywhere(), new Carbon('2030-01-01'), new Carbon('2030-01-02'))->since());
+    }
+
+    /**
      * Every review is bounded: by the configured limit, by the default when
      * none is configured, or by the limit given, of at least one row, the rest
      * of the query kept; a configured limit that is not a whole number of at

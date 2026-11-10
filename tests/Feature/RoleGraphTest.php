@@ -441,6 +441,73 @@ final class RoleGraphTest extends TestCase
     }
 
     /**
+     * Within the reach read, the chain of each held role the tenant scope shows
+     * runs from the role up to the root, the role alone with the hierarchy
+     * disabled; none when the hierarchy moved after it was read. Its keys list
+     * each role then its ancestors from the root down, as the keys within the
+     * reach do.
+     *
+     * @return void
+     */
+    public function testTheChainsWithinTheReach(): void
+    {
+        [$root, $middle, $leaf] = self::chainOf(3, 'c');
+        $other                  = Role::create(['name' => 'other', 'guard' => 'web']);
+        $elsewhere              = Role::create(['name' => 'elsewhere', 'guard' => 'web']);
+        $missing                = (string) Str::uuid();
+        $reach                  = RoleGraph::reach([$leaf->id, $other->id, $missing]);
+        $chains                 = RoleGraph::chainsWithin($reach, [$leaf->id, $other->id, $missing]);
+
+        self::assertSame([$leaf->id => [$leaf->id, $middle->id, $root->id], $other->id => [$other->id]], $chains);
+        self::assertNotNull($chains);
+        self::assertSame(RoleGraph::keysWithin($reach, [$leaf->id, $other->id, $missing]), RoleGraph::keysOf($chains));
+        self::assertSame([$leaf->id, $root->id, $middle->id, $other->id], RoleGraph::keysOf($chains));
+
+        DB::table('roles')->where('id', $root->id)->update(['parent_id' => $elsewhere->id]);
+
+        self::assertNull(RoleGraph::chainsWithin($reach, [$leaf->id]));
+
+        config(['authorization.hierarchy.enabled' => false]);
+
+        self::assertSame([$leaf->id => [$leaf->id]], RoleGraph::chainsWithin(RoleGraph::reach([$leaf->id]), [$leaf->id]));
+    }
+
+    /**
+     * The permissions the roles of the chains carry are read in the one query
+     * the names take, with the key and name of each by the role carrying it,
+     * each once; no role reads nothing.
+     *
+     * @return void
+     */
+    public function testThePermissionsCarriedWithinTheChains(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        [$root, $leaf] = self::chainOf(2, 'p');
+        $read          = Permission::create(['name' => 'posts:read', 'guard' => 'web']);
+        $edit          = Permission::create(['name' => 'posts:edit', 'guard' => 'web']);
+
+        $root->givePermission($read, Carbon::parse('2026-07-01 13:00:00'));
+        $leaf->givePermission($read);
+        $leaf->givePermission($edit);
+
+        $chains  = [$leaf->id => [$leaf->id, $root->id]];
+        $carried = null;
+
+        self::assertSame(1, self::queriesFor(static function () use ($chains, &$carried): void {
+            $carried = RoleGraph::carriedWithin($chains);
+        }));
+
+        self::assertNotNull($carried);
+        self::assertEqualsCanonicalizing(['posts:read', 'posts:edit'], $carried->names);
+        self::assertSame(3600, $carried->expiresIn);
+        self::assertSame([['id' => $read->id, 'name' => 'posts:read']], $carried->byRole[$root->id] ?? null);
+        self::assertEqualsCanonicalizing([['id' => $read->id, 'name' => 'posts:read'], ['id' => $edit->id, 'name' => 'posts:edit']], $carried->byRole[$leaf->id] ?? null);
+        self::assertSame([], RoleGraph::carriedWithin([])->byRole);
+        self::assertNull(RoleGraph::permissionsWithin(RoleGraph::reach([$leaf->id]), [$leaf->id])?->byRole);
+    }
+
+    /**
      * Create a chain of roles, root first, each the parent of the next.
      *
      * @param  int  $length

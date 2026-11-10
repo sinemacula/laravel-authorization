@@ -375,6 +375,34 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * The grant usage block is validated with the rest: the package's default,
+     * tracking off, passes, and an interval under a minute is refused under its
+     * key.
+     *
+     * @return void
+     */
+    public function testTheUsageBlockIsValidated(): void
+    {
+        $config    = $this->authorizationConfig();
+        $container = $this->app;
+
+        self::assertNotNull($container);
+        self::assertSame(['enabled' => false, 'interval' => 3600, 'batch' => 250, 'connection' => null, 'queue' => null, 'retention' => 400], $config['usage']);
+
+        ConfigValidator::validate($config, $container);
+
+        $short = $config;
+
+        $short['usage']['interval'] = 59;
+
+        $this->assertRejected(
+            static fn () => ConfigValidator::validate($short, $container),
+            'authorization.usage.interval',
+            'expected a whole number of at least 60, got 59 (int).',
+        );
+    }
+
+    /**
      * The grant hooks are validated with the rest: the package's default, an
      * empty list, passes, as does a missing key, and a class that is not a hook
      * is refused under its entry's key.
