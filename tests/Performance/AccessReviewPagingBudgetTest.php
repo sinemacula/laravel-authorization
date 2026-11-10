@@ -83,6 +83,7 @@ final class AccessReviewPagingBudgetTest extends TestCase
             self::assertCount(self::HOLDERS, $paged['rows']);
             self::assertCount(self::HOLDERS, \array_unique(\array_map(static fn ($row): string => $row->rowKey, $paged['rows'])));
             self::assertCount(\intdiv(self::HOLDERS, self::PAGE), $costs);
+            self::assertNotEmpty($costs);
             self::assertLessThanOrEqual(1, \max($costs) - \min($costs), 'The pages cost other queries: ' . \implode(', ', $costs));
             self::assertSame($costs[1], \end($costs), 'The last page cost other queries than the second: ' . \implode(', ', $costs));
             self::assertFalse(self::readsByOffset($paged['queries']), 'A page was read at an offset.');
@@ -332,7 +333,7 @@ final class AccessReviewPagingBudgetTest extends TestCase
      * rows each filter or recheck removed included; a bitmap's index scan reads
      * no row itself, its heap scan reading them.
      *
-     * @param  array<string, mixed>  $node
+     * @param  array<array-key, mixed>  $node
      * @return int
      */
     private static function scanned(array $node): int

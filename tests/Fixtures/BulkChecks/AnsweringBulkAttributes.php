@@ -26,7 +26,7 @@ final class AnsweringBulkAttributes implements BulkResourceAttributeProvider
     /**
      * Create the provider.
      *
-     * @param  array<string, mixed>  $answers
+     * @param  array<array-key, mixed>  $answers
      * @param  bool  $isBroken
      */
     public function __construct(

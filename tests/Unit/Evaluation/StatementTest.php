@@ -105,6 +105,7 @@ final class StatementTest extends TestCase
 
         self::assertSame($document, $statement->toArray());
         self::assertSame($document['sid'] ?? null, $statement->sid);
+        self::assertIsString($document['effect']);
         self::assertSame(PolicyEffect::from($document['effect']), $statement->effect);
         self::assertSame($document['actions'] ?? null, $statement->actions);
         self::assertSame($document['not_actions'] ?? null, $statement->notActions);

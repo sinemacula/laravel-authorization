@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
@@ -111,7 +112,7 @@ final class GuardScopedLookup
             });
 
         return $chain->nearestFirst($query, $grammar->wrap($column('tenant_type')), $grammar->wrap($column('tenant_id')))
-            ->orderByRaw($grammar->wrap($column('guard')) . ' IS NULL')
+            ->orderBy(new ComposedExpression($grammar->wrap($column('guard')) . ' IS NULL'))
             ->orderBy($instance->getQualifiedKeyName());
     }
 }

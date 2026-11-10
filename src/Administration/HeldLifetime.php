@@ -74,10 +74,12 @@ final class HeldLifetime
      */
     public static function ofEach(Subject $subject, array $permissions): array
     {
-        $direct  = static fn (Model $grantee): array => self::direct($grantee, $permissions);
-        $carried = static fn (array $roles): array => self::carried($roles, $permissions);
-
-        return self::across($subject, $permissions, $direct, $carried);
+        return self::across(
+            $subject,
+            $permissions,
+            static fn (Model $grantee): array => self::direct($grantee, $permissions),
+            static fn (array $roles): array => self::carried($roles, $permissions),
+        );
     }
 
     /**
@@ -92,10 +94,12 @@ final class HeldLifetime
      */
     public static function ofPolicy(Subject $subject, string $policy): ?int
     {
-        $direct  = static fn (Model $grantee): array => [$policy => self::attached($grantee, $policy)];
-        $carried = static fn (array $roles): array => [$policy => self::attachedToRoles($roles, $policy)];
-
-        return self::across($subject, [$policy], $direct, $carried)[$policy];
+        return self::across(
+            $subject,
+            [$policy],
+            static fn (Model $grantee): array => [$policy => self::attached($grantee, $policy)],
+            static fn (array $roles): array => [$policy => self::attachedToRoles($roles, $policy)],
+        )[$policy];
     }
 
     /**
@@ -329,7 +333,7 @@ final class HeldLifetime
      * Read the live grants of the relation, with their expiry, on the write
      * connection.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<covariant \Illuminate\Database\Eloquent\Model, *, *>  $grants
      * @return \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>
      */
     private static function held(MorphToMany $grants): EloquentCollection
@@ -369,11 +373,12 @@ final class HeldLifetime
     /**
      * Return the latest of the times given, or null when none is.
      *
+     * @param  int|null  $time
      * @param  int|null  ...$times
      * @return int|null
      */
-    private static function later(?int ...$times): ?int
+    private static function later(?int $time, ?int ...$times): ?int
     {
-        return \max($times);
+        return \max([$time, ...$times]);
     }
 }

@@ -66,7 +66,7 @@ trait CompilesQueries
      */
     private static function connectionOf(string $driver): Connection
     {
-        $pdo    = static fn (): ?\PDO => null;
+        $pdo    = static fn (): \PDO => throw new \LogicException('The connection compiles queries; it never runs one.');
         $config = ['driver' => $driver, 'name' => $driver];
 
         return match ($driver) {

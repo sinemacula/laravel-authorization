@@ -120,7 +120,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertTrue(TenantScope::within($org, 'web', static fn (): bool => $manager->check('posts:read')->isAllowed() && $manager->check('posts:edit')->isAllowed()));
 
         $observed = $this->observed();
-        $keys     = \array_values(\array_unique(\array_map(static fn (array $one): string => (string) $one['grant_key'], $observed)));
+        $keys     = \array_values(\array_unique(\array_map(static fn (array $one): string => $one['grant_key'], $observed)));
 
         \sort($keys);
 

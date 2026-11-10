@@ -51,7 +51,7 @@ final class DocumentComparison
     public static function read(mixed $document): ?Policy
     {
         try {
-            return \is_array($document) ? Policy::fromArray(PolicyDocument::named($document, PolicyDocument::UNNAMED)) : null;
+            return \is_array($document) ? Policy::fromArray(PolicyDocument::named(PolicyDocument::decode($document, PolicyDocument::UNNAMED), PolicyDocument::UNNAMED)) : null;
         } catch (\Throwable) {
             return null;
         }

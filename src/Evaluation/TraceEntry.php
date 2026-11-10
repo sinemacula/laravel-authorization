@@ -101,7 +101,17 @@ final readonly class TraceEntry
     {
         $held = $this->permission === null ? null : 'permission "' . $this->permission . '"';
 
-        return $this->statement?->toString() ?? $this->cap ?? $held ?? match ($this->stage) {
+        return $this->statement?->toString() ?? $this->cap ?? $held ?? $this->weighed();
+    }
+
+    /**
+     * Return what the entry's stage weighs, as its explanation names it.
+     *
+     * @return string
+     */
+    private function weighed(): string
+    {
+        return match ($this->stage) {
             DecisionStage::GUARDRAIL      => 'guardrails',
             DecisionStage::BOUNDARY       => 'boundaries',
             DecisionStage::SESSION        => 'session caps',

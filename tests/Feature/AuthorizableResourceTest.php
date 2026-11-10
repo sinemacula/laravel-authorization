@@ -61,10 +61,10 @@ final class AuthorizableResourceTest extends TestCase
         parent::setUp();
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
-        (new AuthorizationServiceProvider($this->app))->boot();
+        (new AuthorizationServiceProvider($this->container()))->boot();
     }
 
     /**
@@ -268,9 +268,9 @@ final class AuthorizableResourceTest extends TestCase
     {
         $resolver = new StubSubjectResolver($user, $tenant);
 
-        $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+        $this->container()->instance(SubjectResolver::class, $resolver);
+        $this->container()->forgetInstance('authorization');
+        $this->container()->forgetInstance(AuthorizationManager::class);
 
         // The Gate decides about the user it hands over, as a signed-in user's
         // would be, since a guest is decided as no subject.

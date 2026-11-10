@@ -40,10 +40,10 @@ final class PermissionProviderTest extends TestCase
     public function testBootWritesNoPermissionRows(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_providers', [StubPermissionProvider::class]);
 
-        (new AuthorizationServiceProvider($this->app))->boot();
+        (new AuthorizationServiceProvider($this->container()))->boot();
 
         self::assertSame(0, Permission::count());
     }
@@ -59,10 +59,10 @@ final class PermissionProviderTest extends TestCase
         $this->expectExceptionMessageMatches('/does not exist/');
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_providers', ['App\NonExistent\Provider']);
 
-        (new AuthorizationServiceProvider($this->app))->boot();
+        (new AuthorizationServiceProvider($this->container()))->boot();
     }
 
     /**
@@ -76,9 +76,9 @@ final class PermissionProviderTest extends TestCase
         $this->expectExceptionMessageMatches('/does not implement/');
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_providers', [\stdClass::class]);
 
-        (new AuthorizationServiceProvider($this->app))->boot();
+        (new AuthorizationServiceProvider($this->container()))->boot();
     }
 }

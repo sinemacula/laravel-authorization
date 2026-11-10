@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -539,7 +540,11 @@ final class RecordWriterTest extends TestCase
     {
         $statement = ['effect' => 'allow', 'actions' => [$action], 'resources' => [OperationResource::TYPE . ':*'], 'conditions' => ['eq' => $conditions]];
 
-        self::grants()?->attachPolicy($admin->subject->subject, Policy::query()->create(['name' => 'allows-' . $action, 'document' => ['statements' => [$statement]]]));
+        $grantee = $admin->subject->subject;
+
+        self::assertInstanceOf(Model::class, $grantee);
+
+        self::grants()?->attachPolicy($grantee, Policy::query()->create(['name' => 'allows-' . $action, 'document' => ['statements' => [$statement]]]));
     }
 
     /**

@@ -192,8 +192,8 @@ final class UncoveredBranchesTest extends TestCase
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole($role);
 
-        $this->app->forgetInstance(ResolutionCache::class); // @phpstan-ignore method.nonObject
-        $this->app->offsetUnset(ResolutionCache::class); // @phpstan-ignore method.nonObject
+        $this->container()->forgetInstance(ResolutionCache::class);
+        $this->container()->offsetUnset(ResolutionCache::class);
 
         $names = $user->fresh()?->getRoles() ?? [];
 
@@ -213,8 +213,8 @@ final class UncoveredBranchesTest extends TestCase
         $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->givePermission($permission);
 
-        $this->app->forgetInstance(ResolutionCache::class); // @phpstan-ignore method.nonObject
-        $this->app->offsetUnset(ResolutionCache::class); // @phpstan-ignore method.nonObject
+        $this->container()->forgetInstance(ResolutionCache::class);
+        $this->container()->offsetUnset(ResolutionCache::class);
 
         $names = $user->fresh()?->getPermissions() ?? [];
 
@@ -298,7 +298,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testBladeHelpersHasAllRolesReturnsFalseForNonRoleSupportingPrincipal(): void
     {
-        $this->app->instance( // @phpstan-ignore method.nonObject
+        $this->container()->instance(
             SubjectResolver::class,
             new StubSubjectResolver(new \stdClass),
         );

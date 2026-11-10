@@ -56,7 +56,7 @@ final class AuthorizeActionTest extends TestCase
     /** @var string Action reused across the scenarios. */
     private const string ACTION = 'posts:delete';
 
-    /** @var array<string, class-string> The morph map before the test. */
+    /** @var array<string, class-string<\Illuminate\Database\Eloquent\Model>> The morph map before the test. */
     private array $morphMap = [];
 
     /**

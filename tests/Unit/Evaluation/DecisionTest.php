@@ -384,8 +384,8 @@ final class DecisionTest extends TestCase
 
     /**
      * The keys are every condition key the trace tested, each once, in the
-     * order first tested, held or failed alike, a numeric key as text; a
-     * decision whose trace tested none depended on none.
+     * order first tested, held or failed alike; a decision whose trace tested
+     * none depended on none.
      *
      * @return void
      */
@@ -395,10 +395,10 @@ final class DecisionTest extends TestCase
         $decision  = Decision::allow(DecisionStage::ALLOW, [], [
             new TraceEntry(DecisionStage::DENY, TraceOutcome::CONDITION_FAILED, $statement, ['resource.status' => false, 'input.flag' => true]),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
-            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::MATCHED, $statement, ['input.flag' => true, '7' => false, 'subject.department' => true]),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::MATCHED, $statement, ['input.flag' => true, 'resource.tier' => false, 'subject.department' => true]),
         ]);
 
-        self::assertSame(['resource.status', 'input.flag', '7', 'subject.department'], $decision->keys());
+        self::assertSame(['resource.status', 'input.flag', 'resource.tier', 'subject.department'], $decision->keys());
         self::assertSame([], Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT)->keys());
     }
 

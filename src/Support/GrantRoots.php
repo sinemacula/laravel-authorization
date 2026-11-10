@@ -10,6 +10,7 @@ use Illuminate\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Administration\DependencyPins;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Enums\GrantScopeStatus;
@@ -252,7 +253,7 @@ final readonly class GrantRoots
 
         $query = $connection->query()
             ->from($table)
-            ->selectRaw("case when {$type} is null and {$id} is null then 0 when {$type} is null or {$id} is null then 1 else 0 end as is_unreadable");
+            ->addSelect(new ComposedExpression("case when {$type} is null and {$id} is null then 0 when {$type} is null or {$id} is null then 1 else 0 end as is_unreadable"));
 
         $query->where(function (Builder $grantees) use ($table): void {
             foreach ($this->grantees as $grantee) {

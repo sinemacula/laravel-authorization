@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Reviews\Enums\ScopeSelection;
@@ -211,7 +212,7 @@ final readonly class ReviewRun
         return $query->whereExists(static function (Builder $role) use ($chain, $roles, $key, $table): void {
             $grantee = $role->getGrammar()->wrap($table . '.authorizable_id');
 
-            $role->selectRaw('1')->from($roles)->whereRaw(Definitions::keyAsText($role, $roles . '.' . $key) . ' = ' . $grantee);
+            $role->selectRaw('1')->from($roles)->whereRaw(new ComposedExpression(Definitions::keyAsText($role, $roles . '.' . $key) . ' = ' . $grantee));
 
             $chain->owners($role, $roles . self::TENANT_TYPE, $roles . self::TENANT_ID);
         });

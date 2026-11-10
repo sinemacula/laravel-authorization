@@ -77,15 +77,15 @@ final class GrantRowsTest extends TestCase
             self::grants()->grantRole($grantee, $role);
         }
 
-        $read = static fn (array $grantees): array => \array_map(
+        $read = static fn (Reference ...$grantees): array => \array_map(
             static fn (GrantRow $row): string => $row->grantee->type . ':' . $row->grantee->id,
-            GrantRows::all(GrantRows::ordered(GrantRows::grantedTo(GrantRows::of(GrantTarget::ROLE), $table, $grantees), $table, 'role_id'), 'role'),
+            GrantRows::all(GrantRows::ordered(GrantRows::grantedTo(GrantRows::of(GrantTarget::ROLE), $table, \array_values($grantees)), $table, 'role_id'), 'role'),
         );
 
-        self::assertSame(['a:1', 'b:1'], $read([new Reference('a', '1'), new Reference('b', '1')]));
-        self::assertSame(['a:2'], $read([new Reference('a', '2')]));
-        self::assertSame([], $read([new Reference('b', '2')]));
-        self::assertSame([], $read([]));
+        self::assertSame(['a:1', 'b:1'], $read(new Reference('a', '1'), new Reference('b', '1')));
+        self::assertSame(['a:2'], $read(new Reference('a', '2')));
+        self::assertSame([], $read(new Reference('b', '2')));
+        self::assertSame([], $read());
     }
 
     /**
@@ -235,13 +235,13 @@ final class GrantRowsTest extends TestCase
         foreach (self::drivers() as $driver) {
             $column = static fn (string $name): string => self::wrappedOn($driver, 'authorizable_roles.' . $name);
             $bytes  = static fn (string $name): string => match (true) {
-                $driver === 'sqlite'                       => $column($name) . ' collate binary',
-                $driver === 'pgsql' && $name !== 'role_id' => $column($name) . ' collate "C"',
-                $driver === 'pgsql'                        => 'cast(' . $column($name) . ' as text) collate "C"',
-                $driver === 'mysql' && $name !== 'role_id' => $column($name),
-                default                                    => 'cast(' . $column($name) . ' as binary)',
+                $driver === 'sqlite'                       => $column($name) . ' collate binary asc',
+                $driver === 'pgsql' && $name !== 'role_id' => $column($name) . ' collate "C" asc',
+                $driver === 'pgsql'                        => 'cast(' . $column($name) . ' as text) collate "C" asc',
+                $driver === 'mysql' && $name !== 'role_id' => $column($name) . ' asc',
+                default                                    => 'cast(' . $column($name) . ' as binary) asc',
             };
-            $tagged = static fn (string $name): string => 'case when ' . $column($name) . ' is null then 0 else 1 end, ' . $bytes($name);
+            $tagged = static fn (string $name): string => 'case when ' . $column($name) . ' is null then 0 else 1 end asc, ' . $bytes($name);
             $scope  = [
                 $bytes('authorizable_type'),
                 $bytes('authorizable_id'),

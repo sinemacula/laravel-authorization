@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\GuardrailException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
@@ -92,10 +93,22 @@ final class GuardrailAuthority
         $impersonated = $actor->isImpersonating() ? self::decide($actor, $tenant, PackagePermissions::ADMINISTRATION_IMPERSONATED, $reach) : null;
 
         if ($impersonated !== null && !$impersonated->isAllowed()) {
-            $step = new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, cap: DecisionReason::ADMINISTRATION_IMPERSONATING->value);
-
-            throw ActingContext::refusal(Decision::deny(DecisionReason::ADMINISTRATION_IMPERSONATING, DecisionStage::ADMINISTRATION, [], [...$impersonated->trace, $step]));
+            throw self::impersonating($impersonated);
         }
+    }
+
+    /**
+     * Return the refusal of a change made while impersonating, carrying the
+     * decision that did not allow it, with the refusal's step added.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $impersonated
+     * @return \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    private static function impersonating(Decision $impersonated): AuthorizationException
+    {
+        $step = new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, cap: DecisionReason::ADMINISTRATION_IMPERSONATING->value);
+
+        return ActingContext::refusal(Decision::deny(DecisionReason::ADMINISTRATION_IMPERSONATING, DecisionStage::ADMINISTRATION, [], [...$impersonated->trace, $step]));
     }
 
     /**

@@ -44,9 +44,9 @@ final class ServiceProviderTest extends TestCase
      */
     public function testBindsManagerEvaluatorAndResolver(): void
     {
-        self::assertInstanceOf(PolicyEvaluator::class, $this->app->make(PolicyEvaluator::class)); // @phpstan-ignore method.nonObject
-        self::assertInstanceOf(AuthGuardSubjectResolver::class, $this->app->make(SubjectResolver::class)); // @phpstan-ignore method.nonObject
-        self::assertInstanceOf(AuthorizationManager::class, $this->app->make('authorization')); // @phpstan-ignore method.nonObject
+        self::assertInstanceOf(PolicyEvaluator::class, $this->container()->make(PolicyEvaluator::class));
+        self::assertInstanceOf(AuthGuardSubjectResolver::class, $this->container()->make(SubjectResolver::class));
+        self::assertInstanceOf(AuthorizationManager::class, $this->container()->make('authorization'));
         /** @var \Illuminate\Foundation\Application $app */
         $app = $this->app;
         self::assertSame($app->make('authorization'), $app->make(AuthorizationManager::class));
@@ -60,7 +60,7 @@ final class ServiceProviderTest extends TestCase
     public function testMergesDefaultConfig(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
 
         self::assertSame('web', $config->get('authorization.defaults.guard'));
         self::assertTrue($config->get('authorization.gate.enabled'));
@@ -79,7 +79,7 @@ final class ServiceProviderTest extends TestCase
     public function testBootRegistersTheGateHook(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         Gate::define('posts:create', static fn (?object $user = null): bool => true);

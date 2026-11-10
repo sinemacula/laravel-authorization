@@ -72,6 +72,9 @@ final class RowCollectorTest extends TestCase
 
             [$row, $same, $expired] = $rows->rows();
 
+            $supporting = $row->toArray()['supporting_grants'];
+
+            self::assertIsArray($supporting);
             self::assertSame([
                 'ann',
                 'ann',
@@ -97,7 +100,7 @@ final class RowCollectorTest extends TestCase
                 $row->viaIdentity?->id,
                 \array_map(static fn (Reference $role): string => $role->type, $row->rolePath),
                 \array_map(static fn (Reference $role): string => $role->id, $row->rolePath),
-                \array_column($row->toArray()['supporting_grants'], 'source_key'),
+                \array_column($supporting, 'source_key'),
                 $row->toArray()['route_expires_at'],
                 $row->toArray()['expires_at'],
                 $row->grantedBy,

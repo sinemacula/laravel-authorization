@@ -457,7 +457,10 @@ final class WhyCommandTest extends TestCase
 
         [, $output] = self::why(['subject' => StubIdentity::class . ':user-8', 'action' => 'posts:edit', '--format' => 'json']);
 
-        self::assertArrayHasKey('resource', self::decoded($output)['request']);
+        $request = self::decoded($output)['request'];
+
+        self::assertIsArray($request);
+        self::assertArrayHasKey('resource', $request);
         self::assertNull(self::decoded($output)['request']['resource']);
     }
 

@@ -272,13 +272,14 @@ final class AuthorizationManager
         $current    = fn (): DecisionProvenance => DecisionProvenance::of($this->currentSubject());
         $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? $this->preview?->provenance() ?? $this->inSubjectScope($current);
         $failed     = AuthorizationFailed::of($provenance, $action, ResourceReferences::identifierOf($reference), $decision);
+        $report     = fn (): mixed => $this->events?->dispatch($failed);
 
         if ($this->preview === null) {
-            $this->events?->dispatch($failed);
+            $report();
         } else {
             // Its listeners run as a preview's evaluation, so they may change
             // nothing.
-            Previewing::current()->during(fn (): mixed => $this->events?->dispatch($failed));
+            Previewing::current()->during($report);
         }
 
         $reason = $decision->reason ?? DecisionReason::NO_MATCH;
@@ -631,6 +632,7 @@ final class AuthorizationManager
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException
      *
      * @phpstan-ignore throws.unusedType
      */

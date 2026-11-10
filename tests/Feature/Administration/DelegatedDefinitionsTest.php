@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Administration;
 
+use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\AffectedHolders;
@@ -172,6 +173,8 @@ final class DelegatedDefinitionsTest extends TestCase
         $other    = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']], ['effect' => 'deny', 'actions' => ['posts:edit']]]];
         $digest   = DocumentDigest::of(PolicyDocument::named($approved, 'support'))->digest;
         $rewrite  = static fn (array $document): \Closure => static fn (): mixed => self::policies()->rewrite($policy->fresh() ?? $policy, $document, $actor);
+
+        self::assertInstanceOf(Model::class, $actor->subject->subject);
 
         self::grants()->attachPolicy($actor->subject->subject, self::policy('approver', [[
             'effect'     => 'allow',
@@ -716,6 +719,8 @@ final class DelegatedDefinitionsTest extends TestCase
             'resources'  => [OperationResource::TYPE . ':*'],
             'conditions' => ['eq' => ['resource.digest' => $digest]],
         ];
+
+        self::assertInstanceOf(Model::class, $actor->subject->subject);
 
         self::grants()->attachPolicy($actor->subject->subject, self::policy($name, [$statement]));
     }

@@ -166,6 +166,7 @@ final class RoleObserver
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
      *
+     * @throws \LogicException
      * @throws \Throwable
      */
     public function deleted(Role $role): void

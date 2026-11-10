@@ -60,35 +60,40 @@ final class ConfigValidator
      */
     public static function validate(array $config, Container $container): void
     {
-        self::validateConnection($config['connection'] ?? null, $container);
-        self::validateModels($config['models'] ?? []);
-        self::validatePermissionEnums($config['permission_enums'] ?? []);
-        self::validatePermissionProviders($config['permission_providers'] ?? []);
-        self::validateGate(\array_key_exists('gate', $config) ? $config['gate'] : []);
-        self::validateSubjectResolver($config['subject_resolver'] ?? null);
-        self::validateTenantTree($config['tenant_tree'] ?? null);
+        // A key holding null reads as its default, except where only a missing
+        // key does, so that a null set on purpose is validated as given.
+        $value = static fn (string $key, mixed $default = null): mixed => $config[$key] ?? $default;
+        $given = static fn (string $key, mixed $default): mixed => \array_key_exists($key, $config) ? $config[$key] : $default;
+
+        self::validateConnection($value('connection'), $container);
+        self::validateModels($value('models', []));
+        self::validatePermissionEnums($value('permission_enums', []));
+        self::validatePermissionProviders($value('permission_providers', []));
+        self::validateGate($given('gate', []));
+        self::validateSubjectResolver($value('subject_resolver'));
+        self::validateTenantTree($value('tenant_tree'));
         ImplementationConfigValidator::validate(
             'authorization.identity_directory',
-            \array_key_exists('identity_directory', $config) ? $config['identity_directory'] : GuardUserIdentityDirectory::class,
+            $given('identity_directory', GuardUserIdentityDirectory::class),
             IdentityDirectory::class,
             'an identity directory class is required; set it to \\' . GuardUserIdentityDirectory::class . ' for the default.',
         );
-        self::validateApplicationAccess($config['application_access'] ?? []);
-        self::validateResourceTenantResolver($config['resource_tenant_resolver'] ?? null);
-        RequirementCheckerConfigValidator::validate(\array_key_exists('requirement_checker', $config) ? $config['requirement_checker'] : RefusingRequirementChecker::class);
-        self::validatePolicyStore($config['policy_store'] ?? null);
+        self::validateApplicationAccess($value('application_access', []));
+        self::validateResourceTenantResolver($value('resource_tenant_resolver'));
+        RequirementCheckerConfigValidator::validate($given('requirement_checker', RefusingRequirementChecker::class));
+        self::validatePolicyStore($value('policy_store'));
         self::validateCacheStore($config['cache']['store'] ?? null, $container);
         self::validateCacheTtl($config['cache']['ttl'] ?? 300);
         self::validatePolicyLimits($config['policies']['limits'] ?? []);
-        ContextConfigValidator::validate($config['context'] ?? [], $container);
-        AttributeConfigValidator::validate($config['attributes'] ?? [], $container);
-        SessionConfigValidator::validate($config['session'] ?? [], $container);
-        QueryScopingConfigValidator::validate($config['query_scoping'] ?? []);
-        BulkConfigValidator::validate($config['bulk'] ?? []);
-        AdministrationConfigValidator::validate($config['administration'] ?? []);
-        ReviewConfigValidator::validate($config['reviews'] ?? []);
+        ContextConfigValidator::validate($value('context', []), $container);
+        AttributeConfigValidator::validate($value('attributes', []), $container);
+        SessionConfigValidator::validate($value('session', []), $container);
+        QueryScopingConfigValidator::validate($value('query_scoping', []));
+        BulkConfigValidator::validate($value('bulk', []));
+        AdministrationConfigValidator::validate($value('administration', []));
+        ReviewConfigValidator::validate($value('reviews', []));
         UsageConfigValidator::validateIn($config);
-        GrantHookConfigValidator::validate(\array_key_exists('grant_hooks', $config) ? $config['grant_hooks'] : []);
+        GrantHookConfigValidator::validate($given('grant_hooks', []));
     }
 
     /**

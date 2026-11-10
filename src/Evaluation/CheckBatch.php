@@ -424,7 +424,7 @@ final readonly class CheckBatch
      * Return how many checks a chunk holds: `authorization.bulk.chunk_size`, or
      * 500 when it sets none.
      *
-     * @return int
+     * @return positive-int
      */
     private static function chunkSize(): int
     {

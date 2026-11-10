@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
@@ -147,10 +148,10 @@ final class QueryAuthorizerTest extends TestCase
         $condition = self::authorizer()->compile($manager->currentSubject(), new TenantScopedPost, 'posts:view');
 
         self::assertSame(['none', 'partial', 'active'], $kept);
-        self::assertSame($kept, TenantScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all());
+        self::assertSame($kept, TenantScopedPost::query()->whereRaw(new ComposedExpression($condition))->orderBy('id')->pluck('title')->all());
         $elsewhere = self::authorizer()->compile($this->resolveRequest($user, $t2)->currentSubject(), new TenantScopedPost, 'posts:view');
 
-        self::assertSame([], TenantScopedPost::query()->whereRaw($elsewhere)->pluck('title')->all());
+        self::assertSame([], TenantScopedPost::query()->whereRaw(new ComposedExpression($elsewhere))->pluck('title')->all());
     }
 
     /**
@@ -170,7 +171,7 @@ final class QueryAuthorizerTest extends TestCase
 
         $condition = self::authorizer()->compile($this->resolveRequest($user)->currentSubject(), new TenantScopedPost, 'posts:view');
 
-        self::assertSame(['none'], TenantScopedPost::query()->whereRaw($condition)->pluck('title')->all());
+        self::assertSame(['none'], TenantScopedPost::query()->whereRaw(new ComposedExpression($condition))->pluck('title')->all());
     }
 
     /**
@@ -193,7 +194,7 @@ final class QueryAuthorizerTest extends TestCase
         $kept = function (object $tenant) use ($user): array {
             $condition = self::authorizer()->compile($this->resolveRequest($user, $tenant)->currentSubject(), new ScopedTicket, 'posts:view');
 
-            return ScopedTicket::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all();
+            return ScopedTicket::query()->whereRaw(new ComposedExpression($condition))->orderBy('id')->pluck('title')->all();
         };
 
         self::assertSame(['team none', 'team 5'], $kept(new Reference('teams', '5')));
@@ -240,7 +241,7 @@ final class QueryAuthorizerTest extends TestCase
 
         self::assertSame(['real', 'real', 'real'], \array_column($kinds, 'kind'));
         self::assertSame(['none', 'type'], $allowed);
-        self::assertSame($allowed, NumberedTenantPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all());
+        self::assertSame($allowed, NumberedTenantPost::query()->whereRaw(new ComposedExpression($condition))->orderBy('id')->pluck('title')->all());
     }
 
     /**
@@ -271,7 +272,7 @@ final class QueryAuthorizerTest extends TestCase
             self::assertStringContainsString($wrapped . ($shape === 'sqlite' ? ' IN (' : ' = '), $condition);
         }
 
-        self::assertSame(['p0', 'p3'], NumberedTenantPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all());
+        self::assertSame(['p0', 'p3'], NumberedTenantPost::query()->whereRaw(new ComposedExpression($condition))->orderBy('id')->pluck('title')->all());
 
         if ($shape !== 'sqlite') {
             return;
@@ -313,7 +314,7 @@ final class QueryAuthorizerTest extends TestCase
         $kept = static function () use ($subject): array {
             $condition = self::authorizer()->compile($subject, new ScopedDocument, 'posts:view');
 
-            return ScopedDocument::query()->whereRaw($condition)->orderBy('row_id')->pluck('title')->all();
+            return ScopedDocument::query()->whereRaw(new ComposedExpression($condition))->orderBy('row_id')->pluck('title')->all();
         };
 
         self::assertSame(['short', 'longest', 'too long'], $kept());
@@ -383,7 +384,7 @@ final class QueryAuthorizerTest extends TestCase
 
         $condition = self::authorizer()->compile($manager->currentSubject(), new TenantScopedPost, 'posts:view');
 
-        self::assertSame(['none', 't1', 't2'], TenantScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all());
+        self::assertSame(['none', 't1', 't2'], TenantScopedPost::query()->whereRaw(new ComposedExpression($condition))->orderBy('id')->pluck('title')->all());
         self::assertSame(['none', 't1', 't2'], self::allowed($manager));
 
         $ids = [];
@@ -414,7 +415,7 @@ final class QueryAuthorizerTest extends TestCase
         $condition = self::authorizer()->compile($manager->currentSubject(), new TenantScopedPost, 'posts:view');
 
         self::assertSame(['none', 't1', 't2', 'kept'], self::allowed($manager));
-        self::assertSame(['none', 't1', 't2', 'kept'], TenantScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all());
+        self::assertSame(['none', 't1', 't2', 'kept'], TenantScopedPost::query()->whereRaw(new ComposedExpression($condition))->orderBy('id')->pluck('title')->all());
     }
 
     /**
@@ -446,14 +447,16 @@ final class QueryAuthorizerTest extends TestCase
         $checked   = \array_values(\array_filter([3, 4, 5], static fn (int $id): bool => $manager->can('posts:view', ScopedPost::query()->find($id))));
 
         self::assertSame([5], $checked);
-        self::assertSame($checked, ScopedPost::query()->whereRaw($condition)->pluck('id')->all());
+        self::assertSame($checked, ScopedPost::query()->whereRaw(new ComposedExpression($condition))->pluck('id')->all());
 
         $user->givePermission(Permission::create(['name' => 'posts:view']));
 
-        self::assertSame([3, 5], ScopedPost::query()->whereRaw(self::authorizer()->compile($subject, new ScopedPost, 'posts:view'))->orderBy('id')->pluck('id')->all());
+        $recompiled = new ComposedExpression(self::authorizer()->compile($subject, new ScopedPost, 'posts:view'));
+
+        self::assertSame([3, 5], ScopedPost::query()->whereRaw($recompiled)->orderBy('id')->pluck('id')->all());
         $overridden = self::authorizer(self::pipeline()->withPolicies([]))->compile($subject, new ScopedPost, 'posts:view');
 
-        self::assertSame([3, 4, 5], ScopedPost::query()->whereRaw($overridden)->orderBy('id')->pluck('id')->all());
+        self::assertSame([3, 4, 5], ScopedPost::query()->whereRaw(new ComposedExpression($overridden))->orderBy('id')->pluck('id')->all());
 
         $config  = $this->app?->make(ConfigRepository::class);
         $compile = static fn (): string => self::authorizer()->compile($subject, new ScopedPost, 'posts:view');
@@ -501,7 +504,7 @@ final class QueryAuthorizerTest extends TestCase
         $checked   = \array_values(\array_filter([4, 5], static fn (int $id): bool => $manager->can('posts:view', ScopedPost::query()->find($id))));
 
         self::assertSame([5], $checked);
-        self::assertSame($checked, ScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('id')->all());
+        self::assertSame($checked, ScopedPost::query()->whereRaw(new ComposedExpression($condition))->orderBy('id')->pluck('id')->all());
     }
 
     /**
@@ -545,7 +548,7 @@ final class QueryAuthorizerTest extends TestCase
             $condition = self::authorizer()->compile($manager->currentSubject(), new TenantScopedPost, 'posts:view');
 
             self::assertSame(["kept-{$index}"], $checked, \bin2hex($id));
-            self::assertSame($checked, TenantScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all(), \bin2hex($id));
+            self::assertSame($checked, TenantScopedPost::query()->whereRaw(new ComposedExpression($condition))->orderBy('id')->pluck('title')->all(), \bin2hex($id));
         }
     }
 

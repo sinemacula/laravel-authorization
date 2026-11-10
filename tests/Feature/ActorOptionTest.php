@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -67,6 +68,7 @@ final class ActorOptionTest extends TestCase
 
         self::assertNull(ActorOption::acting(null));
         self::assertInstanceOf(ActingContext::class, $actor);
+        self::assertInstanceOf(Model::class, $actor->subject->subject);
         self::assertTrue($admin->is($actor->subject->subject));
         self::assertNull($actor->subject->session);
 

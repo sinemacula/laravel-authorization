@@ -387,7 +387,7 @@ final class MigrateSpatieCommandTest extends TestCase
         ];
 
         self::assertCount(5, $ids);
-        self::assertCount(5, \array_unique($ids));
+        self::assertCount(5, \array_unique(\array_filter($ids, \is_string(...))));
 
         foreach ($ids as $id) {
             self::assertIsString($id);

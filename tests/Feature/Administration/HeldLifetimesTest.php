@@ -50,16 +50,16 @@ final class HeldLifetimesTest extends TestCase
         $lifetimes = new HeldLifetimes($subject);
 
         self::assertSame(HeldLifetime::of($subject, 'posts:read'), $lifetimes->of('posts:read'));
-        self::assertSame(\PHP_INT_MAX, $lifetimes->ofPolicy($policy->getKey()));
+        self::assertSame(\PHP_INT_MAX, $lifetimes->ofPolicy($policy->id));
         self::assertNull($lifetimes->of('posts:edit'));
-        self::assertNull($lifetimes->of($policy->getKey()));
+        self::assertNull($lifetimes->of($policy->id));
 
         DB::flushQueryLog();
         DB::enableQueryLog();
 
         $lifetimes->of('posts:read');
         $lifetimes->of('posts:edit');
-        $lifetimes->ofPolicy($policy->getKey());
+        $lifetimes->ofPolicy($policy->id);
 
         $queries = \count(DB::getQueryLog());
 

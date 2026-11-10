@@ -133,6 +133,30 @@ final class ResolutionCodec
     }
 
     /**
+     * Return what a resolution found as policies, refusing a resolution that
+     * found anything else.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Cache\Resolution<mixed>  $resolution
+     * @return \SineMacula\Laravel\Authorization\Cache\Resolution<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     *
+     * @throws \UnexpectedValueException
+     */
+    public static function policyResolution(Resolution $resolution): Resolution
+    {
+        $policies = [];
+
+        foreach ($resolution->value as $policy) {
+            if (!$policy instanceof Policy) {
+                throw new \UnexpectedValueException('Resolved policy is not an evaluation policy.');
+            }
+
+            $policies[] = $policy;
+        }
+
+        return new Resolution($policies, $resolution->expiresIn, $resolution->stable, $resolution->routes);
+    }
+
+    /**
      * Hydrate stored policy documents back into evaluation policies, each with
      * its stored key and, for a resource policy, the resource it is attached
      * to.

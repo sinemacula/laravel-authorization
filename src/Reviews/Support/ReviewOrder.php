@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Reviews\Support;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Str;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Database\ExactReferences;
 
 /**
@@ -59,10 +60,10 @@ final class ReviewOrder
         $wrapped = $query->getGrammar()->wrap($column);
 
         if ($isNullable) {
-            $query->orderByRaw("case when {$wrapped} is null then 0 else 1 end");
+            $query->orderBy(new ComposedExpression("case when {$wrapped} is null then 0 else 1 end"));
         }
 
-        return $query->orderByRaw(self::bytes(self::driverOf($query), $column, $wrapped));
+        return $query->orderBy(new ComposedExpression(self::bytes(self::driverOf($query), $column, $wrapped)));
     }
 
     /**
@@ -80,8 +81,9 @@ final class ReviewOrder
     {
         $driver = self::driverOf($query);
         $bound  = self::isCastToBinary($driver, $column) ? 'cast(? as binary)' : '?';
+        $bytes  = self::bytes($driver, $column, $query->getGrammar()->wrap($column));
 
-        return $query->whereRaw(self::bytes($driver, $column, $query->getGrammar()->wrap($column)) . ' ' . ($operator === '>' ? '>' : '=') . ' ' . $bound, [$value]);
+        return $query->whereRaw(new ComposedExpression($bytes . ' ' . ($operator === '>' ? '>' : '=') . ' ' . $bound), [$value]);
     }
 
     /**
@@ -105,7 +107,7 @@ final class ReviewOrder
         $columns = \array_map(static fn (string $column): string => self::bytes('pgsql', $column, $grammar->wrap($column)), \array_keys($values));
         $marks   = \implode(', ', \array_fill(0, \count($values), '?'));
 
-        return $query->whereRaw('(' . \implode(', ', $columns) . ') >= (' . $marks . ')', \array_values($values));
+        return $query->whereRaw(new ComposedExpression('(' . \implode(', ', $columns) . ') >= (' . $marks . ')'), \array_values($values));
     }
 
     /**
