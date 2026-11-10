@@ -322,7 +322,7 @@ final readonly class PolicyValidator
      * Return the path of every `${…}` reference in the string operands and
      * resource patterns, once each.
      *
-     * @param  list<mixed>  $subjects
+     * @param  array<int, mixed>  $subjects
      * @return list<string>
      */
     private static function referencesOf(array $subjects): array

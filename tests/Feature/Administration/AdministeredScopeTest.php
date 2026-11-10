@@ -248,6 +248,43 @@ final class AdministeredScopeTest extends TestCase
     }
 
     /**
+     * A further right is allowed across a reach only when it is allowed at the
+     * node the operation is decided at and across the whole reach by the same
+     * rule as the action: denied at the node it is refused without the reach
+     * being weighed; allowed there, it is decided again just below the reach's
+     * tenant, and refused when anything in the reach could limit it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAFurtherRightIsWeighedAtItsNodeAndAcrossItsReach(): void
+    {
+        $role      = Role::query()->firstOrCreate(['name' => 'named']);
+        $reach     = new GrantScope(new Reference('tenant', 'a'), 'admin');
+        $operation = OperationResource::grant(PackagePermissions::ROLE_GRANT, StubIdentity::query()->firstOrCreate(['id' => 'u1']), $role, $reach)->toResourceReference();
+        $self      = PackagePermissions::ADMINISTRATION_SELF;
+        $denying   = self::sources(policies: [['effect' => 'deny', 'actions' => [$self]]]);
+
+        self::assertFalse(AdministeredScope::isAllowedAcross($self, $operation, $reach, $this->checks(false, self::sources())));
+        self::assertSame([['decide', $self, null, false, null]], $this->asked);
+
+        $this->asked = [];
+
+        self::assertTrue(AdministeredScope::isAllowedAcross($self, $operation, $reach, $this->checks(true, self::sources())));
+        self::assertSame([
+            ['decide', $self, null, false, null],
+            ['decide', $self, 'admin', true, ['tenant', 'a']],
+            ['sources', $self, 'admin', true, ['tenant', 'a']],
+        ], $this->asked);
+
+        self::assertFalse(AdministeredScope::isAllowedAcross($self, $operation, $reach, $this->checks(true, $denying)));
+        self::assertTrue(AdministeredScope::isAllowedAcross($self, $operation, new GrantScope(new Reference('tenant', 'a'), 'admin', false), $this->checks(true, $denying)));
+        self::assertTrue(AdministeredScope::isLimited($self, $reach, $this->checks(true, $denying)));
+        self::assertFalse(AdministeredScope::isLimited($self, $reach, $this->checks(true, self::sources())));
+    }
+
+    /**
      * Return why the role grant, decided across the reach through the checks,
      * is refused.
      *

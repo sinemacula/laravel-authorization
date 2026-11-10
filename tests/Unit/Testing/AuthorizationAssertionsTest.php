@@ -271,7 +271,7 @@ final class AuthorizationAssertionsTest extends TestCase
         $config = $this->app?->make('config');
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
-        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+        (new AuthorizationServiceProvider($this->container()))->boot();
 
         Permission::create(['name' => 'posts:create', 'guard' => 'web']);
 
@@ -301,7 +301,7 @@ final class AuthorizationAssertionsTest extends TestCase
         $config = $this->app?->make('config');
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
-        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+        (new AuthorizationServiceProvider($this->container()))->boot();
 
         Permission::create(['name' => 'posts:create', 'guard' => 'web']);
 
@@ -563,7 +563,7 @@ final class AuthorizationAssertionsTest extends TestCase
         $config = $this->app?->make('config');
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
-        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+        (new AuthorizationServiceProvider($this->container()))->boot();
 
         Permission::create(['name' => 'posts:create', 'guard' => 'web']);
         Permission::create(['name' => 'posts:delete', 'guard' => 'web']);

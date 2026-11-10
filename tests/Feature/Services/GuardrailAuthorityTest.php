@@ -334,6 +334,71 @@ final class GuardrailAuthorityTest extends TestCase
     }
 
     /**
+     * A removal reaches the tenant's whole subtree, so the right is weighed
+     * across it (N79): an actor holding the right at the organisation, but
+     * denied it by a role it holds in the team, is refused the account's and
+     * the team's guardrails, though allowed from above them, and the platform's
+     * for a platform-wide grant; a guardrail set only adds a cap, so it is
+     * decided from above alone and permitted.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARemovalIsWeighedAcrossTheGuardrailsReach(): void
+    {
+        $actor  = self::actor('org-admin');
+        $global = self::actor('platform-admin');
+
+        $actor->givePermission(self::right(), tenant: $this->org);
+        $global->givePermission(self::right());
+
+        self::assertPermitted($actor, $this->account);
+        self::assertPermitted($global, null);
+
+        self::restrictIn($actor, $this->team, PackagePermissions::GUARDRAIL_MANAGE);
+        self::restrictIn($global, $this->team, PackagePermissions::GUARDRAIL_MANAGE);
+
+        self::assertRefused($actor, $this->account);
+        self::assertRefused($actor, $this->team);
+        self::assertRefused($global, null);
+
+        GuardrailAuthority::assertPermitted(self::acting($actor), Reference::of($this->account), true);
+        GuardrailAuthority::assertPermitted(self::acting($global), null, true);
+    }
+
+    /**
+     * The impersonated right of a removal is weighed across the guardrail's
+     * reach too: an impersonated actor allowed it at the organisation, but
+     * denied it by a role it holds in the team, is refused the account's
+     * guardrail as impersonating, after the trace of the allow, while a set is
+     * still permitted.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheImpersonatedRightOfARemovalIsWeighedAcrossItsReach(): void
+    {
+        $actor = self::actor('org-admin');
+
+        $actor->givePermission(self::right(), tenant: $this->org);
+        $actor->givePermission(Permission::create(['name' => PackagePermissions::ADMINISTRATION_IMPERSONATED]), tenant: $this->org);
+
+        $impersonated = self::acting($actor)->impersonatedBy(new Reference('support', '9'));
+
+        self::assertNull(self::impersonationRefusal($impersonated, $this->account));
+
+        self::restrictIn($actor, $this->team, PackagePermissions::ADMINISTRATION_IMPERSONATED);
+
+        $trace = self::impersonationRefusal($impersonated, $this->account)?->getDecision()->trace ?? [];
+
+        self::assertEquals(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, null, [], 'administration.scope'), $trace[\count($trace) - 2] ?? null);
+
+        GuardrailAuthority::assertPermitted($impersonated, Reference::of($this->account), true);
+    }
+
+    /**
      * With no authorization manager bound, every actor is refused.
      *
      * @return void
@@ -418,6 +483,27 @@ final class GuardrailAuthorityTest extends TestCase
             self::assertEquals(Reference::of($actor), $exception->getActor());
             self::assertEquals([$scope], $exception->getTenants());
         }
+    }
+
+    /**
+     * Grant the actor, in the tenant, a new role carrying a policy that denies
+     * the action.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $actor
+     * @param  \Tests\Feature\Stubs\StubTenant  $tenant
+     * @param  string  $action
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private static function restrictIn(StubIdentity $actor, StubTenant $tenant, string $action): void
+    {
+        $name   = 'restricted-' . Role::query()->count();
+        $role   = Role::query()->create(['name' => $name, 'rank' => 8]);
+        $policy = Policy::create(['name' => $name, 'document' => ['statements' => [['effect' => 'deny', 'actions' => [$action]]]]]);
+
+        $role->attachPolicy($policy);
+        $actor->assignRole($role, tenant: $tenant);
     }
 
     /**

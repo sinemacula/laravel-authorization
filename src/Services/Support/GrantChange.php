@@ -32,4 +32,17 @@ final readonly class GrantChange
         /** The expiry the row carried before the write, in UTC. */
         public ?Carbon $previousExpiresAt = null,
     ) {}
+
+    /**
+     * Determine whether the write changed the row of the key while the keys
+     * list it.
+     *
+     * @param  string  $id
+     * @param  list<string>  $ids
+     * @return bool
+     */
+    public function changesAnyOf(string $id, array $ids): bool
+    {
+        return $this->outcome !== GrantOutcome::UNCHANGED && \in_array($id, $ids, true);
+    }
 }

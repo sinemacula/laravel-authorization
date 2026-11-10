@@ -111,18 +111,14 @@ final class ConditionEvaluator
      */
     public static function evaluate(string $operator, mixed $operand, mixed $actual): MatchResult
     {
-        return match (self::FAMILIES[$operator] ?? null) {
-            'equality'   => self::matchesEquality($operator, $operand, $actual),
-            'membership' => self::matchesMembership($operator, $operand, $actual),
-            'string'     => self::matchesString($operator, $operand, $actual),
-            'number'     => self::matchesNumericComparison($operator, $operand, $actual),
-            'time'       => self::matchesTimeComparison($operator, $operand, $actual),
-            'between'    => self::matchesBetween($operand, $actual),
-            'bool'       => self::matchesBool($operand, $actual),
-            'null'       => self::matchesNull($operand, $actual),
-            'ip'         => self::matchesIp($operator, $operand, $actual),
-            'values'     => self::matchesValues($operator, $operand, $actual),
-            default      => self::unknownOperator($operator),
+        $family = self::FAMILIES[$operator] ?? null;
+
+        return match ($family) {
+            'between' => self::matchesBetween($operand, $actual),
+            'bool'    => self::matchesBool($operand, $actual),
+            'null'    => self::matchesNull($operand, $actual),
+            null      => self::unknownOperator($operator),
+            default   => self::matchesOperator($family, $operator, $operand, $actual),
         };
     }
 
@@ -166,6 +162,29 @@ final class ConditionEvaluator
     public static function logUnknownOperator(string $operator): void
     {
         AuthorizationLog::debug("Unknown authorization condition operator '{$operator}': the statement is invalid.");
+    }
+
+    /**
+     * Evaluate an operator of a family whose test depends on the operator
+     * itself, not on its family alone.
+     *
+     * @param  'equality'|'ip'|'membership'|'number'|'string'|'time'|'values'  $family
+     * @param  string  $operator
+     * @param  mixed  $operand
+     * @param  mixed  $actual
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
+     */
+    private static function matchesOperator(string $family, string $operator, mixed $operand, mixed $actual): MatchResult
+    {
+        return match ($family) {
+            'equality'   => self::matchesEquality($operator, $operand, $actual),
+            'membership' => self::matchesMembership($operator, $operand, $actual),
+            'string'     => self::matchesString($operator, $operand, $actual),
+            'number'     => self::matchesNumericComparison($operator, $operand, $actual),
+            'time'       => self::matchesTimeComparison($operator, $operand, $actual),
+            'ip'         => self::matchesIp($operator, $operand, $actual),
+            'values'     => self::matchesValues($operator, $operand, $actual),
+        };
     }
 
     /**

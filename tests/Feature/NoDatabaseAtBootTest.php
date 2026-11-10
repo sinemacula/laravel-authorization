@@ -35,6 +35,8 @@ final class NoDatabaseAtBootTest extends OrchestraTestCase
      * query and never reads the provider.
      *
      * @return void
+     *
+     * @throws \LogicException
      */
     public function testBootRunsNoQueryWithoutTables(): void
     {
@@ -44,7 +46,7 @@ final class NoDatabaseAtBootTest extends OrchestraTestCase
             $queries[] = $query->sql;
         });
 
-        (new AuthorizationServiceProvider($this->app))->boot();
+        (new AuthorizationServiceProvider($this->app ?? throw new \LogicException('The application has not been created.')))->boot();
 
         self::assertSame([], $queries);
         self::assertSame(0, RecordingPermissionProvider::$reads);

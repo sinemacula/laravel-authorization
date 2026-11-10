@@ -32,6 +32,29 @@ use Tests\TestCase;
 final class ListCatalogueCommandTest extends TestCase
 {
     /**
+     * Each listing is registered under its name, described, and offered a
+     * `--guard` filter, in the words of what it lists.
+     *
+     * @return void
+     */
+    public function testEachListingIsNamedAndDescribedByWhatItLists(): void
+    {
+        $listings = [
+            ListRolesCommand::NAME       => ['role', 'roles'],
+            ListPermissionsCommand::NAME => ['permission', 'permissions'],
+        ];
+
+        foreach ($listings as $name => [$model, $records]) {
+            $command = Artisan::all()[$name];
+
+            self::assertSame($name, $command->getName());
+            self::assertSame('List every authorization ' . $model . ', platform-wide and tenant-owned, with its owner', $command->getDescription());
+            self::assertSame('Filter ' . $records . ' by guard name', $command->getDefinition()->getOption('guard')->getDescription());
+            self::assertTrue($command->getDefinition()->getOption('guard')->acceptValue());
+        }
+    }
+
+    /**
      * An empty listing says so in the listing's own words.
      *
      * @return void

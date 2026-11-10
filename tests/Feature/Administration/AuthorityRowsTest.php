@@ -200,7 +200,7 @@ final class AuthorityRowsTest extends TestCase
         $role   = Role::query()->create(['name' => 'editor']);
         $parent = Role::query()->create(['name' => 'senior']);
 
-        $parentSet = OperationResource::definition(PackagePermissions::ROLE_PARENT_SET, $role, ['parent' => $parent->getKey()]);
+        $parentSet = OperationResource::definition(PackagePermissions::ROLE_PARENT_SET, $role, ['parent' => $parent->id]);
         $created   = OperationResource::definition(PackagePermissions::ROLE_CREATE, new Role(['name' => 'new']), ['name' => 'new']);
         $foreign   = OperationResource::definition(PackagePermissions::ROLE_UPDATE, StubIdentity::query()->create(['id' => 'model']), []);
 

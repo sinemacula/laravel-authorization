@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Query;
 use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Connection;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
@@ -220,7 +221,7 @@ final class RecordAttachments
         $query = $connection->query()->from("{$table} as {$alias}")->selectRaw('1')
             ->where("{$alias}.resource_type", $this->shape->type)
             ->where("{$alias}.policy_id", $policy->id)
-            ->whereRaw($keyText)
+            ->whereRaw(new ComposedExpression($keyText))
             ->where(static function (Builder $query) use ($chain, $application, $alias): void {
                 $chain->grants($query, $alias);
                 GrantApplications::only($query, $alias, $application);

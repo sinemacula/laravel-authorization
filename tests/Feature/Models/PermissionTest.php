@@ -123,7 +123,7 @@ final class PermissionTest extends StringCastsTestCase
     public function testResolvingANameWithoutAGuardUsesTheDefaultGuard(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.defaults.guard', 'api');
 
         Permission::query()->create(['name' => 'posts:edit', 'guard' => 'web']);
@@ -162,7 +162,7 @@ final class PermissionTest extends StringCastsTestCase
     private function useCustomRole(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.models.role', CustomRole::class);
     }
 }

@@ -456,10 +456,10 @@ final class GrantService
     private function grant(GrantTarget $kind, Model|Reference $grantee, mixed $target, ?\DateTimeInterface $expiresAt, ?ActingContext $actor, GrantScope $named): GrantOutcome
     {
         $reference = self::grantee($grantee);
-        $operation = Operation::begin($actor, [$kind->grantAction()]);
+        $begun     = Operation::begin($actor, [$kind->grantAction()]);
 
         /** @var \SineMacula\Laravel\Authorization\Enums\GrantOutcome $outcome */
-        $outcome = OperationScope::run($operation, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $named, $target, $expiresAt): GrantOutcome {
+        $outcome = OperationScope::run($begun, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $named, $target, $expiresAt, $begun): GrantOutcome {
             $resolve = static function () use ($kind, $grantee, $named, $target, $actor): array {
                 $model = $kind->resolve($target, GrantChanges::guard($grantee), $named->tenant);
                 $model = \is_string($target) ? $model : self::stored($kind, $model, $actor);
@@ -468,8 +468,9 @@ final class GrantService
             };
 
             // A grant that widens the identity's scope runs its hooks first,
-            // before the package takes any lock for the call (AUTHZ-11.3).
-            $hooks = WideningPhase::before($operation, $grantee, static function () use ($kind, $resolve, $expiresAt): array {
+            // before the package takes any lock for the call (AUTHZ-11.3),
+            // handed the operation as begun, with its client.
+            $hooks = WideningPhase::before($begun, $grantee, static function () use ($kind, $resolve, $expiresAt): array {
                 [$model, $scope] = $resolve();
 
                 return [ProposedGrant::of($kind, $model, $scope, $expiresAt)];
@@ -570,15 +571,16 @@ final class GrantService
     private function sync(GrantTarget $kind, Model|Reference $grantee, array $targets, ?\DateTimeInterface $expiresAt, ?ActingContext $actor, GrantScope $named): SyncResult
     {
         $reference = self::grantee($grantee);
-        $operation = Operation::begin($actor, [$kind->grantAction(), $kind->revokeAction()]);
+        $begun     = Operation::begin($actor, [$kind->grantAction(), $kind->revokeAction()]);
 
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult $result */
-        $result = OperationScope::run($operation, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $named, $targets, $expiresAt): SyncResult {
+        $result = OperationScope::run($begun, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $named, $targets, $expiresAt, $begun): SyncResult {
             $plan = static fn (): array => self::plan($kind, $grantee, $operation->actor, $named, $targets, $actor);
 
             // Every addition that widens the identity's scope runs its hooks
-            // first, all of them before any lock and any write (AUTHZ-11.3).
-            $hooks = WideningPhase::before($operation, $grantee, static function () use ($kind, $plan, $expiresAt): array {
+            // first, all of them before any lock and any write (AUTHZ-11.3),
+            // handed the operation as begun, with its client.
+            $hooks = WideningPhase::before($begun, $grantee, static function () use ($kind, $plan, $expiresAt): array {
                 [, $written, $table, $keep] = $plan();
 
                 return WideningPhase::additions($kind, $expiresAt, $written, $table, $keep);

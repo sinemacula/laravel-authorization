@@ -37,7 +37,9 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *
  * 1. an operation made while impersonating is refused as
  *    `administration.impersonating`, unless the subject is also allowed
- *    `authorization:administration.impersonated` on the same operation;
+ *    `authorization:administration.impersonated` on the same operation, and,
+ *    for a change to a subject that may widen authority, across its whole reach
+ *    as its action is (see `AdministeredScope::isAllowedAcross()`);
  * 2. an operation on a subject, a principal or an identity (a grant, a
  *    revocation, an attachment, a detach, a boundary set or removal), is
  *    weighed by the constraints of a change to a subject, listed below;
@@ -67,7 +69,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *   grantee holds;
  * - **self**: a change to the actor itself, its principal or its identity, that
  *   may widen authority is refused as `administration.self` unless
- *   `authorization:administration.self` is also allowed on the operation;
+ *   `authorization:administration.self` is also allowed on the operation, at
+ *   its node and across its whole reach by the rule its action is weighed by,
+ *   so a self right denied or limited in any tenant the change reaches refuses
+ *   it;
  * - a change that can only narrow (see `Narrowing`) is then allowed;
  * - **possession** (N77): a direct grant of a permission must be provably held
  *   by the actor across its reach and lifetime, or explicitly grantable there
@@ -87,7 +92,8 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *   `Narrowing`); one that replaces a boundary with a wider one, or a removal,
  *   cannot be bounded in general, so it is refused as
  *   `administration.unprovable` unless the actor is also allowed
- *   `authorization:administration.unbounded` on the same operation;
+ *   `authorization:administration.unbounded` on the same operation, at its node
+ *   and across its whole reach;
  * - every other change that may widen authority, a detach of a denying policy
  *   included, is refused as `administration.unprovable`.
  *
@@ -166,19 +172,42 @@ final class OperationConstraints
      */
     private static function refusal(OperationResource $operation, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
-        if ($operation->impersonator !== null && !$checks->decide(PackagePermissions::ADMINISTRATION_IMPERSONATED, $resource)->isAllowed()) {
+        $change = OperationGrantee::isSubject($operation) ? $operation->change : null;
+
+        if ($operation->impersonator !== null && !self::isImpersonable($operation, $change, $resource, $checks)) {
             return DecisionReason::ADMINISTRATION_IMPERSONATING;
         }
 
-        if (!OperationGrantee::isSubject($operation)) {
+        if ($change === null) {
             return DefinitionConstraints::refusal($operation, $resource, $checks);
         }
-
-        $change = $operation->change;
 
         return self::scope($operation, $change, $resource, $checks)
             ?? self::rank($operation, $change, $resource, $checks)
             ?? self::widening($operation, $change, $resource, $checks);
+    }
+
+    /**
+     * Determine whether the subject is allowed
+     * `authorization:administration.impersonated` on the operation: at its
+     * node, and, for a change to a subject that may widen authority, across its
+     * whole reach (see `AdministeredScope::isAllowedAcross()`); a change to a
+     * definition is weighed across its reach by the impact check (see
+     * `Impact`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange|null  $change
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
+     * @return bool
+     */
+    private static function isImpersonable(OperationResource $operation, ?OperationChange $change, ResourceReference $resource, FurtherChecks $checks): bool
+    {
+        if ($change === null || $operation->isNarrowing) {
+            return $checks->decide(PackagePermissions::ADMINISTRATION_IMPERSONATED, $resource)->isAllowed();
+        }
+
+        return AdministeredScope::isAllowedAcross(PackagePermissions::ADMINISTRATION_IMPERSONATED, $resource, $change->scope, $checks);
     }
 
     /**
@@ -212,7 +241,7 @@ final class OperationConstraints
     private static function rank(OperationResource $operation, OperationChange $change, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
         if (OperationGrantee::isSelf($operation, $checks->subject)) {
-            return self::self($operation, $resource, $checks);
+            return self::self($operation, $change, $resource, $checks);
         }
 
         if (!RankComparison::isEnabled()) {
@@ -261,16 +290,19 @@ final class OperationConstraints
     /**
      * Return `administration.self` when a change to the actor itself, which
      * this is, that may widen authority is not also allowed
-     * `authorization:administration.self`.
+     * `authorization:administration.self`, at its node and across its whole
+     * reach, as its action is (see `AdministeredScope::isAllowedAcross()`): a
+     * self right denied or limited in any tenant the change reaches refuses it.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      */
-    private static function self(OperationResource $operation, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
+    private static function self(OperationResource $operation, OperationChange $change, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
-        $isRefused = !$operation->isNarrowing && !$checks->decide(PackagePermissions::ADMINISTRATION_SELF, $resource)->isAllowed();
+        $isRefused = !$operation->isNarrowing && !AdministeredScope::isAllowedAcross(PackagePermissions::ADMINISTRATION_SELF, $resource, $change->scope, $checks);
 
         return $isRefused ? DecisionReason::ADMINISTRATION_SELF : null;
     }
@@ -304,7 +336,7 @@ final class OperationConstraints
             $action === PackagePermissions::PERMISSION_GRANT && $target instanceof Permission => Possession::refusal($operation, $change, $target, $checks),
             $action === PackagePermissions::ROLE_GRANT       && $target instanceof Role       => self::roleGranted($operation, $change, $target, $checks),
             $action === PackagePermissions::POLICY_ATTACH    && $target instanceof Policy     => PolicyRoute::refusal($operation, $change, $target, $checks),
-            $isBoundary                                                                       => self::unbounded($resource, $checks),
+            $isBoundary                                                                       => self::unbounded($change, $resource, $checks),
             default                                                                           => DecisionReason::ADMINISTRATION_UNPROVABLE,
         };
     }
@@ -312,15 +344,19 @@ final class OperationConstraints
     /**
      * Return `administration.unprovable` unless the operation, a boundary
      * replaced by a wider one or removed, is also allowed
-     * `authorization:administration.unbounded`.
+     * `authorization:administration.unbounded`, at its node and across its
+     * whole reach (see `AdministeredScope::isAllowedAcross()`).
      *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      */
-    private static function unbounded(ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
+    private static function unbounded(OperationChange $change, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
-        return $checks->decide(PackagePermissions::ADMINISTRATION_UNBOUNDED, $resource)->isAllowed() ? null : DecisionReason::ADMINISTRATION_UNPROVABLE;
+        $isAllowed = AdministeredScope::isAllowedAcross(PackagePermissions::ADMINISTRATION_UNBOUNDED, $resource, $change->scope, $checks);
+
+        return $isAllowed ? null : DecisionReason::ADMINISTRATION_UNPROVABLE;
     }
 
     /**

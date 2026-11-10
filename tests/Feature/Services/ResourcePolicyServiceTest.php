@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -494,6 +495,8 @@ final class ResourcePolicyServiceTest extends TestCase
             'conditions' => ['eq' => ['resource.grantee_type' => 'posts', 'resource.grantee_id' => '7']],
         ];
 
+        self::assertInstanceOf(Model::class, $admin->subject->subject);
+
         GrantService::instance()?->attachPolicy($admin->subject->subject, self::policy('detacher', [$statement]));
 
         self::assertDelegatedRefusal(DecisionReason::CONDITION_FAILED, static fn (): int => self::service()->detach($policy, 'posts', actor: $admin));
@@ -771,12 +774,18 @@ final class ResourcePolicyServiceTest extends TestCase
      * Return an attachment row's resource as `type:id`, or `type:*` for the
      * whole type.
      *
-     * @param  object{resource_type: string, resource_id: string|null}  $row
+     * @param  \stdClass  $row
      * @return string
      */
-    private static function identifierOf(object $row): string
+    private static function identifierOf(\stdClass $row): string
     {
-        return $row->resource_type . ':' . ($row->resource_id ?? '*');
+        $type = $row->resource_type;
+        $id   = $row->resource_id ?? '*';
+
+        self::assertIsString($type);
+        self::assertIsString($id);
+
+        return $type . ':' . $id;
     }
 
     /**

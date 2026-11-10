@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Concerns;
 
+use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -48,7 +49,7 @@ trait HasAuthorization // @phpstan-ignore trait.unused
     protected static function bootHasAuthorization(): void
     {
         static::deleted(static function (self $model): void {
-            if (\method_exists($model, 'isForceDeleting') && !$model->isForceDeleting()) {
+            if (!InlinePolicies::isDeletedForGood($model)) {
                 return;
             }
 

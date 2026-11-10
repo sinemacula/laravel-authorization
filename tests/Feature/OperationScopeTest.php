@@ -91,6 +91,25 @@ final class OperationScopeTest extends TestCase
     }
 
     /**
+     * The work of an operation with a client, and every write its observers
+     * report, is given the operation without the client, its id and actor kept.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheWorkIsGivenTheOperationWithoutItsClient(): void
+    {
+        $operation = Operation::begin(new Reference('user', '1'), [], '203.0.113.9', 'Browser/1.0');
+
+        [$given, $current] = OperationScope::run($operation, static fn (Operation $given): array => [$given, OperationScope::current(new Role)]);
+
+        self::assertSame($given, $current);
+        self::assertSame([$operation->id, $operation->actor, null, null], [$given->id, $given->actor, $given->ip, $given->userAgent]);
+        self::assertSame(['203.0.113.9', 'Browser/1.0'], [$operation->ip, $operation->userAgent]);
+    }
+
+    /**
      * A call's operation is current, whatever the record, only while its work
      * runs or until it throws.
      *

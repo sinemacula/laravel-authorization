@@ -28,10 +28,11 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *   `AffectedHolders::ofPolicy()`), the principals either document names where
  *   the policy is attached to a resource included: the impact check over them
  *   (see `Impact`), then, for a policy in use as a boundary, the further right
- *   `authorization:administration.unbounded` on the same operation, since the
- *   rewrite widens the boundary, and the policy route for the allows it adds
- *   across the policy's reach (see `PolicyRoute`), the grantable route decided
- *   on the new document's digest.
+ *   `authorization:administration.unbounded` on the same operation, at its node
+ *   and across the policy's reach (see `AdministeredScope::isAllowedAcross()`),
+ *   since the rewrite widens the boundary wherever it is set, and the policy
+ *   route for the allows it adds across the policy's reach (see `PolicyRoute`),
+ *   the grantable route decided on the new document's digest.
  *
  * A rewrite that reaches no holder widens no one, and passes.
  *
@@ -67,9 +68,10 @@ final class PolicyRewrite
             return DecisionReason::ADMINISTRATION_UNPROVABLE;
         }
 
-        $added = DocumentComparison::added($old, $new);
-        $route = static fn (): ?DecisionReason => self::unbounded($policy, $resource, $checks)
-            ?? PolicyRoute::refusalOf($operation, DefinitionConstraints::across($operation, $policy), $policy, $document, $added, $checks);
+        $added  = DocumentComparison::added($old, $new);
+        $across = DefinitionConstraints::across($operation, $policy);
+        $route  = static fn (): ?DecisionReason => self::unbounded($policy, $across, $resource, $checks)
+            ?? PolicyRoute::refusalOf($operation, $across, $policy, $document, $added, $checks);
 
         return DefinitionConstraints::growth($operation, $resource, AffectedHolders::none()->ofPolicy($policy, [$old, $new]), $checks, $route);
     }
@@ -77,20 +79,25 @@ final class PolicyRewrite
     /**
      * Return `administration.unprovable` when the policy is in use as a
      * boundary and the operation is not also allowed
-     * `authorization:administration.unbounded`.
+     * `authorization:administration.unbounded`, at its node and across the
+     * policy's reach, the change handing it out (see
+     * `AdministeredScope::isAllowedAcross()`).
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $across
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      */
-    private static function unbounded(Policy $policy, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
+    private static function unbounded(Policy $policy, OperationChange $across, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
         /** @var string $table */
         $table = config('authorization.tables.authorizable_boundaries', 'authorizable_boundaries');
 
         $isBoundary = AuthorizationConnection::connection()->table($table)->useWritePdo()->where('policy_id', $policy->getKey())->exists();
 
-        return $isBoundary && !$checks->decide(PackagePermissions::ADMINISTRATION_UNBOUNDED, $resource)->isAllowed() ? DecisionReason::ADMINISTRATION_UNPROVABLE : null;
+        $isUnbounded = !$isBoundary || AdministeredScope::isAllowedAcross(PackagePermissions::ADMINISTRATION_UNBOUNDED, $resource, $across->scope, $checks);
+
+        return $isUnbounded ? null : DecisionReason::ADMINISTRATION_UNPROVABLE;
     }
 }

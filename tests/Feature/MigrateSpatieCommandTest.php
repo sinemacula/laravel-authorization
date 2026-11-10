@@ -100,6 +100,19 @@ final class MigrateSpatieCommandTest extends TestCase
     }
 
     /**
+     * The command is registered under its `NAME` constant, the name its
+     * signature declares.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:migrate-spatie', MigrateSpatieCommand::NAME);
+        self::assertInstanceOf(MigrateSpatieCommand::class, Artisan::all()[MigrateSpatieCommand::NAME] ?? null);
+        self::assertSame(MigrateSpatieCommand::NAME, Artisan::all()[MigrateSpatieCommand::NAME]->getName());
+    }
+
+    /**
      * Full migration copies all five Spatie tables into the package tables.
      *
      * @return void
@@ -374,7 +387,7 @@ final class MigrateSpatieCommandTest extends TestCase
         ];
 
         self::assertCount(5, $ids);
-        self::assertCount(5, \array_unique($ids));
+        self::assertCount(5, \array_unique(\array_filter($ids, \is_string(...))));
 
         foreach ($ids as $id) {
             self::assertIsString($id);

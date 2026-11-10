@@ -36,6 +36,8 @@ use Tests\Feature\Stubs\FixedSubjectResolver;
  * @internal
  *
  * @phpstan-require-extends \Tests\TestCase
+ *
+ * @phpstan-import-type Observation from \SineMacula\Laravel\Authorization\Usage\UsageBatch
  */
 trait TracksGrantUsage
 {
@@ -100,7 +102,7 @@ trait TracksGrantUsage
      * Flush the recorder and return every observation the recording jobs sent
      * since the last read carry, in the order sent.
      *
-     * @return list<array<string, int|string|null>>
+     * @return list<Observation>
      */
     protected function observed(): array
     {
@@ -110,6 +112,8 @@ trait TracksGrantUsage
         $observations = [];
 
         foreach (\array_slice($jobs, $this->jobsRead) as $job) {
+            self::assertInstanceOf(RecordGrantUsage::class, $job);
+
             \array_push($observations, ...$job->batch->observations());
         }
 
@@ -126,7 +130,7 @@ trait TracksGrantUsage
      */
     protected function keysObserved(): array
     {
-        $keys = \array_values(\array_unique(\array_map(static fn (array $observation): string => (string) $observation['grant_key'], $this->observed())));
+        $keys = \array_values(\array_unique(\array_map(static fn (array $observation): string => $observation['grant_key'], $this->observed())));
 
         \sort($keys);
 

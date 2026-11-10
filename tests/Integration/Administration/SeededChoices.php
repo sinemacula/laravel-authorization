@@ -60,11 +60,17 @@ final readonly class SeededChoices
      *
      * @template TItem
      *
-     * @param  non-empty-list<TItem>  $items
+     * @param  list<TItem>  $items
      * @return TItem
+     *
+     * @throws \LogicException
      */
     public function pick(array $items): mixed
     {
+        if ($items === []) {
+            throw new \LogicException('There is nothing to pick from.');
+        }
+
         return $items[$this->random->getInt(0, \count($items) - 1)];
     }
 

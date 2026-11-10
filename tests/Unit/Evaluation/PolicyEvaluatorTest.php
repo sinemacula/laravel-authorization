@@ -1561,10 +1561,10 @@ final class PolicyEvaluatorTest extends TestCase
         $asked    = new \ArrayObject;
         $policy   = self::policy('p', [['effect' => 'deny', 'actions' => ['posts:read']], ['effect' => 'allow', 'actions' => ['posts:read']]]);
         $boundary = self::policy('cap', [['effect' => 'allow', 'actions' => ['posts:read']]]);
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, [], [$boundary], static function () use ($asked): bool {
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, [], [$boundary], static function () use ($asked): string {
             $asked->append(true);
 
-            return true;
+            return 'posts:read';
         });
 
         self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
@@ -1583,10 +1583,10 @@ final class PolicyEvaluatorTest extends TestCase
         $asked    = new \ArrayObject;
         $policy   = self::policy('p', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
         $boundary = self::policy('cap', [['effect' => 'allow', 'actions' => ['posts:read']]]);
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:edit', null, [], [$boundary], static function () use ($asked): bool {
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:edit', null, [], [$boundary], static function () use ($asked): string {
             $asked->append(true);
 
-            return true;
+            return 'posts:edit';
         });
 
         self::assertFalse($decision->isAllowed());
@@ -1828,10 +1828,10 @@ final class PolicyEvaluatorTest extends TestCase
         $policy    = self::policy('p', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
         $boundary  = self::policy('cap', [['effect' => 'allow', 'actions' => ['posts:*']]]);
         $guardrail = self::policy('rail', [['effect' => 'allow', 'actions' => ['posts:read']]])->withId('4');
-        $decision  = (new PolicyEvaluator)->evaluate([$policy], 'posts:edit', null, [], [$boundary], static function () use ($asked): bool {
+        $decision  = (new PolicyEvaluator)->evaluate([$policy], 'posts:edit', null, [], [$boundary], static function () use ($asked): string {
             $asked->append(true);
 
-            return true;
+            return 'posts:edit';
         }, [$guardrail]);
 
         self::assertFalse($decision->isAllowed());
@@ -2091,10 +2091,10 @@ final class PolicyEvaluatorTest extends TestCase
         $asked    = new \ArrayObject;
         $policy   = self::policy('p', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
         $session  = SessionCaps::of(null, [['posts:read']]);
-        $decision = (new PolicyEvaluator)->capped($session)->evaluate([$policy], 'posts:edit', null, [], [], static function () use ($asked): bool {
+        $decision = (new PolicyEvaluator)->capped($session)->evaluate([$policy], 'posts:edit', null, [], [], static function () use ($asked): string {
             $asked->append(true);
 
-            return true;
+            return 'posts:edit';
         });
 
         self::assertFalse($decision->isAllowed());

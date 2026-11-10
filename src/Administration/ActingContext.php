@@ -201,6 +201,23 @@ final readonly class ActingContext
     }
 
     /**
+     * Return the further checks of the acting subject, with the call's caps,
+     * each decided and gathered in the scope in place when it is asked, so a
+     * right decided outside the administration stage, the guardrail right, can
+     * be weighed across a reach (see `AdministeredScope`).
+     *
+     * @return \SineMacula\Laravel\Authorization\Administration\FurtherChecks
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     *
+     * @internal
+     */
+    public function furtherChecks(): FurtherChecks
+    {
+        return $this->manager()->furtherChecks() ?? throw self::unresolved();
+    }
+
+    /**
      * Decide the operation as `check()` does and throw when it is not allowed:
      * an `InsufficientAuthenticationException` for a step-up, else an
      * `AuthorizationException`, each carrying the decision, after the refusal
@@ -377,7 +394,9 @@ final readonly class ActingContext
 
     /**
      * Return the manager deciding about the acting subject, with the call's
-     * caps, refusing when the package is not booted.
+     * caps, in the scope in place, the reach a check puts in place included,
+     * whatever tenant the subject names (see `forActor()`), refusing when the
+     * package is not booted.
      *
      * @return \SineMacula\Laravel\Authorization\AuthorizationManager
      *
@@ -385,7 +404,7 @@ final readonly class ActingContext
      */
     private function manager(): AuthorizationManager
     {
-        $manager = AuthorizationManager::instance()?->for($this->subject) ?? throw self::unresolved();
+        $manager = AuthorizationManager::instance()?->forActor($this->subject) ?? throw self::unresolved();
 
         foreach ($this->caps as $cap) {
             $manager = $manager->capped($cap);

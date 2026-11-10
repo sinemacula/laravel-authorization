@@ -76,4 +76,16 @@ final class UsagePruneCommandTest extends TestCase
 
         self::assertSame([0, 0], [DB::table('authorization_grant_usage')->count(), DB::table('authorization_usage_coverage')->count()]);
     }
+
+    /**
+     * The command is registered under the name its constant holds.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:usage-prune', UsagePruneCommand::NAME);
+        self::assertInstanceOf(UsagePruneCommand::class, Artisan::all()[UsagePruneCommand::NAME] ?? null);
+        self::assertSame(UsagePruneCommand::NAME, Artisan::all()[UsagePruneCommand::NAME]->getName());
+    }
 }

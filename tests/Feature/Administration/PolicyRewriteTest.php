@@ -103,6 +103,35 @@ final class PolicyRewriteTest extends TestCase
     }
 
     /**
+     * The unbounded right a widening rewrite of a boundary policy needs is
+     * weighed across the policy's whole reach: allowed while nothing limits it,
+     * the rewrite refused as unprovable once the actor holds a role in one
+     * tenant whose policy denies `authorization:administration.unbounded`,
+     * though the right is allowed where the rewrite is decided.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheUnboundedRightIsWeighedAcrossThePolicysReach(): void
+    {
+        $policy = self::policy([self::READ, self::DENY]);
+        $deny   = Policy::create(['name' => 'restricting', 'document' => ['statements' => [['effect' => 'deny', 'actions' => [PackagePermissions::ADMINISTRATION_UNBOUNDED]]]]]);
+        $role   = Role::query()->create(['name' => 'restricted']);
+
+        self::grants()->grantPermission(self::actor(), Permission::query()->create(['name' => 'posts:edit']));
+        BoundaryService::instance()?->set(StubIdentity::query()->create(['id' => 'bounded']), $policy);
+
+        self::assertNull($this->refusal($policy, [self::READ, self::EDIT, self::DENY], true));
+
+        self::grants()->attachPolicy($role, $deny);
+        self::grants()->grantRole(self::actor(), $role, tenant: new Reference('tenant', 't0'));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $this->refusal($policy, [self::READ, self::EDIT, self::DENY], true));
+        self::assertNotContains('posts:edit', $this->asked);
+    }
+
+    /**
      * A rewrite that only narrows passes whoever holds the policy; one that
      * adds allows to a policy attached to a resource reaches the principals the
      * old document names as well as those of the new; and the rewrite of a

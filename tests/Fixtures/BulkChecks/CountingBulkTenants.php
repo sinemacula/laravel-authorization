@@ -41,7 +41,7 @@ final class CountingBulkTenants implements BulkResourceTenantResolver
     /**
      * Create a new resolver answering from the map.
      *
-     * @param  array<string, \SineMacula\Laravel\Authorization\Support\Reference|null>  $tenants
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\Reference|null>  $tenants
      */
     public function __construct(
 

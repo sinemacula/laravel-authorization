@@ -49,8 +49,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * actor is refused with `GuardrailException`, an impersonated one with
  * `AuthorizationException` as `administration.impersonating` unless
  * `authorization:administration.impersonated` is allowed it, so a tenant's own
- * administrators never lift the guardrails their tenant is set under. The right
- * is decided through `check()` with the guardrails left out, as every check of
+ * administrators never lift the guardrails their tenant is set under. A removal
+ * lifts a cap across the scope's whole subtree, so both rights are weighed
+ * across it too, and refused when anything that denies or caps the actor
+ * anywhere there could limit them; a set only adds a cap, and is decided from
+ * above alone (see `GuardrailAuthority`). The right is decided through
+ * `check()` with the guardrails left out, as every check of
  * `authorization:guardrail.manage` is, so no guardrail locks the guardrails:
  * one that does not allow the permission, or whose document cannot be read, a
  * platform guardrail included, is still removed through here. Every other deny
@@ -110,7 +114,7 @@ final class GuardrailService
         $operation = Operation::begin($actor, [PackagePermissions::GUARDRAIL_MANAGE]);
 
         return OperationScope::run($operation, static function (Operation $operation) use ($actor, $policy, $named): GrantOutcome {
-            self::assertPermitted($actor, $policy, $named);
+            self::assertPermitted($actor, $policy, $named, true);
 
             // Read under a lock on the policy's row, so the checks below weigh
             // the document as committed, and an edit or a deletion of the
@@ -150,7 +154,7 @@ final class GuardrailService
 
         /** @var bool */
         return OperationScope::run($operation, static function (Operation $operation) use ($actor, $policy, $named): bool {
-            self::assertPermitted($actor, $policy, $named);
+            self::assertPermitted($actor, $policy, $named, false);
 
             // A guardrail's policy cannot be deleted from under it, so a policy
             // that is not stored is a guardrail nowhere.
@@ -172,11 +176,13 @@ final class GuardrailService
      * guardrails of the scope and the scopes above it are locked and pinned
      * before the right is decided, and read again once it is allowed, so the
      * change is tried again rather than made on authority that changed
-     * meanwhile.
+     * meanwhile. A guardrail set only adds a cap, so it narrows; a removal
+     * lifts one across the scope's whole reach (see `GuardrailAuthority`).
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $isNarrowing
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
@@ -184,13 +190,13 @@ final class GuardrailService
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardrailException
      * @throws \LogicException
      */
-    private static function assertPermitted(ActingContext $actor, Policy $policy, ?Reference $tenant): void
+    private static function assertPermitted(ActingContext $actor, Policy $policy, ?Reference $tenant, bool $isNarrowing): void
     {
         $pins = OperationScope::delegatedPins();
 
         $pins->lockGuardrail($policy, $tenant);
 
-        GuardrailAuthority::assertPermitted($actor, $tenant);
+        GuardrailAuthority::assertPermitted($actor, $tenant, $isNarrowing);
 
         $pins->validate();
     }

@@ -59,10 +59,10 @@ final class GateParityTest extends TestCase
         parent::setUp();
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
-        (new AuthorizationServiceProvider($this->app))->boot();
+        (new AuthorizationServiceProvider($this->container()))->boot();
     }
 
     /**

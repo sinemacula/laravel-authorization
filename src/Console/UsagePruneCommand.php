@@ -22,9 +22,12 @@ use SineMacula\Laravel\Authorization\Usage\UsageTracking;
  */
 final class UsagePruneCommand extends Command
 {
+    /** @var string The console command's name. */
+    public const string NAME = 'authorization:usage-prune';
+
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:usage-prune
+    protected $signature = self::NAME . <<<'EOD'
+
                                     {--pretend : Report how many rows would be removed, without removing them}
         EOD;
 

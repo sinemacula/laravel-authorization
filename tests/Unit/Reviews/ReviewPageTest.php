@@ -32,7 +32,7 @@ final class ReviewPageTest extends TestCase
      */
     public function testItKeepsItsRowsAndSaysWhetherItIsTheLast(): void
     {
-        $at   = CarbonImmutable::create(2030, 1, 1, 0, 0, 0, 'UTC');
+        $at   = new CarbonImmutable('2030-01-01 00:00:00', 'UTC');
         $rows = [self::row('a'), self::row('b')];
         $page = new ReviewPage($rows, 'cursor', $at, false);
 

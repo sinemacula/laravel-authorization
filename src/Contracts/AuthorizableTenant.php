@@ -20,6 +20,17 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  * would produce request-scoped hashes that do not match previously-persisted
  * rows.
  *
+ * `getKey()` is the tenant's identifier, and the only one the package knows: a
+ * tenant is referenced by its morph type and `getKey()` everywhere, in the
+ * `tenant_id` of every grant and owned row, in the references the tenant tree
+ * is asked about and answers with, in the resolution cache's keys, in events
+ * and in `Support\Reference`. For an Eloquent tenant that is its primary key. A
+ * tenant with a public identifier distinct from its key (a slug, say) is still
+ * referenced by its key, so a sibling package that names a tenant to this one
+ * passes the key, or the tenant itself, never the other identifier; a
+ * non-Eloquent tenant returns from `getKey()` the value it wants its rows keyed
+ * by, and keeps it for the tenant's life.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */

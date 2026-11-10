@@ -32,7 +32,7 @@ final class ReviewResultTest extends TestCase
      */
     public function testItGivesEachRowInItsShape(): void
     {
-        $at     = CarbonImmutable::create(2030, 1, 1, 0, 0, 0, 'UTC');
+        $at     = new CarbonImmutable('2030-01-01 00:00:00', 'UTC');
         $rows   = [self::row('a'), self::row('b')];
         $result = new ReviewResult($rows, true, false, $at);
 

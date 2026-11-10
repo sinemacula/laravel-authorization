@@ -36,6 +36,7 @@ use SineMacula\Laravel\Authorization\Support\DeclaredAbilities;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\AllowingLaravelPolicy;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\DenyingLaravelPolicy;
@@ -74,6 +75,8 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationManager::class)]
 final class GateRegistrarTest extends TestCase
 {
+    use ReadsDispatchedEvents;
+
     /**
      * Boot the provider with the demo permission enum so the Gate asks the
      * package about its cases in each test, and fake the decision event so
@@ -87,13 +90,13 @@ final class GateRegistrarTest extends TestCase
         parent::setUp();
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         // Register a morph alias so model identifiers are short and exact.
         Relation::morphMap(['stub' => StubIdentity::class]);
 
-        (new AuthorizationServiceProvider($this->app))->boot();
+        (new AuthorizationServiceProvider($this->container()))->boot();
 
         Event::fake([DecisionEvaluated::class]);
     }
@@ -752,7 +755,7 @@ final class GateRegistrarTest extends TestCase
 
         Gate::before(static fn (?object $user, string $ability): ?bool => $ability === 'posts:delete' ? true : null);
 
-        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+        (new AuthorizationServiceProvider($this->container()))->boot();
 
         $this->actAsFullyPermittedPrincipal();
 
@@ -887,7 +890,7 @@ final class GateRegistrarTest extends TestCase
         $this->app?->forgetInstance(DeclaredAbilities::class);
         $this->app?->offsetUnset(DeclaredAbilities::class);
 
-        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+        (new AuthorizationServiceProvider($this->container()))->boot();
 
         $this->actAsFullyPermittedPrincipal();
 
@@ -937,7 +940,7 @@ final class GateRegistrarTest extends TestCase
         $this->app?->forgetInstance(DeclaredAbilities::class);
         $this->app?->offsetUnset(DeclaredAbilities::class);
 
-        (new GateRegistrar($this->app))->register(); // @phpstan-ignore argument.type
+        (new GateRegistrar($this->container()))->register();
 
         $this->actAsFullyPermittedPrincipal();
 
@@ -1052,11 +1055,7 @@ final class GateRegistrarTest extends TestCase
      */
     private function decisions(): array
     {
-        return \array_values(
-            Event::dispatched(DecisionEvaluated::class)
-                ->map(static fn (array $arguments): DecisionEvaluated => $arguments[0])
-                ->all(),
-        );
+        return self::dispatchedEvents(DecisionEvaluated::class);
     }
 
     /**
@@ -1167,9 +1166,9 @@ final class GateRegistrarTest extends TestCase
     {
         $resolver = new StubSubjectResolver($user);
 
-        $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+        $this->container()->instance(SubjectResolver::class, $resolver);
+        $this->container()->forgetInstance('authorization');
+        $this->container()->forgetInstance(AuthorizationManager::class);
 
         // The Gate decides about the user it hands over, as a signed-in user's
         // would be, since a guest is decided as no subject.

@@ -526,6 +526,15 @@ another guard is refused with `ParentGuardMismatchException`, and a role or perm
 guard with `GranteeGuardMismatchException`. The tenant that owns a role, permission or policy is fixed once it is
 created (`OwnerChangedException`): to move one, create it in the new tenant and grant it again.
 
+**How a tenant is named.** A tenant is an Eloquent model, or any object implementing
+`SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant`, and the package names it by its morph type and its
+`getKey()` everywhere: in the `tenant_type` and `tenant_id` of every grant and owned row, in the tenant tree's questions
+and answers, in the resolution cache's keys, in events and in a `Support\Reference`. `getKey()` is the contract's
+identifier, and for a model it is the primary key, so a tenant that also carries a public identifier of its own (a slug,
+an external id) is still named by its key. A sibling package, or the application, naming a tenant to this one passes
+the tenant, a `Reference` made from it, or its morph type and key, never the other identifier. A non-Eloquent tenant
+returns from `getKey()` the value its rows are to be keyed by, and keeps it for the tenant's life.
+
 Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class
 implementing `SineMacula\Laravel\Authorization\Contracts\TenantTree` as `tenant_tree` in `config/authorization.php`,
 answering a tenant's ancestors, whether one tenant is within another, and a tenant's subtree as a query. The subtree
@@ -1004,15 +1013,21 @@ guardrail is read for it, neither its denies nor its allows apply, and the trace
 guardrails: exempt`. For a tenant's guardrails it is decided just below the tenant's parent, so a grant held at an
 ancestor of the tenant counts when it reaches the tenants below it, a platform-wide grant counts, and a grant held
 within the tenant itself never does: a tenant's own administrators never lift the guardrails their tenant is set under.
-A tenant with no parent, and the platform, are changed only through a platform-wide grant. The check keeps the request's
-application and is recorded and reported like any other decision. An actor without the right is refused with
-`GuardrailException`, whose `getReason()` is `not_permitted` and `getActor()` the actor's principal, before anything is
-read or written. An impersonated actor is refused with `AuthorizationException` as `administration.impersonating` unless
-`authorization:administration.impersonated` is allowed it from above the scope too. Every change runs under the
-[concurrency protocol](#delegated-administration) of delegated administration: the actor's authority, the policy's row
-and the guardrails of the scope and the scopes above it are locked before the right is decided and read again before
-anything is written, so a right revoked or a policy rewritten meanwhile has the change tried again, and refused as
-`administration.conflict` once every try has conflicted.
+A tenant with no parent, and the platform, are changed only through a platform-wide grant. A removal lifts a cap across
+the scope's whole subtree, so it is also weighed across that subtree, or across every tenant for a platform guardrail,
+by the administered-scope rule of delegated administration: the right, and `authorization:administration.impersonated`
+for an impersonated actor, are refused when anything that denies or caps the actor anywhere there could limit them, read
+as stored and as conservatively as for the action (any overlapping deny counts, whatever its application or conditions),
+the guardrails still never counting against the right itself. So an organisation's administrator denied the right by a
+role it holds in one team cannot remove the guardrails of the account above it. Setting a guardrail only adds a cap, so
+it is decided from above alone. The check keeps the request's application and is recorded and reported like any other
+decision. An actor without the right is refused with `GuardrailException`, whose `getReason()` is `not_permitted` and
+`getActor()` the actor's principal, before anything is read or written. An impersonated actor is refused with
+`AuthorizationException` as `administration.impersonating` unless `authorization:administration.impersonated` is allowed
+it from above the scope too. Every change runs under the [concurrency protocol](#delegated-administration) of delegated
+administration: the actor's authority, the policy's row and the guardrails of the scope and the scopes above it are
+locked before the right is decided and read again before anything is written, so a right revoked or a policy rewritten
+meanwhile has the change tried again, and refused as `administration.conflict` once every try has conflicted.
 
 ```php
 // Every scope, the platform included.
@@ -1352,21 +1367,30 @@ session cap, and in its intended tenant. Then an administration stage, after the
 weighs the operation's constraints, in this order, and can only refuse:
 
 - **Impersonation.** A change made while impersonating is refused as `administration.impersonating` unless the actor is
-  also allowed `authorization:administration.impersonated` on the same operation.
+  also allowed `authorization:administration.impersonated` on the same operation, and, for a change that may widen
+  authority, across its whole reach by the administered-scope rule below.
 - **Administered scope** (N79). The actor must administer the whole reach of a change that may widen authority, or the
-  change is refused as `administration.scope`. Its action is decided again in the grant's tenant, standing just below
-  it for a grant that reaches the tenants below, so only authority that itself reaches below counts (node-only authority
+  change is refused as `administration.scope`. Its action is decided again in the grant's tenant, standing just below it
+  for a grant that reaches the tenants below, so only authority that itself reaches below counts (node-only authority
   cannot issue a subtree grant), or at platform scope for a platform-wide grant, and in the grant's application, so a
-  grant to every application needs authority unrestricted by application. A decision at one node reads only what
-  applies there, so a reach wider than its node, a platform-wide grant or one reaching the tenants below, is also
-  refused when anything of the actor's anywhere in it could deny or limit the action, read as the possession route reads
-  it: a deny statement whose actions overlap it, conditional or not, a boundary or guardrail that does not allow it
-  whole, a session or credential cap that does not cover it, or a tree, row or document that cannot be read. So an actor
-  allowed `authorization:*` at the platform, but denied `authorization:role.grant` by a role it holds in one tenant,
-  cannot grant a role platform-wide, and a parent's administrator denied an action in one child cannot take it across
-  the parent's subtree, though a node-only change in the parent is still decided there alone. The same rule weighs the
-  reach of a definition change and of a resource-policy attachment in the impact check, and every widening change a
-  platform-scope `revokeAll()` or `removeAll()` decides.
+  grant to every application needs authority unrestricted by application. A decision at one node reads only what applies
+  there, so a reach wider than its node, a platform-wide grant or one reaching the tenants below, is also refused when
+  anything of the actor's anywhere in it could deny or limit the action, read as the possession route reads it: a deny
+  statement whose actions overlap it, conditional or not, a boundary or guardrail that does not allow it whole, a
+  session or credential cap that does not cover it, or a tree, row or document that cannot be read. So an actor allowed
+  `authorization:*` at the platform, but denied `authorization:role.grant` by a role it holds in one tenant, cannot
+  grant a role platform-wide, and a parent's administrator denied an action in one child cannot take it across the
+  parent's subtree, though a node-only change in the parent is still decided there alone. The same rule weighs the reach
+  of a definition change and of a resource-policy attachment in the impact check, and every widening change a
+  platform-scope `revokeAll()` or `removeAll()` decides. Every further right a widening change needs beside its action,
+  `authorization:administration.self`, `authorization:administration.unbounded`,
+  `authorization:administration.impersonated` and the grantable rights, is weighed across the same reach by the same
+  rule, so a right allowed at the platform but denied or limited by a role the actor holds in one tenant is never used
+  on a change that reaches that tenant; a guardrail's removal is weighed across the subtree it caps the same way (see
+  [Guardrails](#guardrails)). The further rights inherit the rule's conservatism on purpose: any deny statement whose
+  actions overlap the right counts, whatever its application or conditions, so a deny held only for another application,
+  or one whose condition would never hold, still refuses the right on a change whose reach is wider than its node, and
+  what each right's limits read is read once per decision, however many permissions and policies the change hands out.
 - **Rank** (N76). Every change to an identity or a principal, a revocation, a sync, `revokeAll()`, a boundary change and
   a call that changes nothing included, is refused as `administration.rank` unless the actor is strictly senior to the
   grantee, and as `administration.rank_uncomparable` when either side's rank, or the reach, cannot be read. The actor is
@@ -1379,9 +1403,11 @@ weighs the operation's constraints, in this order, and can only refuse:
   acts on no one, two unranked sides are equal and refused, and with `authorization.rank.enabled` off rank is no
   constraint.
 - **Self.** A change to the actor itself, its principal or its identity, that may widen authority is refused as
-  `administration.self` unless the actor is also allowed `authorization:administration.self` on the same operation;
-  rank is not weighed against itself. A change to itself that only narrows, such as revoking its own permission, needs
-  no such right.
+  `administration.self` unless the actor is also allowed `authorization:administration.self` on the same operation, at
+  the node it is decided at and across the change's whole reach, as its action is: an actor allowed the right at the
+  platform, but holding a role in one tenant whose policy denies it, cannot widen its own authority platform-wide, or
+  across a subtree holding that tenant. Rank is not weighed against itself. A change to itself that only narrows, such
+  as revoking its own permission, needs no such right.
 - **Narrowing.** A change that can only narrow what anyone may do is then allowed: revoking a permission (directly or
   from a role), revoking a role no policy attached to it or its ancestors denies anything in, detaching a policy, from a
   grantee or a resource, with no deny statement, setting a boundary where the grantee has none in the scope, or
@@ -1404,11 +1430,13 @@ weighs the operation's constraints, in this order, and can only refuse:
     never grows with other tenants' policies. Two patterns that both hold wildcards, one of them `?` or a `[...]` class,
     are taken to overlap. When in doubt, a tree, row or document that cannot be read included, the route fails;
   - *explicit grantability*: `authorization:permission.grantable` is allowed, in the grant's reach, on the grant's
-    descriptor (`OperationResource::grantable()`), the same operation resource under that action, naming the
-    permission, the grantee, the reach and the expiry, so a policy may allow exactly one delegation the actor does not
-    hold. A right held for one application, or at a tenant's node alone, allows no grant to every application, another
-    application or the subtree. The right must last as long as the grant: held as a permission, through grants lasting
-    that long; allowed by a policy, through an attachment lasting that long (a resource policy's never expires).
+    descriptor (`OperationResource::grantable()`), the same operation resource under that action, naming the permission,
+    the grantee, the reach and the expiry, so a policy may allow exactly one delegation the actor does not hold. A right
+    held for one application, or at a tenant's node alone, allows no grant to every application, another application or
+    the subtree, and, for a reach wider than its node, nothing that denies or caps the actor anywhere in the reach may
+    limit the right, read as the administered-scope rule reads the action, so a right denied in one tenant allows no
+    grant reaching it. The right must last as long as the grant: held as a permission, through grants lasting that long;
+    allowed by a policy, through an attachment lasting that long (a resource policy's never expires).
 
   Otherwise the grant is refused as `administration.not_grantable` when the actor does not hold the permission across
   the grant's reach and lifetime, and as `administration.unprovable` when it does but its check there is refused or
@@ -1485,12 +1513,12 @@ weighs the operation's constraints, in this order, and can only refuse:
   a deny, and detaching a denying policy, lift a deny that cannot be bounded, so they are `administration.unprovable`.
 - **Policy documents.** A rewrite (`policy.update` with a new document) is compared with the stored document statement
   by statement, conservatively: one that only removes allows or adds denies narrows and passes, the same document in
-  authority terms included (key order and sids aside); one that lifts a deny, or either document that cannot be read,
-  is `administration.unprovable`; any other adds allows, so it needs the impact check over every holder (the subjects
-  it is attached to or bounds, the holders of every role it is attached to, and the principals either document names
-  where it is attached to a resource), the policy route for the allows it adds, the grantable right decided on the new
-  digest, and, for a policy in use as a boundary, `authorization:administration.unbounded`. A policy attached as a
-  guardrail is still never edited.
+  authority terms included (key order and sids aside); one that lifts a deny, or either document that cannot be read, is
+  `administration.unprovable`; any other adds allows, so it needs the impact check over every holder (the subjects it is
+  attached to or bounds, the holders of every role it is attached to, and the principals either document names where it
+  is attached to a resource), the policy route for the allows it adds, the grantable right decided on the new digest,
+  and, for a policy in use as a boundary, `authorization:administration.unbounded`, weighed across the policy's reach. A
+  policy attached as a guardrail is still never edited.
 - **The impact check.** A change to a shared definition reaches everyone who holds it. Their set is read in a fixed
   number of queries, outside every tenant scope, whether or not a grant has expired: the grantees of a role and of every
   role below it, the grantees of a permission and the holders of every role carrying it, the subjects a policy is
@@ -1499,16 +1527,19 @@ weighs the operation's constraints, in this order, and can only refuse:
   allowed across the whole reach their grants can have (the owner and every tenant below it, in every application, or
   the platform), or `administration.scope`; the actor must be strictly senior to the most senior rank any holder but
   itself holds there, and to a rank the change gives them, or `administration.rank` (`administration.rank_uncomparable`
-  when a rank cannot be read); and a change reaching the actor itself needs `authorization:administration.self`, or
-  `administration.self`. A change reaching no holder widens no one and needs neither the check nor a route. The set is
-  bounded by `authorization.administration.max_impact` (1000 by default), counted in distinct holders: a holder that
-  two sets, or one set twice, name counts once, and never hides a holder not read yet. A change reaching more holders is
-  refused as `administration.unprovable`, never approximated.
+  when a rank cannot be read); and a change reaching the actor itself needs `authorization:administration.self` across
+  the same reach, or `administration.self`, as a change made while impersonating needs
+  `authorization:administration.impersonated` there, or `administration.impersonating`. A change reaching no holder
+  widens no one and needs neither the check nor a route. The set is bounded by `authorization.administration.max_impact`
+  (1000 by default), counted in distinct holders: a holder that two sets, or one set twice, name counts once, and never
+  hides a holder not read yet. A change reaching more holders is refused as `administration.unprovable`, never
+  approximated.
 - **Boundaries.** Setting a boundary where the grantee has none narrows, and so does replacing one with the same policy
   or one whose document can only narrow it, reaching no fewer tenants. Replacing one with a wider boundary, and removing
   one (`revokeAll()` included), lift a cap whose release cannot in general be bounded, so each is refused as
   `administration.unprovable` unless the actor is also allowed `authorization:administration.unbounded` on the same
-  operation, after the scope, rank and self rules. A delegated change never lifts a boundary on possession alone.
+  operation, across its whole reach, after the scope, rank and self rules. A delegated change never lifts a boundary on
+  possession alone.
 - **Resource-policy attachments.** A resource policy grants without any permission held, to every principal its allows
   name, on one record or on the whole type: each principal, and every holder of a role a selector names, is weighed by
   the impact check across the attachment's reach, and the policy must pass the policy route. A principal whose rank
@@ -2371,7 +2402,7 @@ or about the subject of the scoped manager it is called on:
 | `lastDecision()`                                  | Returns the latest decision of the request or job, whichever manager made it                                              |
 | `lastDecisionProvenance()`                        | Returns who the latest decision was about, who previewed it and where it was made, or null whenever `lastDecision()` is   |
 | `permissionsFor($subject, $scope, $context)`      | Lists the actions of the permission catalogue the subject may take in the scope                                           |
-| `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's tenant and application, or a `Subject` as it is |
+| `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's scope, or a `Subject` in its own scope          |
 | `forUser($user)`                                  | Returns a scoped manager deciding about the subject the resolver translates the user into                                 |
 | `previewFor($subject, $scope)`                    | Returns a preview deciding about the subject as the caller, admitted at every use (see [Preview](#preview))               |
 | `capped($actions)`                                | Returns a scoped manager whose checks are capped by the actions given                                                     |
@@ -2426,6 +2457,33 @@ $scoped->all(['posts:read', 'posts:update'], $post);
 Authorization::lastDecision();            // the decision of the last action $scoped decided
 Authorization::lastDecisionProvenance();  // DecisionProvenance: a Reference to $user as subject and identity
 ```
+
+**`for()` and the scope.** A model given to `for()` is decided in the request's tenant and application, as the subject
+resolver reports them. A resolved `Subject` is taken as it is, keeping its identity, guard and session, and when it
+names a tenant or an application, every check through the manager is decided there: its tenant, or the platform when it
+names none, and its application, or none, are put in place of the request's, both as the subject's and as the scope of
+the grants that count, for each `check()`, `can()`, `cannot()`, `any()`, `all()`, `authorize()`, `checkMany()`,
+`canEach()`, `filterAuthorized()`, `explain()` and query scoped through it with `whereAuthorized()`. The request's are
+restored once each is decided, even when it throws, and nothing is kept between calls or requests. A `Subject` naming
+neither is decided in the request's scope, as a model is. So a subject in another tenant needs no wrapping:
+
+```php
+use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+
+$member = new Subject($principal, $person, $account, 'admin');
+
+Authorization::for($member)->can('posts:update', $post);   // decided in $account, on the admin application
+
+// The same decision, as callers wrote it before: wrapping the call still gives the same result.
+$scope = AuthorizationScope::tenant($account, 'admin');
+$scope->within(fn () => Authorization::for($scope->subjectIn($member))->can('posts:update', $post));
+```
+
+`permissionsFor()` lists in the scope it is given, which wins over the subject's, and a preview from `previewFor()`
+keeps its own scope (see [Preview](#preview)). The subject's tenant is read when a check is decided, not by `for()`, so
+a `Subject` whose tenant cannot be read, a plain object that is neither a model nor an `AuthorizableTenant`, is refused
+with `InvalidTenantException` by each check through the manager, before anything is decided.
 
 The last decision is kept with its provenance, a `DecisionProvenance` of references and names alone: `subject` and
 `identity`, references to the principal the decision was about and its identity, null for a guest; `previewer`, whoever
@@ -3024,11 +3082,11 @@ the right, a conditional deny included. So a deny the reviewer holds in one chil
 parent's subtree. Applications are weighed the same way: a review of `ApplicationSelector::any()` in one tenant needs
 the right held for every application, and is refused when a deny, boundary or guardrail held for any one application
 could limit it. A review run while the reviewer is impersonated (`ActingContext::impersonatedBy()`) is refused as
-`administration.impersonating` unless the reviewer is also allowed `authorization:administration.impersonated` on it, as
-a delegated change is, since the impersonator is the one shown what it discloses. A refused review throws
-`AuthorizationException` with the one generic line, carrying the reviewer's own decision (a step-up the right needs
-included), after recording and reporting it as any refused check, and discloses no row, count, truncation or
-completeness.
+`administration.impersonating` unless the reviewer is also allowed `authorization:administration.impersonated` on it,
+across the review's whole reach by the same rule, as a delegated change is, since the impersonator is the one shown what
+it discloses. A refused review throws `AuthorizationException` with the one generic line, carrying the reviewer's own
+decision (a step-up the right needs included), after recording and reporting it as any refused check, and discloses no
+row, count, truncation or completeness.
 
 **The trusted path.** `trusted()` runs a review as trusted system work, for a scheduled job or a command, with no
 reviewer and no admission. Nothing falls back to it: `review()` always takes an acting context, and one that cannot be
@@ -3297,6 +3355,12 @@ there is built per request or job, and null or a class that does not implement t
 'identity_directory' => App\Authorization\PrincipalDirectory::class,
 ```
 
+**In the suite.** `laravel-iam` binds a complete identity directory adapter, so an application using it needs nothing
+more. An application with principals that does not use `laravel-iam` binds its own: a directory that lists, for each
+identity, every principal it owns, as below, and answers an incomplete list for an identity it cannot read. Left in
+place under another subject resolver, `GuardUserIdentityDirectory` answers incomplete for everyone, so a grant to any
+principal is treated as widening (`INCOMPLETE_DIRECTORY`) and no grant scope query answers `WITHIN`.
+
 ```php
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Support\IdentityPrincipals;
@@ -3428,6 +3492,17 @@ final class ScopeWideningHook implements GrantHook
 }
 ```
 
+**The client.** The widening carries the operation's client, `ip` and `userAgent`, each a nullable string, as the
+`Operation` does. A grant made through the services gets its client only from the routed request of a delegated call,
+the IP address as Laravel resolves it behind your trusted proxies. A trusted grant, and any grant made from the console
+or a queued job, reaches the hook with no client: no service takes one. Code that builds an `Operation` or a
+`GrantWidening` itself, such as the membership path below or a hook's own tests, may pass one explicitly, as
+`Operation::begin($actor, $actions, $ip, $userAgent)` or the constructors' last two arguments, and a client given there
+is kept as it is. Pass only the client of a routed request, never one read from the request Laravel binds for the
+console and the queue, which reports `127.0.0.1` and `Symfony`. Both are personal data, so the package hands them to the
+grant hook alone: the change events carry the operation without them, and they are never put in a cache key, a decision
+event, a log or a stored grant row. A hook that keeps them is answerable for them.
+
 **One binding, with the listed hooks before it.** Exactly one hook is bound on the contract. The default is
 `Hooks\GrantHooks` holding no hook, which does nothing; a sibling package or your application may bind its own instead,
 before the package registers or after. The classes `grant_hooks` lists in `config/authorization.php` run before
@@ -3521,7 +3596,10 @@ hook refuses stops the import, with what was written before it kept.
   use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
   use SineMacula\Laravel\Authorization\Support\Reference;
 
-  DB::transaction(function () use ($person, $principal, $tenant, $membership) {
+  // The client of a routed request alone: console and queued work have none.
+  $request = request()->route() === null ? null : request();
+
+  DB::transaction(function () use ($person, $principal, $tenant, $membership, $request) {
       // Saved first, so the hook is handed its key; a refusal rolls it back.
       $membership->save();
 
@@ -3543,6 +3621,8 @@ hook refuses stops the import, with what was written before it kept.
               reasons: [WideningReason::MEMBERSHIP],
           )],
           observedAt: now('UTC')->toImmutable(),
+          ip: $request?->ip(),
+          userAgent: $request?->userAgent(),
       ));
   });
   ```
@@ -4070,6 +4150,12 @@ Gate hook: enabled (the package answers every ability it declares through Gate::
 
 It is the start of the configuration report: each setting and seam it comes to report adds a line.
 
+Each command's class names its command in a public `NAME` constant, the name its signature declares, so a schedule, a
+test or a sibling package can refer to it without repeating the string: `PruneGrantsCommand::NAME` is
+`authorization:prune`, and so on for `CheckConfigurationCommand`, `GrantRoleCommand`, `RevokeRoleCommand`,
+`ListRolesCommand`, `ListPermissionsCommand`, `SyncPermissionsCommand`, `MigrateSpatieCommand`,
+`ValidatePolicyCommand`, `WhyCommand` and `ReviewCommand`, all in `SineMacula\Laravel\Authorization\Console`.
+
 The listing commands are administrative views: they list every role or permission, platform-wide and tenant-owned
 alike, and show each one's owner. `grant` and `revoke` write through the grant service and look the role up within the
 tenant scope, so without a resolved tenant they find platform-wide roles only. A role the identity already holds with
@@ -4096,7 +4182,9 @@ than making checks correct. Like `model:prune`, it takes `--pretend`, which coun
 boundaries apart from the grants as a run does, and `--chunk`, and is scheduled like any command:
 
 ```php
-Schedule::command('authorization:prune')->daily();
+use SineMacula\Laravel\Authorization\Console\PruneGrantsCommand;
+
+Schedule::command(PruneGrantsCommand::NAME)->daily();
 ```
 
 `authorization:usage-heartbeat` extends the coverage of [usage tracking](#usage-tracking) to now, so a quiet site stays

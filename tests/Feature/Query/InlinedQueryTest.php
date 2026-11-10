@@ -10,6 +10,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Query\Contracts\Dialect;
 use SineMacula\Laravel\Authorization\Query\Dialects\Dialects;
 use SineMacula\Laravel\Authorization\Query\InlinedQuery;
@@ -87,7 +88,12 @@ final class InlinedQueryTest extends TestCase
 
         self::assertNotNull($inlined);
 
-        $kept = DB::table('inlined_values')->whereRaw('(EXISTS (' . $inlined . ') OR value = ?)', ['a?b'])->where('value', '<>', '??')->orderBy('id')->pluck('value')->all();
+        $kept = DB::table('inlined_values')
+            ->whereRaw(new ComposedExpression('(EXISTS (' . $inlined . ') OR value = ?)'), ['a?b'])
+            ->where('value', '<>', '??')
+            ->orderBy('id')
+            ->pluck('value')
+            ->all();
 
         self::assertSame(['a?b', 'a\\'], $kept);
     }

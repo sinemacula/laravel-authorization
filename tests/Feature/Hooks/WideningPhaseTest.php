@@ -467,7 +467,10 @@ final class WideningPhaseTest extends TestCase
 
         $phase->assertCovers(static fn (): array => [$proposal]);
 
-        $locked = \array_map(static fn (array $lock): array => [$lock[0], \array_values(\array_intersect(['p1', 'p2', 'person'], $lock[1]))], $locks->getArrayCopy());
+        $locked = \array_map(
+            static fn (array $lock): array => [$lock[0], \array_values(\array_intersect(['p1', 'p2', 'person'], \array_filter($lock[1], \is_string(...))))],
+            $locks->getArrayCopy(),
+        );
 
         // The grantee's own row, then the grants that apply in the tenant, then
         // those that reach below it.

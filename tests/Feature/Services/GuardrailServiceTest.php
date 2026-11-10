@@ -23,6 +23,7 @@ use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
 use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
@@ -272,6 +273,36 @@ final class GuardrailServiceTest extends TestCase
         $this->expectException(GuardrailException::class);
 
         self::service()->remove($policy, $account, ActingContext::for($within));
+    }
+
+    /**
+     * A removal lifts a cap across the tenant's whole subtree, so it is weighed
+     * across it, while a set only adds one: an actor holding the right at the
+     * organisation, but denied it by a role it holds in a team below the
+     * account, sets a guardrail on the account but is refused its removal,
+     * which writes nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARemovalIsWeighedAcrossTheSubtreeASetIsNot(): void
+    {
+        [$org, $account, $team] = \array_map(self::createTenant(...), ['org', 'account', 'team']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org))->put(Reference::of($team), Reference::of($account)));
+
+        $actor  = StubIdentity::create(['id' => 'org-admin']);
+        $role   = Role::create(['name' => 'restricted', 'rank' => 8]);
+        $policy = self::rail('cap');
+
+        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]), tenant: $org);
+        $role->attachPolicy(self::policy('restricting', [['effect' => 'deny', 'actions' => [PackagePermissions::GUARDRAIL_MANAGE]]]));
+        $actor->assignRole($role, tenant: $team);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($policy, $account, ActingContext::for($actor)));
+        self::assertRefusedAs(GuardrailException::class, static fn (): bool => self::service()->remove($policy, $account, ActingContext::for($actor)));
+        self::assertSame(1, DB::table('guardrails')->count());
     }
 
     /**
@@ -701,7 +732,7 @@ final class GuardrailServiceTest extends TestCase
 
             return;
         } catch (\Throwable $exception) {
-            self::assertInstanceOf($refusal, $exception);
+            self::assertTrue(\is_a($exception, $refusal), 'The call was refused with ' . $exception::class . '.');
 
             return;
         }

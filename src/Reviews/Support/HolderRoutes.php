@@ -168,16 +168,14 @@ final class HolderRoutes
 
         $chains = RoleChains::below($run, \array_map(strval(...), \array_keys($attachments)));
 
-        $expand = static function (GrantRow $grant, array $chain) use ($run, $rows, $attachments): void {
-            RoleCarriers::throughAttachments($run, $rows, $grant->grantee, $grant, $chain, $attachments);
-        };
-
         self::throughRoles(
             $run,
             $chains,
             $rows,
             SourceKind::ROLE_POLICY,
-            $expand,
+            static function (GrantRow $grant, array $chain) use ($run, $rows, $attachments): void {
+                RoleCarriers::throughAttachments($run, $rows, $grant->grantee, $grant, $chain, $attachments);
+            },
             static fn (Builder $query, string $table): Builder => RoleCarriers::reaching($run, $query, $table, $chains, $attachments),
             static function (array $page) use ($run, $attachments): void {
                 $run->settle($page, $attachments);

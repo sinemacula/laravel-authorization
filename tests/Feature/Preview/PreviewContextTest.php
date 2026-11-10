@@ -14,7 +14,6 @@ use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException;
 use SineMacula\Laravel\Authorization\Preview\PreviewContext;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -227,10 +226,25 @@ final class PreviewContextTest extends TestCase
 
         $preview = $this->signIn($caller)->previewFor($target, AuthorizationScope::platform('admin'));
 
+        $unreadable = new class implements \Stringable {
+            /**
+             * Throw, as a resource whose identifier cannot be read does.
+             *
+             * @return string
+             *
+             * @throws \RuntimeException
+             */
+            #[\Override]
+            public function __toString(): string
+            {
+                throw new \RuntimeException('The resource cannot be read.');
+            }
+        };
+
         try {
-            $preview->checkMany(['not a check']);
-            self::fail('The batch was not refused.');
-        } catch (InvalidCheckArgumentException) {
+            $preview->checkMany([new CheckInput('posts:read', $unreadable)]);
+            self::fail('The check did not throw.');
+        } catch (\RuntimeException) {
             self::assertNull(TenantScope::currentTenant());
             self::assertNull(TenantScope::currentApplication());
         }
