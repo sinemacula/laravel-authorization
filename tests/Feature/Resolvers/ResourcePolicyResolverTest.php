@@ -449,13 +449,13 @@ final class ResourcePolicyResolverTest extends TestCase
         $service->attach(self::sharing('long'), [$long, '1']);
 
         self::assertSame([], $resolver->recordPoliciesFor('posts', 'posts:read', 10));
-        self::assertSame(['edit posts:*'], $names($resolver->recordPoliciesFor('posts', 'posts:edit', 10)));
+        self::assertSame(['edit posts:*'], $names($resolver->recordPoliciesFor('posts', 'posts:edit', 10) ?? []));
         $read   = static fn (): array => $resolver->recordPoliciesFor('posts', 'posts:read', 10);
         $inTeam = static fn (?string $application): array => TenantScope::within(new Reference('teams', '5'), $application, $read);
 
         self::assertSame([], $inTeam(null));
         self::assertSame(['read posts:*'], $names($inTeam('admin')));
-        self::assertCount(1, $resolver->recordPoliciesFor($long, 'posts:read', 10));
+        self::assertCount(1, $resolver->recordPoliciesFor($long, 'posts:read', 10) ?? []);
         self::assertSame([], $resolver->recordPoliciesFor($long . 'p', 'posts:read', 10));
 
         $id = (string) Str::uuid();
@@ -498,7 +498,7 @@ final class ResourcePolicyResolverTest extends TestCase
 
         self::assertNull((new ResourcePolicyResolver)->recordPoliciesFor('posts', 'posts:read', 3));
         self::assertCount(1, $pages);
-        self::assertStringContainsString('limit 100', $pages[0]);
+        self::assertStringContainsString('limit 100', $pages[0] ?? '');
         self::assertTrue(QueryRecorder::recorded()[0]->useWritePdo);
         self::assertCount(101, (new ResourcePolicyResolver)->recordPoliciesFor('posts', 'posts:read', 101) ?? []);
 

@@ -125,7 +125,7 @@ trait ChecksGrantsByName
 
         $this->syncTo($identity, ['editor']);
 
-        self::assertEqualsCanonicalizing([(string) $platform->getKey(), (string) $tenant->getKey()], self::grantedKeys());
+        self::assertEqualsCanonicalizing([self::keyOf($platform->getKey()), self::keyOf($tenant->getKey())], self::grantedKeys());
     }
 
     /**
@@ -140,7 +140,7 @@ trait ChecksGrantsByName
 
         $this->syncTo($identity, ['editor']);
 
-        self::assertSame([(string) $tenant->getKey()], self::grantedKeys());
+        self::assertSame([self::keyOf($tenant->getKey())], self::grantedKeys());
     }
 
     /**
@@ -158,7 +158,7 @@ trait ChecksGrantsByName
 
         $this->revokeFrom($identity, $platform);
 
-        self::assertSame([(string) $tenant->getKey()], self::grantedKeys());
+        self::assertSame([self::keyOf($tenant->getKey())], self::grantedKeys());
     }
 
     /**
@@ -176,7 +176,7 @@ trait ChecksGrantsByName
 
         $this->syncTo($identity, [$tenant]);
 
-        self::assertSame([(string) $tenant->getKey()], self::grantedKeys());
+        self::assertSame([self::keyOf($tenant->getKey())], self::grantedKeys());
     }
 
     /**
@@ -308,6 +308,19 @@ trait ChecksGrantsByName
     private static function grantedKeys(): array
     {
         /** @var list<string> */
-        return DB::table(static::grantTable())->orderBy(static::targetColumn())->pluck(static::targetColumn())->map(static fn (mixed $key): string => (string) $key)->all();
+        return DB::table(static::grantTable())->orderBy(static::targetColumn())->pluck(static::targetColumn())->map(self::keyOf(...))->all();
+    }
+
+    /**
+     * Return a row's key, which every grantable table holds as a string.
+     *
+     * @param  mixed  $key
+     * @return string
+     */
+    private static function keyOf(mixed $key): string
+    {
+        self::assertIsString($key);
+
+        return $key;
     }
 }

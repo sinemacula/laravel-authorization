@@ -935,15 +935,15 @@ final class ResolutionCacheTest extends TestCase
         $record = EvaluationPolicy::fromArray(['name' => 'record', 'statements' => []])->withResource('posts:*');
 
         $cache   = $this->request();
-        $pinning = fn (array $policies): \Closure => function (ResolutionPins $pins) use ($policies): Resolution {
+        $pinning = fn (EvaluationPolicy ...$policies): \Closure => function (ResolutionPins $pins) use ($policies): Resolution {
             $pins->resourcePolicies('posts');
 
-            return $this->resolve($policies);
+            return $this->resolve(\array_values($policies));
         };
 
-        self::assertEquals([$type], $cache->rememberResourcePolicies('posts', null, $pinning([$type])));
-        self::assertEquals([$record], $cache->rememberResourcePolicies('posts', '*', $pinning([$record])));
-        self::assertEquals([$type], $this->request()->rememberResourcePolicies('posts', null, $pinning([])));
+        self::assertEquals([$type], $cache->rememberResourcePolicies('posts', null, $pinning($type)));
+        self::assertEquals([$record], $cache->rememberResourcePolicies('posts', '*', $pinning($record)));
+        self::assertEquals([$type], $this->request()->rememberResourcePolicies('posts', null, $pinning()));
         self::assertSame(2, $this->resolutions);
         self::assertIsArray($this->store->get('authorization-test:resource-type-policies:posts:*:platform:every:limits:65536.100.50.512'));
         self::assertIsArray($this->store->get('authorization-test:resource-policies:posts:*:platform:every:limits:65536.100.50.512'));
@@ -1042,10 +1042,10 @@ final class ResolutionCacheTest extends TestCase
         $this->store->setEventDispatcher($events);
 
         $resolve = $this->resolveEach(...);
-        $counted = function (array $ids) use ($operations, $resolve): array {
+        $counted = function (string ...$ids) use ($operations, $resolve): array {
             $operations->exchangeArray([]);
 
-            $found = $this->request()->rememberResourcePoliciesMany('posts', $ids, $resolve);
+            $found = $this->request()->rememberResourcePoliciesMany('posts', \array_values($ids), $resolve);
 
             return [$operations->getArrayCopy(), \array_map(static fn (array $policies): string => $policies[0]->resource ?? '', $found)];
         };
@@ -1053,12 +1053,12 @@ final class ResolutionCacheTest extends TestCase
         $many = \array_map(strval(...), \range(1, 100));
 
         // The versions the records' entries share are first given a token.
-        $counted(['0']);
+        $counted('0');
 
-        [$coldOne]              = $counted(['500']);
-        [$coldMany, $resources] = $counted($many);
-        [$warmOne]              = $counted(['500']);
-        [$warmMany, $warmFound] = $counted($many);
+        [$coldOne]              = $counted('500');
+        [$coldMany, $resources] = $counted(...$many);
+        [$warmOne]              = $counted('500');
+        [$warmMany, $warmFound] = $counted(...$many);
 
         self::assertSame($coldOne, $coldMany);
         self::assertSame($warmOne, $warmMany);
@@ -1070,7 +1070,7 @@ final class ResolutionCacheTest extends TestCase
 
         $this->versions()->bump([$this->versions()->resourcePoliciesKey('posts')]);
 
-        $counted(['1', '2']);
+        $counted('1', '2');
 
         self::assertSame(104, $this->resolutions);
 

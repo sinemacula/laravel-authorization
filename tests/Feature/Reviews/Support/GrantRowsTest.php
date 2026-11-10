@@ -77,15 +77,15 @@ final class GrantRowsTest extends TestCase
             self::grants()->grantRole($grantee, $role);
         }
 
-        $read = static fn (array $grantees): array => \array_map(
+        $read = static fn (Reference ...$grantees): array => \array_map(
             static fn (GrantRow $row): string => $row->grantee->type . ':' . $row->grantee->id,
-            GrantRows::all(GrantRows::ordered(GrantRows::grantedTo(GrantRows::of(GrantTarget::ROLE), $table, $grantees), $table, 'role_id'), 'role'),
+            GrantRows::all(GrantRows::ordered(GrantRows::grantedTo(GrantRows::of(GrantTarget::ROLE), $table, \array_values($grantees)), $table, 'role_id'), 'role'),
         );
 
-        self::assertSame(['a:1', 'b:1'], $read([new Reference('a', '1'), new Reference('b', '1')]));
-        self::assertSame(['a:2'], $read([new Reference('a', '2')]));
-        self::assertSame([], $read([new Reference('b', '2')]));
-        self::assertSame([], $read([]));
+        self::assertSame(['a:1', 'b:1'], $read(new Reference('a', '1'), new Reference('b', '1')));
+        self::assertSame(['a:2'], $read(new Reference('a', '2')));
+        self::assertSame([], $read(new Reference('b', '2')));
+        self::assertSame([], $read());
     }
 
     /**

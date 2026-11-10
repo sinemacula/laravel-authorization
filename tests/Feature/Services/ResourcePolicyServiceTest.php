@@ -774,12 +774,18 @@ final class ResourcePolicyServiceTest extends TestCase
      * Return an attachment row's resource as `type:id`, or `type:*` for the
      * whole type.
      *
-     * @param  object{resource_type: string, resource_id: string|null}  $row
+     * @param  \stdClass  $row
      * @return string
      */
-    private static function identifierOf(object $row): string
+    private static function identifierOf(\stdClass $row): string
     {
-        return $row->resource_type . ':' . ($row->resource_id ?? '*');
+        $type = $row->resource_type;
+        $id   = $row->resource_id ?? '*';
+
+        self::assertIsString($type);
+        self::assertIsString($id);
+
+        return $type . ':' . $id;
     }
 
     /**
