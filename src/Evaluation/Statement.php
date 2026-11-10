@@ -337,18 +337,13 @@ final readonly class Statement
      */
     private function assessConditions(InterpolationScope $scope): MatchResult
     {
+        $parts       = $this->assessTests($scope);
         $result      = $this->operatorErrors === [] ? MatchResult::matches() : MatchResult::invalid($this->operatorErrors[0]);
         $requirement = MatchResult::matches();
         $held        = [];
-        $tests       = $scope->context->isExplaining() ? [] : null;
-        $unresolved  = $tests === null ? [] : $scope->context->takeUnresolved();
 
-        foreach ($this->tests as $test) {
-            $part = self::assessTest($test, $scope);
-
-            if ($tests !== null) {
-                $tests[] = ConditionClassifier::classify($test, $part, $scope, $scope->context->takeUnresolved());
-            }
+        foreach ($this->tests as $index => $test) {
+            $part = $parts[$index];
 
             if ($test['operator'] === AuthenticationRequirement::OPERATOR) {
                 $requirement = $part;
@@ -359,13 +354,42 @@ final readonly class Statement
             $held[$test['key']] = ($held[$test['key']] ?? true) && $part->outcome === MatchOutcome::MATCHES;
         }
 
-        if ($tests !== null) {
-            $scope->context->noteAssessment($tests, $unresolved);
-        }
-
         $combined = $result->and($requirement)->withConditions($held);
 
         return $combined->unmetRequirement === null || $result->holds() ? $combined : $combined->withUnmetRequirement(null);
+    }
+
+    /**
+     * Assess each key test of the conditions against the context, in order,
+     * and, through the context of an explained check, note each with what it
+     * found.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\MatchResult>
+     */
+    private function assessTests(InterpolationScope $scope): array
+    {
+        $isExplaining = $scope->context->isExplaining();
+        $unresolved   = $isExplaining ? $scope->context->takeUnresolved() : [];
+        $parts        = [];
+        $tests        = [];
+
+        foreach ($this->tests as $test) {
+            $part    = self::assessTest($test, $scope);
+            $parts[] = $part;
+
+            if (!$isExplaining) {
+                continue;
+            }
+
+            $tests[] = ConditionClassifier::classify($test, $part, $scope, $scope->context->takeUnresolved());
+        }
+
+        if ($isExplaining) {
+            $scope->context->noteAssessment($tests, $unresolved);
+        }
+
+        return $parts;
     }
 
     /**

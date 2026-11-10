@@ -408,17 +408,10 @@ final class PolicyEvaluator
         $isExplaining = $context->isExplaining();
 
         foreach ($statements as [$reference, $statement, $notApplicable]) {
-            // Most statements do not name the action, and decide nothing.
-            if (!$statement->coversAction($action)) {
-                $trace[] = $notApplicable;
+            $passed = self::passedOver($reference, $statement, $notApplicable, $stage, $action, $context);
 
-                continue;
-            }
-
-            // An allow, a guardrail's or a boundary's included, applies only to
-            // the subjects its source admits.
-            if (!$isDeny && !self::isForSubject($reference, $statement, $context)) {
-                $trace[] = new TraceEntry($stage, TraceOutcome::PRINCIPAL_MISMATCH, $reference);
+            if ($passed !== null) {
+                $trace[] = $passed;
 
                 continue;
             }
@@ -441,6 +434,39 @@ final class PolicyEvaluator
         }
 
         return [$found, $requirements];
+    }
+
+    /**
+     * Return the trace entry of a statement that decides nothing for the check,
+     * or null when it is to be assessed. Most statements do not name the
+     * action; an allow, a guardrail's or a boundary's included, applies only to
+     * the subjects its source admits.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\StatementReference  $reference
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\TraceEntry  $notApplicable
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage  $stage
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @return \SineMacula\Laravel\Authorization\Evaluation\TraceEntry|null
+     */
+    private static function passedOver(
+        StatementReference $reference,
+        Statement $statement,
+        TraceEntry $notApplicable,
+        DecisionStage $stage,
+        string $action,
+        CheckContext $context,
+    ): ?TraceEntry {
+        if (!$statement->coversAction($action)) {
+            return $notApplicable;
+        }
+
+        if ($stage !== DecisionStage::DENY && !self::isForSubject($reference, $statement, $context)) {
+            return new TraceEntry($stage, TraceOutcome::PRINCIPAL_MISMATCH, $reference);
+        }
+
+        return null;
     }
 
     /**
