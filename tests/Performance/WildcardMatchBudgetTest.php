@@ -30,9 +30,10 @@ final class WildcardMatchBudgetTest extends TestCase
 {
     /**
      * 100 wildcard matches against a shallow prefix pattern must complete in
-     * under 5ms on the reference machine. Observed ~63μs for 100 calls on the
-     * reference machine (~0.63μs each); budget is generous to tolerate CI
-     * variance.
+     * under 20ms. Observed ~63μs for 100 calls on the reference machine
+     * (~0.63μs each). The CI job that collects coverage runs it under PCOV on a
+     * shared runner, where it has taken over 8ms, so the budget allows 20ms:
+     * still about 300× the reference figure.
      *
      * @return void
      */
@@ -52,7 +53,7 @@ final class WildcardMatchBudgetTest extends TestCase
         $elapsed = \microtime(true) - $start;
 
         self::assertLessThan(
-            0.005,
+            0.02,
             $elapsed,
             "Wildcard match budget (shallow prefix) exceeded ({$elapsed}s for 100 iterations).",
         );
