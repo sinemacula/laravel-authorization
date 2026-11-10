@@ -41,6 +41,7 @@ use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 
 /**
@@ -186,8 +187,9 @@ final class AuthorizationManager
     {
         $list = ActionList::of('any', $actions);
 
-        // Resolved once, so a bound resource tenant resolver is asked once.
-        $reference = ResourceReferences::of($resource);
+        // Resolved once, in the subject's scope as a check resolves it, so a
+        // bound resource tenant resolver is asked once.
+        $reference = $this->inSubjectScope(static fn (): false|ResourceReference|null => ResourceReferences::of($resource));
 
         return $list->isAnyAllowed(fn (string $action): bool => $this->check($action, $reference, $context)->isAllowed());
     }
@@ -214,8 +216,9 @@ final class AuthorizationManager
     {
         $list = ActionList::of('all', $actions);
 
-        // Resolved once, so a bound resource tenant resolver is asked once.
-        $reference = ResourceReferences::of($resource);
+        // Resolved once, in the subject's scope as a check resolves it, so a
+        // bound resource tenant resolver is asked once.
+        $reference = $this->inSubjectScope(static fn (): false|ResourceReference|null => ResourceReferences::of($resource));
 
         return $list->isEveryAllowed(fn (string $action): bool => $this->check($action, $reference, $context)->isAllowed());
     }
@@ -251,8 +254,9 @@ final class AuthorizationManager
      */
     public function authorize(string $action, mixed $resource = null, array $context = []): void
     {
-        // Resolved once, so a bound resource tenant resolver is asked once.
-        $reference = ResourceReferences::of($resource);
+        // Resolved once, in the subject's scope as a check resolves it, so a
+        // bound resource tenant resolver is asked once.
+        $reference = $this->inSubjectScope(static fn (): false|ResourceReference|null => ResourceReferences::of($resource));
         $decision  = $this->check($action, $reference, $context);
 
         if ($decision->isAllowed()) {

@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Concerns\BuildsScopedManagers;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException;
@@ -157,9 +158,10 @@ final class BuildsScopedManagersTest extends TestCase
     }
 
     /**
-     * A `Subject` whose tenant names no record is refused by `for()`, before
-     * anything is decided, and `forActor()` is refused on a preview, as `for()`
-     * is.
+     * A `Subject` whose tenant names no record is taken by `for()`, its tenant
+     * read only when a check is decided, which refuses it before anything is
+     * decided, as each form adapting it does; and `forActor()` is refused on a
+     * preview, as `for()` is.
      *
      * @return void
      *
@@ -167,14 +169,24 @@ final class BuildsScopedManagersTest extends TestCase
      */
     public function testAnUnreadableTenantAndAForActorOnAPreviewAreRefused(): void
     {
-        $user = StubIdentity::create(['id' => 'scoped-7']);
+        $user    = StubIdentity::create(['id' => 'scoped-7']);
+        $manager = self::manager()->for(new Subject($user, $user, new \stdClass));
+        $calls   = [
+            static fn (): mixed => $manager->check('posts:read'),
+            static fn (): mixed => $manager->can('posts:read'),
+            static fn (): mixed => $manager->any(['posts:read'], ['posts', 'p1']),
+            static fn (): mixed => $manager->checkMany([new CheckInput('posts:read')]),
+            static fn (): mixed => $manager->explain('posts:read'),
+        ];
 
-        try {
-            self::manager()->for(new Subject($user, $user, new \stdClass));
+        foreach ($calls as $call) {
+            try {
+                $call();
 
-            self::fail('The subject is refused.');
-        } catch (InvalidTenantException) {
-            self::assertNull(Authorization::lastDecision());
+                self::fail('The subject is refused.');
+            } catch (InvalidTenantException) {
+                self::assertNull(Authorization::lastDecision());
+            }
         }
 
         $previewer = StubIdentity::create(['id' => 'scoped-8']);

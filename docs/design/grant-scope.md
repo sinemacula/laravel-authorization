@@ -136,7 +136,11 @@ the hook runs in a grant call.
     grant service hands `WideningPhase::before()` the operation as begun, with its client, while `OperationScope`
     gives the call's work, and so every event it dispatches and every write its observers report, the operation
     without it (`Operation::withoutClient()`). The client is never put in a cache key, a decision event, a log or a
-    stored grant row.
+    stored grant row. No service takes a client: each begins its own operation with none given, so a service grant
+    reaches the hook with the client of the routed request of a delegated call, or with none for a trusted, console
+    or queued call. An explicit client applies only to an `Operation` or a `GrantWidening` a caller builds itself, such
+    as a hook's own tests, and is the client of a routed request or none, never one read from the request Laravel
+    binds for the console and the queue.
 
 ## Success Path
 

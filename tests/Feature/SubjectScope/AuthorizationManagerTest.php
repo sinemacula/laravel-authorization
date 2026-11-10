@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -24,6 +25,7 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ScopesQueries;
+use Tests\Feature\Stubs\AmbientResourceTenantResolver;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FailingResourceAttributes;
 use Tests\Feature\Stubs\StubIdentity;
@@ -220,6 +222,41 @@ final class AuthorizationManagerTest extends TestCase
         self::assertFalse($inSecond->explain(self::CREATE)->isAllowed());
         self::assertSame([], $inSecond->permissionsFor(null, AuthorizationScope::tenant($this->second)));
         self::assertSame([], self::titles($inSecond));
+    }
+
+    /**
+     * A `(type, id)` resource is resolved in the subject's scope by every
+     * single check, `any()`, `all()` and `authorize()` as by `check()`, so a
+     * bound resource tenant resolver that reads the scope in place places the
+     * record in the subject's tenant, as it does inside the `within()` form.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    public function testTheResourceIsResolvedInTheSubjectsScope(): void
+    {
+        $resolver = new AmbientResourceTenantResolver;
+
+        $this->app?->instance(ResourceTenantResolver::class, $resolver);
+
+        $resource = ['posts', 'p1'];
+        $subject  = $this->subject($this->first);
+        $scope    = AuthorizationScope::tenant($this->first);
+        $inFirst  = Authorization::for($subject);
+
+        self::assertTrue($scope->within(static fn (): bool => Authorization::for($scope->subjectIn($subject))->can(self::CREATE, $resource)));
+        self::assertTrue($inFirst->check(self::CREATE, $resource)->isAllowed());
+        self::assertTrue($inFirst->any([self::DELETE, self::CREATE], $resource));
+        self::assertTrue($inFirst->all([self::CREATE], $resource));
+
+        $inFirst->authorize(self::CREATE, $resource);
+
+        self::assertSame(['tenant-a', null], self::provenance());
+        self::assertNotSame([], $resolver->answered);
+        self::assertSame(['tenant-a'], \array_values(\array_unique($resolver->answered)));
+        self::assertSame([$this->second->getMorphClass(), 'tenant-b'], TenantScope::currentTenant());
     }
 
     /**

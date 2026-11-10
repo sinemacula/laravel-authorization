@@ -123,17 +123,19 @@ its identity. A subject named this way never has a session, whichever model it i
 met for it. With no subject resolved, the clone has no tenant or application.
 
 `Authorization::for($subject)` with a resolved `Subject` keeps it as it is, its session included, and, when it names a
-tenant or an application, holds the `AuthorizationScope` they make (its tenant, or the platform for none, and its
-application). Each decision of the clone, `check()` and `checkMany()` and everything adapting them, `explain()`, the
-provenance a refusal is reported with, and each compile of a query scoped through it, runs inside that scope's
-`within()`, which puts the tenant and application in place of the request's and restores them in `finally`, with what
-the resolution cache held; a scope already in place is not entered again, so a `Subject` in the request's own scope
-costs nothing more. `permissionsFor()` keeps the scope it is given. The scope is computed when the clone is made, so a
-tenant that cannot be read is refused there with `InvalidTenantException`, and it lives on the clone alone, so nothing
-leaks to the manager it was made from or to the next request. `forUser()`, `previewFor()` and `for()` of a model drop
-it. Delegated administration and access reviews decide an actor's rights in the reach they put in place, so they use
-the internal `forActor()`, which names the acting `Subject` without its scope; a preview's admitter is built the same
-way, so a preview keeps its own scope.
+tenant or an application, decides in the `AuthorizationScope` they make (its tenant, or the platform for none, and its
+application). Each decision of the clone, `check()` and `checkMany()` and everything adapting them, the resource
+reference `any()`, `all()` and `authorize()` resolve once for their checks, `explain()`, the provenance a refusal is
+reported with, and each compile of a query scoped through it, runs inside that scope's `within()`, which puts the tenant
+and application in place of the request's and restores them in `finally`, with what the resolution cache held; a scope
+already in place is not entered again, so a `Subject` in the request's own scope costs nothing more. `permissionsFor()`
+keeps the scope it is given. The scope is read from the subject at each decision, not when the clone is made, so a
+tenant that cannot be read is refused with `InvalidTenantException` by the check, before anything is decided, as it was
+before the subject's scope was put in place, and a caller wrapping `for()` in its own handling sees it where it did. The
+subject lives on the clone alone, so nothing leaks to the manager it was made from or to the next request. `forUser()`,
+`previewFor()` and `for()` of a model drop it. Delegated administration and access reviews decide an actor's rights in
+the reach they put in place, so they use the internal `forActor()`, which names the acting `Subject` without its scope;
+a preview's admitter is built the same way, so a preview keeps its own scope.
 
 `Authorization::forUser($user)` returns a cloned manager deciding about the subject the resolver translates the user
 into. The Gate hook uses it for the user Laravel hands over, and so does a Laravel policy class deciding through

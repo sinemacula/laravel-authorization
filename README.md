@@ -2435,8 +2435,9 @@ $scope->within(fn () => Authorization::for($scope->subjectIn($member))->can('pos
 ```
 
 `permissionsFor()` lists in the scope it is given, which wins over the subject's, and a preview from `previewFor()`
-keeps its own scope (see [Preview](#preview)). A `Subject` whose tenant cannot be read, a plain object that is neither a
-model nor an `AuthorizableTenant`, is refused by `for()` with `InvalidTenantException`.
+keeps its own scope (see [Preview](#preview)). The subject's tenant is read when a check is decided, not by `for()`, so
+a `Subject` whose tenant cannot be read, a plain object that is neither a model nor an `AuthorizableTenant`, is refused
+with `InvalidTenantException` by each check through the manager, before anything is decided.
 
 The last decision is kept with its provenance, a `DecisionProvenance` of references and names alone: `subject` and
 `identity`, references to the principal the decision was about and its identity, null for a guest; `previewer`, whoever
@@ -3317,13 +3318,15 @@ final class ScopeWideningHook implements GrantHook
 ```
 
 **The client.** The widening carries the operation's client, `ip` and `userAgent`, each a nullable string, as the
-`Operation` does. A delegated call made in a routed request takes them from the request, the IP address as Laravel
-resolves it behind your trusted proxies; a trusted call, and any call made from the console or a queued job, has none
-unless its caller passes them. A caller that builds the operation itself passes them explicitly, as
-`Operation::begin($actor, $actions, $ip, $userAgent)` or the constructor's last two arguments, and a client given there
-is kept as it is. Both are personal data, so the package hands them to the grant hook alone: the change events carry the
-operation without them, and they are never put in a cache key, a decision event, a log or a stored grant row. A hook
-that keeps them is answerable for them.
+`Operation` does. A grant made through the services gets its client only from the routed request of a delegated call,
+the IP address as Laravel resolves it behind your trusted proxies. A trusted grant, and any grant made from the console
+or a queued job, reaches the hook with no client: no service takes one. Code that builds an `Operation` or a
+`GrantWidening` itself, such as the membership path below or a hook's own tests, may pass one explicitly, as
+`Operation::begin($actor, $actions, $ip, $userAgent)` or the constructors' last two arguments, and a client given there
+is kept as it is. Pass only the client of a routed request, never one read from the request Laravel binds for the
+console and the queue, which reports `127.0.0.1` and `Symfony`. Both are personal data, so the package hands them to the
+grant hook alone: the change events carry the operation without them, and they are never put in a cache key, a decision
+event, a log or a stored grant row. A hook that keeps them is answerable for them.
 
 **One binding, an ordered composite.** Exactly one hook is bound. The default is `Hooks\GrantHooks`, the composite of
 the classes `grant_hooks` lists in `config/authorization.php`, each built from the container and run in the order
@@ -3394,7 +3397,10 @@ hook refuses stops the import, with what was written before it kept.
   use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
   use SineMacula\Laravel\Authorization\Support\Reference;
 
-  DB::transaction(function () use ($person, $principal, $tenant, $membership) {
+  // The client of a routed request alone: console and queued work have none.
+  $request = request()->route() === null ? null : request();
+
+  DB::transaction(function () use ($person, $principal, $tenant, $membership, $request) {
       // Saved first, so the hook is handed its key; a refusal rolls it back.
       $membership->save();
 
@@ -3416,8 +3422,8 @@ hook refuses stops the import, with what was written before it kept.
               reasons: [WideningReason::MEMBERSHIP],
           )],
           observedAt: now('UTC')->toImmutable(),
-          ip: request()->ip(),
-          userAgent: request()->userAgent(),
+          ip: $request?->ip(),
+          userAgent: $request?->userAgent(),
       ));
   });
   ```
