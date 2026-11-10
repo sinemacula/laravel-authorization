@@ -46,9 +46,8 @@ use SineMacula\Laravel\Authorization\Usage\RouteSources;
  * same queries, each also reading where its grants were made and when; a
  * resolution whose hierarchy moved while it ran says none.
  *
- * @phpstan-type PermissionGrants \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Permission, *, *>
- * @phpstan-type PolicyGrants \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, *, *>
- * @phpstan-type RoleGrants \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, *, *>
+ * @phpstan-type PolicyGrants \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, covariant \Illuminate\Database\Eloquent\Model, *>
+ * @phpstan-type RoleGrants \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, covariant \Illuminate\Database\Eloquent\Model, *>
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -108,7 +107,7 @@ final class GrantResolver
      * Resolve the names of the permissions granted directly and through the
      * roles, with each role's ancestors' when the hierarchy is enabled.
      *
-     * @param  PermissionGrants  $direct
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Permission, covariant \Illuminate\Database\Eloquent\Model, *>  $direct
      * @param  RoleGrants  $roles
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \SineMacula\Laravel\Authorization\Cache\Resolution<string>
@@ -293,8 +292,7 @@ final class GrantResolver
      *
      * @template TGranted of \Illuminate\Database\Eloquent\Model
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<TGranted,
-     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<TGranted, covariant \Illuminate\Database\Eloquent\Model, *>  $grants
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \Illuminate\Database\Eloquent\Collection<int, TGranted>
      */

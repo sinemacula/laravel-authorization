@@ -271,7 +271,7 @@ final class OperationScope
         /** @var list<\SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent> $events */
         $connection = AuthorizationConnection::connection();
         $cache      = ResolutionCache::instance();
-        $keys       = $cache?->versionKeys(\array_values($events)) ?? [];
+        $keys       = $cache?->versionKeys($events) ?? [];
 
         $cache?->invalidate($keys);
 
