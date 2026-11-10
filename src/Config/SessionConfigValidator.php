@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Config;
 use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -60,8 +61,8 @@ final class SessionConfigValidator
     {
         $block = ConfigBlock::of('authorization.session', $config, self::SETTINGS);
 
-        self::validateSource(ConfigBlock::entry($block, 'source', NoSessionPolicy::class));
-        self::validateCoverage(self::scopeMap(ConfigBlock::entry($block, 'scopes', [])), $container);
+        self::source(ConfigBlock::entry($block, 'source', NoSessionPolicy::class));
+        self::coverage(self::scopeMap(ConfigBlock::entry($block, 'scopes', [])), $container);
     }
 
     /**
@@ -82,7 +83,9 @@ final class SessionConfigValidator
     public static function scopeMap(mixed $value): array
     {
         if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException(self::SCOPES, 'expected an array of scopes to their action patterns, got ' . \get_debug_type($value) . '.');
+            $reason = 'expected an array of scopes to their action patterns, got ' . \get_debug_type($value) . '.';
+
+            throw new InvalidAuthorizationConfigException(self::SCOPES, $reason, IssueCode::INVALID_TYPE, 'an array of scopes to their action patterns', \get_debug_type($value));
         }
 
         $patterns = [];
@@ -94,11 +97,13 @@ final class SessionConfigValidator
                 $reason = 'each scope must be a non-empty string, listed on its own or mapped to a non-empty list of action patterns, such as'
                     . ' [\'posts.read\', \'editor\' => [\'posts:*\']].';
 
-                throw new InvalidAuthorizationConfigException(self::SCOPES, $reason);
+                $wanted = 'a scope listed on its own or mapped to a list of action patterns';
+
+                throw new InvalidAuthorizationConfigException(self::SCOPES, $reason, IssueCode::INVALID_VALUE, $wanted, \get_debug_type($entry));
             }
 
             if (\array_key_exists($scope, $patterns)) {
-                throw new InvalidAuthorizationConfigException(self::SCOPES, "the scope '{$scope}' is named more than once.");
+                throw new InvalidAuthorizationConfigException(self::SCOPES, "the scope '{$scope}' is named more than once.", IssueCode::DUPLICATE, 'a scope named once', 'string');
             }
 
             $patterns[$scope] = $list;
@@ -115,25 +120,18 @@ final class SessionConfigValidator
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    private static function validateSource(mixed $value): void
+    public static function source(mixed $value): void
     {
-        $reason = match (true) {
-            $value                        === null           => 'a session policy source class is required; set it to \\' . NoSessionPolicy::class . ' for no credential cap.',
-            !\is_string($value) || $value === ''             => 'expected a class-string, got ' . \get_debug_type($value) . '.',
-            !\class_exists($value)                           => "class '{$value}' does not exist.",
-            !\is_a($value, SessionPolicySource::class, true) => "class '{$value}' does not implement " . SessionPolicySource::class . '.',
-            default                                          => null,
-        };
+        $required = 'a session policy source class is required; set it to \\' . NoSessionPolicy::class . ' for no credential cap.';
 
-        if ($reason !== null) {
-            throw new InvalidAuthorizationConfigException(self::SOURCE, $reason);
-        }
+        ImplementationConfigValidator::validate(self::SOURCE, $value, SessionPolicySource::class, $required);
     }
 
     /**
      * Validate that every pattern of every scope covers at least one permission
      * the package or the application declares, reading the action catalogue
-     * only when there is a pattern to check.
+     * only when there is a pattern to check. The catalogue is built to read
+     * them, so this runs at boot only.
      *
      * @param  array<array-key, list<string>>  $patterns
      * @param  \Illuminate\Contracts\Container\Container  $container
@@ -141,7 +139,7 @@ final class SessionConfigValidator
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    private static function validateCoverage(array $patterns, Container $container): void
+    public static function coverage(array $patterns, Container $container): void
     {
         if ($patterns === []) {
             return;
@@ -153,7 +151,9 @@ final class SessionConfigValidator
         foreach ($patterns as $scope => $list) {
             foreach ($list as $pattern) {
                 if (!PackagePermissions::covers($pattern) && !$catalogue->covers($pattern)) {
-                    throw new InvalidAuthorizationConfigException(self::SCOPES, "the scope '{$scope}' names '{$pattern}', which covers no declared permission.");
+                    $reason = "the scope '{$scope}' names '{$pattern}', which covers no declared permission.";
+
+                    throw new InvalidAuthorizationConfigException(self::SCOPES, $reason, IssueCode::INVALID_VALUE, 'patterns that each cover a declared permission');
                 }
             }
         }

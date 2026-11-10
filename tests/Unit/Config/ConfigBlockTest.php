@@ -8,7 +8,9 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Config\ConfigBlock;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use Tests\Concerns\ReadsRefusedSettings;
 
 /**
  * Unit tests for reading a block of the authorization config whose keys the
@@ -22,6 +24,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 #[CoversClass(ConfigBlock::class)]
 final class ConfigBlockTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /**
      * A block setting only keys the package defines, some or none of them, is
      * returned as it is.
@@ -88,5 +92,53 @@ final class ConfigBlockTest extends TestCase
         self::assertNull(ConfigBlock::entry(['one' => null], 'one', 'default'));
         self::assertSame(0, ConfigBlock::entry(['one' => 0], 'one', 'default'));
         self::assertFalse(ConfigBlock::entry(['one' => false], 'one', true));
+    }
+
+    /**
+     * The unknown keys of a block are listed in the order it sets them, without
+     * refusing any, and each is refused on its own as an unknown key, stating
+     * the keys expected.
+     *
+     * @return void
+     */
+    public function testEachUnknownKeyIsListedAndRefusedOnItsOwn(): void
+    {
+        self::assertSame(['tow', 0], ConfigBlock::unknownKeys(['tow' => 2, 'one' => 1, 0 => 3], ['one', 'two']));
+        self::assertSame([], ConfigBlock::unknownKeys(['one' => 1], ['one', 'two']));
+
+        $refusal = ConfigBlock::unknownKey('authorization.example', 'tow', ['one', 'two']);
+
+        self::assertSame('authorization.example.tow', $refusal->getConfigKey());
+        self::assertSame(IssueCode::UNKNOWN_KEY, $refusal->getIssue());
+        self::assertSame('one of one, two', $refusal->getExpected());
+        self::assertSame(
+            ['authorization.example.tow', 'unknown_key', 'one of one, two', null],
+            self::refusedSetting(static fn (): never => ConfigBlock::refuseUnknownKey('authorization.example', 'tow', ['one', 'two'])),
+        );
+        self::assertSame(
+            ['authorization.example', 'invalid_type', 'an array', 'string'],
+            self::refusedSetting(static fn (): array => ConfigBlock::of('authorization.example', 'x', ['one'])),
+        );
+    }
+
+    /**
+     * Each entry of an array is checked, and the array returned; a value that
+     * is not one is refused, stating the shape expected.
+     *
+     * @return void
+     */
+    public function testEachEntryOfAnArrayIsChecked(): void
+    {
+        $seen  = [];
+        $entry = static function (int|string $key, mixed $value) use (&$seen): void {
+            $seen[] = [$key, $value];
+        };
+
+        self::assertSame(['a' => 1, 2], ConfigBlock::entries('authorization.list', ['a' => 1, 2], 'an array of numbers', $entry));
+        self::assertSame([['a', 1], [0, 2]], $seen);
+        self::assertSame(
+            ['authorization.list', 'invalid_type', 'an array of numbers', 'string'],
+            self::refusedSetting(static fn (): array => ConfigBlock::entries('authorization.list', 'x', 'an array of numbers', $entry)),
+        );
     }
 }

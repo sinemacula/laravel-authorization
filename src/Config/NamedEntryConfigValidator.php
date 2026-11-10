@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Config;
 
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Container\Container;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
@@ -55,7 +56,11 @@ final class NamedEntryConfigValidator
     public static function connection(mixed $value, Container $container): void
     {
         if ($value !== null && !\is_string($value)) {
-            throw new InvalidAuthorizationConfigException('authorization.connection', 'expected a database connection name, got ' . ConfigValidator::describe($value) . '.');
+            $reason = 'expected a database connection name, got ' . ConfigValidator::describe($value) . '.';
+
+            $wanted = 'a database connection name or null';
+
+            throw new InvalidAuthorizationConfigException('authorization.connection', $reason, IssueCode::INVALID_TYPE, $wanted, \get_debug_type($value));
         }
 
         $config = self::config($container);
@@ -75,7 +80,9 @@ final class NamedEntryConfigValidator
             ? 'the default database connection, database.default, is ' . ConfigValidator::describe($name) . ', which names no entry of database.connections.'
             : "database connection '{$value}' is not configured.";
 
-        throw new InvalidAuthorizationConfigException('authorization.connection', $reason);
+        $wanted = 'the name of an entry of database.connections';
+
+        throw new InvalidAuthorizationConfigException('authorization.connection', $reason, IssueCode::UNKNOWN_NAME, $wanted, \get_debug_type($value));
     }
 
     /**
@@ -90,9 +97,21 @@ final class NamedEntryConfigValidator
      */
     public static function defaults(mixed $value, Container $container): void
     {
-        $guard = ConfigBlock::entry(ConfigBlock::of('authorization.defaults', $value, self::DEFAULTS), 'guard', self::GUARD);
+        self::guard(ConfigBlock::entry(ConfigBlock::of('authorization.defaults', $value, self::DEFAULTS), 'guard', self::GUARD), $container);
+    }
 
-        self::assertNames('authorization.defaults.guard', $guard, 'auth.guards', $container);
+    /**
+     * Validate that `defaults.guard` names a guard under `auth.guards`.
+     *
+     * @param  mixed  $value
+     * @param  \Illuminate\Contracts\Container\Container  $container
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function guard(mixed $value, Container $container): void
+    {
+        self::assertNames('authorization.defaults.guard', $value, 'auth.guards', $container);
     }
 
     /**
@@ -148,13 +167,15 @@ final class NamedEntryConfigValidator
     private static function assertNames(string $path, mixed $value, string $map, Container $container): void
     {
         if (!\is_string($value) || $value === '') {
-            throw new InvalidAuthorizationConfigException($path, 'expected a non-empty name, got ' . ConfigValidator::describe($value) . '.');
+            $reason = 'expected a non-empty name, got ' . ConfigValidator::describe($value) . '.';
+
+            throw new InvalidAuthorizationConfigException($path, $reason, IssueCode::INVALID_TYPE, 'a non-empty name', \get_debug_type($value));
         }
 
         $config = self::config($container);
 
         if ($config !== null && !self::names($config, $map, $value)) {
-            throw new InvalidAuthorizationConfigException($path, "'{$value}' names no entry of {$map}.");
+            throw new InvalidAuthorizationConfigException($path, "'{$value}' names no entry of {$map}.", IssueCode::UNKNOWN_NAME, "the name of an entry of {$map}", 'string');
         }
     }
 

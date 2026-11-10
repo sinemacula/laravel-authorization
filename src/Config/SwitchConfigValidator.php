@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Config;
 
 use Illuminate\Contracts\Config\Repository;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
@@ -76,12 +77,16 @@ final class SwitchConfigValidator
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    private static function enabled(string $switch, array $block): bool
+    public static function enabled(string $switch, array $block): bool
     {
         $enabled = ConfigBlock::entry($block, 'enabled', true);
 
-        return \is_bool($enabled)
-            ? $enabled
-            : throw new InvalidAuthorizationConfigException("authorization.{$switch}.enabled", 'expected true or false, got ' . ConfigValidator::describe($enabled) . '.');
+        if (\is_bool($enabled)) {
+            return $enabled;
+        }
+
+        $reason = 'expected true or false, got ' . ConfigValidator::describe($enabled) . '.';
+
+        throw new InvalidAuthorizationConfigException("authorization.{$switch}.enabled", $reason, IssueCode::INVALID_TYPE, 'true or false', \get_debug_type($enabled));
     }
 }

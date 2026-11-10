@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Usage;
 
+use Illuminate\Config\Repository;
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Foundation\Application;
@@ -11,7 +13,9 @@ use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Support\Facades\Bus;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\GrantUsageStore;
+use SineMacula\Laravel\Authorization\Diagnostics\BindingRegistry;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Registrars\UsageRegistrar;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -154,6 +158,38 @@ final class UsageRegistrarTest extends TestCase
         $sandbox->make(Dispatcher::class)->dispatch(new JobProcessed('sync', \Mockery::mock(Job::class)));
 
         Bus::assertDispatchedTimes(RecordGrantUsage::class, 2);
+    }
+
+    /**
+     * The store is bound through the seam bindings: a store bound before the
+     * package registers stands and is recorded as earlier, and the package's
+     * own store is its default, as the provider reports it.
+     *
+     * @return void
+     */
+    public function testAStoreBoundBeforeThePackageStands(): void
+    {
+        $before = new Application(\dirname(__DIR__, 3));
+        $store  = new CountingUsageStore(new DatabaseGrantUsageStore);
+
+        $before->instance('config', new Repository(['authorization' => []]));
+        $before->instance(GrantUsageStore::class, $store);
+
+        (new AuthorizationServiceProvider($before))->register();
+
+        $plain = new Application(\dirname(__DIR__, 3));
+
+        $plain->instance('config', new Repository(['authorization' => []]));
+
+        (new AuthorizationServiceProvider($plain))->register();
+
+        self::assertSame($store, $before->make(GrantUsageStore::class));
+        self::assertSame($store, BindingRegistry::of($before)->get(GrantUsageStore::class)?->earlier);
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($before, GrantUsageStore::class));
+        self::assertTrue(AuthorizationServiceProvider::isPackageDefault($plain, GrantUsageStore::class));
+        self::assertSame(DatabaseGrantUsageStore::class, BindingRegistry::of($plain)->get(GrantUsageStore::class)?->class);
+
+        Container::setInstance($this->application());
     }
 
     /**

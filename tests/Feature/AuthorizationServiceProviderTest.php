@@ -2052,6 +2052,16 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
+     * The middleware aliases the provider registers are the ones it declares.
+     *
+     * @return void
+     */
+    public function testTheDeclaredMiddlewareAliasesAreRegistered(): void
+    {
+        self::assertSame(AuthorizationServiceProvider::MIDDLEWARE, \array_intersect_key($this->router()->getMiddleware(), AuthorizationServiceProvider::MIDDLEWARE));
+    }
+
+    /**
      * Seed two tenants, a platform role, a temporary platform role, one role
      * owned by each tenant, and one identity holding every role but the plain
      * platform one. The temporary grant expires at 12:05.

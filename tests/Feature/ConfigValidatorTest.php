@@ -44,6 +44,7 @@ use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
+use Tests\Concerns\ReadsRefusedSettings;
 use Tests\Feature\Stubs\ConflictingResourceAttributes;
 use Tests\Feature\Stubs\Contracts\PermissionEnumInterface;
 use Tests\Feature\Stubs\CustomPermission;
@@ -84,6 +85,8 @@ use Tests\TestCase;
 #[CoversClass(InvalidAuthorizationConfigException::class)]
 final class ConfigValidatorTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /** @var string The reason a missing resource tenant resolver is refused for. */
     private const string RESOURCE_TENANT_RESOLVER_REQUIRED = 'a resource tenant resolver class is required; set it to \\'
         . NoResourceTenant::class
@@ -1374,6 +1377,50 @@ final class ConfigValidatorTest extends TestCase
     {
         $this->assertRejected(fn () => $this->validateWithGate(false), 'authorization.gate', 'expected an array, got false (bool).');
         $this->assertRejected(fn () => $this->validateWithGate(null), 'authorization.gate', 'expected an array, got \'null\' (null).');
+    }
+
+    /**
+     * Collecting the issues of the configuration the suite boots with finds
+     * none, and collecting those of a refused one finds every refusal.
+     *
+     * @return void
+     */
+    public function testTheIssuesAreCollected(): void
+    {
+        $config = $this->authorizationConfig();
+
+        self::assertSame([], ConfigValidator::issues($config, $this->container())->issues);
+        self::assertCount(2, ConfigValidator::issues([...$config, 'bulk' => ['chunk_size' => 0], 'reviews' => ['limit' => 0]], $this->container())->issues);
+    }
+
+    /**
+     * Each entry of the models, the permission enums and providers and the
+     * application access map is checked on its own, each refusal structured.
+     *
+     * @return void
+     */
+    public function testEachEntryIsRefusedStructured(): void
+    {
+        self::assertSame(
+            ['authorization.models.role', 'not_implemented', 'the name of ' . Role::class . ' or a subclass of it', 'string'],
+            self::refusedSetting(static fn () => ConfigValidator::model('role', \stdClass::class)),
+        );
+        self::assertSame(
+            ['authorization.models.rol', 'unknown_key', 'one of role, permission, policy', null],
+            self::refusedSetting(static fn () => ConfigValidator::model('rol', Role::class)),
+        );
+        self::assertSame('invalid_type', self::refusedSetting(static fn () => ConfigValidator::permissionEnum(0, 3))[1]);
+        self::assertSame('unknown_class', self::refusedSetting(static fn () => ConfigValidator::permissionEnum(0, 'Missing\Enum'))[1]);
+        self::assertSame('not_implemented', self::refusedSetting(static fn () => ConfigValidator::permissionEnum(0, \stdClass::class))[1]);
+        self::assertSame('invalid_type', self::refusedSetting(static fn () => ConfigValidator::permissionProvider(0, ''))[1]);
+        self::assertSame('not_implemented', self::refusedSetting(static fn () => ConfigValidator::permissionProvider(0, \stdClass::class))[1]);
+        self::assertSame(
+            ['authorization.application_access', 'invalid_value', 'an application name mapped to a permission name', 'int'],
+            self::refusedSetting(static fn () => ConfigValidator::applicationAccess('app', 3)),
+        );
+
+        ConfigValidator::permissionEnum(0, PermissionEnum::class);
+        ConfigValidator::applicationAccess('app', 'app.access');
     }
 
     /**

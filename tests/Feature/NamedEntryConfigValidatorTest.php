@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Config\NamedEntryConfigValidator;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use Tests\Concerns\ReadsRefusedSettings;
 use Tests\TestCase;
 
 /**
@@ -31,6 +32,8 @@ use Tests\TestCase;
 #[CoversClass(ConfigValidator::class)]
 final class NamedEntryConfigValidatorTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /**
      * Null and an empty name select the default connection, which is
      * configured, and a configured connection may be named.
@@ -247,6 +250,36 @@ final class NamedEntryConfigValidatorTest extends TestCase
         NamedEntryConfigValidator::queueConnection('anything', $container);
 
         $this->assertRefused(static fn () => NamedEntryConfigValidator::logChannel(5, $container), 'authorization.log_channel', 'expected a non-empty name, got 5 (int).');
+    }
+
+    /**
+     * The guard is checked on its own, and each refusal of a name is
+     * structured, never holding the name.
+     *
+     * @return void
+     */
+    public function testEachRefusalIsStructured(): void
+    {
+        $app = $this->container();
+
+        NamedEntryConfigValidator::guard('web', $app);
+
+        self::assertSame(
+            ['authorization.defaults.guard', 'unknown_name', 'the name of an entry of auth.guards', 'string'],
+            self::refusedSetting(static fn () => NamedEntryConfigValidator::guard('nowhere', $app)),
+        );
+        self::assertSame(
+            ['authorization.defaults.guard', 'invalid_type', 'a non-empty name', 'int'],
+            self::refusedSetting(static fn () => NamedEntryConfigValidator::guard(3, $app)),
+        );
+        self::assertSame(
+            ['authorization.connection', 'invalid_type', 'a database connection name or null', 'array'],
+            self::refusedSetting(static fn () => NamedEntryConfigValidator::connection([], $app)),
+        );
+        self::assertSame(
+            ['authorization.connection', 'unknown_name', 'the name of an entry of database.connections', 'string'],
+            self::refusedSetting(static fn () => NamedEntryConfigValidator::connection('nowhere', $app)),
+        );
     }
 
     /**

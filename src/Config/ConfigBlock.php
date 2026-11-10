@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Config;
 
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
@@ -26,6 +27,9 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  */
 final class ConfigBlock
 {
+    /** @var string What a block, or a list, is expected to be. */
+    public const string ARRAY = 'an array';
+
     /**
      * Return the block, refusing a value that is not an array, or that sets a
      * key the package does not define, under the full path.
@@ -40,16 +44,87 @@ final class ConfigBlock
     public static function of(string $path, mixed $value, array $keys): array
     {
         if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException($path, 'expected an array, got ' . ConfigValidator::describe($value) . '.');
+            $reason = 'expected an array, got ' . ConfigValidator::describe($value) . '.';
+
+            throw new InvalidAuthorizationConfigException($path, $reason, IssueCode::INVALID_TYPE, self::ARRAY, \get_debug_type($value));
         }
 
-        foreach (\array_keys($value) as $key) {
-            if (!\in_array($key, $keys, true)) {
-                throw new InvalidAuthorizationConfigException("{$path}.{$key}", "unknown key '{$key}'; expected one of " . \implode(', ', $keys) . '.');
-            }
+        $unknown = self::unknownKeys($value, $keys);
+
+        return $unknown === [] ? $value : throw self::unknownKey($path, $unknown[0], $keys);
+    }
+
+    /**
+     * Return the array under the path, refusing a value that is not one, after
+     * checking each of its entries with the check given, which refuses an entry
+     * under its own path.
+     *
+     * @param  string  $path
+     * @param  mixed  $value
+     * @param  string  $shape
+     * @param  \Closure(array-key, mixed): mixed  $entry
+     * @return array<array-key, mixed>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function entries(string $path, mixed $value, string $shape, \Closure $entry): array
+    {
+        if (!\is_array($value)) {
+            $reason = "expected {$shape}, got " . \get_debug_type($value) . '.';
+
+            throw new InvalidAuthorizationConfigException($path, $reason, IssueCode::INVALID_TYPE, $shape, \get_debug_type($value));
+        }
+
+        foreach ($value as $key => $item) {
+            $entry($key, $item);
         }
 
         return $value;
+    }
+
+    /**
+     * Return the keys the block sets that the package does not define, in the
+     * order the block sets them, without refusing any.
+     *
+     * @param  array<array-key, mixed>  $block
+     * @param  list<string>  $keys
+     * @return list<array-key>
+     */
+    public static function unknownKeys(array $block, array $keys): array
+    {
+        return \array_values(\array_filter(\array_keys($block), static fn (int|string $key): bool => !\in_array($key, $keys, true)));
+    }
+
+    /**
+     * Refuse a key the block sets that the package does not define, under its
+     * full path.
+     *
+     * @param  string  $path
+     * @param  int|string  $key
+     * @param  list<string>  $keys
+     * @return never
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function refuseUnknownKey(string $path, int|string $key, array $keys): never
+    {
+        throw self::unknownKey($path, $key, $keys);
+    }
+
+    /**
+     * Return the refusal of a key the block sets that the package does not
+     * define, under its full path.
+     *
+     * @param  string  $path
+     * @param  int|string  $key
+     * @param  list<string>  $keys
+     * @return \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function unknownKey(string $path, int|string $key, array $keys): InvalidAuthorizationConfigException
+    {
+        $expected = 'one of ' . \implode(', ', $keys);
+
+        return new InvalidAuthorizationConfigException("{$path}.{$key}", "unknown key '{$key}'; expected {$expected}.", IssueCode::UNKNOWN_KEY, $expected);
     }
 
     /**

@@ -351,6 +351,10 @@ lookup by name under a guard that does not exist finds only the roles and permis
 channel is checked at boot only, by design: a warning is written from inside error handling, and writing one never stops
 a check, so a channel changed after boot to one that does not exist is written to as the default channel.
 
+`authorization:check` runs these checks again on the configuration as it stands, except those that build what they
+check, and lists every issue at once rather than stopping at the first (see
+[Checking the configuration](#checking-the-configuration)).
+
 ## Usage
 
 Give your user model the contract and the trait:
@@ -4194,14 +4198,8 @@ php artisan authorization:usage-prune --pretend
 php artisan authorization:check
 ```
 
-`authorization:check` reports the configuration the application runs with, one `name: state` line per check, and exits
-with `0`. It reports whether the Gate hook is enabled:
-
-```text
-Gate hook: enabled (the package answers every ability it declares through Gate::before)
-```
-
-It is the start of the configuration report: each setting and seam it comes to report adds a line.
+`authorization:check` reports the configuration the application runs with (see
+[Checking the configuration](#checking-the-configuration)).
 
 Each command's class names its command in a public `NAME` constant, the name its signature declares, so a schedule, a
 test or a sibling package can refer to it without repeating the string: `PruneGrantsCommand::NAME` is
@@ -4243,6 +4241,171 @@ Schedule::command(PruneGrantsCommand::NAME)->daily();
 `authorization:usage-heartbeat` extends the coverage of [usage tracking](#usage-tracking) to now, so a quiet site stays
 covered, and records nothing while tracking is off; `authorization:usage-prune` removes the usage of grants that no
 longer exist and coverage older than `authorization.usage.retention` days, and takes `--pretend`.
+
+#### Checking the configuration
+
+`authorization:check` reports the configuration the application runs with, and checks it again as the boot checks it:
+
+```bash
+php artisan authorization:check
+php artisan authorization:check --format=json
+```
+
+It reports:
+
+- **Issues**: every setting the checks refuse, listed all at once rather than stopping at the first, each unknown key
+  on its own, a check skipped because a setting it depends on was refused, and a part of the report that could not be
+  read. Each is structured: the setting's path, a stable code (`unknown_key`, `invalid_type`, `out_of_range`,
+  `unknown_class`, `not_implemented`, `unknown_name`, `duplicate`, `required`, `invalid_value`, `invalid_catalogue`,
+  `skipped` or `internal`), what the setting expects, written by the package, and the type of the value found, never
+  the value or an exception's message. An application that booted passed the same checks, so an issue shows the
+  configuration changed since, such as by `config()->set()`.
+- **Settings**: every setting the package defines, and any unknown key set, with its status (`ok`, `refused`,
+  `skipped`, `unchecked`, or `checked_at_boot` for a check that builds what it checks, such as a context source, an
+  attribute provider or the cache store, which ran and passed when the application booted and is never run again).
+  A value is shown only for settings whose values are safe to show: class names, table names, switches, whole
+  numbers, and guard, connection, store, queue, channel and permission names. Any other value, and every value under
+  an unknown key, is shown by its type alone (`string`, `array(3)`). Whether a set value came from the file or the
+  environment is not known once the configuration is merged or cached, so it is `unknown`, and `default` for a
+  setting left out.
+- **Seams**: for each contract the package binds or reads, where its binding came from (`package_default`,
+  `configured`, `earlier_binding`, `later_binding`, `declared`, `deferred`, `alias`, `external_binding` or `unbound`),
+  the class it builds when that is known without building it, how long what it builds lives (of the key a forwarding
+  binding resolves, not of the forwarder), the extenders still registered on it, in order (the configured grant hooks
+  as `authorization.grant_hooks`, any other by its file and line), and whether it was resolved before. A seam bound to
+  a closure whose class is decided when it is first resolved is shown by the closure's file and line, `supplied by
+  custom code`; that is a note, and never fails the check. An optional contract nothing binds, such as `PolicyStore`
+  or `ScopeRegistry`, is `unbound`.
+- **Grant hooks**: the hooks in the order they run: those `authorization.grant_hooks` lists, by class, then the hook
+  bound to the contract. The chain stops at the first refusal.
+- **Connection**: the database connection's name, whether `authorization.connection` or `database.default` chose it,
+  and its driver; the cache store's name and driver; the usage queue's connection, driver and queue. Nothing else of
+  a connection's configuration is read, so no host, user, password or URL is shown.
+- **Integrations**: whether the Gate hook is enabled, the Blade directives, the query macros and the route middleware
+  aliases are registered.
+
+Building the report builds no seam, store, catalogue or provider, resolves nothing that was not resolved before,
+connects to nothing and runs no query, so it is safe before the migrations have run, and the connection shows
+`connectivity: not_tested`.
+
+**The text.** The default format prints one line per issue first, then a section each for the settings, the seams,
+the grant hooks, the connection and the integrations, each line `[subject] state`, and a last line, `Every check
+passed.`, `A check failed.` or `The check could not be completed.`:
+
+```text
+[setting authorization.models.rol] unknown key; expected one of role, permission, policy
+
+Settings
+[setting authorization.models.role] ok; SineMacula\Laravel\Authorization\Models\Role
+[setting authorization.cache.prefix] ok; value not shown (string)
+[setting authorization.models.rol] refused; unknown key; value not shown (string)
+
+Seams
+[seam SubjectResolver] package default; SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver; scoped
+[seam TenantTree] bound after the package registered, over its binding; supplied by custom code (app/Providers/AppServiceProvider.php:24); class decided at first use; transient
+[seam PolicyStore] not bound; none
+
+Grant hooks, in the order they run; the chain stops at the first refusal
+[grant hook 1] App\Authorization\AuditGrants; listed in authorization.grant_hooks
+[grant hook 2] SineMacula\Laravel\Authorization\Hooks\GrantHooks; bound to the contract, package default; runs no hook of its own
+
+Connection
+[connection database] mysql; chosen by database.default; driver mysql; not connected to
+[connection cache] none (entries are kept for the request or job alone)
+[connection queue] redis; chosen by queue.default; driver redis; queue the default
+
+Integrations
+[integration gate] enabled (the package answers every ability it declares through Gate::before)
+[integration blade_directives] registered
+
+A check failed.
+```
+
+(Lines are shortened here; the report lists every setting, seam and integration.) Every name is printed with its
+console markup and control characters escaped.
+
+**The JSON.** `--format=json` prints the report's versioned JSON alone on the standard output, with no prose or
+styling. Its keys are stable; version 1 is:
+
+```json
+{
+    "version": 1,
+    "status": "passed | refused | incomplete",
+    "settings": [
+        {"path": "authorization.models.role", "known": true, "set": true, "value": "...", "redacted": false,
+         "type": "string", "source": "default | unknown", "status": "ok | refused | skipped | unchecked | checked_at_boot"}
+    ],
+    "seams": [
+        {"contract": "...", "origin": "package_default", "class": "... | null", "classes": ["..."],
+         "decides": "... | null", "factory": "file:line | null", "lifetime": "transient | singleton | scoped | instance | null",
+         "extenders": ["authorization.grant_hooks", "file:line"], "config_key": "... | null", "alias": "... | null",
+         "deferred_provider": "... | null", "previously_resolved": false,
+         "declaration": {"owner": "...", "classes": ["..."], "decides": "... | null", "lifetime": "scoped",
+                         "state": "standing | overridden | unverified"}}
+    ],
+    "grant_hooks": [
+        {"position": 1, "source": "configured | bound", "class": "... | null", "type": "... | null",
+         "origin": "... | null", "factory": "file:line | null", "runs": true}
+    ],
+    "connection": {
+        "database": {"name": "...", "chosen": "configured | default", "driver": "...", "connectivity": "not_tested"},
+        "cache": {"store": "... | null", "chosen": "configured | none", "driver": "... | null"},
+        "queue": {"connection": "...", "chosen": "configured | default", "driver": "...", "queue": "... | null"}
+    },
+    "integrations": [
+        {"name": "gate | blade_directives | query_macro | grammar_macro | middleware.{alias}",
+         "state": "...", "detail": "... | null"}
+    ],
+    "issues": [
+        {"path": "authorization.models.rol", "code": "unknown_key", "kind": "refusal | skipped | internal",
+         "expected": "... | null", "got_type": "... | null", "depends_on": "... | null", "exception": "class | null"}
+    ]
+}
+```
+
+`value` is null when it is not shown, and `redacted` is then true for a setting that is set. `declaration` is null when
+no sibling package declared the seam, and `exception` names the class alone of what a check that could not be
+completed threw.
+
+**Exit codes.**
+
+| Code | When                                                                                          |
+|------|-----------------------------------------------------------------------------------------------|
+| `0`  | Every check passed; a seam supplied by custom code never changes it                           |
+| `1`  | A setting is refused, whether or not the report is also incomplete                            |
+| `2`  | An invalid invocation: an unknown option, or a `--format` other than `text` or `json`         |
+| `3`  | The report could not be completed (a check or a part of it failed), and no setting is refused |
+
+The command catches what fails inside it, ending with `1` for a refused configuration or `3` for anything else and
+naming the exception's class alone on the standard error, so a command calling it in-process, through
+`Artisan::call()` or the console kernel's `call()`, gets its exit code and its text on the output it gives, never a
+throw. It cannot catch what fails before it runs: an application whose configuration is refused at boot never reaches
+the command, which then fails as any command would, and the same goes for the console kernel's own bootstrap and a
+deferred provider loaded before the command runs.
+
+**For suite packages.** A package that binds its own adapter to one of the package's contracts can declare it, so the
+report names the adapter and its owner rather than custom code. It declares in its `register()`, after binding the
+contract, through `Diagnostics\Declarations`, a container instance each application holds its own of:
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Diagnostics\Declarations;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\Lifetime;
+
+$this->app->scoped('acme.tenants', AcmeTenantTree::class);
+
+$binding = static fn (Application $app): TenantTree => $app->make('acme.tenants');
+
+$this->app->bind(TenantTree::class, $binding);
+
+Declarations::of($this->app)->adapter(TenantTree::class, 'acme/tenants', AcmeTenantTree::class, Lifetime::SCOPED, $binding);
+```
+
+A binding that decides among several classes as it is resolved declares them with `factory()`, naming the classes it
+may build and when it decides (`'per tenant, at first use'`); the report shows the set, never one class. Naming the
+closure bound lets the report tell the declared adapter, still bound, from a binding made later over it, which it
+shows as `declared by acme/tenants as ..., but overridden later`; a declaration naming no closure is shown beside
+whatever is bound as unverified. A declaration is data alone: nothing is loaded or built to read it.
 
 #### Explaining a check from the console
 

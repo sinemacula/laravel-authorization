@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Config\GrantHookConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
+use Tests\Concerns\ReadsRefusedSettings;
 use Tests\Fixtures\GrantHooks\RecordingGrantHook;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
 
@@ -25,6 +26,8 @@ use Tests\Fixtures\GrantHooks\RefusingGrantHook;
 #[CoversClass(GrantHookConfigValidator::class)]
 final class GrantHookConfigValidatorTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /**
      * An empty list, and a list of hooks each listed once, are accepted.
      *
@@ -91,5 +94,23 @@ final class GrantHookConfigValidatorTest extends TestCase
         $this->expectExceptionMessage("Invalid authorization config at '{$key}': {$reason}");
 
         GrantHookConfigValidator::validate($value);
+    }
+
+    /**
+     * Each entry is checked on its own against the hooks seen before it, a hook
+     * named again in another case refused as a duplicate.
+     *
+     * @return void
+     */
+    public function testEachEntryIsCheckedAgainstThoseSeen(): void
+    {
+        $seen = GrantHookConfigValidator::entry(0, RecordingGrantHook::class, []);
+
+        self::assertSame([\strtolower(RecordingGrantHook::class) => true], $seen);
+        self::assertSame(
+            ['authorization.grant_hooks.1', 'duplicate', 'a class listed once', 'string'],
+            self::refusedSetting(static fn (): array => GrantHookConfigValidator::entry(1, '\\' . \strtoupper(RecordingGrantHook::class), $seen)),
+        );
+        self::assertSame('invalid_type', self::refusedSetting(static fn (): array => GrantHookConfigValidator::validate('x'))[1]);
     }
 }

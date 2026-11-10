@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Config;
 
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
@@ -84,7 +85,13 @@ final class UsageConfigValidator
      */
     public static function enabled(mixed $enabled): bool
     {
-        return \is_bool($enabled) ? $enabled : throw new InvalidAuthorizationConfigException(self::KEY . '.enabled', 'expected a boolean, got ' . self::describe($enabled) . '.');
+        if (\is_bool($enabled)) {
+            return $enabled;
+        }
+
+        $reason = 'expected a boolean, got ' . self::describe($enabled) . '.';
+
+        throw new InvalidAuthorizationConfigException(self::KEY . '.enabled', $reason, IssueCode::INVALID_TYPE, 'true or false', \get_debug_type($enabled));
     }
 
     /**
@@ -105,7 +112,10 @@ final class UsageConfigValidator
             return $integer;
         }
 
-        throw new InvalidAuthorizationConfigException(self::KEY . '.' . $setting, "expected a whole number of at least {$least}, got " . self::describe($value) . '.');
+        $reason = "expected a whole number of at least {$least}, got " . self::describe($value) . '.';
+        $issue  = $integer === null ? IssueCode::INVALID_TYPE : IssueCode::OUT_OF_RANGE;
+
+        throw new InvalidAuthorizationConfigException(self::KEY . '.' . $setting, $reason, $issue, "a whole number of at least {$least}", \get_debug_type($value));
     }
 
     /**
@@ -124,7 +134,9 @@ final class UsageConfigValidator
             return $value;
         }
 
-        throw new InvalidAuthorizationConfigException(self::KEY . '.' . $setting, 'expected a non-empty string or null, got ' . self::describe($value) . '.');
+        $reason = 'expected a non-empty string or null, got ' . self::describe($value) . '.';
+
+        throw new InvalidAuthorizationConfigException(self::KEY . '.' . $setting, $reason, IssueCode::INVALID_TYPE, 'a non-empty string or null', \get_debug_type($value));
     }
 
     /**

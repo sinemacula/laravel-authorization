@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Config\CacheConfigValidator;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use Tests\Concerns\ReadsRefusedSettings;
 use Tests\TestCase;
 
 /**
@@ -30,6 +31,8 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationServiceProvider::class)]
 final class CacheConfigValidatorTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /** @var string The path of the lifetime. */
     private const string TTL = 'authorization.cache.ttl';
 
@@ -179,6 +182,27 @@ final class CacheConfigValidatorTest extends TestCase
         $config->set(self::PREFIX, '');
 
         $this->assertRefused(static fn () => $app->make(ResolutionCache::class), self::PREFIX, 'expected a non-empty string, got \'\' (string).');
+    }
+
+    /**
+     * Each refusal of the cache block is structured, the store's name checked
+     * without resolving it.
+     *
+     * @return void
+     */
+    public function testEachRefusalIsStructured(): void
+    {
+        self::assertSame(['authorization.cache.prefix', 'invalid_type', 'a non-empty string', 'string'], self::refusedSetting(static fn () => CacheConfigValidator::prefix('')));
+        self::assertSame(
+            ['authorization.cache.store', 'invalid_type', 'a cache store name or null', 'int'],
+            self::refusedSetting(static fn () => CacheConfigValidator::storeName(3)),
+        );
+        self::assertSame('out_of_range', self::refusedSetting(static fn () => CacheConfigValidator::ttl(0))[1]);
+        self::assertSame('missing', CacheConfigValidator::storeName('missing'));
+        self::assertSame(
+            ['authorization.cache.store', 'unknown_name', 'the name of a configured cache store', 'string'],
+            self::refusedSetting(fn () => CacheConfigValidator::validate(['store' => 'missing'], $this->container())),
+        );
     }
 
     /**
