@@ -34,9 +34,14 @@ use SineMacula\Laravel\Authorization\Hooks\GrantWidening;
  * raw Eloquent write on the package's models is not refused while a hook runs,
  * but is the application's responsibility and belongs in no hook.
  *
- * Exactly one hook is bound. The default is `Hooks\GrantHooks`, the ordered
- * composite of the classes `authorization.grant_hooks` lists, which with none
- * listed does nothing; an application binds its own on the contract instead.
+ * Exactly one hook is bound. The default is `Hooks\GrantHooks` holding no hook,
+ * which does nothing; an application or a sibling package may bind its own on
+ * the contract instead, before the package registers or after. When
+ * `authorization.grant_hooks` lists hooks, they run first, in order, then the
+ * bound hook (N108): the package extends the contract so whatever it resolves
+ * to is wrapped in `Hooks\ListedGrantHooks`, and the grant service wraps the
+ * hook it calls unless it already is, for an instance Laravel applies no
+ * extender to.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

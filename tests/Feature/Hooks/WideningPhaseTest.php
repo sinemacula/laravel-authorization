@@ -9,6 +9,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
@@ -40,7 +41,9 @@ use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Concerns\WidensGrants;
 use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Fixtures\GrantHooks\RecordingGrantHook;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
+use Tests\Fixtures\GrantHooks\SecondGrantHook;
 use Tests\TestCase;
 
 /**
@@ -49,7 +52,8 @@ use Tests\TestCase;
  * rolling everything back, the check of the final grants under the lock after
  * every other, a race it catches, the retry with the hook or, inside the
  * application's transaction, the conflict thrown for it, the recursion guard,
- * nested calls and a binding that is no hook.
+ * nested calls, a binding that is no hook, and the hooks the configuration
+ * lists run before the bound hook however it was bound (N108).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -590,6 +594,68 @@ final class WideningPhaseTest extends TestCase
     }
 
     /**
+     * With hooks listed, a hook bound with `instance()` after the package
+     * registered, which Laravel applies no extender to, runs after them (N108).
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheListedHooksRunBeforeAnInstanceBoundAfterRegistration(): void
+    {
+        $ran = $this->listAHook();
+
+        $this->hook(static fn () => $ran->append('bound'));
+        $this->widen();
+
+        self::assertSame(['listed', 'bound'], $ran->getArrayCopy());
+    }
+
+    /**
+     * With hooks listed, a hook bound after an instance the package wrapped as
+     * it registered, which Laravel applies no extender to, runs after them
+     * (N108).
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheListedHooksRunBeforeAHookBoundAfterAWrappedInstance(): void
+    {
+        $this->app?->instance(GrantHook::class, new RecordingGrantHook);
+
+        $ran = $this->listAHook();
+
+        $this->app?->bind(GrantHook::class, static fn (): GrantHook => new RecordingGrantHook(static fn () => $ran->append('later')));
+        $this->widen();
+
+        self::assertSame(['listed', 'later'], $ran->getArrayCopy());
+    }
+
+    /**
+     * With hooks listed, a hook the package extended and an extender registered
+     * after the package decorated runs after them once, though the grant
+     * service wraps the decoration again (N108).
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheListedHooksRunOnceAroundALaterDecoration(): void
+    {
+        $ran = $this->listAHook();
+
+        $this->app?->bind(GrantHook::class, static fn (): GrantHook => new RecordingGrantHook(static fn () => $ran->append('bound')));
+        $this->app?->extend(GrantHook::class, static fn (GrantHook $hook): GrantHook => new SecondGrantHook(static function (GrantWidening $widening) use ($hook, $ran): void {
+            $ran->append('decorated');
+            $hook->beforeWidening($widening);
+        }));
+        $this->widen();
+
+        self::assertSame(['listed', 'decorated', 'bound'], $ran->getArrayCopy());
+    }
+
+    /**
      * A sync proposes each target it keeps that the grantee does not hold live,
      * with the sync's expiry, and nothing for one held live.
      *
@@ -623,6 +689,40 @@ final class WideningPhaseTest extends TestCase
         self::assertSame([GrantChanges::key($expired), GrantChanges::key($new)], \array_map(static fn (ProposedGrant $proposal): string => $proposal->target->id, $proposals));
         self::assertSame($expiresAt->getTimestamp(), $proposals[0]->expiresAt?->getTimestamp());
         self::assertSame('acct1', $proposals[1]->tenant?->id);
+    }
+
+    /**
+     * List a hook that notes `listed` when it runs, register the package, and
+     * return what the hooks note.
+     *
+     * @return \ArrayObject<int, string>
+     */
+    private function listAHook(): \ArrayObject
+    {
+        /** @var \ArrayObject<int, string> $ran */
+        $ran = new \ArrayObject;
+
+        $this->app?->instance(SecondGrantHook::class, new SecondGrantHook(static fn () => $ran->append('listed')));
+
+        config(['authorization.grant_hooks' => [SecondGrantHook::class]]);
+
+        (new AuthorizationServiceProvider($this->app ?? self::fail('No application.')))->register();
+
+        return $ran;
+    }
+
+    /**
+     * Propose a widening grant of a new role to the principal.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private function widen(): void
+    {
+        $this->principals();
+
+        WideningPhase::before(Operation::begin(), self::principal(), static fn (): array => [self::proposal(Role::query()->create(['name' => 'new']))]);
     }
 
     /**

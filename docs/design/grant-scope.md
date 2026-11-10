@@ -86,12 +86,31 @@ the hook runs in a grant call.
     `UnresolvableRecipientException`, never classified as not widening.
 
 12. **The contract (N80).** `Contracts\GrantHook::beforeWidening(GrantWidening $widening)`. `Hooks\GrantWidening` and
-    `Hooks\ProposedGrant` are immutable values of references, strings and immutable UTC instants: the operation's id
-    and mode, the actor references, the recipient identity and the actual grantee, each widening grant with its action,
-    target, tenant, application, reach, expiry and reasons, the reasons of the call once each, and when the proposal
-    was observed. Exactly one hook is bound: by default `Hooks\GrantHooks`, the ordered composite of the classes
-    `authorization.grant_hooks` lists, validated at boot (`Config\GrantHookConfigValidator`), run in order and stopped
-    by the first that throws. With none listed nothing is classified. There is no runtime registrar.
+    `Hooks\ProposedGrant` are immutable values of references, strings and immutable UTC instants: the operation's id and
+    mode, the actor references, the recipient identity and the actual grantee, each widening grant with its action,
+    target, tenant, application, reach, expiry and reasons, the reasons of the call once each, and when the proposal was
+    observed. Exactly one hook is bound: by default `Hooks\GrantHooks` holding no hook, or the hook a sibling package or
+    the application binds on the contract. The classes `authorization.grant_hooks` lists, validated at boot
+    (`Config\GrantHookConfigValidator`), run before whichever hook is bound, in order, stopped by the first that throws.
+    With none listed, and the default bound, nothing is classified. There is no runtime registrar. When hooks are
+    listed, the package extends the contract with Laravel's `extend()` (N108), so whatever it resolves to is wrapped in
+    `Hooks\ListedGrantHooks`: the listed hooks first, then the bound hook, any of which may refuse. Hooks only refuse,
+    so every one runs and none is dropped. Laravel applies the extender each time it builds the contract, so a hook
+    bound before the package registered or after, with `bind()`, `singleton()` or `scoped()`, a scoped closure naming
+    the contract by its return type, or a deferred provider, is wrapped, and so is the default, which holds none of the
+    listed hooks, so none runs twice. An extender registered before the package's decorates the bound hook before it is
+    wrapped; one registered after receives the wrapped hook. Laravel applies no extender to an instance it is handed
+    later, so `Hooks\WideningPhase` wraps the hook it calls as well, with `ListedGrantHooks::wrap()`, which leaves a
+    wrapped hook as it is: a hook bound with `instance()` after the package registered, or bound in any way after an
+    instance the package wrapped as it registered, runs after the listed hooks too. A decorator called while another
+    runs its hook for the same widening calls its own hook alone, so when an extender registered after the package
+    decorates the wrapped hook and the grant service wraps the decoration again, the listed hooks still run once. The
+    wrapped hook builds the listed hooks from its container at its first use and keeps them, so registering builds none
+    of them, and they share the bound hook's lifetime, in a queue worker and in each Octane sandbox. Registering
+    resolves the bound hook only when it was resolved before and a callback watches the contract for rebinding, which
+    Laravel hands the wrapped hook. A wrapped hook is never wrapped again, so registering the package twice runs the
+    listed hooks once. `Registrars\SeamBindings` binds the default and registers the extender. With none listed nothing
+    is extended, and the bound hook stands alone.
 
 13. **Veto only.** A hook refuses by throwing, `Exceptions\GrantRefusedException` or anything else: the call rolls back
     with nothing written and no event, and is not tried again, unless what it threw is a concurrency error
@@ -224,6 +243,15 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
   lock, and the coverage check's locks last in the lock order.
 - `Feature\Hooks\GrantHooksTest`, `Unit\Config\GrantHookConfigValidatorTest` and `Feature\OperationScopeTest` -- the
   composite's order and stop, its validation, the guard and the trusted retry.
+- `Feature\Hooks\ListedGrantHooksTest` -- the listed hooks run before whatever the contract resolves to (N108): a hook
+  bound before or after the package registered, every way of binding it, a deferred provider's, the default without
+  running twice, and an earlier extender's decoration, either refusing; a wrapped hook not wrapped again and a later
+  decoration wrapped again running the listed hooks once, nothing extended with none listed, the bound hook's lifetime
+  kept in a queue worker and each Octane sandbox, nothing built while registering, a rebinding watcher handed the
+  wrapped hook, and nothing wrapped twice. `Feature\Hooks\WideningPhaseTest` -- the grant service running the listed
+  hooks before an instance bound after registration and a hook bound after a wrapped instance.
+  `Feature\Registrars\SeamBindingsTest` -- the default bound with no hook, and the extender registered only when hooks
+  are listed.
 
 ## Done
 
