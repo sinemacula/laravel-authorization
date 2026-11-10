@@ -17,9 +17,11 @@ effective-permissions API, and the boundary between authorization scoping and re
 2. **`for()` keeps the request's tenant and application for a model.** A model named replaces the request's subject
    only: the tenant, application and guard stay the ones the subject resolver reports for the request (none when it
    resolves no subject). A resolved `Subject` is taken as it is, its identity, tenant, application, guard and session
-   kept, as an acting context names its actor (see [Delegated administration](delegated-administration.md)). A check
-   never takes its tenant from the caller here otherwise; naming a tenant explicitly is for the administration and
-   preview API.
+   kept, as an acting context names its actor (see [Delegated administration](delegated-administration.md)), and when
+   it names a tenant or an application, each check through the clone is decided there, grants and ambient scope both,
+   with the request's restored afterwards (N109, see [the subject resolver](subject-resolver-contract.md)). A check
+   never takes its tenant from the caller here otherwise; naming a tenant for a single check is for the administration
+   and preview API.
 
 3. **`for()` does NOT change `$request->user()`.** The scoped manager only affects authorization evaluation -- it
    overrides `currentSubject()` on the clone. The Laravel auth guard, `$request->user()`, session state, and any other

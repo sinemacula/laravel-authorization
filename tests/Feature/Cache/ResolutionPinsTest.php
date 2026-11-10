@@ -169,4 +169,16 @@ final class ResolutionPinsTest extends TestCase
         self::assertSame([$key($account, 'account'), $key($org, 'org'), $key($sibling, 'sibling')], \array_keys($moved->tokens()));
         self::assertEquals([Reference::of($account), Reference::of($sibling)], TenantScope::currentChain()->tenants);
     }
+
+    /**
+     * Pins keep no routes unless the cache tracks grant usage for the
+     * resolution.
+     *
+     * @return void
+     */
+    public function testPinsRouteOnlyWhenAsked(): void
+    {
+        self::assertFalse((new ResolutionPins)->isRouting());
+        self::assertTrue((new ResolutionPins(null, true))->isRouting());
+    }
 }

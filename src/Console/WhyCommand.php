@@ -63,12 +63,15 @@ final class WhyCommand extends Command
     /** @var string What the text format says before the explanation. */
     public const string PREAMBLE = 'Explanation for the named subject under the given scope and console context, without their browser session:';
 
+    /** @var string The console command's name. */
+    public const string NAME = 'authorization:why';
+
     /** @var list<string> The options that take a value, refused when given without one. */
     private const array VALUED = ['tenant', 'application', 'context', 'format'];
 
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:why
+    protected $signature = self::NAME . <<<'EOD'
+
                                     {subject : The saved subject in morphType:key format (e.g. user:1)}
                                     {action : The action to explain}
                                     {resource? : A record as type:id (e.g. post:42), a type alone as type:*, or an opaque identifier; none checks without one}

@@ -5,7 +5,10 @@ declare(strict_types = 1);
 namespace Tests\Unit\Support;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Container\Container;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
+use Illuminate\Routing\Route;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
@@ -108,6 +111,150 @@ final class OperationTest extends TestCase
         self::assertEquals(new Reference('support', '3'), $operation->impersonator);
         self::assertFalse($operation->isTrusted);
         self::assertSame([PackagePermissions::ROLE_GRANT, PackagePermissions::ROLE_REVOKE], $operation->actions);
+    }
+
+    /**
+     * A delegated operation begun in a routed request carries the request's IP
+     * address and user agent; begun with no routed request, as console and
+     * queued work is, it carries none; and a trusted one carries none, even in
+     * a routed request.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testADelegatedOperationCarriesTheRoutedRequestsClient(): void
+    {
+        $actor = ActingContext::for(new Subject(self::saved('42'), self::saved('7')));
+
+        self::withRequest(null, static function () use ($actor): void {
+            $operation = Operation::begin($actor);
+
+            self::assertSame([null, null], [$operation->ip, $operation->userAgent]);
+        });
+
+        self::withRequest(self::request(false), static function () use ($actor): void {
+            $operation = Operation::begin($actor);
+
+            self::assertSame([null, null], [$operation->ip, $operation->userAgent]);
+        });
+
+        self::withRequest(self::request(true), static function () use ($actor): void {
+            $delegated = Operation::begin($actor);
+            $trusted   = Operation::begin(new Reference('user', '7'));
+
+            self::assertSame(['203.0.113.9', 'Browser/1.0'], [$delegated->ip, $delegated->userAgent]);
+            self::assertSame([null, null], [$trusted->ip, $trusted->userAgent]);
+        });
+    }
+
+    /**
+     * A client the caller passes is kept as it is, for a trusted operation and
+     * for a delegated one in a routed request, whose own client is then not
+     * read, even when the caller passes only one of the two values.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testAnExplicitClientIsKept(): void
+    {
+        $actor = ActingContext::for(new Subject(self::saved('42'), self::saved('7')));
+
+        $trusted = Operation::begin(null, [], '198.51.100.1', 'Worker/2.0');
+
+        self::assertSame(['198.51.100.1', 'Worker/2.0'], [$trusted->ip, $trusted->userAgent]);
+
+        self::withRequest(self::request(true), static function () use ($actor): void {
+            $both  = Operation::begin($actor, [], '198.51.100.1', 'Worker/2.0');
+            $ip    = Operation::begin($actor, [], '198.51.100.2');
+            $agent = Operation::begin($actor, [], null, 'Worker/3.0');
+
+            self::assertSame(['198.51.100.1', 'Worker/2.0'], [$both->ip, $both->userAgent]);
+            self::assertSame(['198.51.100.2', null], [$ip->ip, $ip->userAgent]);
+            self::assertSame([null, 'Worker/3.0'], [$agent->ip, $agent->userAgent]);
+        });
+
+        $built = new Operation('op', null, new \DateTimeImmutable, true, null, null, [], '192.0.2.1', 'Agent/4.0');
+
+        self::assertSame(['192.0.2.1', 'Agent/4.0'], [$built->ip, $built->userAgent]);
+        self::assertSame([null, null], [(new Operation('op', null, new \DateTimeImmutable))->ip, (new Operation('op', null, new \DateTimeImmutable))->userAgent]);
+    }
+
+    /**
+     * An operation without its client keeps everything else, and one with no
+     * client is returned as it is.
+     *
+     * @return void
+     */
+    public function testWithoutClientKeepsEverythingElse(): void
+    {
+        $operation = new Operation(
+            'op',
+            new Reference('user', '1'),
+            new \DateTimeImmutable('@100'),
+            false,
+            new Reference('id', '2'),
+            new Reference('support', '3'),
+            ['a', 'b'],
+            '192.0.2.1',
+            'Agent/4.0',
+        );
+        $stripped = $operation->withoutClient();
+        $plain    = Operation::begin();
+
+        self::assertSame([null, null], [$stripped->ip, $stripped->userAgent]);
+        self::assertSame(
+            [$operation->id, $operation->actor, $operation->at, $operation->isTrusted, $operation->identity, $operation->impersonator, $operation->actions],
+            [$stripped->id, $stripped->actor, $stripped->at, $stripped->isTrusted, $stripped->identity, $stripped->impersonator, $stripped->actions],
+        );
+        self::assertSame($plain, $plain->withoutClient());
+        self::assertNull((new Operation('op', null, new \DateTimeImmutable, true, null, null, [], '192.0.2.1'))->withoutClient()->ip);
+        self::assertNull((new Operation('op', null, new \DateTimeImmutable, true, null, null, [], null, 'Agent/4.0'))->withoutClient()->userAgent);
+    }
+
+    /**
+     * Run the callback with a container holding the request as the current one,
+     * or none, and put the container in place back afterwards.
+     *
+     * @param  \Illuminate\Http\Request|null  $request
+     * @param  \Closure(): void  $callback
+     * @return void
+     */
+    private static function withRequest(?Request $request, \Closure $callback): void
+    {
+        $previous  = Container::getInstance();
+        $container = new Container;
+
+        if ($request !== null) {
+            $container->instance('request', $request);
+        }
+
+        Container::setInstance($container);
+
+        try {
+            $callback();
+        } finally {
+            Container::setInstance($previous);
+        }
+    }
+
+    /**
+     * Return a request from a client with an IP address and a user agent,
+     * routed or not.
+     *
+     * @param  bool  $isRouted
+     * @return \Illuminate\Http\Request
+     */
+    private static function request(bool $isRouted): Request
+    {
+        $request = Request::create('/posts', 'GET', [], [], [], ['REMOTE_ADDR' => '203.0.113.9', 'HTTP_USER_AGENT' => 'Browser/1.0']);
+
+        if ($isRouted) {
+            $request->setRouteResolver(static fn (): Route => new Route('GET', '/posts', static fn (): null => null));
+        }
+
+        return $request;
     }
 
     /**

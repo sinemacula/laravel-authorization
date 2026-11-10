@@ -7,6 +7,8 @@ namespace SineMacula\Laravel\Authorization\Console;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
@@ -17,24 +19,41 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * (`platform`, or the owning tenant as `{morphType}:{key}`), system flag, and
  * the count of its related records, which counts every related record whatever
  * its owner. An optional `--guard` filter restricts the listing to a single
- * guard name.
+ * guard name. Each listing command declares its name in `NAME` and the
+ * `authorization.models` key of what it lists in `MODEL`, from which its
+ * signature, its description and the rest of the listing are built.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 abstract class ListCatalogueCommand extends Command
 {
-    /** @var string The `authorization.models` key of the listed model. */
+    /** @var string The console command's name, which each listing command declares. */
+    public const string NAME = '';
+
+    /** @var string The `authorization.models` key of the listed model, which each listing command declares. */
     protected const string MODEL = '';
 
-    /** @var class-string<\Illuminate\Database\Eloquent\Model> The model listed when none is configured. */
-    protected const string DEFAULT_MODEL = Model::class;
+    /** @var array<string, array{0: class-string<\Illuminate\Database\Eloquent\Model>, 1: string, 2: string}> For each listed model's key: the model listed when none is configured, the relation whose records are counted, also the plural of the related records, and the plural name of the listed records. */
+    private const array LISTINGS = [
+        'permission' => [Permission::class, 'roles', 'permissions'],
+        'role'       => [Role::class, 'permissions', 'roles'],
+    ];
 
-    /** @var string The relation whose records are counted, also the plural of the related records. */
-    protected const string COUNTED = '';
+    /**
+     * Create the command, its signature built from its name, with an optional
+     * `--guard` filter of the records it lists, and its description from the
+     * model it lists.
+     *
+     * @return void
+     */
+    public function __construct()
+    {
+        $this->signature   = static::NAME . ' {--guard= : Filter ' . self::LISTINGS[static::MODEL][2] . ' by guard name}';
+        $this->description = 'List every authorization ' . static::MODEL . ', platform-wide and tenant-owned, with its owner';
 
-    /** @var string The plural name of the listed records, for the empty-listing message. */
-    protected const string RECORDS = '';
+        parent::__construct();
+    }
 
     /**
      * Execute the console command.
@@ -43,10 +62,10 @@ abstract class ListCatalogueCommand extends Command
      */
     public function handle(): int
     {
-        $relation = static::COUNTED;
+        [$default, $relation, $plural] = self::LISTINGS[static::MODEL];
 
         /** @var class-string<\Illuminate\Database\Eloquent\Model> $class */
-        $class = config('authorization.models.' . static::MODEL, static::DEFAULT_MODEL);
+        $class = config('authorization.models.' . static::MODEL, $default);
 
         $query = $class::query()
             ->withoutGlobalScope(TenantScope::class)
@@ -64,7 +83,7 @@ abstract class ListCatalogueCommand extends Command
         $records = $query->orderBy('name')->get();
 
         if ($records->isEmpty()) {
-            $this->info('No ' . static::RECORDS . ' found.');
+            $this->info('No ' . $plural . ' found.');
 
             return self::SUCCESS;
         }

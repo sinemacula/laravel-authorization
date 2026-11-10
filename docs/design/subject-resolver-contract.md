@@ -28,17 +28,45 @@ and `forUser()` scopes, and how the Gate, middleware, Blade directives and tenan
    `scoped()`, so the queue worker and Octane build them afresh for each job or request (AUTHZ-12.5). A resolver the
    application binds itself, with `instance()`, `singleton()`, `scoped()` or `bind()`, is kept across that reset.
 
-6. **A binding made first stands (N103).** The contract is bound to the package's default only when nothing is bound
-   to it yet (`bindIf()`), so a resolver a sibling package or the application binds before the package registers
-   stands, `instance()` included, and one bound afterwards with `bind()`, `singleton()`, `scoped()` or `instance()`
-   replaces the default; the default stays reachable under its package-owned key. The same holds for every seam the
-   package gives a default for. Provider order still decides between bindings made outside the package: the later of
-   two wins, and a `bindIf()` made after the package registers is skipped. Rebinding the resolver still empties the
-   resolution cache's memo: one bound before the package registered, `instance()` included, is watched from its first
-   resolution in each container that resolves it, an Octane sandbox included, since watching it sooner would resolve it
-   while providers register.
+6. **A binding made first stands (N103), unless the application configured a class (N106).** The contract is bound to
+   the package's default only when nothing is bound to it yet (`bindIf()`), so a resolver a sibling package binds before
+   the package registers stands, `instance()` included, and one bound afterwards with `bind()`, `singleton()`,
+   `scoped()` or `instance()` replaces the default; the default stays reachable under its package-owned key. When
+   `authorization.subject_resolver` names a class other than the package's default, the contract is bound to it whatever
+   was bound before, since the application's configuration is its explicit choice and a sibling's binding is not; a
+   value equal to the default, or none, binds nothing over an earlier binding. A sibling's deferred provider of the
+   contract would bind it at its first resolution, after the configured class, so the package loads it before binding:
+   as the package registers when the application already knows of it, and otherwise in a `booting()` callback, which
+   loads the provider and binds the configured class again when the contract is still deferred as the application boots,
+   since Laravel learns of the deferred providers of its configuration and of package discovery only once every eager
+   provider has registered. A binding made after the package registers, with no deferred provider of the contract, is
+   left standing at boot. Binding the configured class follows Laravel's rules for any binding: an extender registered
+   on the contract is applied to it, so one typed to a sibling's class fails, and over a contract already resolved the
+   callbacks watching it with `rebinding()` or `refresh()` are called, which may resolve the configured class while the
+   package registers. The precedence, highest first, is a binding made after the package registers, then the configured
+   class, then a binding made before the package registers, then the package's default. The same holds for every seam
+   the package gives a default for, and for every seam the configuration names a class for: the tenant tree, the
+   identity directory, the resource tenant resolver, the authentication requirement checker, the session policy source
+   and the policy store, which has no default, so a configured store always replaces an earlier binding. The grant hook
+   is the one exception (N108): hooks only refuse, so when `authorization.grant_hooks` lists any, the package extends
+   the contract and they run before whatever hook it resolves to, bound before the package registered or after, rather
+   than replacing it, with `bind()`, `singleton()`, `scoped()` or `instance()` (see `grant-scope.md`, invariant 12).
+   Provider order still decides between bindings made outside the package: the later of two wins, and a `bindIf()` made
+   after the package registers is skipped. Rebinding the resolver still empties the resolution cache's memo: one bound
+   before the package registered, `instance()` included, is watched from its first resolution in each container that
+   resolves it, an Octane sandbox included, whether that binding stands or the configured class replaced it, since
+   watching it sooner would resolve it while providers register.
 
-7. **Configuration fails closed.** `authorization.subject_resolver` must name a class implementing the contract. Null,
+7. **A `Subject` decides in its own scope (N109).** `Authorization::for($subject)` with a resolved `Subject` naming a
+   tenant or an application decides every check through the manager there, grants and ambient scope both, as
+   `AuthorizationScope::within()` around `for()` of the subject in that scope does, and restores the request's scope
+   afterwards, even on a throw. A `Subject` naming neither, and a model, are decided in the request's scope.
+
+8. **A tenant is named by its key.** The tenant a `Subject` carries is a model or an `AuthorizableTenant`, named by
+   its morph type and `getKey()`, the contract's identifier and a model's primary key, in every grant row, tenant tree
+   question, cache key and `Reference`. A tenant's other identifiers (a slug, an external id) are never read.
+
+9. **Configuration fails closed.** `authorization.subject_resolver` must name a class implementing the contract. Null,
    a missing class or a class that does not implement it is refused at boot (AUTHZ-17.2).
 
 ## Contract
@@ -113,6 +141,21 @@ request's tenant, application and guard (see `docs/design/impersonation.md`). Na
 its identity. A subject named this way never has a session, whichever model it is, so no authentication requirement is
 met for it. With no subject resolved, the clone has no tenant or application.
 
+`Authorization::for($subject)` with a resolved `Subject` keeps it as it is, its session included, and, when it names a
+tenant or an application, decides in the `AuthorizationScope` they make (its tenant, or the platform for none, and its
+application). Each decision of the clone, `check()` and `checkMany()` and everything adapting them, the resource
+reference `any()`, `all()` and `authorize()` resolve once for their checks, `explain()`, the provenance a refusal is
+reported with, and each compile of a query scoped through it, runs inside that scope's `within()`, which puts the tenant
+and application in place of the request's and restores them in `finally`, with what the resolution cache held; a scope
+already in place is not entered again, so a `Subject` in the request's own scope costs nothing more. `permissionsFor()`
+keeps the scope it is given. The scope is read from the subject at each decision, not when the clone is made, so a
+tenant that cannot be read is refused with `InvalidTenantException` by the check, before anything is decided, as it was
+before the subject's scope was put in place, and a caller wrapping `for()` in its own handling sees it where it did. The
+subject lives on the clone alone, so nothing leaks to the manager it was made from or to the next request. `forUser()`,
+`previewFor()` and `for()` of a model drop it. Delegated administration and access reviews decide an actor's rights in
+the reach they put in place, so they use the internal `forActor()`, which names the acting `Subject` without its scope;
+a preview's admitter is built the same way, so a preview keeps its own scope.
+
 `Authorization::forUser($user)` returns a cloned manager deciding about the subject the resolver translates the user
 into. The Gate hook uses it for the user Laravel hands over, and so does a Laravel policy class deciding through
 `Concerns\DecidesThroughAuthorization`, for the user its method is given. `forUser(null)` decides about a guest: no
@@ -149,7 +192,8 @@ rather than asking the resolver again without end.
 - `Contracts\SubjectResolver` -- the contract.
 - `Subject` -- the resolved subject, identity, tenant, application, guard and session.
 - `Resolvers\AuthGuardSubjectResolver` -- the shipped default.
-- `AuthorizationManager::currentSubject()`, `for()` and `forUser()` -- resolution and the scoped clones.
+- `AuthorizationManager::currentSubject()`, `for()` and `forUser()` -- resolution and the scoped clones;
+  `Concerns\BuildsScopedManagers::forActor()` -- an acting subject decided in the scope in place.
 - `Registrars\GateRegistrar` -- the Gate hook translating its user; `Concerns\DecidesThroughAuthorization` -- a policy
   class translating its user the same way.
 - `Support\ResolvedTenant` and `Scopes\TenantScope` -- the tenant held per request or job.
@@ -168,10 +212,20 @@ rather than asking the resolver again without end.
   platform rows only.
 - `AuthorizationServiceProviderTest` -- the resolver and tenant rebuilt per job; an application's own binding kept; a
   binding made before registration standing, by `bind`, `singleton`, `scoped` or `instance`, for every seam.
+- `AuthorizationServiceProviderTest` and `Registrars\SeamBindingsTest` -- a configured class replacing an earlier
+  binding (N106), a deferred provider's included, whether the application knows of it as the package registers or learns
+  of it before it boots, and a later binding standing at boot.
 - `ConfigValidatorTest` -- the refusals of `subject_resolver`.
+- `SubjectScope\AuthorizationManagerTest` (Feature) and `BuildsScopedManagersTest` -- a `Subject` decided in its own
+  tenant and application by every method, parity with the `within()` form, the request's scope for a subject naming
+  neither, restoration after a throw, `forActor()`, and a preview admitted in its own scope.
+- `ReferenceTest` (Unit) -- a tenant referenced by its morph type and key, whatever its other identifiers.
 
 ## Change Triggers
 
 - Adding a field to `Subject` (an authentication context, a session) requires updating every resolver and this note.
-- Letting a check name a tenant explicitly belongs to the administration and preview API, not to `for()`.
+- Letting a single check name a tenant other than its subject's belongs to the administration and preview API, not to
+  `for()`, which decides in the scope its `Subject` names.
+- Keying tenants by an identifier other than `getKey()` would change every stored `tenant_id`, so it needs a migration
+  and this note.
 - Caching the resolved subject inside the manager would change the no-caching trade-off and must stay per request.

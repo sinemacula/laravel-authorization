@@ -196,7 +196,8 @@ final class ReviewAdmission
 
     /**
      * Return the manager deciding about the reviewer, with the reviewer's caps,
-     * refusing when the package is not booted.
+     * in the scope in place, the review's reach, whatever tenant the reviewer
+     * names (see `forActor()`), refusing when the package is not booted.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $reviewer
      * @return \SineMacula\Laravel\Authorization\AuthorizationManager
@@ -205,7 +206,7 @@ final class ReviewAdmission
      */
     private static function manager(ActingContext $reviewer): AuthorizationManager
     {
-        $manager = AuthorizationManager::instance()?->for($reviewer->subject)
+        $manager = AuthorizationManager::instance()?->forActor($reviewer->subject)
             ?? throw self::refusal(Decision::deny(DecisionReason::SUBJECT_UNRESOLVED, DecisionStage::SUBJECT));
 
         foreach ($reviewer->caps as $cap) {

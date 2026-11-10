@@ -14,9 +14,11 @@ impersonates: the guard, the session, the Gate and Blade stay the caller's.
    real caller, the subject the manager it is called on decides about, captured with its session and never inferred
    later from the target, the authenticated user or a listener; the target; and the scope, given or captured with
    `AuthorizationScope::current()` when the preview is built. A job previews through an explicitly named caller,
-   `Authorization::for($resolvedSubject)->previewFor($target)`. A previewer that names no record, a guest included, is
-   refused as `subject_unresolved`, and a target that names no record with `InvalidPreviewException`, since no event
-   could name either.
+   `Authorization::for($resolvedSubject)->previewFor($target)`. The previewer's own manager, which decides each
+   admission, is built without the scope a `Subject` given to `for()` names (N109), so a preview made from such a
+   manager is admitted in the preview's scope and the scopes its decisions are made in, as before. A previewer that
+   names no record, a guest included, is refused as `subject_unresolved`, and a target that names no record with
+   `InvalidPreviewException`, since no event could name either.
 
 2. **The target has no session.** A resolved `Subject` keeps its principal and identity but loses its session, and a
    model gets `for()` semantics, in the previewer's request. No authentication requirement made of the target is met,
@@ -95,12 +97,12 @@ impersonates: the guard, the session, the Gate and Blade stay the caller's.
     conditions, caps and requirements), never an attribute value or a session detail, which no trace holds. A refused
     preview explains nothing.
 
-11. **Refused in v1.** On a preview, `for()`, `forUser()`, `previewFor()` and `permissionsFor()` naming a subject would
-    change the target, a listing in another tenant or application would change the scope, and `withPolicies()` would
-    answer through hypothetical policies: each throws `InvalidPreviewException` before anything is decided. A manager
-    carrying a policy override cannot build a preview either, so an override never stands in for the previewer's
-    policies. `capped()` is allowed: it caps the target's checks alone, never the previewer's admission, and a cap on
-    the caller's manager still caps the admission.
+11. **Refused in v1.** On a preview, `for()`, `forActor()`, `forUser()`, `previewFor()` and `permissionsFor()` naming
+    a subject would change the target, a listing in another tenant or application would change the scope, and
+    `withPolicies()` would answer through hypothetical policies: each throws `InvalidPreviewException` before anything
+    is decided. A manager carrying a policy override cannot build a preview either, so an override never stands in for
+    the previewer's policies. `capped()` is allowed: it caps the target's checks alone, never the previewer's
+    admission, and a cap on the caller's manager still caps the admission.
 
 12. **No authority from a preview (N87).** A preview never converts into an `ActingContext`: one built while a preview
     is evaluated, or built from a preview's target (the subject `currentSubject()` returns on it), is refused as

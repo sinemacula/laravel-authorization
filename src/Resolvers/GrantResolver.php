@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 use SineMacula\Laravel\Authorization\Support\RolePolicies;
+use SineMacula\Laravel\Authorization\Usage\RouteSources;
 
 /**
  * Resolves what an identity's grants come to: the names of its roles, the keys
@@ -39,6 +40,12 @@ use SineMacula\Laravel\Authorization\Support\RolePolicies;
  * however many roles and however deep, only when a role holds a policy in the
  * current scope.
  *
+ * While grant usage is tracked (see `ResolutionPins::isRouting()`), the
+ * permissions and the policies are resolved with the routes of the stored
+ * grants behind each (see `Usage\RouteSources`), read from the same rows in the
+ * same queries, each also reading where its grants were made and when; a
+ * resolution whose hierarchy moved while it ran says none.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -47,7 +54,8 @@ final class GrantResolver
     /**
      * Resolve the names of the roles granted through the relation.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \SineMacula\Laravel\Authorization\Cache\Resolution<string>
      */
@@ -74,7 +82,8 @@ final class GrantResolver
      * seen; the roles are then read afresh, and the resolution is marked
      * unstable, so it is kept for the request or job alone and never stored.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \SineMacula\Laravel\Authorization\Cache\Resolution<string>
      *
@@ -97,8 +106,10 @@ final class GrantResolver
      * Resolve the names of the permissions granted directly and through the
      * roles, with each role's ancestors' when the hierarchy is enabled.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Permission, \Illuminate\Database\Eloquent\Model>  $direct
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $roles
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Permission,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $direct
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $roles
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \SineMacula\Laravel\Authorization\Cache\Resolution<string>
      *
@@ -106,14 +117,20 @@ final class GrantResolver
      */
     public static function permissions(MorphToMany $direct, MorphToMany $roles, ResolutionPins $pins): Resolution
     {
-        $granted = self::held($direct);
-        $held    = self::held($roles);
+        $granted = self::heldOf($direct, $pins);
+        $held    = self::heldOf($roles, $pins);
         $keys    = \array_keys($held->getDictionary());
         $reach   = RoleGraph::reach($keys);
 
         $pins->roles(\array_keys($reach));
 
-        $within    = RoleGraph::permissionsWithin($reach, $keys);
+        $chains = $pins->isRouting() ? RoleGraph::chainsWithin($reach, $keys) : null;
+        $within = match (true) {
+            !$pins->isRouting() => RoleGraph::permissionsWithin($reach, $keys),
+            $chains === null    => null,
+            default             => RoleGraph::carriedWithin($chains),
+        };
+
         $inherited = $within ?? RoleGraph::permissionsHeldBy(self::rolesAfresh($roles, $keys));
 
         /** @var list<string> $names */
@@ -123,6 +140,7 @@ final class GrantResolver
             \array_values(\array_unique([...$names, ...$inherited->names])),
             self::expiresIn($inherited->expiresIn, $granted, $held),
             $within !== null,
+            $chains === null ? null : RouteSources::permissions($direct->getParent(), $granted, $held, $chains, $inherited),
         );
     }
 
@@ -142,9 +160,11 @@ final class GrantResolver
      * its exception thrown, so it denies every check for its holder rather than
      * being skipped.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>|null  $roles
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>|null  $roles
      * @return \SineMacula\Laravel\Authorization\Cache\Resolution<\SineMacula\Laravel\Authorization\Evaluation\Policy>
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
@@ -156,9 +176,10 @@ final class GrantResolver
             $pins->rolePolicies();
         }
 
-        [$own, $throughRoles] = self::attached($grants, $roles);
+        [$own, $throughRoles] = self::attached($grants, $roles, $pins->isRouting());
 
-        $inherited = $roles !== null && $throughRoles ? RolePolicies::heldThrough(self::held($roles), $roles, $pins) : new InheritedPolicies;
+        $held      = $roles !== null && $throughRoles ? self::heldOf($roles, $pins) : null;
+        $inherited = $roles !== null && $held !== null ? RolePolicies::heldThrough($held, $roles, $pins) : new InheritedPolicies;
 
         // Flipping the keys and back lists each policy once, in the order it
         // was first reached.
@@ -174,7 +195,9 @@ final class GrantResolver
             $policies[] = self::hydrate($policy);
         }
 
-        return new Resolution($policies, GrantExpiry::nearest($inherited->expiresIn, \array_column($own, 'expires_at')), $inherited->stable);
+        $routes = $pins->isRouting() ? RouteSources::policies($grants->getParent(), $own, $held, $inherited) : null;
+
+        return new Resolution($policies, GrantExpiry::nearest($inherited->expiresIn, \array_column($own, 'expires_at')), $inherited->stable, $routes);
     }
 
     /**
@@ -209,7 +232,8 @@ final class GrantResolver
      * Return the held roles read afresh, with their hierarchy as it is now, for
      * a resolution whose hierarchy moved while it ran.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $roles
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $roles
      * @param  list<string>  $keys
      * @return list<\SineMacula\Laravel\Authorization\Models\Role>
      */
@@ -224,15 +248,19 @@ final class GrantResolver
      * the write connection, and, given the relation onto its roles, whether any
      * role holds a policy in the current scope, in the same query. An
      * attachment of an inline policy that belongs to another grantee is left
-     * out.
+     * out. While grant usage is tracked, each is read with where it was made
+     * and its creation too.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, \Illuminate\Database\Eloquent\Model>  $grants
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>|null  $roles
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>|null  $roles
+     * @param  bool  $isRouting
      * @return array{0: array<int, array{policy_id: string, authorizable_type: string, expires_at: string|null}>, 1: bool}
      */
-    private static function attached(MorphToMany $grants, ?MorphToMany $roles): array
+    private static function attached(MorphToMany $grants, ?MorphToMany $roles, bool $isRouting = false): array
     {
-        $columns = ['policy_id', 'authorizable_type', 'expires_at'];
+        $columns = $isRouting ? ['policy_id', 'authorizable_type', 'expires_at', ...RouteSources::SCOPE, 'created_at'] : ['policy_id', 'authorizable_type', 'expires_at'];
         $query   = InlinePolicies::attachedToTheirGrantee((clone $grants->getQuery())->toBase(), $grants->getTable())
             ->select(\array_map($grants->qualifyPivotColumn(...), $columns));
 
@@ -252,13 +280,33 @@ final class GrantResolver
      * Read the grants of the relation, with their expiry, on the write
      * connection.
      *
-     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model>  $grants
-     * @return \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>
+     * @template TGranted of \Illuminate\Database\Eloquent\Model
+     *
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<TGranted,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
+     * @return \Illuminate\Database\Eloquent\Collection<int, TGranted>
      */
     private static function held(MorphToMany $grants): EloquentCollection
     {
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model> */
-        return $grants->useWritePdo()->get(); // @phpstan-ignore method.notFound
+        $grants->getQuery()->useWritePdo();
+
+        return $grants->get();
+    }
+
+    /**
+     * Read the grants of the relation as `held()` reads them, with where each
+     * was made when the resolution keeps the routes behind what it finds.
+     *
+     * @template TGranted of \Illuminate\Database\Eloquent\Model
+     *
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<TGranted,
+     *     covariant \Illuminate\Database\Eloquent\Model, covariant \Illuminate\Database\Eloquent\Relations\MorphPivot, 'pivot'>  $grants
+     * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
+     * @return \Illuminate\Database\Eloquent\Collection<int, TGranted>
+     */
+    private static function heldOf(MorphToMany $grants, ResolutionPins $pins): EloquentCollection
+    {
+        return self::held($pins->isRouting() ? RouteSources::scoped($grants) : $grants);
     }
 
     /**
@@ -292,7 +340,7 @@ final class GrantResolver
      * an expiry already known, or null when none of them expires.
      *
      * @param  int|null  $nearest
-     * @param  \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>  ...$grants
+     * @param  \Illuminate\Database\Eloquent\Collection<int, covariant \Illuminate\Database\Eloquent\Model>  ...$grants
      * @return int|null
      */
     private static function expiresIn(?int $nearest, EloquentCollection ...$grants): ?int

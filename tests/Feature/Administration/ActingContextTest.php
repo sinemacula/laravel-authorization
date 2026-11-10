@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Preview\Previewing;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -38,6 +39,7 @@ use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSessionPolicySource;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
@@ -526,7 +528,7 @@ final class ActingContextTest extends TestCase
         $actor      = ActingContext::for($admin);
         $operation  = Operation::begin($actor);
         $permission = Permission::create(['name' => 'posts:edit']);
-        $revoke     = static fn (object $tenant): OperationResource => OperationResource::revoke(
+        $revoke     = static fn (StubTenant $tenant): OperationResource => OperationResource::revoke(
             PackagePermissions::PERMISSION_REVOKE,
             new Reference('user', '1'),
             $permission,
@@ -599,6 +601,32 @@ final class ActingContextTest extends TestCase
         self::assertSame($decision, $refusal->getDecision());
         self::assertSame('Refusé.', $refusal->getMessage());
         self::assertSame(DecisionReason::NO_MATCH, ActingContext::refusal(Decision::allow(DecisionStage::ALLOW))->getReason());
+    }
+
+    /**
+     * An acting subject naming a tenant is decided in the scope in place, the
+     * reach a service puts in place included, never in the tenant it names, so
+     * a delegated call decides the actor's rights where it changes things.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testAnActorNamingATenantIsDecidedInTheScopeInPlace(): void
+    {
+        $first  = self::createTenant('acting-a');
+        $second = self::createTenant('acting-b');
+        $admin  = StubIdentity::create(['id' => 'admin-1']);
+
+        $admin->givePermission(Permission::create(['name' => 'posts:read']), null, $second);
+
+        $this->resolving(new Subject(StubIdentity::create(['id' => 'user-1']), null, $first));
+
+        $actor  = ActingContext::for(new Subject($admin, $admin, $first));
+        $decide = static fn (): bool => $actor->decide('posts:read')->isAllowed();
+
+        self::assertFalse($decide());
+        self::assertTrue(TenantScope::within($second, null, $decide));
     }
 
     /**

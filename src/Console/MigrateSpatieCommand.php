@@ -50,6 +50,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  */
 final class MigrateSpatieCommand extends Command
 {
+    /** @var string The console command's name. */
+    public const string NAME = 'authorization:migrate-spatie';
+
     /** @var list<string> Spatie source table names. */
     private const array SPATIE_TABLES = [
         'roles',
@@ -60,8 +63,8 @@ final class MigrateSpatieCommand extends Command
     ];
 
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:migrate-spatie
+    protected $signature = self::NAME . <<<'EOD'
+
                                     {--dry-run : Report counts without writing}
         EOD;
 

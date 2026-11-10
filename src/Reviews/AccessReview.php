@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Reviews\Support\PageRead;
 use SineMacula\Laravel\Authorization\Reviews\Support\ReviewCursor;
 use SineMacula\Laravel\Authorization\Reviews\Support\ReviewPosition;
 use SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun;
+use SineMacula\Laravel\Authorization\Reviews\Support\ReviewUsage;
 use SineMacula\Laravel\Authorization\Reviews\Support\RowCollector;
 use SineMacula\Laravel\Authorization\Reviews\Support\StoredRows;
 use SineMacula\Laravel\Authorization\Reviews\Support\SubjectStates;
@@ -23,8 +24,10 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 
 /**
  * Runs access reviews (AUTHZ-11.6, N93 to N98): who holds a role, permission or
- * policy, what a subject holds, what expires, and what an actor last granted,
- * for periodic reviews and their sign-off.
+ * policy, what a subject holds, what expires, what an actor last granted, and
+ * what shows no observed use, for periodic reviews and their sign-off. Every
+ * row says what is known of its use (N94, see `RowUsage`): reading it is
+ * introspection, so neither a review nor its admission ever counts as use.
  *
  * A review lists grant routes, never effective access: one row for each route
  * by which a subject holds a target through the stored grants, every row it
@@ -335,7 +338,9 @@ final readonly class AccessReview
      * page, stream and export shares (D22). Its rows are collected in the
      * review's order after the position's last row, at most the limit of them
      * and at least one more to know whether any is left, with what is known of
-     * their subjects, at the position's frozen instant.
+     * their subjects and of their use (one batched lookup of the page's routes,
+     * see `Support\ReviewUsage`), at the position's frozen instant. A review of
+     * unused grants keeps only the rows with no observed use.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewPosition  $position
@@ -345,17 +350,19 @@ final readonly class AccessReview
      */
     private function read(ReviewQuery $query, ReviewPosition $position): PageRead
     {
-        $run  = ReviewRun::of($query->scope, $position->at);
-        $rows = new RowCollector($run, $query->limit, $position->after);
+        $run   = ReviewRun::of($query->scope, $position->at);
+        $usage = ReviewUsage::forQuery($query, $run->now);
+        $rows  = new RowCollector($run, $query->limit, $position->after, $query->kind === ReviewKind::UNUSED ? $usage->isUnobserved(...) : null);
 
         $isComplete = match ($query->kind) {
             ReviewKind::HOLDERS  => HolderRoutes::read($run, $query, $rows),
             ReviewKind::HOLDINGS => HoldingRoutes::read($run, $query, $rows, $this->directory()),
             ReviewKind::EXPIRING,
             ReviewKind::GRANTED_BY => StoredRows::read($run, $query, $rows),
+            ReviewKind::UNUSED     => StoredRows::unused($run, $rows, $usage),
         };
 
-        $read = $rows->rows($query->kind === ReviewKind::HOLDINGS);
+        $read = $usage->annotate($rows->rows($query->kind === ReviewKind::HOLDINGS));
         $next = $rows->next();
 
         return new PageRead(SubjectStates::apply($read, $query->subject), $next === null ? null : $position->after($next), $isComplete, $run->now);

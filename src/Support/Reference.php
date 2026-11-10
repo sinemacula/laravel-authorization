@@ -23,6 +23,12 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
  * no guard, so a role or permission named by a string is looked up under the
  * package's default guard.
  *
+ * A tenant's reference is its morph type and its `getKey()`, the identifier
+ * `AuthorizableTenant` declares, which is its primary key for an Eloquent
+ * tenant: the same pair its grant and owned rows store, the tenant tree is
+ * asked about and the resolution cache keys by, so a reference made from the
+ * tenant, from its rows or by hand always names the same tenant.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */

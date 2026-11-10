@@ -239,6 +239,15 @@ working: each forwards to the matching service method with no actor.
   still count.
 - **The commands name no actor by default.** `authorization:grant`, `authorization:revoke` and `authorization:sync`
   take `--actor={morphType}:{key}`, which must name a row that exists; without it they record no actor.
+- **The operation reads the routed request for its client.** `Operation::begin()` reads the container's current
+  request, through `Support\RequestClient`, for the IP address and the user agent, as `Context\RoutedRequestContext`
+  reads it for the `request` namespace: only when a delegated operation is begun with no client given, and it takes
+  them only when that request is routed. A trusted operation reads nothing, and one begun in the console or a queued
+  job, whose request is not routed, has no client; no service takes one. The request is read when the operation
+  begins, never kept.
+- **Each command names itself once.** Every package command declares its name in a public `NAME` constant
+  (`PruneGrantsCommand::NAME` is `authorization:prune`) and builds its signature from it, so a schedule, a test or a
+  sibling package refers to the constant and the two cannot drift; each command's test pins the name it registers.
 
 ## Implementation Anchors
 

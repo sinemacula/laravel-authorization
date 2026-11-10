@@ -394,7 +394,9 @@ final readonly class ActingContext
 
     /**
      * Return the manager deciding about the acting subject, with the call's
-     * caps, refusing when the package is not booted.
+     * caps, in the scope in place, the reach a check puts in place included,
+     * whatever tenant the subject names (see `forActor()`), refusing when the
+     * package is not booted.
      *
      * @return \SineMacula\Laravel\Authorization\AuthorizationManager
      *
@@ -402,7 +404,7 @@ final readonly class ActingContext
      */
     private function manager(): AuthorizationManager
     {
-        $manager = AuthorizationManager::instance()?->for($this->subject) ?? throw self::unresolved();
+        $manager = AuthorizationManager::instance()?->forActor($this->subject) ?? throw self::unresolved();
 
         foreach ($this->caps as $cap) {
             $manager = $manager->capped($cap);

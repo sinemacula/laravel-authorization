@@ -36,9 +36,12 @@ final class RevokeRoleCommand extends Command
 {
     use ResolvesIdentity;
 
+    /** @var string The console command's name. */
+    public const string NAME = 'authorization:revoke';
+
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:revoke
+    protected $signature = self::NAME . <<<'EOD'
+
                                     {identity : Identity in morphType:key format (e.g. user:123)}
                                     {role : Role name to revoke}
                                     {--actor= : The actor the change is decided as, in morphType:key format (e.g. user:1); none for trusted system work}

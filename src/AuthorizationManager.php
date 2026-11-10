@@ -42,7 +42,9 @@ use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
+use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
 
 /**
  * Authorization manager — the facade-facing entry point.
@@ -63,7 +65,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * the check (the subject, resource and tenant stages) and gathers every source,
  * the session caps included; the policy evaluator runs the rest of the stages
  * in AUTHZ-7.1's order, the denies, the caps, the allows and the implicit deny,
- * each recorded in the decision's trace for audit consumers.
+ * each recorded in the decision's trace for audit consumers. A manager from
+ * `for()` of a `Subject` naming a tenant or an application decides every check,
+ * batch, explanation and query scope there (N109), with the request's scope
+ * restored afterwards; `permissionsFor()` lists in the scope it is given.
  *
  * `scopedTo()` is called from the `BuildsScopedManagers` trait alone, which an
  * analysis of this file by itself does not see (hence php:S1144), and so is the
@@ -94,6 +99,7 @@ final class AuthorizationManager
      * @param  \SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver|null  $resourcePolicies
      * @param  \SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver|null  $guardrails
      * @param  \SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver|null  $sessionCaps
+     * @param  \SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder|null  $usage
      */
     public function __construct(
 
@@ -129,6 +135,9 @@ final class AuthorizationManager
         // Makes the session caps of a check; null reads no credential's scopes,
         // so only `capped()` and a machine's missing scopes cap it.
         ?SessionCapResolver $sessionCaps = null,
+
+        /** Notes the grant routes everyday checks use while grant usage is tracked; null when it is not. */
+        private readonly ?GrantUsageRecorder $usage = null,
     ) {
         $this->pipeline = new DecisionPipeline($evaluator, $policyResolver, $contexts, $resourcePolicies, $guardrails, $sessionCaps);
     }
@@ -184,8 +193,9 @@ final class AuthorizationManager
     {
         $list = ActionList::of('any', $actions);
 
-        // Resolved once, so a bound resource tenant resolver is asked once.
-        $reference = ResourceReferences::of($resource);
+        // Resolved once, in the subject's scope as a check resolves it, so a
+        // bound resource tenant resolver is asked once.
+        $reference = $this->inSubjectScope(static fn (): false|ResourceReference|null => ResourceReferences::of($resource));
 
         return $list->isAnyAllowed(fn (string $action): bool => $this->check($action, $reference, $context)->isAllowed());
     }
@@ -212,8 +222,9 @@ final class AuthorizationManager
     {
         $list = ActionList::of('all', $actions);
 
-        // Resolved once, so a bound resource tenant resolver is asked once.
-        $reference = ResourceReferences::of($resource);
+        // Resolved once, in the subject's scope as a check resolves it, so a
+        // bound resource tenant resolver is asked once.
+        $reference = $this->inSubjectScope(static fn (): false|ResourceReference|null => ResourceReferences::of($resource));
 
         return $list->isEveryAllowed(fn (string $action): bool => $this->check($action, $reference, $context)->isAllowed());
     }
@@ -249,15 +260,17 @@ final class AuthorizationManager
      */
     public function authorize(string $action, mixed $resource = null, array $context = []): void
     {
-        // Resolved once, so a bound resource tenant resolver is asked once.
-        $reference = ResourceReferences::of($resource);
+        // Resolved once, in the subject's scope as a check resolves it, so a
+        // bound resource tenant resolver is asked once.
+        $reference = $this->inSubjectScope(static fn (): false|ResourceReference|null => ResourceReferences::of($resource));
         $decision  = $this->check($action, $reference, $context);
 
         if ($decision->isAllowed()) {
             return;
         }
 
-        $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? $this->preview?->provenance() ?? DecisionProvenance::of($this->currentSubject());
+        $current    = fn (): DecisionProvenance => DecisionProvenance::of($this->currentSubject());
+        $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? $this->preview?->provenance() ?? $this->inSubjectScope($current);
         $failed     = AuthorizationFailed::of($provenance, $action, ResourceReferences::identifierOf($reference), $decision);
 
         if ($this->preview === null) {
@@ -325,9 +338,11 @@ final class AuthorizationManager
      * a batch of one, through the same `CheckBatch`, so a check is decided the
      * same way on its own or in a batch, but reads nothing ahead and holds
      * nothing for later. The decision is recorded as the last decision and
-     * reported with `DecisionEvaluated`. On a preview from `previewFor()`, the
-     * preview is admitted first, and the decision is about its target, in its
-     * scope, recorded and reported with both parties.
+     * reported with `DecisionEvaluated`. On a manager from `for()` of a
+     * `Subject` naming a tenant or an application, it is decided there, as
+     * every form adapting it is (see `for()`). On a preview from
+     * `previewFor()`, the preview is admitted first, and the decision is about
+     * its target, in its scope, recorded and reported with both parties.
      *
      * The context is what the caller passes, which a policy reads under `input`
      * (`['post' => ['status' => 'draft']]` is `input.post.status`) and never
@@ -357,7 +372,7 @@ final class AuthorizationManager
             return $this->preview->run(fn (?Subject $target): Decision => $this->batch()->decideOne($target, $check));
         }
 
-        return $this->batch()->decideOne($this->currentSubject(), $check);
+        return $this->inSubjectScope(fn (): Decision => $this->batch()->decideOne($this->currentSubject(), $check));
     }
 
     /**
@@ -388,7 +403,7 @@ final class AuthorizationManager
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      *
-     * @phpstan-ignore throws.unusedType
+     * @phpstan-ignore throws.unusedType, throws.unusedType
      */
     public function checkMany(array $checks): array
     {
@@ -396,7 +411,7 @@ final class AuthorizationManager
             return $this->preview->run(fn (?Subject $target): array => $this->batch()->decide($target, $checks));
         }
 
-        return $this->batch()->decide($this->currentSubject(), $checks);
+        return $this->inSubjectScope(fn (): array => $this->batch()->decide($this->currentSubject(), $checks));
     }
 
     /**
@@ -486,7 +501,7 @@ final class AuthorizationManager
             return AuthorizedQuery::compiled($model, $action, static fn (): string => $preview->run($compile), true);
         }
 
-        return AuthorizedQuery::compiled($model, $action, fn (): string => $compile($this->currentSubject()));
+        return AuthorizedQuery::compiled($model, $action, fn (): string => $this->inSubjectScope(fn (): string => $compile($this->currentSubject())));
     }
 
     /**
@@ -550,7 +565,7 @@ final class AuthorizationManager
         $check   = new CheckInput($action, $resource, $context);
         $explain = fn (?Subject $target): Decision => $this->batch(isExplaining: true)->decideOne($target, $check);
 
-        return ($this->preview === null ? $explain($this->currentSubject()) : $this->preview->run($explain))->explain();
+        return ($this->preview === null ? $this->inSubjectScope(fn (): Decision => $explain($this->currentSubject())) : $this->preview->run($explain))->explain();
     }
 
     /**
@@ -581,7 +596,9 @@ final class AuthorizationManager
      * request's, both as the subject's and as the scope of the grants that
      * count, and the request's are restored once the actions are decided, even
      * when deciding one throws, with what the resolution cache held for them
-     * (see `AuthorizationScope`).
+     * (see `AuthorizationScope`). The scope given wins over the one a `Subject`
+     * named through `for()` would decide in, as it does inside
+     * `AuthorizationScope::within()`.
      *
      * The listing is exact: each action is decided through the one decision
      * path `checkMany()` takes, over what the checks share read once, the
@@ -703,6 +720,11 @@ final class AuthorizationManager
      * dispatching alone; a preview's decisions name its previewer. The batch
      * `explain()` decides through explains its check.
      *
+     * While grant usage is tracked, an everyday check's batch decides through a
+     * pipeline that notes the grant routes each decision used (N100); a
+     * preview's, an explanation's and a listing's never do (N70, N86, N89),
+     * since none of them is a decision the application acts on.
+     *
      * @param  bool  $isDispatching
      * @param  bool  $isStoring
      * @param  bool  $isExplaining
@@ -710,8 +732,10 @@ final class AuthorizationManager
      */
     private function batch(bool $isDispatching = true, bool $isStoring = true, bool $isExplaining = false): CheckBatch
     {
+        $usage = $this->usage !== null && $isStoring && !$isExplaining && $this->preview === null ? $this->usage : null;
+
         return new CheckBatch(
-            $this->pipeline,
+            $usage === null ? $this->pipeline : $this->pipeline->tracking($usage),
             $this->lastDecisionStore,
             $this->subjectResolver,
             $this->events,

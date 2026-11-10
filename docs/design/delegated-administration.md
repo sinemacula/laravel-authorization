@@ -31,7 +31,9 @@ administration never grants anything it cannot justify.
    (principal, identity, guard, session, and a machine's credential scopes through the session policy source) and any
    caps the call adds. `current()` keeps the request's session; `for($model)` names a model as `Authorization::for()`
    does, with no session, so session requirements fail closed; `for($subject)` keeps a resolved subject as it is. It is
-   never built from a bare `Reference`.
+   never built from a bare `Reference`. Its checks are decided in the scope in place, the reach the call puts in place
+   included, through the manager's internal `forActor()`, never in the tenant the actor's `Subject` names, which
+   `Authorization::for()` would decide in (N109).
 
 4. **One decision path (D22, in this release).** Each service builds an `Administration\OperationResource` for each
    change and decides `check($action, $operationResource)` as the actor, inside the call's transaction

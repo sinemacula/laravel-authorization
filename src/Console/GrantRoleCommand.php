@@ -40,9 +40,12 @@ final class GrantRoleCommand extends Command
 {
     use ResolvesIdentity;
 
+    /** @var string The console command's name. */
+    public const string NAME = 'authorization:grant';
+
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:grant
+    protected $signature = self::NAME . <<<'EOD'
+
                                     {identity : Identity in morphType:key format (e.g. user:123)}
                                     {role : Role name to assign}
                                     {--actor= : The actor the change is decided as, in morphType:key format (e.g. user:1); none for trusted system work}

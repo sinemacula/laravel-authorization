@@ -76,6 +76,19 @@ final class ValidatePolicyCommandTest extends TestCase
     }
 
     /**
+     * The command is registered under its `NAME` constant, the name its
+     * signature declares.
+     *
+     * @return void
+     */
+    public function testTheCommandsNameIsItsConstant(): void
+    {
+        self::assertSame('authorization:policy:validate', ValidatePolicyCommand::NAME);
+        self::assertInstanceOf(ValidatePolicyCommand::class, Artisan::all()[ValidatePolicyCommand::NAME] ?? null);
+        self::assertSame(ValidatePolicyCommand::NAME, Artisan::all()[ValidatePolicyCommand::NAME]->getName());
+    }
+
+    /**
      * A file holding a valid document passes.
      *
      * @return void

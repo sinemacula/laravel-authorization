@@ -28,9 +28,12 @@ use SineMacula\Laravel\Authorization\Services\GrantPruner;
  */
 final class PruneGrantsCommand extends Command
 {
+    /** @var string The console command's name. */
+    public const string NAME = 'authorization:prune';
+
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:prune
+    protected $signature = self::NAME . <<<'EOD'
+
                                     {--pretend : Report how many grants would be removed, without removing them}
                                     {--chunk=1000 : How many rows each pass reads}
         EOD;
