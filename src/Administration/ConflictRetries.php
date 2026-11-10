@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Administration;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Database\ConcurrencyErrorDetector;
 use Illuminate\Database\DeadlockException;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -69,16 +70,16 @@ final class ConflictRetries
 
     /**
      * Return how many times a conflicting operation is tried again:
-     * `authorization.administration.retries`, or the default when it is not a
-     * whole number of at least 0.
+     * `authorization.administration.retries`, or the default when it is left
+     * out, refusing one that is not a whole number of at least 0.
      *
      * @return int
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function retries(): int
     {
-        $retries = config('authorization.administration.retries', self::DEFAULT_RETRIES);
-
-        return \is_int($retries) && $retries >= 0 ? $retries : self::DEFAULT_RETRIES;
+        return ConfigValue::integer('administration.retries', self::DEFAULT_RETRIES, 0);
     }
 
     /**

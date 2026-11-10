@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
@@ -239,46 +240,61 @@ final class PermissionCatalogueTest extends TestCase
 
     /**
      * The configuration is read after boot, so an entry of the configured enums
-     * the boot validation would refuse is skipped, whatever it is, and the
-     * enums around it are read.
+     * the boot validation would refuse is refused, whatever it is, naming the
+     * entry, rather than skipped.
      *
      * @return void
      */
-    public function testSkipsAnEnumEntryTheValidationWouldRefuse(): void
+    public function testRefusesAnEnumEntryTheValidationWouldRefuse(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app?->make(ConfigRepository::class);
 
-        $config->set('authorization.permission_enums', [123, \stdClass::class, IntBackedPermissionEnum::class, ['nested'], null, PermissionEnum::class]);
+        foreach ([123, \stdClass::class, IntBackedPermissionEnum::class, ['nested'], null] as $entry) {
+            $config->set('authorization.permission_enums', [PermissionEnum::class, $entry]);
 
-        self::assertEquals(
-            [...(new PackagePermissions)->permissions(), new PermissionDefinition('posts:create'), new PermissionDefinition('posts:delete')],
-            $this->catalogue()->definitions(),
-        );
+            $this->assertConfigRefused('authorization.permission_enums.1');
+        }
     }
 
     /**
-     * The configuration is read after boot, so configured enums that are not a
-     * list are read as one: a single enum class as the list holding it, and
-     * none as no enum.
+     * The configuration is read after boot, so configured enums that are not an
+     * array, a single enum class or null among them, are refused rather than
+     * read as a list; an empty list reads no enum.
      *
      * @return void
      */
-    public function testReadsConfiguredEnumsThatAreNotAList(): void
+    public function testRefusesConfiguredEnumsThatAreNotAnArray(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app?->make(ConfigRepository::class);
 
-        $config->set('authorization.permission_enums', PermissionEnum::class);
+        foreach ([PermissionEnum::class, null] as $enums) {
+            $config->set('authorization.permission_enums', $enums);
 
-        self::assertEquals(
-            [...(new PackagePermissions)->permissions(), new PermissionDefinition('posts:create'), new PermissionDefinition('posts:delete')],
-            $this->catalogue()->definitions(),
-        );
+            $this->assertConfigRefused('authorization.permission_enums');
+        }
 
-        $config->set('authorization.permission_enums', null);
+        $config->set('authorization.permission_enums', []);
 
         self::assertEquals((new PackagePermissions)->permissions(), $this->catalogue()->definitions());
+    }
+
+    /**
+     * Assert reading the catalogue is refused under the config key.
+     *
+     * @param  string  $key
+     * @return void
+     */
+    private function assertConfigRefused(string $key): void
+    {
+        try {
+            $this->catalogue()->definitions();
+
+            self::fail("The catalogue was not refused under {$key}.");
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame($key, $exception->getConfigKey());
+        }
     }
 
     /**

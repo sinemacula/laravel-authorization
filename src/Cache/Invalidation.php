@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Cache;
 
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
@@ -20,7 +22,6 @@ use SineMacula\Laravel\Authorization\Events\Role\PermissionExpiryChanged as Role
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
-use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -119,7 +120,7 @@ final class Invalidation
     private static function granteeKeys(VersionedStore $store, Reference $grantee): array
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
-        $roleClass = config('authorization.models.role', Role::class);
+        $roleClass = ModelClasses::get('role');
         $keys      = [$store->granteeKey($grantee)];
 
         if ($grantee->type === (new $roleClass)->getMorphClass()) {
@@ -145,11 +146,9 @@ final class Invalidation
 
         $connection = AuthorizationConnection::connection();
 
-        /** @var string $rolePermissions */
-        $rolePermissions = config('authorization.tables.role_permissions', 'role_permissions');
+        $rolePermissions = TableNames::get('role_permissions');
 
-        /** @var string $grants */
-        $grants = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
+        $grants = TableNames::get('authorizable_permissions');
 
         /** @var list<string> $roles */
         $roles = $connection->table($rolePermissions)->where('permission_id', $event->permission->id)->pluck('role_id')->all();

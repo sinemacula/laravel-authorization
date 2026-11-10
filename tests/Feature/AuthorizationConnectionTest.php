@@ -9,6 +9,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -71,15 +72,19 @@ final class AuthorizationConnectionTest extends TestCase
     }
 
     /**
-     * A value that is not a string is never taken for a connection name.
+     * A value that is not a string is never taken for a connection name, nor
+     * read as the default connection: it is refused.
      *
      * @return void
      */
-    public function testNameIsNullWhenNotAString(): void
+    public function testNameIsRefusedWhenNotAString(): void
     {
         $this->setConnectionSetting(5);
 
-        self::assertNull(AuthorizationConnection::name());
+        $this->expectException(InvalidAuthorizationConfigException::class);
+        $this->expectExceptionMessage('Invalid authorization config at \'authorization.connection\': expected a database connection name, got 5 (int).');
+
+        AuthorizationConnection::name();
     }
 
     /**

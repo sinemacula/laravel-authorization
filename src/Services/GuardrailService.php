@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Services;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
@@ -252,8 +253,7 @@ final class GuardrailService
      */
     private static function table(Operation $operation, ?Reference $tenant): GuardrailTable
     {
-        /** @var string $table */
-        $table = config('authorization.tables.guardrails', 'guardrails');
+        $table = TableNames::get('guardrails');
 
         return new GuardrailTable(AuthorizationConnection::connection(), $table, $tenant, $operation->actor);
     }

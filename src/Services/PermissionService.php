@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -210,6 +211,6 @@ final class PermissionService
     private static function permissionClass(): string
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> */
-        return config('authorization.models.permission', Permission::class);
+        return ModelClasses::get('permission');
     }
 }

@@ -11,6 +11,8 @@ use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
@@ -74,10 +76,9 @@ trait HasPermissions // @phpstan-ignore trait.unused
     public function permissions(): MorphToMany
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $model */
-        $model = config('authorization.models.permission', Permission::class);
+        $model = ModelClasses::get('permission');
 
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
+        $table = TableNames::get('authorizable_permissions');
 
         return $this->authorizationGrantRelation($model, $table, 'permission_id', AuthorizablePermissionPivot::class);
     }

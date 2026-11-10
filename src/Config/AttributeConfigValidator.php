@@ -24,6 +24,9 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * `tenant`), no key another provider declares with another type, and no key
  * under another key the same provider declares.
  *
+ * The block sets no key but `resources` and `subjects` (N116); each is empty
+ * when left out, and refused when set to null.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -31,6 +34,9 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  */
 final class AttributeConfigValidator
 {
+    /** @var list<string> The settings the block may set. */
+    public const array SETTINGS = ['resources', 'subjects'];
+
     /** @var string The config key of the attribute providers. */
     private const string ATTRIBUTES = 'authorization.attributes';
 
@@ -51,14 +57,11 @@ final class AttributeConfigValidator
      */
     public static function validate(mixed $config, Container $container): void
     {
-        if (!\is_array($config)) {
-            throw new InvalidAuthorizationConfigException(self::ATTRIBUTES, 'expected an array with resources and subjects, got ' . \get_debug_type($config) . '.');
-        }
-
+        $block     = ConfigBlock::of(self::ATTRIBUTES, $config, self::SETTINGS);
         $providers = [];
 
         foreach (self::NAMESPACES as $key => $namespace) {
-            $providers[$key] = self::providersOf($key, $config[$key] ?? [], AttributeProviders::CONTRACTS[$namespace]);
+            $providers[$key] = self::providers($key, ConfigBlock::entry($block, $key, []), AttributeProviders::CONTRACTS[$namespace]);
         }
 
         /** @var array<string, class-string<\SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider>> $resources */
@@ -79,7 +82,9 @@ final class AttributeConfigValidator
     /**
      * Return the entries of `attributes.resources` or `attributes.subjects`,
      * refusing one that does not map a morph type to a class implementing the
-     * contract.
+     * contract. The attribute providers are read through here at run time too,
+     * before any is resolved, so an entry changed after boot is refused there,
+     * never cast.
      *
      * @param  string  $key
      * @param  mixed  $value
@@ -88,7 +93,7 @@ final class AttributeConfigValidator
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    private static function providersOf(string $key, mixed $value, string $contract): array
+    public static function providers(string $key, mixed $value, string $contract): array
     {
         $configKey = self::ATTRIBUTES . ".{$key}";
 

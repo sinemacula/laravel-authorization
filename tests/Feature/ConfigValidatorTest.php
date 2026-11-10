@@ -5,18 +5,35 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Support\Arr;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Config\AdministrationConfigValidator;
+use SineMacula\Laravel\Authorization\Config\AttributeConfigValidator;
+use SineMacula\Laravel\Authorization\Config\BulkConfigValidator;
+use SineMacula\Laravel\Authorization\Config\CacheConfigValidator;
+use SineMacula\Laravel\Authorization\Config\ConfigBlock;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Config\ContextConfigValidator;
+use SineMacula\Laravel\Authorization\Config\NamedEntryConfigValidator;
+use SineMacula\Laravel\Authorization\Config\PolicyConfigValidator;
+use SineMacula\Laravel\Authorization\Config\QueryScopingConfigValidator;
+use SineMacula\Laravel\Authorization\Config\ReviewConfigValidator;
+use SineMacula\Laravel\Authorization\Config\SessionConfigValidator;
+use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
+use SineMacula\Laravel\Authorization\Config\TableConfigValidator;
+use SineMacula\Laravel\Authorization\Config\UsageConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
+use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -36,7 +53,9 @@ use Tests\Feature\Stubs\EmptyActionCatalogue;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
+use Tests\Feature\Stubs\RecordingPermissionProvider;
 use Tests\Feature\Stubs\ReservedContextSource;
+use Tests\Feature\Stubs\StubPermissionProvider;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -61,6 +80,7 @@ use Tests\TestCase;
  * @SuppressWarnings("php:S1192")
  */
 #[CoversClass(ConfigValidator::class)]
+#[CoversClass(ConfigBlock::class)]
 #[CoversClass(InvalidAuthorizationConfigException::class)]
 final class ConfigValidatorTest extends TestCase
 {
@@ -131,6 +151,153 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * The config file the package ships passes as it is, and so does a config
+     * that sets nothing, as one cached before the package's defaults were
+     * merged into it does: every key left out takes its default.
+     *
+     * @return void
+     */
+    public function testTheShippedConfigPasses(): void
+    {
+        ConfigValidator::validate(require __DIR__ . '/../../config/authorization.php', $this->container());
+        ConfigValidator::validate([], $this->container());
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * Each block whose keys the package defines allows exactly the keys the
+     * shipped config file sets, so the two cannot drift apart.
+     *
+     * @return void
+     */
+    public function testTheAllowedKeysAreTheShippedKeys(): void
+    {
+        /** @var array<string, mixed> $shipped */
+        $shipped = require __DIR__ . '/../../config/authorization.php';
+
+        $allowed = [
+            ''                => ConfigValidator::KEYS,
+            'models'          => \array_keys(ConfigValidator::MODELS),
+            'tables'          => \array_keys(TableConfigValidator::LENGTHS),
+            'defaults'        => NamedEntryConfigValidator::DEFAULTS,
+            'gate'            => SwitchConfigValidator::KEYS,
+            'hierarchy'       => SwitchConfigValidator::KEYS,
+            'rank'            => SwitchConfigValidator::KEYS,
+            'policies'        => PolicyConfigValidator::SETTINGS,
+            'policies.limits' => PolicyLimits::KEYS,
+            'query_scoping'   => QueryScopingConfigValidator::LIMITS,
+            'bulk'            => BulkConfigValidator::KEYS,
+            'context'         => ContextConfigValidator::SETTINGS,
+            'attributes'      => AttributeConfigValidator::SETTINGS,
+            'session'         => SessionConfigValidator::SETTINGS,
+            'cache'           => CacheConfigValidator::SETTINGS,
+            'administration'  => AdministrationConfigValidator::LIMITS,
+            'reviews'         => ReviewConfigValidator::SETTINGS,
+            'usage'           => UsageConfigValidator::SETTINGS,
+        ];
+
+        foreach ($allowed as $path => $keys) {
+            $block = $path === '' ? $shipped : Arr::get($shipped, $path);
+
+            self::assertIsArray($block, $path);
+
+            $shippedKeys = \array_keys($block);
+
+            \sort($shippedKeys);
+            \sort($keys);
+
+            self::assertSame($shippedKeys, $keys, "The keys of authorization.{$path} drifted from the shipped config.");
+        }
+
+        self::assertSame(\array_keys($shipped), ConfigValidator::KEYS);
+    }
+
+    /**
+     * An authorization config that is not an array is refused, naming it.
+     *
+     * @return void
+     */
+    public function testAConfigThatIsNotAnArrayIsRefused(): void
+    {
+        foreach (['\'null\' (null)' => null, '\'authorization\' (string)' => 'authorization', '5 (int)' => 5] as $described => $config) {
+            $this->assertRejected(fn () => ConfigValidator::validate($config, $this->container()), 'authorization', "expected an array, got {$described}.");
+        }
+    }
+
+    /**
+     * A key the package does not define is refused at the top level and in a
+     * block of package-defined keys, naming its full path.
+     *
+     * @return void
+     */
+    public function testAnUnknownKeyIsRefusedNamingItsPath(): void
+    {
+        $config         = $this->authorizationConfig();
+        $config['gaet'] = ['enabled' => true];
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->container()),
+            'authorization.gaet',
+            'unknown key \'gaet\'; expected one of ' . \implode(', ', ConfigValidator::KEYS) . '.',
+        );
+
+        $config                  = $this->authorizationConfig();
+        $config['models']['rol'] = Role::class;
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->container()),
+            'authorization.models.rol',
+            'unknown key \'rol\'; expected one of role, permission, policy.',
+        );
+    }
+
+    /**
+     * Provide each block or list the config may leave out, which a null does
+     * not stand in for.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function blockProvider(): iterable
+    {
+        $blocks = [
+            'models', 'tables', 'defaults', 'permission_enums', 'permission_providers', 'gate', 'policies', 'query_scoping', 'bulk', 'context', 'attributes',
+            'application_access', 'session', 'cache', 'hierarchy', 'rank', 'administration', 'reviews', 'usage', 'grant_hooks',
+        ];
+
+        foreach ($blocks as $key) {
+            yield $key => [$key];
+        }
+    }
+
+    /**
+     * A block or list set to null is refused, naming it, while one left out
+     * takes its default.
+     *
+     * @param  string  $key
+     * @return void
+     */
+    #[DataProvider('blockProvider')]
+    public function testANullBlockIsRefused(string $key): void
+    {
+        $config = $this->authorizationConfig();
+
+        unset($config[$key]);
+
+        ConfigValidator::validate($config, $this->container());
+
+        $config[$key] = null;
+
+        try {
+            ConfigValidator::validate($config, $this->container());
+
+            self::fail('A null block was accepted.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame("authorization.{$key}", $exception->getConfigKey());
+        }
+    }
+
+    /**
      * The longest an entry lives may be any whole number of seconds from 1, and
      * defaults when it is not set.
      *
@@ -138,7 +305,7 @@ final class ConfigValidatorTest extends TestCase
      */
     public function testCacheLifetimesFromOneSecondPass(): void
     {
-        foreach ([1, 300] as $ttl) {
+        foreach ([1, 300, '300'] as $ttl) {
             $config                 = $this->authorizationConfig();
             $config['cache']['ttl'] = $ttl;
 
@@ -154,8 +321,8 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
-     * A cache lifetime below a second, or that is not a whole number, is
-     * refused: there is no "forever".
+     * A cache lifetime below a second, null, or one that is not a whole number,
+     * is refused: there is no "forever".
      *
      * @return void
      */
@@ -172,31 +339,34 @@ final class ConfigValidatorTest extends TestCase
             );
         }
 
-        $config                 = $this->authorizationConfig();
-        $config['cache']['ttl'] = '300';
+        $config = $this->authorizationConfig();
 
-        $this->assertRejected(
-            fn () => ConfigValidator::validate($config, $this->container()),
-            'authorization.cache.ttl',
-            'expected a whole number of seconds of at least 1, got \'300\' (string).',
-        );
+        foreach (['\'null\' (null)' => null, '\' 300\' (string)' => ' 300', '\'3e2\' (string)' => '3e2'] as $described => $ttl) {
+            $config['cache']['ttl'] = $ttl;
+
+            $this->assertRejected(
+                fn () => ConfigValidator::validate($config, $this->container()),
+                'authorization.cache.ttl',
+                "expected a whole number of seconds of at least 1, got {$described}.",
+            );
+        }
     }
 
     /**
-     * The policy limits pass from 1, and each limit, or all of them, may be
-     * left unset or null.
+     * The policy limits pass from 1, written as whole numbers the way the
+     * environment gives them too, and each limit, or all of them, may be left
+     * unset.
      *
      * @return void
      */
     public function testPolicyLimitsFromOnePass(): void
     {
         $config                       = $this->authorizationConfig();
-        $config['policies']['limits'] = ['document_bytes' => 1, 'statements' => 1, 'conditions' => 1, 'pattern_length' => 1];
+        $config['policies']['limits'] = ['document_bytes' => 1, 'statements' => 1, 'conditions' => '1', 'pattern_length' => '512'];
 
         ConfigValidator::validate($config, $this->container());
 
         unset($config['policies']['limits']['statements']);
-        $config['policies']['limits']['conditions'] = null;
 
         ConfigValidator::validate($config, $this->container());
 
@@ -218,7 +388,9 @@ final class ConfigValidatorTest extends TestCase
         foreach (['document_bytes', 'statements', 'conditions', 'pattern_length'] as $key) {
             yield "{$key} of 0" => [$key, 0, '0 (int)'];
             yield "{$key} below 0" => [$key, -1, '-1 (int)'];
-            yield "{$key} as a string" => [$key, '10', '\'10\' (string)'];
+            yield "{$key} as null" => [$key, null, '\'null\' (null)'];
+            yield "{$key} as a string of 0" => [$key, '0', '\'0\' (string)'];
+            yield "{$key} as a string not a whole number" => [$key, '12abc', '\'12abc\' (string)'];
             yield "{$key} as a float" => [$key, 10.5, '10.5 (float)'];
         }
     }
@@ -258,7 +430,7 @@ final class ConfigValidatorTest extends TestCase
         $this->assertRejected(
             fn () => ConfigValidator::validate($config, $this->container()),
             'authorization.policies.limits',
-            'expected an array of limits, got 100 (int).',
+            'expected an array, got 100 (int).',
         );
     }
 
@@ -360,7 +532,7 @@ final class ConfigValidatorTest extends TestCase
         $text = $config;
 
         $zero['reviews']['limit'] = 0;
-        $text['reviews']['limit'] = '100';
+        $text['reviews']['limit'] = '1e2';
 
         $this->assertRejected(
             fn () => ConfigValidator::validate($zero, $this->container()),
@@ -370,7 +542,7 @@ final class ConfigValidatorTest extends TestCase
         $this->assertRejected(
             fn () => ConfigValidator::validate($text, $this->container()),
             'authorization.reviews.limit',
-            'expected a whole number of at least 1, got \'100\' (string).',
+            'expected a whole number of at least 1, got \'1e2\' (string).',
         );
     }
 
@@ -445,7 +617,7 @@ final class ConfigValidatorTest extends TestCase
         $this->assertRejected(
             fn () => ConfigValidator::validate($config, $this->container()),
             'authorization.models',
-            'expected an array of model class names, got \'role\' (string).',
+            'expected an array, got \'role\' (string).',
         );
     }
 
@@ -639,6 +811,63 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * A list of classes implementing the `PermissionProvider` contract passes
+     * validation, and the list is returned as it is, every entry kept.
+     *
+     * @return void
+     */
+    public function testPermissionProvidersImplementingTheContractPass(): void
+    {
+        $providers = [StubPermissionProvider::class, RecordingPermissionProvider::class];
+
+        $config                         = $this->authorizationConfig();
+        $config['permission_providers'] = $providers;
+
+        ConfigValidator::validate($config, $this->container());
+
+        self::assertSame($providers, ConfigValidator::permissionProviders($providers));
+    }
+
+    /**
+     * Provide `permission_providers` values the validation refuses, with the
+     * key and the reason each is refused under.
+     *
+     * @return iterable<string, array{mixed, string, string}>
+     */
+    public static function invalidPermissionProviderProvider(): iterable
+    {
+        $notAProvider = 'class \'stdClass\' does not implement ' . PermissionProvider::class . '.';
+
+        yield 'an empty entry after a valid one' => [[StubPermissionProvider::class, ''], 'authorization.permission_providers.1', 'entry must be a non-empty class-string.'];
+        yield 'an int entry' => [[5], 'authorization.permission_providers.0', 'entry must be a non-empty class-string.'];
+        yield 'a missing class after a valid one' => [
+            [StubPermissionProvider::class, 'Missing\Provider'],
+            'authorization.permission_providers.1',
+            'class \'Missing\Provider\' does not exist.',
+        ];
+        yield 'a class not implementing the contract' => [[\stdClass::class], 'authorization.permission_providers.0', $notAProvider];
+        yield 'a string' => ['x', 'authorization.permission_providers', 'expected an array of class names, got string.'];
+    }
+
+    /**
+     * A `permission_providers` value that is not a list of classes implementing
+     * the contract is refused at boot, naming the entry or the list.
+     *
+     * @param  mixed  $providers
+     * @param  string  $key
+     * @param  string  $reason
+     * @return void
+     */
+    #[DataProvider('invalidPermissionProviderProvider')]
+    public function testInvalidPermissionProvidersAreRejected(mixed $providers, string $key, string $reason): void
+    {
+        $config                         = $this->authorizationConfig();
+        $config['permission_providers'] = $providers;
+
+        $this->assertRejected(fn () => ConfigValidator::validate($config, $this->container()), $key, $reason);
+    }
+
+    /**
      * The shipped subject resolver, and any class implementing the contract,
      * pass validation.
      *
@@ -734,8 +963,9 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
-     * Every invalid `tenant_tree` value, null and a missing key included, is
-     * refused with its reason: no tree never means a flat one by accident.
+     * Every invalid `tenant_tree` value, null included, is refused with its
+     * reason: no tree never means a flat one by accident. A config without the
+     * key takes the flat tree.
      *
      * @param  mixed  $tree
      * @param  string  $reason
@@ -753,7 +983,7 @@ final class ConfigValidatorTest extends TestCase
         $config = $this->authorizationConfig();
         unset($config['tenant_tree']);
 
-        $this->assertRejected(fn () => ConfigValidator::validate($config, $this->container()), 'authorization.tenant_tree', $reason);
+        ConfigValidator::validate($config, $this->container());
     }
 
     /**
@@ -928,14 +1158,19 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
-     * A config without a `resource_tenant_resolver` key is refused as null is.
+     * A config without a `resource_tenant_resolver` key takes the package's
+     * default, while one set to null is refused.
      *
      * @return void
      */
-    public function testMissingResourceTenantResolverIsRejected(): void
+    public function testMissingResourceTenantResolverTakesTheDefault(): void
     {
         $config = $this->authorizationConfig();
         unset($config['resource_tenant_resolver']);
+
+        ConfigValidator::validate($config, $this->container());
+
+        $config['resource_tenant_resolver'] = null;
 
         $this->assertRejected(
             fn () => ConfigValidator::validate($config, $this->container()),
@@ -1014,8 +1249,8 @@ final class ConfigValidatorTest extends TestCase
     public static function invalidSubjectResolverProvider(): iterable
     {
         yield 'null' => [null, 'a subject resolver class is required; set it to \\' . AuthGuardSubjectResolver::class . ' to decide about the user Laravel authenticated.'];
-        yield 'integer' => [42, 'expected a class-string, got 42 (int).'];
-        yield 'empty' => ['', 'expected a class-string, got \'\' (string).'];
+        yield 'integer' => [42, 'expected a class-string, got int.'];
+        yield 'empty' => ['', 'expected a class-string, got string.'];
         yield 'missing class' => ['App\Resolvers\Missing', 'class \'App\Resolvers\Missing\' does not exist.'];
         yield 'unrelated class' => [\stdClass::class, 'class \'stdClass\' does not implement ' . SubjectResolver::class . '.'];
     }
@@ -1039,20 +1274,18 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
-     * A config without a `subject_resolver` key is refused as null is.
+     * A config without a `subject_resolver` key takes the package's default.
      *
      * @return void
      */
-    public function testMissingSubjectResolverIsRejected(): void
+    public function testMissingSubjectResolverTakesTheDefault(): void
     {
         $config = $this->authorizationConfig();
         unset($config['subject_resolver']);
 
-        $this->assertRejected(
-            fn () => ConfigValidator::validate($config, $this->container()),
-            'authorization.subject_resolver',
-            'a subject resolver class is required; set it to \\' . AuthGuardSubjectResolver::class . ' to decide about the user Laravel authenticated.',
-        );
+        ConfigValidator::validate($config, $this->container());
+
+        $this->expectNotToPerformAssertions();
     }
 
     /**

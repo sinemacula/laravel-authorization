@@ -9,7 +9,8 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
-use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -79,10 +80,9 @@ final class BoundaryResolver
         $pins->boundaries();
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
+        $class = ModelClasses::get('policy');
 
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_boundaries', 'authorizable_boundaries');
+        $table = TableNames::get('authorizable_boundaries');
 
         $model = new $class;
         $rows  = $class::query()->withoutGlobalScopes()->useWritePdo()

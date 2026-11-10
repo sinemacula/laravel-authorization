@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
@@ -150,8 +151,7 @@ final class PolicyPrincipals
      */
     private static function isAttachedIn(string $table, Policy $policy): bool
     {
-        /** @var string $name */
-        $name = config("authorization.tables.{$table}", $table);
+        $name = TableNames::get($table);
 
         return AuthorizationConnection::connection()->table($name)->useWritePdo()->where('policy_id', $policy->getKey())->exists();
     }

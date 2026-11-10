@@ -30,6 +30,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -549,8 +550,10 @@ final class CheckBatchTest extends TestCase
 
     /**
      * The checks are decided a chunk of `authorization.bulk.chunk_size` at a
-     * time, the decisions keyed and ordered as the checks are across chunks; a
-     * size that is not a whole number of at least 1 takes the default.
+     * time, the decisions keyed and ordered as the checks are across chunks,
+     * the size read as the environment writes it; a size that is not a whole
+     * number of at least 1 is refused before any check is decided, never read
+     * as the default.
      *
      * @return void
      */
@@ -563,16 +566,28 @@ final class CheckBatchTest extends TestCase
         $provider  = $this->attributes(new BulkStatusAttributes);
         $resources = ['e' => $posts[4], 'a' => $posts[0], 'd' => $posts[3], 'b' => $posts[1], 'c' => $posts[2]];
 
-        $this->config()->set('authorization.bulk.chunk_size', 2);
+        $this->config()->set('authorization.bulk.chunk_size', '2');
 
         $allowed = Authorization::withPolicies([$this->statusPolicy()])->canEach(self::ACTION, $resources);
 
         self::assertSame(['e' => false, 'a' => true, 'd' => false, 'b' => false, 'c' => true], $allowed);
 
-        $this->config()->set('authorization.bulk.chunk_size', 0);
+        $this->config()->set('authorization.bulk', []);
 
         self::assertSame($allowed, Authorization::withPolicies([$this->statusPolicy()])->canEach(self::ACTION, $resources));
         self::assertSame([2, 2, 1, 5], \array_map(\count(...), $provider->bulkCalls));
+
+        $this->config()->set('authorization.bulk.chunk_size', 0);
+
+        try {
+            Authorization::withPolicies([$this->statusPolicy()])->canEach(self::ACTION, $resources);
+
+            self::fail('A chunk size of 0 was not refused.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame('authorization.bulk.chunk_size', $exception->getConfigKey());
+        }
+
+        self::assertCount(4, $provider->bulkCalls);
     }
 
     /**

@@ -12,6 +12,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\RolePermissionRelation;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
@@ -77,9 +79,7 @@ class Permission extends Model
     {
         parent::__construct($attributes);
 
-        /** @var string $table */
-        $table       = config('authorization.tables.permissions', 'permissions');
-        $this->table = $table;
+        $this->table = TableNames::get('permissions');
     }
 
     /**
@@ -143,7 +143,7 @@ class Permission extends Model
     public function roles(): BelongsToMany
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleModel */
-        $roleModel = config('authorization.models.role', Role::class);
+        $roleModel = ModelClasses::get('role');
 
         return $this->belongsToMany($roleModel, RolePermissionRelation::table(), 'permission_id', 'role_id')
             ->using(RolePermission::class)

@@ -7,6 +7,8 @@ namespace SineMacula\Laravel\Authorization\Support;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder as QueryBuilder;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyOwnerException;
@@ -192,8 +194,7 @@ final class InlinePolicies
      */
     public static function attachedToTheirGrantee(QueryBuilder $query, string $table): QueryBuilder
     {
-        /** @var string $policies */
-        $policies = config('authorization.tables.policies', 'policies');
+        $policies = TableNames::get('policies');
 
         return $query->whereNotExists(static function (QueryBuilder $stray) use ($policies, $table): void {
             $stray->selectRaw('1')
@@ -330,6 +331,6 @@ final class InlinePolicies
     private static function policyClass(): string
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> */
-        return config('authorization.models.policy', Policy::class);
+        return ModelClasses::get('policy');
     }
 }

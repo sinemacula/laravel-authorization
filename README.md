@@ -236,21 +236,24 @@ otherwise bind the contract at its first resolution and so replace your class: t
 binding your class, as it registers when the application already knows of the provider, and otherwise as the application
 boots, since Laravel learns of the deferred providers of your configuration and of package discovery only once every
 eager provider, this package among them, has registered. A value equal to the package's default, or no value, binds
-nothing over an earlier binding. From the highest precedence down, a contract resolves to a binding made after the
-package registers, then the class your configuration names, then a binding made before the package registers, then the
-package's default. Binding your configured class over a contract follows Laravel's rules for any binding: an extender a
-sibling package registered on the contract is applied to your class, so one typed to the sibling's own class fails, and
-when the contract was already resolved, a callback watching it with `rebinding()` or `refresh()` is called, which may
-resolve your class while the package registers. The grant hook is the one exception: hooks only refuse, so when
-`grant_hooks` lists any, the package extends the contract and the listed hooks run before whatever hook it resolves to,
-rather than replacing it (see [Grant hooks](#grant-hooks)). The order your providers register in therefore never lets
-the package's default replace a binding of yours. It still decides between other bindings of the same contract: of two
-bindings made outside the package, by a sibling package and your application for example, the later one wins as usual,
-and a `bindIf()`, `singletonIf()` or `scopedIf()` only fills a contract nothing has bound yet, so one made after the
-package registers is skipped and the package's default, or your configured class, stands. To replace a seam whatever
-order providers register in, bind it unconditionally. A binding of your own is kept as you bound it across the reset
-between queue jobs and Octane requests, while the package's defaults and configured classes, the context key catalogue
-aside, are built afresh for each.
+nothing over an earlier binding, and nor does a value that names no class implementing the contract (null, a number or
+an empty string among them): the package binds its default as though nothing were configured, so registering never fails
+on it, and the boot refuses the setting. `policy_store` differs on both counts: the package has no store of its own, so
+such a value binds nothing at all, and null is not refused, since it means no store. From the highest precedence down, a
+contract resolves to a binding made after the package registers, then the class your configuration names, then a binding
+made before the package registers, then the package's default. Binding your configured class over a contract follows
+Laravel's rules for any binding: an extender a sibling package registered on the contract is applied to your class, so
+one typed to the sibling's own class fails, and when the contract was already resolved, a callback watching it with
+`rebinding()` or `refresh()` is called, which may resolve your class while the package registers. The grant hook is the
+one exception: hooks only refuse, so when `grant_hooks` lists any, the package extends the contract and the listed hooks
+run before whatever hook it resolves to, rather than replacing it (see [Grant hooks](#grant-hooks)). The order your
+providers register in therefore never lets the package's default replace a binding of yours. It still decides between
+other bindings of the same contract: of two bindings made outside the package, by a sibling package and your application
+for example, the later one wins as usual, and a `bindIf()`, `singletonIf()` or `scopedIf()` only fills a contract
+nothing has bound yet, so one made after the package registers is skipped and the package's default, or your configured
+class, stands. To replace a seam whatever order providers register in, bind it unconditionally. A binding of your own is
+kept as you bound it across the reset between queue jobs and Octane requests, while the package's defaults and
+configured classes, the context key catalogue aside, are built afresh for each.
 
 A sibling package that registers after this one and wants to replace only the package's default, never a binding the
 application made, asks `AuthorizationServiceProvider::isPackageDefault($app, $contract)`. It is true only while the
@@ -286,7 +289,7 @@ php artisan authorization:sync
 ```
 
 The package writes its warnings (a discarded cache entry, a policy whose document cannot be read) to your default log
-channel. To send them elsewhere, name a channel from `config/logging.php`:
+channel. To send them elsewhere, name a channel from `config/logging.php`; a name that is not one is refused at boot:
 
 ```dotenv
 AUTHORIZATION_LOG_CHANNEL=stderr
@@ -297,6 +300,56 @@ Gate switch, the policy store, the policy limits, the context keys and sources, 
 resolver, the identity directory, the authentication requirement checker, the session policy source and the scope map,
 the cache, the bulk checks' chunk size, the role hierarchy and rank, the access reviews' limit, and grant usage
 tracking (see [Usage tracking](#usage-tracking)).
+
+### Configuration checks
+
+Every setting is checked when the application boots, and a malformed one stops the boot with an
+`InvalidAuthorizationConfigException` naming the setting, rather than being read as something else:
+
+- A key the package does not define is refused, at the top level and in every block whose keys the package defines
+  (`models`, `tables`, `defaults`, `gate`, `policies` and `policies.limits`, `context`, `attributes`, `session`,
+  `cache`, `hierarchy`, `rank`, `query_scoping`, `bulk`, `administration`, `reviews` and `usage`), naming its full
+  path, such as `authorization.models.rol`, so a misspelt key never leaves its default in place. The maps you fill in
+  (`context.keys`, `context.sources`, the attribute providers, `session.scopes` and `application_access`) take any
+  key; each entry is checked against its own shape instead.
+- A setting left out takes its default, also when the configuration was cached without the package's defaults merged
+  into it. A setting set to null is refused, a block set to null among them, except where null means the default or
+  none: `connection`, `policy_store`, `cache.store`, `usage.connection`, `usage.queue` and `log_channel`. The whole
+  `authorization` configuration must be an array.
+- A value read from the environment is checked as it is written, since the config file casts none of them. A whole
+  number is an int, or a string written as one in base 10 (`300`, not `300s`, `3e2`, `300.0`, `-0`, one with a space
+  around it or an empty value) and no larger than PHP holds. A switch (`gate.enabled`, `hierarchy.enabled`,
+  `rank.enabled` and `usage.enabled`) is true or false, which the environment gives for `true`, `false`, `(true)` and
+  `(false)`; `0`, `1`, `off` and `no` are refused.
+- Each table name is a plain identifier (a letter or an underscore, then letters, digits and underscores) with no
+  schema before it, short enough that every index and key name the migrations build from it fits in 63 characters,
+  PostgreSQL's limit (from 33 to 51 characters, depending on the table), and the twelve names are distinct.
+- `defaults.guard` names a guard in `auth.guards`, `log_channel` a channel in `logging.channels`, and
+  `usage.connection`, when set, a connection in `queue.connections`. `connection` names a connection in
+  `database.connections`, or, when it is null or empty, `database.default` must. Each is read from the configuration as
+  it stands when the application boots, and nothing is connected to.
+- `cache.prefix` is a string that is not empty, and `cache.ttl` a whole number of seconds of at least 1.
+- `hierarchy.enabled` and `rank.enabled` are switches, checked as `gate.enabled` is.
+
+A setting the package reads after boot is read through the same checks, so one changed at run time (by `config()->set()`
+in a test, a queue worker or an Octane request) is refused with the same exception when it is read, never read as its
+default, cast or skipped. That covers the policy limits, the query scoping limits, the bulk chunk size, the
+administration limits, the access reviews' limit, usage tracking, `cache.ttl` and `cache.prefix`, the three switches,
+the permission enums and providers, `application_access` (an entry for an application that is not a permission name,
+null among it, is refused rather than opening the application), `session.scopes`, `context.keys` and `context.sources`,
+the attribute providers and `grant_hooks`. A block on the way to a setting that is not an array is refused too, rather
+than read as one that leaves the setting out. A setting read on every check is read with a few array lookups and plain
+comparisons, so the checks add next to nothing to a request.
+
+The names are checked after boot for their type only. A table name, a model class or `defaults.guard` that is not a
+string, or is empty, is refused with the same exception, and so is a `connection` or `cache.store` that is neither null
+nor a string, or a `cache.store` that is empty (null, and for `connection` an empty string, mean the default). Whether
+the name exists is checked only at boot, so one changed after boot to a name that does not exist is used as it is, never
+swapped for the default: a table fails with the database's own error and a model class with PHP's when they are used, a
+connection or a cache store with Laravel's own `InvalidArgumentException` from the database or cache manager, and a
+lookup by name under a guard that does not exist finds only the roles and permissions that name no guard. The log
+channel is checked at boot only, by design: a warning is written from inside error handling, and writing one never stops
+a check, so a channel changed after boot to one that does not exist is written to as the default channel.
 
 ## Usage
 
@@ -2705,8 +2758,9 @@ boundaries, session caps (a `capped()` manager's included) and authentication re
 `check()` weighs them. An action whose check would be `insufficient_authentication` is not listed. An action whose check
 would throw, through a failing attribute provider say, makes the listing throw what it throws, so nothing is listed
 that the check would not allow. A catalogue that cannot be read, one declaring a name twice for a guard with different
-metadata say, throws `InvalidPermissionCatalogueException`; an entry of `authorization.permission_enums` the boot
-validation would refuse is skipped.
+metadata say, throws `InvalidPermissionCatalogueException`; an entry of `authorization.permission_enums` or
+`authorization.permission_providers` the boot validation would refuse, one changed after boot say, throws
+`InvalidAuthorizationConfigException` when the catalogue is read, and is never skipped.
 
 **Generic and resource-specific listings differ.** A listing with no resource answers the check with no resource, so an
 allow limited to some records, or conditioned on a resource's attributes, does not list its action there; a listing

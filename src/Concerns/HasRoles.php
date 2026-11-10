@@ -11,6 +11,8 @@ use SineMacula\Laravel\Authorization\Administration\RankComparison;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
@@ -58,10 +60,9 @@ trait HasRoles // @phpstan-ignore trait.unused
     public function roles(): MorphToMany
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $model */
-        $model = config('authorization.models.role', Role::class);
+        $model = ModelClasses::get('role');
 
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_roles', 'authorizable_roles');
+        $table = TableNames::get('authorizable_roles');
 
         return $this->authorizationGrantRelation($model, $table, 'role_id', AuthorizableRolePivot::class);
     }

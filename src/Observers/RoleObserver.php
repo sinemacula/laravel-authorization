@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Observers;
 
 use Illuminate\Database\Eloquent\Builder;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
@@ -141,7 +142,7 @@ final class RoleObserver
     public function deleting(Role $role): void
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
-        $roleClass = config('authorization.models.role', Role::class);
+        $roleClass = ModelClasses::get('role');
 
         /** @var list<string> $children */
         $children = $roleClass::query()->withoutGlobalScope(TenantScope::class)->where('parent_id', $role->id)->orderBy('name')->pluck('name')->all();
@@ -203,7 +204,7 @@ final class RoleObserver
     private function assertParity(Role $role): void
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
-        $roleClass = config('authorization.models.role', Role::class);
+        $roleClass = ModelClasses::get('role');
         $query     = $roleClass::query()->withoutGlobalScope(TenantScope::class);
         $parent    = $role->parent_id === null || !$role->isDirty(['parent_id', 'guard']) ? null : (clone $query)->find($role->parent_id);
 
@@ -257,7 +258,7 @@ final class RoleObserver
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
-        $roleClass = config('authorization.models.role', Role::class);
+        $roleClass = ModelClasses::get('role');
         $guard     = $role->guard;
 
         // @phpstan-ignore staticMethod.dynamicCall
@@ -302,7 +303,7 @@ final class RoleObserver
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
-        $roleClass = config('authorization.models.role', Role::class);
+        $roleClass = ModelClasses::get('role');
         $current   = $role->parent_id;
         $parent    = null;
         $visited   = [];

@@ -16,6 +16,36 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Validation
+    |---------------------------------------------------------------------------
+    |
+    | Every setting is checked when the application boots, and one that is
+    | malformed is refused, naming the setting, rather than read as something
+    | else. A key the package does not define is refused too, at the top level
+    | and in every block below whose keys the package defines, so a misspelt
+    | key never leaves its default in place. A setting left out takes its
+    | default; one set to null is refused, except where null is said below to
+    | mean the default or none. A value read from the environment is checked
+    | as it is written: a whole number must be written as one (`300`, not
+    | `300s`, `3e2`, `300.0` or ` 300`), and a switch must be `true` or
+    | `false`, never `0`, `1`, `off` or `no`. A setting read after boot is read
+    | through the same checks, so one changed at run time is refused when it is
+    | read, never read as its default. A name read after boot (a table, a
+    | model, `defaults.guard`, `connection` and `cache.store`) is checked for
+    | its type only, and whether it names something that exists is checked at
+    | boot: one changed at run time to a name that does not exist is used as
+    | it is, so a table or a model fails with the database's or PHP's own
+    | error, a connection or a cache store with Laravel's, and a lookup by
+    | name under a guard that does not exist finds only the roles and
+    | permissions that name no guard. `log_channel` is checked at boot only,
+    | since a warning is written from inside error handling: a channel changed
+    | at run time to one that does not exist is written to as the default
+    | channel.
+    |
+    */
+
+    /*
+    |---------------------------------------------------------------------------
     | Models
     |---------------------------------------------------------------------------
     |
@@ -46,7 +76,10 @@ return [
     | and guardrail services runs in one transaction here. Point it at the
     | connection the application keeps its identity tables on, so a
     | transaction that creates a principal and its grants commits or rolls
-    | back as one. Null uses the application's default connection.
+    | back as one. Null, or an empty name, uses the application's default
+    | connection, which `database.default` must then name; any other name must
+    | be a connection under `database.connections`. Both are checked at boot,
+    | without connecting.
     |
     */
 
@@ -60,6 +93,12 @@ return [
     | Physical table names used by the shipped migrations and Eloquent models.
     | Override here if you need to sidestep naming collisions with existing
     | application tables. The tables' column names are fixed.
+    |
+    | Each name must be a plain identifier (a letter or an underscore, then
+    | letters, digits and underscores) with no schema before it, short enough
+    | that every index and key name the migrations build from it fits in 63
+    | characters (33 to 51, depending on the table), and the twelve names must
+    | be distinct. A name left out is the key's own; null is refused.
     |
     */
 
@@ -86,7 +125,8 @@ return [
     | The guard a role or permission lookup by name uses when the caller names
     | none. Rows record their own guard in the `guard` column; a null guard
     | makes a row apply to every guard. Who a check is about comes from the
-    | subject resolver below, not from this setting.
+    | subject resolver below, not from this setting. It must name a guard
+    | under `auth.guards`.
     |
     */
 
@@ -187,8 +227,8 @@ return [
     |
     | The log channel the package writes its warnings and debug lines to: a
     | discarded corrupt cache entry, a policy whose document cannot be read.
-    | Leave as null to use the application's default channel. A name that is
-    | not a channel in `logging.channels` falls back to the default channel.
+    | Leave as null to use the application's default channel. Any other value
+    | must name a channel in `logging.channels`, or it is refused at boot.
     |
     */
 
@@ -220,7 +260,7 @@ return [
     | many statements it holds, `conditions` on how many key tests one
     | statement's conditions hold, and `pattern_length` on the characters of
     | any action or resource pattern and any string operand. Each must be a
-    | whole number of at least 1.
+    | whole number of at least 1; a limit left out takes its default.
     |
     | A document over a limit is refused when it is written, and a stored one
     | over a limit denies every check for its holder as an invalid policy.
@@ -232,10 +272,10 @@ return [
 
     'policies' => [
         'limits' => [
-            'document_bytes' => (int) env('AUTHORIZATION_POLICY_DOCUMENT_BYTES', 65536),
-            'statements'     => (int) env('AUTHORIZATION_POLICY_STATEMENTS', 100),
-            'conditions'     => (int) env('AUTHORIZATION_POLICY_CONDITIONS', 50),
-            'pattern_length' => (int) env('AUTHORIZATION_POLICY_PATTERN_LENGTH', 512),
+            'document_bytes' => env('AUTHORIZATION_POLICY_DOCUMENT_BYTES', 65536),
+            'statements'     => env('AUTHORIZATION_POLICY_STATEMENTS', 100),
+            'conditions'     => env('AUTHORIZATION_POLICY_CONDITIONS', 50),
+            'pattern_length' => env('AUTHORIZATION_POLICY_PATTERN_LENGTH', 512),
         ],
     ],
 
@@ -269,9 +309,9 @@ return [
     */
 
     'query_scoping' => [
-        'max_anchors'     => (int) env('AUTHORIZATION_QUERY_SCOPING_MAX_ANCHORS', 64),
-        'max_scopes'      => (int) env('AUTHORIZATION_QUERY_SCOPING_MAX_SCOPES', 16),
-        'max_attachments' => (int) env('AUTHORIZATION_QUERY_SCOPING_MAX_ATTACHMENTS', 64),
+        'max_anchors'     => env('AUTHORIZATION_QUERY_SCOPING_MAX_ANCHORS', 64),
+        'max_scopes'      => env('AUTHORIZATION_QUERY_SCOPING_MAX_SCOPES', 16),
+        'max_attachments' => env('AUTHORIZATION_QUERY_SCOPING_MAX_ATTACHMENTS', 64),
     ],
 
     /*
@@ -288,7 +328,7 @@ return [
     */
 
     'bulk' => [
-        'chunk_size' => (int) env('AUTHORIZATION_BULK_CHUNK_SIZE', 500),
+        'chunk_size' => env('AUTHORIZATION_BULK_CHUNK_SIZE', 500),
     ],
 
     /*
@@ -445,7 +485,9 @@ return [
     | `['admin' => 'admin:access']`. `ApplicationAccess::mayUse()` asks the
     | full decision whether the principal holds it on that application, so a
     | grant made for that application counts; grant it through the roles that
-    | should get in. An application not named here is open to every principal.
+    | should get in. An application not named here is open to every principal;
+    | one named with null, an empty name or anything but a permission name is
+    | refused, never left open.
     |
     | Admission is decided without session caps, for people and machines alike:
     | the principal holds no session yet, so neither the request's credential
@@ -563,13 +605,15 @@ return [
     |
     | `ttl` is the longest, in seconds, any entry lives in either tier; an
     | entry also lapses a second before the nearest grant it counts expires.
-    | It must be a whole number of at least 1.
+    | It must be a whole number of at least 1; null is refused, as there is no
+    | "forever". `prefix` starts every key the cache writes, a non-empty
+    | string. `store` is null for no shared store.
     |
     */
 
     'cache' => [
         'store'  => env('AUTHORIZATION_CACHE_STORE'),
-        'ttl'    => (int) env('AUTHORIZATION_CACHE_TTL_SECONDS', 300),
+        'ttl'    => env('AUTHORIZATION_CACHE_TTL_SECONDS', 300),
         'prefix' => env('AUTHORIZATION_CACHE_PREFIX', 'authorization'),
     ],
 
@@ -586,12 +630,13 @@ return [
     | a resource policy's `role:` selector for any of them. When disabled,
     | only directly attached permissions and policies count — `parent_id` can
     | still be set for organisational grouping but has no effect on
-    | authorization decisions.
+    | authorization decisions. Only true or false is accepted: any other
+    | value is refused at boot.
     |
     */
 
     'hierarchy' => [
-        'enabled' => (bool) env('AUTHORIZATION_HIERARCHY_ENABLED', true),
+        'enabled' => env('AUTHORIZATION_HIERARCHY_ENABLED', true),
     ],
 
     /*
@@ -607,12 +652,13 @@ return [
     | ranked role counts as the most junior, and an actor holding none acts
     | on no one. When disabled, rank is no constraint and `canActOn()`
     | returns true. Either way the comparison grants nothing by itself;
-    | delegated administration weighs it beside every other check.
+    | delegated administration weighs it beside every other check. Only true
+    | or false is accepted: any other value is refused at boot.
     |
     */
 
     'rank' => [
-        'enabled' => (bool) env('AUTHORIZATION_RANK_ENABLED', true),
+        'enabled' => env('AUTHORIZATION_RANK_ENABLED', true),
     ],
 
     /*
@@ -648,8 +694,8 @@ return [
     */
 
     'administration' => [
-        'max_impact' => (int) env('AUTHORIZATION_ADMINISTRATION_MAX_IMPACT', 1000),
-        'retries'    => (int) env('AUTHORIZATION_ADMINISTRATION_RETRIES', 2),
+        'max_impact' => env('AUTHORIZATION_ADMINISTRATION_MAX_IMPACT', 1000),
+        'retries'    => env('AUTHORIZATION_ADMINISTRATION_RETRIES', 2),
     ],
 
     /*
@@ -672,7 +718,7 @@ return [
     */
 
     'reviews' => [
-        'limit' => (int) env('AUTHORIZATION_REVIEWS_LIMIT', 1000),
+        'limit' => env('AUTHORIZATION_REVIEWS_LIMIT', 1000),
     ],
 
     /*
@@ -689,20 +735,21 @@ return [
     | queued jobs at the end of each request, job or command, never from within
     | a check; each job carries at most `batch` observations, about 110 KB at
     | worst for the default 250. `connection` and `queue` name where the jobs
-    | go; null takes the defaults. Coverage, the periods tracking was on, is
-    | kept for `retention` days (`authorization:usage-prune`). Schedule
-    | `authorization:usage-heartbeat` once an interval so a quiet site stays
-    | covered.
+    | go; null takes the defaults, and a connection named must be one under
+    | `queue.connections`. `enabled` is true or false. Coverage, the periods
+    | tracking was on, is kept for `retention` days
+    | (`authorization:usage-prune`). Schedule `authorization:usage-heartbeat`
+    | once an interval so a quiet site stays covered.
     |
     */
 
     'usage' => [
-        'enabled'    => (bool) env('AUTHORIZATION_USAGE_ENABLED', false),
-        'interval'   => (int) env('AUTHORIZATION_USAGE_INTERVAL', 3600),
-        'batch'      => (int) env('AUTHORIZATION_USAGE_BATCH', 250),
+        'enabled'    => env('AUTHORIZATION_USAGE_ENABLED', false),
+        'interval'   => env('AUTHORIZATION_USAGE_INTERVAL', 3600),
+        'batch'      => env('AUTHORIZATION_USAGE_BATCH', 250),
         'connection' => env('AUTHORIZATION_USAGE_QUEUE_CONNECTION'),
         'queue'      => env('AUTHORIZATION_USAGE_QUEUE'),
-        'retention'  => (int) env('AUTHORIZATION_USAGE_RETENTION_DAYS', 400),
+        'retention'  => env('AUTHORIZATION_USAGE_RETENTION_DAYS', 400),
     ],
 
     /*

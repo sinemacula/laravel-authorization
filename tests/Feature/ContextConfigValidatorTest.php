@@ -44,12 +44,11 @@ final class ContextConfigValidatorTest extends TestCase
     {
         ContextConfigValidator::validate([], $this->container());
         ContextConfigValidator::validate(['keys' => [], 'sources' => []], $this->container());
-        ContextConfigValidator::validate([
-            'keys'    => ['input' => ['post.status' => 'string', 'post.words' => ContextKeyType::NUMBER], 'plan' => ['tier' => 'string']],
-            'sources' => [PlanContextSource::class],
-        ], $this->container());
+        $keys = ['input' => ['post.status' => 'string', 'post.words' => ContextKeyType::NUMBER], 'plan' => ['tier' => 'string']];
 
-        $this->expectNotToPerformAssertions();
+        ContextConfigValidator::validate(['keys' => $keys, 'sources' => [PlanContextSource::class]], $this->container());
+
+        self::assertSame($keys, ContextConfigValidator::keyMap($keys));
     }
 
     /**
@@ -61,7 +60,11 @@ final class ContextConfigValidatorTest extends TestCase
     {
         $declare = 'must be a namespace and one or more \'.\'-separated segments of letters, digits, \'_\' and \'-\', and at most 128 characters.';
 
-        yield 'a context that is not an array' => ['context', 'authorization.context', 'expected an array with keys and sources, got string.'];
+        yield 'a context that is not an array' => ['context', 'authorization.context', 'expected an array, got \'context\' (string).'];
+        yield 'a null context' => [null, 'authorization.context', 'expected an array, got \'null\' (null).'];
+        yield 'an unknown key' => [['sorces' => []], 'authorization.context.sorces', 'unknown key \'sorces\'; expected one of keys, sources.'];
+        yield 'null keys' => [['keys' => null], 'authorization.context.keys', 'expected an array of namespaces to their keys, got null.'];
+        yield 'null sources' => [['sources' => null], 'authorization.context.sources', 'expected an array of class names, got null.'];
         yield 'keys that are not an array' => [['keys' => 'input.post'], 'authorization.context.keys', 'expected an array of namespaces to their keys, got string.'];
         yield 'a namespace that is not a name' => [['keys' => [['post' => 'string']]], 'authorization.context.keys', self::NOT_A_TYPE_MAP];
         yield 'keys that are not a map' => [['keys' => ['input' => 'string']], 'authorization.context.keys', self::NOT_A_TYPE_MAP];
@@ -69,6 +72,11 @@ final class ContextConfigValidatorTest extends TestCase
         yield 'a type that is not a name' => [['keys' => ['input' => ['post' => 1]]], 'authorization.context.keys', self::NOT_A_TYPE_MAP];
         yield 'an unknown type' => [
             ['keys' => ['input' => ['post' => 'text']]],
+            'authorization.context.keys',
+            'Context key \'input.post\' has an unknown type \'text\'; use one of string, number, bool, time, ip, list.',
+        ];
+        yield 'an unknown type in the second namespace' => [
+            ['keys' => ['plan' => ['tier' => 'string'], 'input' => ['post' => 'text']]],
             'authorization.context.keys',
             'Context key \'input.post\' has an unknown type \'text\'; use one of string, number, bool, time, ip, list.',
         ];

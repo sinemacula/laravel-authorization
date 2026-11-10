@@ -1107,7 +1107,11 @@ final class AuthorizationServiceProviderTest extends TestCase
         $app = new Application(\dirname(__DIR__, 2));
 
         try {
-            $app->instance('config', new ConfigRepositoryImplementation(['authorization' => []]));
+            $app->instance('config', new ConfigRepositoryImplementation([
+                'authorization' => [],
+                'auth'          => ['guards' => ['web' => ['driver' => 'session']]],
+                'database'      => ['default' => 'testing', 'connections' => ['testing' => ['driver' => 'sqlite']]],
+            ]));
 
             $app->register(new AuthorizationServiceProvider($app));
             $app->register(new LateAuthenticationContextProvider($app, ['provider.*']));
@@ -1118,6 +1122,64 @@ final class AuthorizationServiceProviderTest extends TestCase
             $app->boot();
         } finally {
             Container::setInstance($this->application());
+        }
+    }
+
+    /**
+     * Provide an authorization configuration that is not an array, with whether
+     * the application's configuration is cached, which skips merging the
+     * package's defaults.
+     *
+     * @return iterable<string, array{mixed, bool}>
+     */
+    public static function malformedRootProvider(): iterable
+    {
+        foreach (['null' => null, 'a string' => 'authorization', 'an int' => 5] as $name => $root) {
+            yield "{$name}, not cached" => [$root, false];
+            yield "{$name}, cached" => [$root, true];
+        }
+    }
+
+    /**
+     * An authorization configuration that is not an array does not fail the
+     * package's registration, merging the defaults into it or reading a seam
+     * from it; it is kept as it is, and the boot refuses it, naming it.
+     *
+     * @param  mixed  $root
+     * @param  bool  $isCached
+     * @return void
+     */
+    #[DataProvider('malformedRootProvider')]
+    public function testAConfigThatIsNotAnArrayIsRefusedAtBoot(mixed $root, bool $isCached): void
+    {
+        $base = $isCached ? self::cachedBasePath() : \dirname(__DIR__, 2);
+        $app  = new Application($base);
+
+        try {
+            $app->instance('config', new ConfigRepositoryImplementation(['authorization' => $root]));
+
+            self::assertSame($isCached, $app->configurationIsCached());
+
+            $provider = new AuthorizationServiceProvider($app);
+
+            $provider->register();
+
+            self::assertSame($root, $app->make(ConfigRepository::class)->get('authorization'));
+
+            try {
+                $provider->boot();
+
+                self::fail('A configuration that is not an array was accepted.');
+            } catch (InvalidAuthorizationConfigException $exception) {
+                self::assertSame('authorization', $exception->getConfigKey());
+                self::assertStringStartsWith('expected an array, got ', $exception->getReason());
+            }
+        } finally {
+            Container::setInstance($this->application());
+
+            if ($isCached) {
+                self::removeCachedBasePath($base);
+            }
         }
     }
 
@@ -2054,6 +2116,36 @@ final class AuthorizationServiceProviderTest extends TestCase
         $app->instance('config', new ConfigRepositoryImplementation(['authorization' => $authorization]));
 
         return $app;
+    }
+
+    /**
+     * Return a new base path whose configuration is cached, as `config:cache`
+     * leaves it.
+     *
+     * @return string
+     */
+    private static function cachedBasePath(): string
+    {
+        $base = \sys_get_temp_dir() . '/' . \str_replace('.', '', \uniqid('authorization-cached-', true));
+
+        \mkdir($base . '/bootstrap/cache', 0o777, true);
+        \file_put_contents($base . '/bootstrap/cache/config.php', '<?php return [];');
+
+        return $base;
+    }
+
+    /**
+     * Remove the base path `cachedBasePath()` made.
+     *
+     * @param  string  $base
+     * @return void
+     */
+    private static function removeCachedBasePath(string $base): void
+    {
+        \unlink($base . '/bootstrap/cache/config.php');
+        \rmdir($base . '/bootstrap/cache');
+        \rmdir($base . '/bootstrap');
+        \rmdir($base);
     }
 
     /**

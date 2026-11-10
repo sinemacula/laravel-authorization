@@ -70,17 +70,23 @@ final class SessionConfigValidatorTest extends TestCase
         SessionConfigValidator::validate([], $this->container());
         SessionConfigValidator::validate(['source' => NoSessionPolicy::class, 'scopes' => []], $this->container());
         SessionConfigValidator::validate(['source' => StubSessionPolicySource::class], $this->container());
-        SessionConfigValidator::validate([
-            'scopes' => [
-                'editor'  => ['posts:*'],
-                'creator' => ['posts:create', 'posts:delete'],
-                'posts:create',
-                'posts:*',
-                'admin' => [PackagePermissions::GUARDRAIL_MANAGE],
-            ],
-        ], $this->container());
+        $scopes = [
+            'editor'  => ['posts:*'],
+            'creator' => ['posts:create', 'posts:delete'],
+            'posts:create',
+            'posts:*',
+            'admin' => [PackagePermissions::GUARDRAIL_MANAGE],
+        ];
 
-        $this->addToAssertionCount(4);
+        SessionConfigValidator::validate(['scopes' => $scopes], $this->container());
+
+        self::assertSame([
+            'editor'       => ['posts:*'],
+            'creator'      => ['posts:create', 'posts:delete'],
+            'posts:create' => ['posts:create'],
+            'posts:*'      => ['posts:*'],
+            'admin'        => [PackagePermissions::GUARDRAIL_MANAGE],
+        ], SessionConfigValidator::scopeMap($scopes));
     }
 
     /**
@@ -93,7 +99,10 @@ final class SessionConfigValidatorTest extends TestCase
         $scopes = 'authorization.session.scopes';
         $source = 'authorization.session.source';
 
-        yield 'a session that is not an array' => ['session', 'authorization.session', 'expected an array with a source and scopes, got string.'];
+        yield 'a session that is not an array' => ['session', 'authorization.session', 'expected an array, got \'session\' (string).'];
+        yield 'a null session' => [null, 'authorization.session', 'expected an array, got \'null\' (null).'];
+        yield 'an unknown key' => [['scope' => []], 'authorization.session.scope', 'unknown key \'scope\'; expected one of source, scopes.'];
+        yield 'null scopes' => [['scopes' => null], $scopes, 'expected an array of scopes to their action patterns, got null.'];
         yield 'a null source' => [['source' => null], $source, 'a session policy source class is required; set it to \\' . NoSessionPolicy::class . ' for no credential cap.'];
         yield 'an empty source' => [['source' => ''], $source, 'expected a class-string, got string.'];
         yield 'a source that is not a string' => [['source' => 42], $source, 'expected a class-string, got int.'];
@@ -113,6 +122,11 @@ final class SessionConfigValidatorTest extends TestCase
             ['scopes' => ['editor' => ['posts:create', 'users:*']]],
             $scopes,
             'the scope \'editor\' names \'users:*\', which covers no declared permission.',
+        ];
+        yield 'a second scope covering nothing' => [
+            ['scopes' => ['editor' => ['posts:create'], 'admin' => ['users:*']]],
+            $scopes,
+            'the scope \'admin\' names \'users:*\', which covers no declared permission.',
         ];
         yield 'a listed scope covering nothing' => [['scopes' => ['posts:read']], $scopes, 'the scope \'posts:read\' names \'posts:read\', which covers no declared permission.'];
     }

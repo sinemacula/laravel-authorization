@@ -22,17 +22,19 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 final class BulkConfigValidatorTest extends TestCase
 {
     /**
-     * An empty block, one leaving the chunk size null and a whole chunk size of
-     * at least 1 are accepted.
+     * An empty block, whose chunk size takes its default, and a whole chunk
+     * size of at least 1, written as an int or as the environment gives a whole
+     * number, are accepted.
      *
      * @return void
      */
     public function testAWholeChunkSizeIsAccepted(): void
     {
         BulkConfigValidator::validate([]);
-        BulkConfigValidator::validate(['chunk_size' => null]);
         BulkConfigValidator::validate(['chunk_size' => 1]);
         BulkConfigValidator::validate(['chunk_size' => 500]);
+        BulkConfigValidator::validate(['chunk_size' => '1']);
+        BulkConfigValidator::validate(['chunk_size' => '500']);
 
         self::assertSame(['chunk_size'], BulkConfigValidator::KEYS);
         self::assertSame('authorization.bulk', BulkConfigValidator::KEY);
@@ -49,11 +51,19 @@ final class BulkConfigValidatorTest extends TestCase
 
         yield 'not an array' => ['500', 'authorization.bulk', 'expected an array, got \'500\' (string).'];
         yield 'an object' => [new \stdClass, 'authorization.bulk', 'expected an array, got \'stdClass\' (stdClass).'];
-        yield 'an unknown key' => [['size' => 4], 'authorization.bulk', 'unknown key \'size\'; expected one of chunk_size.'];
-        yield 'an unknown key after a known one' => [['chunk_size' => 1, 'size' => 4], 'authorization.bulk', 'unknown key \'size\'; expected one of chunk_size.'];
+        yield 'null' => [null, 'authorization.bulk', 'expected an array, got \'null\' (null).'];
+        yield 'an unknown key' => [['size' => 4], 'authorization.bulk.size', 'unknown key \'size\'; expected one of chunk_size.'];
+        yield 'an unknown key after a known one' => [['chunk_size' => 1, 'size' => 4], 'authorization.bulk.size', 'unknown key \'size\'; expected one of chunk_size.'];
         yield 'zero' => [['chunk_size' => 0], 'authorization.bulk.chunk_size', $whole . '0 (int).'];
+        yield 'zero as a string' => [['chunk_size' => '0'], 'authorization.bulk.chunk_size', $whole . '\'0\' (string).'];
         yield 'negative' => [['chunk_size' => -1], 'authorization.bulk.chunk_size', $whole . '-1 (int).'];
-        yield 'a string' => [['chunk_size' => '500'], 'authorization.bulk.chunk_size', $whole . '\'500\' (string).'];
+        yield 'a null chunk size' => [['chunk_size' => null], 'authorization.bulk.chunk_size', $whole . '\'null\' (null).'];
+        yield 'a string not a whole number' => [['chunk_size' => '12abc'], 'authorization.bulk.chunk_size', $whole . '\'12abc\' (string).'];
+        yield 'an exponent' => [['chunk_size' => '1e3'], 'authorization.bulk.chunk_size', $whole . '\'1e3\' (string).'];
+        yield 'a padded string' => [['chunk_size' => ' 5'], 'authorization.bulk.chunk_size', $whole . '\' 5\' (string).'];
+        yield 'a decimal string' => [['chunk_size' => '5.0'], 'authorization.bulk.chunk_size', $whole . '\'5.0\' (string).'];
+        yield 'an empty string' => [['chunk_size' => ''], 'authorization.bulk.chunk_size', $whole . '\'\' (string).'];
+        yield 'a boolean' => [['chunk_size' => true], 'authorization.bulk.chunk_size', $whole . 'true (bool).'];
         yield 'a float' => [['chunk_size' => 1.5], 'authorization.bulk.chunk_size', $whole . '1.5 (float).'];
         yield 'a list' => [['chunk_size' => [1]], 'authorization.bulk.chunk_size', $whole . '\'array\' (array).'];
     }

@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
@@ -272,7 +273,6 @@ final class RolePolicies
      */
     private static function table(): string
     {
-        /** @var string */
-        return config('authorization.tables.authorizable_policies', 'authorizable_policies');
+        return TableNames::get('authorizable_policies');
     }
 }

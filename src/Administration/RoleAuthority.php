@@ -4,15 +4,14 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Administration;
 
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Evaluation\StatementValidator;
-use SineMacula\Laravel\Authorization\Models\Permission;
-use SineMacula\Laravel\Authorization\Models\Policy;
-use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
@@ -195,10 +194,9 @@ final readonly class RoleAuthority
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
-        $class = config('authorization.models.permission', Permission::class);
+        $class = ModelClasses::get('permission');
 
-        /** @var string $pivot */
-        $pivot = config('authorization.tables.role_permissions', 'role_permissions');
+        $pivot = TableNames::get('role_permissions');
         $model = new $class;
         $query = $class::query()->withoutGlobalScopes()->useWritePdo()
             ->join($pivot, $pivot . '.permission_id', '=', $model->getQualifiedKeyName())
@@ -224,13 +222,12 @@ final readonly class RoleAuthority
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roles */
-        $roles = config('authorization.models.role', Role::class);
+        $roles = ModelClasses::get('role');
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
+        $class = ModelClasses::get('policy');
 
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_policies', 'authorizable_policies');
+        $table = TableNames::get('authorizable_policies');
         $query = AuthorizationConnection::connection()->table($table)->useWritePdo()
             ->where($table . '.authorizable_type', (new $roles)->getMorphClass())
             ->whereIn($table . '.authorizable_id', $chain);
@@ -265,12 +262,11 @@ final readonly class RoleAuthority
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class     = config('authorization.models.policy', Policy::class);
+        $class     = ModelClasses::get('policy');
         $selectors = \array_map(static fn (string $key): string => StatementValidator::ROLE_SELECTOR . ':' . $key, $chain);
         $selecting = [];
 
-        /** @var string $table */
-        $table = config('authorization.tables.policies', 'policies');
+        $table = TableNames::get('policies');
 
         OperationScope::pins()?->lock(DependencyPhase::HOLDERS, AuthorizationConnection::connection()->table($table)->whereIn('id', $keys));
 
@@ -305,8 +301,7 @@ final readonly class RoleAuthority
      */
     private static function resourcePoliciesIn(GrantScope $reach): ?array
     {
-        /** @var string $table */
-        $table = config('authorization.tables.resource_policies', 'resource_policies');
+        $table = TableNames::get('resource_policies');
         $limit = AffectedHolders::limit();
 
         try {

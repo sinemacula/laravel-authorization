@@ -8,13 +8,31 @@ use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Foundation\Application as ApplicationContract;
 use Illuminate\Foundation\Application;
+use Illuminate\Support\Arr;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
+use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
+use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
 use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
 use SineMacula\Laravel\Authorization\Registrars\SeamBindings;
+use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
+use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
+use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
+use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use Tests\Feature\Stubs\DeferredBindingProvider;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Fixtures\GrantHooks\RecordingGrantHook;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
 use Tests\TestCase;
@@ -29,16 +47,33 @@ use Tests\TestCase;
  * Each test binds the grant hook contract in an application of its own, which
  * knows only the configuration it is given.
  *
+ * A seam setting read while the package registers, before the configuration is
+ * validated, that names no class implementing the contract binds the package's
+ * default as though nothing were configured, so registering never fails and
+ * leaves the bindings as nothing configured would, and the boot refuses the
+ * setting, naming it.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
  */
 #[CoversClass(SeamBindings::class)]
+#[CoversClass(AuthorizationServiceProvider::class)]
 final class SeamBindingsTest extends TestCase
 {
     /** @var string The package-owned key that holds the grant hook's default. */
     private const string DEFAULT = 'authorization.default:' . GrantHook::class;
+
+    /** @var array<class-string, class-string> The class each seam's package-owned key builds when nothing is configured. */
+    private const array DEFAULTS = [
+        SubjectResolver::class                  => AuthGuardSubjectResolver::class,
+        TenantTree::class                       => FlatTenantTree::class,
+        IdentityDirectory::class                => GuardUserIdentityDirectory::class,
+        ResourceTenantResolver::class           => NoResourceTenant::class,
+        AuthenticationRequirementChecker::class => RefusingRequirementChecker::class,
+        SessionPolicySource::class              => NoSessionPolicy::class,
+    ];
 
     /**
      * Forget the deferred bindings and restore the suite's application as the
@@ -335,6 +370,271 @@ final class SeamBindingsTest extends TestCase
         self::seams($app)->bindGrantHooks();
 
         self::assertInstanceOf(ListedGrantHooks::class, $app->make(GrantHook::class));
+    }
+
+    /**
+     * The class a configuration key names is returned when it exists and
+     * implements the contract; for anything else the default is, null among the
+     * defaults.
+     *
+     * @return void
+     */
+    public function testTheConfiguredClassIsOnlyOneImplementingTheContract(): void
+    {
+        foreach ([null, 42, '', [RefusingGrantHook::class], 'App\Missing\Hook', \stdClass::class, GrantHook::class] as $value) {
+            $seams = self::seams(self::application(['hook' => $value]));
+
+            self::assertSame(RecordingGrantHook::class, $seams->configuredClass('authorization.hook', GrantHook::class, RecordingGrantHook::class));
+            self::assertNull($seams->configuredClass('authorization.hook', GrantHook::class, null));
+        }
+
+        $seams = self::seams(self::application(['hook' => RefusingGrantHook::class]));
+
+        self::assertSame(RefusingGrantHook::class, $seams->configuredClass('authorization.hook', GrantHook::class, RecordingGrantHook::class));
+        self::assertSame(RecordingGrantHook::class, self::seams(self::application())->configuredClass('authorization.hook', GrantHook::class, RecordingGrantHook::class));
+    }
+
+    /**
+     * Provide every seam the configuration names a class for while the package
+     * registers, with a value naming no class implementing its contract.
+     *
+     * @return iterable<string, array{class-string, string, mixed}>
+     */
+    public static function malformedSeamProvider(): iterable
+    {
+        $seams = [
+            SubjectResolver::class                  => 'subject_resolver',
+            TenantTree::class                       => 'tenant_tree',
+            IdentityDirectory::class                => 'identity_directory',
+            ResourceTenantResolver::class           => 'resource_tenant_resolver',
+            AuthenticationRequirementChecker::class => 'requirement_checker',
+            SessionPolicySource::class              => 'session.source',
+            PolicyStore::class                      => 'policy_store',
+        ];
+
+        $values = ['null' => null, 'an int' => 42, 'an empty string' => '', 'an array' => ['App\Seam'], 'no class' => 'App\Missing\Seam', 'another class' => \stdClass::class];
+
+        foreach ($seams as $contract => $key) {
+            foreach ($values as $name => $value) {
+                if ($contract === PolicyStore::class && $value === null) {
+                    continue;
+                }
+
+                yield "{$key} as {$name}" => [$contract, $key, $value];
+            }
+        }
+    }
+
+    /**
+     * Registering with a malformed seam setting does not fail, and binds the
+     * package's default as when nothing is configured: the contract resolves
+     * through the package's own closure, which a sibling package replaces, and
+     * a policy store is not bound at all.
+     *
+     * @param  class-string  $contract
+     * @param  string  $key
+     * @param  mixed  $value
+     * @return void
+     */
+    #[DataProvider('malformedSeamProvider')]
+    public function testAMalformedSeamBindsTheDefault(string $contract, string $key, mixed $value): void
+    {
+        $app = self::registered(self::malformed($key, $value));
+
+        if ($contract === PolicyStore::class) {
+            self::assertFalse($app->bound(PolicyStore::class));
+
+            return;
+        }
+
+        self::assertTrue(AuthorizationServiceProvider::isPackageDefault($app, $contract));
+        self::assertSame(self::DEFAULTS[$contract], self::defaultClassOf($app, $contract));
+    }
+
+    /**
+     * A binding a sibling package made before the package registered stands
+     * over a malformed seam setting, as it does over no setting, and one made
+     * after replaces the default.
+     *
+     * @param  class-string  $contract
+     * @param  string  $key
+     * @param  mixed  $value
+     * @return void
+     */
+    #[DataProvider('malformedSeamProvider')]
+    public function testASiblingsBindingStandsInEitherOrder(string $contract, string $key, mixed $value): void
+    {
+        $before  = self::application(self::malformed($key, $value));
+        $earlier = self::createStub($contract);
+
+        $before->instance($contract, $earlier);
+
+        (new AuthorizationServiceProvider($before))->register();
+
+        self::assertSame($earlier, $before->make($contract));
+
+        $after = self::registered(self::malformed($key, $value));
+        $later = self::createStub($contract);
+
+        $after->instance($contract, $later);
+
+        self::assertSame($later, $after->make($contract));
+    }
+
+    /**
+     * A deferred provider of the contract stays deferred over a malformed seam
+     * setting, and its binding stands once the contract is resolved.
+     *
+     * @param  class-string  $contract
+     * @param  string  $key
+     * @param  mixed  $value
+     * @return void
+     */
+    #[DataProvider('malformedSeamProvider')]
+    public function testADeferredProviderStaysDeferred(string $contract, string $key, mixed $value): void
+    {
+        $app   = self::application(self::malformed($key, $value));
+        $bound = self::createStub($contract);
+
+        DeferredBindingProvider::$objects = [$contract => $bound];
+
+        $app->addDeferredServices([$contract => DeferredBindingProvider::class]);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        self::assertFalse($app->providerIsLoaded(DeferredBindingProvider::class));
+        self::assertSame($bound, $app->make($contract));
+    }
+
+    /**
+     * A binding already resolved before the package registers is neither
+     * replaced nor rebound over a malformed seam setting.
+     *
+     * @param  class-string  $contract
+     * @param  string  $key
+     * @param  mixed  $value
+     * @return void
+     */
+    #[DataProvider('malformedSeamProvider')]
+    public function testAnAlreadyResolvedBindingIsLeftAlone(string $contract, string $key, mixed $value): void
+    {
+        $app      = self::application(self::malformed($key, $value));
+        $resolved = self::createStub($contract);
+        $rebound  = new \ArrayObject;
+
+        $app->singleton($contract, static fn (): object => $resolved);
+        $app->make($contract);
+        $app->rebinding($contract, static function () use ($rebound): void {
+            $rebound->append(true);
+        });
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        self::assertSame($resolved, $app->make($contract));
+        self::assertCount(0, $rebound);
+    }
+
+    /**
+     * The boot refuses a malformed seam setting, naming its path.
+     *
+     * @param  class-string  $contract
+     * @param  string  $key
+     * @param  mixed  $value
+     * @return void
+     */
+    #[DataProvider('malformedSeamProvider')]
+    public function testTheBootRefusesAMalformedSeam(string $contract, string $key, mixed $value): void
+    {
+        $config = $this->authorizationConfig();
+
+        Arr::set($config, $key, $value);
+
+        try {
+            ConfigValidator::validate($config, $this->container());
+
+            self::fail("A malformed {$contract} was accepted.");
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame("authorization.{$key}", $exception->getConfigKey());
+        }
+    }
+
+    /**
+     * Registering with grant hooks that are not a list extends nothing, and the
+     * boot refuses them, naming the setting.
+     *
+     * @return void
+     */
+    public function testMalformedGrantHooksExtendNothing(): void
+    {
+        foreach ([null, RecordingGrantHook::class, 5] as $hooks) {
+            $app = self::registered(['grant_hooks' => $hooks]);
+
+            self::assertInstanceOf(GrantHooks::class, $app->make(GrantHook::class));
+
+            $config                = $this->authorizationConfig();
+            $config['grant_hooks'] = $hooks;
+
+            try {
+                ConfigValidator::validate($config, $this->container());
+
+                self::fail('Malformed grant hooks were accepted.');
+            } catch (InvalidAuthorizationConfigException $exception) {
+                self::assertSame('authorization.grant_hooks', $exception->getConfigKey());
+            }
+        }
+    }
+
+    /**
+     * Return the authorization configuration setting the seam's key to the
+     * value, its subject resolver the stub, so nothing else resolves the
+     * application's guard.
+     *
+     * @param  string  $key
+     * @param  mixed  $value
+     * @return array<string, mixed>
+     */
+    private static function malformed(string $key, mixed $value): array
+    {
+        $authorization = ['subject_resolver' => StubSubjectResolver::class];
+
+        Arr::set($authorization, $key, $value);
+
+        return $authorization;
+    }
+
+    /**
+     * Return a new application holding the authorization configuration given,
+     * the package registered in it.
+     *
+     * @param  array<string, mixed>  $authorization
+     * @return \Illuminate\Foundation\Application
+     */
+    private static function registered(array $authorization): Application
+    {
+        $app = self::application($authorization);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        return $app;
+    }
+
+    /**
+     * Return the class the package-owned key of the contract builds, as the
+     * binding holds it, without building it.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @param  class-string  $contract
+     * @return mixed
+     */
+    private static function defaultClassOf(Application $app, string $contract): mixed
+    {
+        $concrete = $app->getBindings()["authorization.default:{$contract}"]['concrete'] ?? null;
+
+        self::assertInstanceOf(\Closure::class, $concrete);
+
+        $variables = (new \ReflectionFunction($concrete))->getClosureUsedVariables();
+
+        return $variables['concrete'] ?? $variables['class'] ?? null;
     }
 
     /**

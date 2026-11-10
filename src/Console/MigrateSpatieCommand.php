@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -201,17 +202,8 @@ final class MigrateSpatieCommand extends Command
     {
         $schema = $this->target()->getSchemaBuilder();
 
-        $targets = [
-            'authorization.tables.roles'                    => 'roles',
-            'authorization.tables.permissions'              => 'permissions',
-            'authorization.tables.role_permissions'         => 'role_permissions',
-            'authorization.tables.authorizable_roles'       => 'authorizable_roles',
-            'authorization.tables.authorizable_permissions' => 'authorizable_permissions',
-        ];
-
-        foreach ($targets as $configKey => $default) {
-            /** @var string $table */
-            $table = config($configKey, $default);
+        foreach (['roles', 'permissions', 'role_permissions', 'authorizable_roles', 'authorizable_permissions'] as $key) {
+            $table = TableNames::get($key);
 
             if (!$schema->hasTable($table)) {
                 $this->error("Target table '{$table}' does not exist. Run the package migrations first.");

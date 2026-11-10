@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -47,8 +48,9 @@ final class ConflictRetriesTest extends TestCase
     use UsesAnAuthorizationConnection;
 
     /**
-     * The retries are those configured, 2 when none is, and the default for
-     * anything but a whole number of at least 0.
+     * The retries are those configured, written as an int or as the environment
+     * gives a whole number, 2 when none is, and anything but a whole number of
+     * at least 0 is refused, never read as the default.
      *
      * @return void
      */
@@ -57,10 +59,22 @@ final class ConflictRetriesTest extends TestCase
         self::assertSame(2, ConflictRetries::DEFAULT_RETRIES);
         self::assertSame(2, ConflictRetries::retries());
 
-        foreach ([[0, 0], [5, 5], [-1, 2], ['3', 2], [1.0, 2], [null, 2]] as [$configured, $retries]) {
+        foreach ([[0, 0], [5, 5], ['3', 3], ['0', 0]] as [$configured, $retries]) {
             config(['authorization.administration.retries' => $configured]);
 
             self::assertSame($retries, ConflictRetries::retries(), \var_export($configured, true));
+        }
+
+        foreach ([-1, '3abc', '-1', 1.0, null] as $configured) {
+            config(['authorization.administration.retries' => $configured]);
+
+            try {
+                ConflictRetries::retries();
+
+                self::fail('The retries ' . \var_export($configured, true) . ' were not refused.');
+            } catch (InvalidAuthorizationConfigException $exception) {
+                self::assertSame('authorization.administration.retries', $exception->getConfigKey());
+            }
         }
     }
 

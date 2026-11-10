@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Administration\AffectedHolders;
 use SineMacula\Laravel\Authorization\Administration\DocumentComparison;
 use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -348,8 +349,9 @@ final class AffectedHoldersTest extends TestCase
 
     /**
      * The set holds at most `authorization.administration.max_impact` holders:
-     * one more puts it over its limit, as does one role more than it, and an
-     * unset or invalid limit is the default.
+     * one more puts it over its limit, as does one role more than it, a limit
+     * written as the environment gives a whole number is read as one, an unset
+     * limit is the default, and an invalid one is refused.
      *
      * @return void
      *
@@ -379,9 +381,13 @@ final class AffectedHoldersTest extends TestCase
 
         self::assertNull(AffectedHolders::none()->ofPermission($edit)->holders());
 
+        config(['authorization.administration.max_impact' => '2']);
+
+        self::assertNull(self::holdersOf($role));
+
         config(['authorization.administration.max_impact' => 'many']);
 
-        self::assertCount(3, self::holdersOf($role) ?? []);
+        self::assertInstanceOf(InvalidAuthorizationConfigException::class, self::refusalOf(static fn (): ?array => self::holdersOf($role)));
         self::assertSame(1000, AffectedHolders::DEFAULT_LIMIT);
     }
 
@@ -478,7 +484,7 @@ final class AffectedHoldersTest extends TestCase
      * At the edges of the limit: a limit of one holds one role, and no holder
      * at all, without being over; each read asks for one row more than the
      * limit, and a set over it reads nothing more; a limit that is no positive
-     * whole number is the default.
+     * whole number is refused, never read as the default.
      *
      * @return void
      *
@@ -527,8 +533,8 @@ final class AffectedHoldersTest extends TestCase
         foreach ([0, -1] as $limit) {
             config(['authorization.administration.max_impact' => $limit]);
 
-            self::assertSame(AffectedHolders::DEFAULT_LIMIT, AffectedHolders::limit());
-            self::assertCount(3, self::holdersOf($role) ?? []);
+            self::assertInstanceOf(InvalidAuthorizationConfigException::class, self::refusalOf(static fn (): int => AffectedHolders::limit()));
+            self::assertInstanceOf(InvalidAuthorizationConfigException::class, self::refusalOf(static fn (): ?array => self::holdersOf($role)));
         }
     }
 

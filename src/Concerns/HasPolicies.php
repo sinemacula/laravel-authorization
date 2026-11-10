@@ -10,6 +10,8 @@ use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
@@ -72,10 +74,9 @@ trait HasPolicies // @phpstan-ignore trait.unused
     public function policies(): MorphToMany
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $model */
-        $model = config('authorization.models.policy', Policy::class);
+        $model = ModelClasses::get('policy');
 
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_policies', 'authorizable_policies');
+        $table = TableNames::get('authorizable_policies');
 
         return $this->authorizationGrantRelation($model, $table, 'policy_id', AuthorizablePolicyPivot::class);
     }

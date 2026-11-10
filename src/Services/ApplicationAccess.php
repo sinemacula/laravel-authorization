@@ -6,6 +6,9 @@ namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Container\Container;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
@@ -16,7 +19,11 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * permission it maps to: the full decision is asked whether the principal holds
  * it, on that application, so a grant made for that application counts and one
  * made for another does not. An application the configuration does not name is
- * open to every principal, as `laravel-authentication`'s default admits.
+ * open to every principal, as `laravel-authentication`'s default admits. The
+ * configuration is read as it holds it now: a map that is not an array, or an
+ * entry for the application that is not a non-empty permission name, null among
+ * it, is refused with `InvalidAuthorizationConfigException`, never read as
+ * naming no permission, so a malformed entry never opens the application.
  *
  * Admission is decided without session caps, for people and machines alike
  * (N105): a principal being admitted holds no session yet, so the request's
@@ -47,6 +54,8 @@ final class ApplicationAccess
      * @param  object  $principal
      * @param  object|null  $tenant
      * @return bool
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public function mayUse(string $application, object $principal, ?object $tenant): bool
     {
@@ -63,17 +72,28 @@ final class ApplicationAccess
 
     /**
      * Return the permission the application requires, or null when the
-     * configuration names none for it.
+     * configuration does not name the application, refusing a map that is not
+     * an array and an entry that is not a non-empty string.
      *
      * @param  string  $application
      * @return string|null
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     private static function permissionFor(string $application): ?string
     {
-        /** @var array<string, string> $permissions */
-        $permissions = config('authorization.application_access', []);
+        $permissions = ConfigValue::block('application_access');
 
-        return $permissions[$application] ?? null;
+        if (!\array_key_exists($application, $permissions)) {
+            return null;
+        }
+
+        $permission = $permissions[$application];
+        $reason     = 'expected a non-empty permission name, got ' . ConfigValidator::describe($permission) . '.';
+
+        return \is_string($permission) && $permission !== ''
+            ? $permission
+            : throw new InvalidAuthorizationConfigException("authorization.application_access.{$application}", $reason);
     }
 
     /**

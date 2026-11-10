@@ -6,6 +6,8 @@ namespace SineMacula\Laravel\Authorization\Administration;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -332,7 +334,7 @@ final class AuthorityRows
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class = config('authorization.models.role', Role::class);
+        $class = ModelClasses::get('role');
         $chain = self::sorted(\array_keys(RoleGraph::reach(self::sorted($this->roles))));
         $type  = (new $class)->getMorphClass();
 
@@ -389,8 +391,7 @@ final class AuthorityRows
      */
     private static function table(string $key): Builder
     {
-        /** @var string $table */
-        $table = config('authorization.tables.' . $key, $key);
+        $table = TableNames::get($key);
 
         return AuthorizationConnection::connection()->table($table);
     }

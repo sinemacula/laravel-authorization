@@ -59,11 +59,12 @@ action through the one decision path rather than computing allows less denies, a
    boundary (see `bulk-checks.md`). State may change between rendering and the request, so the server still authorizes
    every action when it is taken.
 
-9. **The catalogue.** The catalogue is read from code on each call and touches no database. An entry of
-   `authorization.permission_enums` the boot validation would refuse is skipped, since the configuration is read after
-   boot; a definition the catalogue refuses (an invalid name, an empty guard, a name declared twice for a guard with
-   different metadata, a provider returning something else) throws `InvalidPermissionCatalogueException`, so nothing
-   is listed. A provider that throws makes the listing throw what it throws.
+9. **The catalogue.** The catalogue is read from code on each call and touches no database. The configuration is read
+   after boot, so an entry of `authorization.permission_enums` or `authorization.permission_providers` the boot
+   validation would refuse is refused with `InvalidAuthorizationConfigException` when the catalogue is read, and nothing
+   is listed; a definition the catalogue refuses (an invalid name, an empty guard, a name declared twice for a guard
+   with different metadata, a provider returning something else) throws `InvalidPermissionCatalogueException`, so
+   nothing is listed. A provider that throws makes the listing throw what it throws.
 
 ## Success Path
 
@@ -96,7 +97,8 @@ request recorded before.
   reference's attributes kept until its last check.
 - `Context\ResourceAttributeBatch` -- one item per shared reference, its bulk or single answer kept for every check.
 - `Cache\ResolutionMemo::aside()` -- the request's memo set aside and put back around another scope.
-- `Support\PermissionCatalogue::definitions()` -- the actions, and the bad enum entries skipped.
+- `Support\PermissionCatalogue::definitions()` -- the actions, refusing a malformed enum or provider list with
+  `InvalidAuthorizationConfigException`.
 - `Concerns\HasPermissions::permissionsFor()` and the facade's docblock -- the delegates.
 
 ## Authoritative Tests

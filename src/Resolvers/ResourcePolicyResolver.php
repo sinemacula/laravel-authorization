@@ -10,6 +10,8 @@ use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
@@ -180,10 +182,9 @@ final readonly class ResourcePolicyResolver
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
+        $class = ModelClasses::get('policy');
 
-        /** @var string $table */
-        $table = config('authorization.tables.resource_policies', 'resource_policies');
+        $table = TableNames::get('resource_policies');
 
         $model    = new $class;
         $policies = $class::query()->withoutGlobalScopes()->useWritePdo()
@@ -233,10 +234,9 @@ final readonly class ResourcePolicyResolver
         $pins->resourcePolicies($type);
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
+        $class = ModelClasses::get('policy');
 
-        /** @var string $table */
-        $table = config('authorization.tables.resource_policies', 'resource_policies');
+        $table = TableNames::get('resource_policies');
 
         $model = new $class;
         $query = $class::query()->withoutGlobalScopes()->useWritePdo()
@@ -280,10 +280,9 @@ final readonly class ResourcePolicyResolver
         $pins->resourcePolicies($type);
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
+        $class = ModelClasses::get('policy');
 
-        /** @var string $table */
-        $table = config('authorization.tables.resource_policies', 'resource_policies');
+        $table = TableNames::get('resource_policies');
 
         $model = new $class;
 

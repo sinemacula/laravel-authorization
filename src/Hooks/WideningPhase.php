@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Hooks;
 use Illuminate\Container\Container;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Administration\OperationGrantee;
+use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
@@ -238,7 +239,7 @@ final readonly class WideningPhase
             throw new \UnexpectedValueException('The grant hook bound on ' . GrantHook::class . ' resolves to ' . \get_debug_type($hook) . ', which does not implement it.');
         }
 
-        if (config('authorization.grant_hooks', []) !== []) {
+        if (ConfigValue::get('grant_hooks', []) !== []) {
             $hook = ListedGrantHooks::wrap($hook, $container);
         }
 

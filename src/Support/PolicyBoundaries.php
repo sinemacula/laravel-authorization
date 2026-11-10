@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Database\Query\Builder;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\BoundaryException;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -91,8 +92,7 @@ final class PolicyBoundaries
      */
     private static function query(Policy $policy): Builder
     {
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_boundaries', 'authorizable_boundaries');
+        $table = TableNames::get('authorizable_boundaries');
 
         return AuthorizationConnection::connection()->table($table)->useWritePdo()->where('policy_id', $policy->getKey());
     }

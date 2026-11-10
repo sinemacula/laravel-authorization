@@ -7,6 +7,9 @@ namespace SineMacula\Laravel\Authorization\Administration;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
@@ -15,7 +18,6 @@ use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
-use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
@@ -240,8 +242,7 @@ final class HeldLifetime
      */
     private static function chains(array $roles): array
     {
-        /** @var bool $hierarchy */
-        $hierarchy = config('authorization.hierarchy.enabled', true);
+        $hierarchy = SwitchConfigValidator::isEnabled('hierarchy');
         $ancestors = $hierarchy ? RoleGraph::ancestorsOf($roles) : [];
         $chains    = [];
 
@@ -264,10 +265,9 @@ final class HeldLifetime
     private static function carried(array $roles, array $permissions): array
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
-        $class = config('authorization.models.permission', Permission::class);
+        $class = ModelClasses::get('permission');
 
-        /** @var string $pivot */
-        $pivot = config('authorization.tables.role_permissions', 'role_permissions');
+        $pivot = TableNames::get('role_permissions');
         $model = new $class;
         $query = $class::query()->useWritePdo()->join($pivot, $pivot . '.permission_id', '=', $model->getQualifiedKeyName())->whereIn($pivot . '.role_id', $roles);
 
@@ -304,10 +304,9 @@ final class HeldLifetime
     private static function attachedToRoles(array $roles, string $policy): array
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class = config('authorization.models.role', Role::class);
+        $class = ModelClasses::get('role');
 
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_policies', 'authorizable_policies');
+        $table = TableNames::get('authorizable_policies');
         $query = AuthorizationConnection::connection()->table($table)->useWritePdo()
             ->where($table . '.authorizable_type', (new $class)->getMorphClass())
             ->whereIn($table . '.authorizable_id', $roles)

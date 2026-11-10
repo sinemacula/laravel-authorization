@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
@@ -103,7 +104,8 @@ final class ScopeClassesTest extends TestCase
     }
 
     /**
-     * More anchors or more classes than allowed are refused, naming the limit.
+     * More anchors or more classes than allowed are refused, naming the limit,
+     * a limit written as the environment gives a whole number included.
      *
      * @return void
      */
@@ -118,7 +120,7 @@ final class ScopeClassesTest extends TestCase
 
         $manager = $this->resolveRequest($user, $tenants['o1']);
 
-        $config?->set('authorization.query_scoping.max_scopes', 4);
+        $config?->set('authorization.query_scoping.max_scopes', '4');
 
         self::assertSame('authorization.query_scoping.max_scopes', self::refusal($manager)->refusals[0]->key);
 
@@ -398,8 +400,8 @@ final class ScopeClassesTest extends TestCase
      * request makes two, its own and none; a platform-wide grant with no active
      * tenant makes one for each tenant a row admitted from outside reads, and
      * one for the rows of no such tenant. The limits hold at their boundaries,
-     * and one not set to a whole number takes its default: at most 16 classes
-     * and 64 anchors.
+     * one not set takes its default, at most 16 classes and 64 anchors, and one
+     * that is not a whole number of at least one is refused.
      *
      * @return void
      *
@@ -441,7 +443,19 @@ final class ScopeClassesTest extends TestCase
 
         self::assertSame('authorization.query_scoping.max_scopes', self::refusal($platform)->refusals[0]->key);
 
-        $config->set('authorization.query_scoping', ['max_scopes' => 'many', 'max_anchors' => 'many']);
+        foreach (['max_scopes', 'max_anchors'] as $limit) {
+            $config->set('authorization.query_scoping', [$limit => 'many']);
+
+            try {
+                self::classes($platform, new TenantScopedPost);
+
+                self::fail("The limit {$limit} was not refused.");
+            } catch (InvalidAuthorizationConfigException $exception) {
+                self::assertSame("authorization.query_scoping.{$limit}", $exception->getConfigKey());
+            }
+        }
+
+        $config->set('authorization.query_scoping', []);
 
         $rails = \array_map(static fn (int $index): string => "t{$index}", \range(1, 63));
 
@@ -551,6 +565,9 @@ final class ScopeClassesTest extends TestCase
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @param  string  $action
      * @return list<\SineMacula\Laravel\Authorization\Query\ScopeClass>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException
      */
     private static function classes(AuthorizationManager $manager, Model $model, string $action = 'posts:view'): array
     {

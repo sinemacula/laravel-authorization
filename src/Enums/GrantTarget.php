@@ -5,6 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Enums;
 
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Config\DefaultGuard;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
@@ -62,8 +65,7 @@ enum GrantTarget: string
     {
         $default = 'authorizable_' . $this->relation();
 
-        /** @var string */
-        return config('authorization.tables.' . $default, $default);
+        return TableNames::get($default);
     }
 
     /**
@@ -157,10 +159,7 @@ enum GrantTarget: string
             throw new InvalidGrantTargetException($this->value, $name);
         }
 
-        /** @var string $default */
-        $default = config('authorization.defaults.guard', 'web');
-
-        $models = GuardScopedLookup::allForGuard($this->modelClass(), $name, $guard ?? $default, $tenant);
+        $models = GuardScopedLookup::allForGuard($this->modelClass(), $name, $guard ?? DefaultGuard::get(), $tenant);
 
         if ($models === [] && $this === self::PERMISSION) {
             throw new UnknownPermissionException($name);
@@ -414,7 +413,7 @@ enum GrantTarget: string
     private function modelClass(): string
     {
         /** @var class-string<\Illuminate\Database\Eloquent\Model> */
-        return config('authorization.models.' . $this->value, $this->baseClass());
+        return ModelClasses::get($this->value);
     }
 
     /**
