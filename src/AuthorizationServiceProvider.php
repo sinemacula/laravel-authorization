@@ -193,6 +193,26 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
+     * Determine whether the contract is bound to the package's own default,
+     * rather than to a binding an application or a sibling package made.
+     *
+     * A sibling that registers after the package uses this to replace the
+     * package's default with its own adapter, while leaving standing a binding
+     * the application made before the sibling registered. An unbound contract,
+     * an instance and any binding the package did not make answer false.
+     *
+     * @param  \Illuminate\Container\Container  $container
+     * @param  string  $contract
+     * @return bool
+     */
+    public static function isPackageDefault(Container $container, string $contract): bool
+    {
+        $concrete = $container->getBindings()[$contract]['concrete'] ?? null;
+
+        return $concrete instanceof \Closure && (new \ReflectionFunction($concrete))->getClosureScopeClass()?->getName() === self::class;
+    }
+
+    /**
      * Fail fast on a malformed `authorization` config. Runs before any binding
      * is resolved so a typo surfaces as a clear typed exception rather than a
      * deep stack trace from the first `can()` call in production.

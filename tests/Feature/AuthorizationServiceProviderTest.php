@@ -1936,6 +1936,36 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
+     * isPackageDefault() is true only while the contract holds the package's
+     * own default: a class the application configured, a binding made
+     * afterwards, an instance, an unbound contract and a closure no class
+     * declares all answer false.
+     *
+     * @return void
+     */
+    public function testIsPackageDefaultTellsThePackagesDefaultFromAnyOtherBinding(): void
+    {
+        $app = $this->app;
+
+        self::assertInstanceOf(Container::class, $app);
+        self::assertTrue(AuthorizationServiceProvider::isPackageDefault($app, TenantTree::class));
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, SubjectResolver::class), 'A configured class is not the default.');
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, 'authorization.nothing-bound-here'));
+
+        $app->bind(TenantTree::class, StubTenantTree::class);
+
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, TenantTree::class));
+
+        $app->instance(TenantTree::class, new StubTenantTree);
+
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, TenantTree::class));
+
+        $app->bind(TenantTree::class, \Closure::bind(static fn (): StubTenantTree => new StubTenantTree, null, null));
+
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, TenantTree::class));
+    }
+
+    /**
      * Seed two tenants, a platform role, a temporary platform role, one role
      * owned by each tenant, and one identity holding every role but the plain
      * platform one. The temporary grant expires at 12:05.

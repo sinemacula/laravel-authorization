@@ -109,17 +109,20 @@ final readonly class SeamBindings
     public function bindDefault(string $contract, \Closure|string $concrete, bool $configured = false): void
     {
         $default = self::DEFAULT_BINDING_PREFIX . $contract;
-        $resolve = ($this->resolving)($default);
 
         $this->app->scoped($default, $concrete);
 
         if (!$configured) {
-            $this->app->bindIf($contract, $resolve);
+            $this->app->bindIf($contract, ($this->resolving)($default));
 
             return;
         }
 
-        $this->bindOverEarlierBindings($contract, $resolve);
+        // The application's own choice is bound through a closure this class
+        // declares, not the provider, so neither the provider's
+        // isPackageDefault() nor a sibling reading the binding table takes it
+        // for the package's default and replaces it.
+        $this->bindOverEarlierBindings($contract, static fn (Application $app): mixed => $app->make($default));
     }
 
     /**

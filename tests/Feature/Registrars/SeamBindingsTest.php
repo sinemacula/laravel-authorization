@@ -80,28 +80,14 @@ final class SeamBindingsTest extends TestCase
     }
 
     /**
-     * Provide whether the binding is of a configured class, and whether the
-     * deferred provider is then loaded as the package registers.
+     * The default is bound through the closure the closure handed to the
+     * registrar builds for the default's key, so the class that declares it,
+     * the service provider in the package, is what a sibling package reads off
+     * the binding table.
      *
-     * @return iterable<string, array{bool}>
-     */
-    public static function configuredProvider(): iterable
-    {
-        yield 'a configured class' => [true];
-        yield 'the default' => [false];
-    }
-
-    /**
-     * The contract is bound to the closure the closure handed to the registrar
-     * builds for the default's key, so the class that declares it, the service
-     * provider in the package, is what a sibling package reads off the binding
-     * table, whether the class is the default or a configured one.
-     *
-     * @param  bool  $configured
      * @return void
      */
-    #[DataProvider('configuredProvider')]
-    public function testTheContractIsBoundToTheClosureTheRegistrarIsHanded(bool $configured): void
+    public function testTheDefaultIsBoundToTheClosureTheRegistrarIsHanded(): void
     {
         $app   = self::application();
         $built = [];
@@ -110,10 +96,36 @@ final class SeamBindingsTest extends TestCase
             return $built[$key] = static fn (ApplicationContract $app): mixed => $app->make($key);
         };
 
-        (new SeamBindings($app, $resolving))->bindDefault(GrantHook::class, RecordingGrantHook::class, $configured);
+        (new SeamBindings($app, $resolving))->bindDefault(GrantHook::class, RecordingGrantHook::class);
 
         self::assertSame([self::DEFAULT], \array_keys($built));
         self::assertSame($built[self::DEFAULT], $app->getBindings()[GrantHook::class]['concrete']);
+        self::assertInstanceOf(RecordingGrantHook::class, $app->make(GrantHook::class));
+    }
+
+    /**
+     * A configured class is bound through a closure the registrar declares
+     * itself, never the one it is handed, so neither the provider nor a sibling
+     * package takes the application's choice for the package's default and
+     * replaces it.
+     *
+     * @return void
+     */
+    public function testAConfiguredClassIsNotBoundToTheClosureTheRegistrarIsHanded(): void
+    {
+        $app   = self::application();
+        $built = [];
+
+        $resolving = static function (string $key) use (&$built): \Closure {
+            return $built[$key] = static fn (ApplicationContract $app): mixed => $app->make($key);
+        };
+
+        (new SeamBindings($app, $resolving))->bindDefault(GrantHook::class, RecordingGrantHook::class, true);
+
+        $concrete = $app->getBindings()[GrantHook::class]['concrete'];
+
+        self::assertSame([], $built);
+        self::assertSame(SeamBindings::class, (new \ReflectionFunction($concrete))->getClosureScopeClass()?->getName());
         self::assertInstanceOf(RecordingGrantHook::class, $app->make(GrantHook::class));
     }
 
@@ -161,6 +173,18 @@ final class SeamBindingsTest extends TestCase
         $app->instance(GrantHook::class, $later);
 
         self::assertSame($later, $app->make(GrantHook::class));
+    }
+
+    /**
+     * Provide whether the binding is of a configured class, and whether the
+     * deferred provider is then loaded as the package registers.
+     *
+     * @return iterable<string, array{bool}>
+     */
+    public static function configuredProvider(): iterable
+    {
+        yield 'a configured class' => [true];
+        yield 'the default' => [false];
     }
 
     /**

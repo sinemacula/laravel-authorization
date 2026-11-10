@@ -18,6 +18,7 @@ use Tests\Feature\Stubs\SiblingSeamsProvider;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubSessionPolicySource;
 use Tests\Feature\Stubs\StubSubjectResolver;
+use Tests\Feature\Stubs\SwitchableSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -80,6 +81,46 @@ final class SiblingSeamsTest extends TestCase
         $this->assertRegisteredInOrder($providers);
 
         self::assertNotNull($this->app?->make(ContextKeyCatalogue::class)->find(SiblingSeamsProvider::KEY));
+    }
+
+    /**
+     * A class the application names in the configuration stands over the
+     * sibling's adapter whichever registers first (N106): the package binds it
+     * through a closure its provider does not declare, so the sibling keeps it,
+     * and isPackageDefault() says it is not the package's default.
+     *
+     * @param  list<class-string<\Illuminate\Support\ServiceProvider>>  $providers
+     * @return void
+     */
+    #[DataProvider('orderProvider')]
+    public function testAConfiguredClassStandsOverTheSiblingInEitherOrder(array $providers): void
+    {
+        $this->assertRegisteredInOrder($providers);
+
+        self::assertInstanceOf(SwitchableSubjectResolver::class, $this->app?->make(SubjectResolver::class));
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($this->app, SubjectResolver::class));
+    }
+
+    /**
+     * Name a subject resolver in the configuration for the test that asks the
+     * application's choice to stand, before any provider registers.
+     *
+     * @param  mixed  $app
+     * @return void
+     */
+    #[\Override]
+    protected function resolveApplicationConfiguration(mixed $app): void
+    {
+        parent::resolveApplicationConfiguration($app);
+
+        if ($this->name() !== 'testAConfiguredClassStandsOverTheSiblingInEitherOrder') {
+            return;
+        }
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $app['config'];
+
+        $config->set('authorization.subject_resolver', SwitchableSubjectResolver::class);
     }
 
     /**

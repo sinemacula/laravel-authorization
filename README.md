@@ -250,6 +250,11 @@ order providers register in, bind it unconditionally. A binding of your own is k
 between queue jobs and Octane requests, while the package's defaults and configured classes, the context key catalogue
 aside, are built afresh for each.
 
+A sibling package that registers after this one and wants to replace only the package's default, never a binding the
+application made, asks `AuthorizationServiceProvider::isPackageDefault($app, $contract)`. It is true only while the
+contract holds the package's own default: a class your configuration names, an instance, any other binding and an
+unbound contract all answer false.
+
 List the enums whose cases are the application's permissions, and any permission providers; the Gate asks the package
 about every permission either declares:
 
