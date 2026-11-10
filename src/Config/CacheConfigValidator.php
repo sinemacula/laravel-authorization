@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Config;
 
 use Illuminate\Contracts\Container\Container;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
@@ -87,9 +88,13 @@ final class CacheConfigValidator
      */
     public static function prefix(mixed $prefix): string
     {
-        return \is_string($prefix) && $prefix !== ''
-            ? $prefix
-            : throw new InvalidAuthorizationConfigException(self::KEY . '.prefix', 'expected a non-empty string, got ' . ConfigValidator::describe($prefix) . '.');
+        if (\is_string($prefix) && $prefix !== '') {
+            return $prefix;
+        }
+
+        $reason = 'expected a non-empty string, got ' . ConfigValidator::describe($prefix) . '.';
+
+        throw new InvalidAuthorizationConfigException(self::KEY . '.prefix', $reason, IssueCode::INVALID_TYPE, 'a non-empty string', \get_debug_type($prefix));
     }
 
     /**
@@ -103,9 +108,13 @@ final class CacheConfigValidator
      */
     public static function storeName(mixed $value): ?string
     {
-        return $value === null || (\is_string($value) && $value !== '')
-            ? $value
-            : throw new InvalidAuthorizationConfigException(self::KEY . '.store', 'expected a cache-store name string, got ' . ConfigValidator::describe($value) . '.');
+        if ($value === null || (\is_string($value) && $value !== '')) {
+            return $value;
+        }
+
+        $reason = 'expected a cache-store name string, got ' . ConfigValidator::describe($value) . '.';
+
+        throw new InvalidAuthorizationConfigException(self::KEY . '.store', $reason, IssueCode::INVALID_TYPE, 'a cache store name or null', \get_debug_type($value));
     }
 
     /**
@@ -130,7 +139,9 @@ final class CacheConfigValidator
         try {
             $container->make('cache')->store($name);
         } catch (\Throwable $exception) {
-            throw new InvalidAuthorizationConfigException(self::KEY . '.store', "cache store '{$name}' is not configured: " . $exception->getMessage());
+            $reason = "cache store '{$name}' is not configured: " . $exception->getMessage();
+
+            throw new InvalidAuthorizationConfigException(self::KEY . '.store', $reason, IssueCode::UNKNOWN_NAME, 'the name of a configured cache store', 'string');
         }
     }
 }

@@ -606,6 +606,22 @@ final class BladeDirectiveRegistrarTest extends TestCase
     }
 
     /**
+     * Every directive the registrar declares is registered, with its
+     * `endunless` pair.
+     *
+     * @return void
+     */
+    public function testEveryDeclaredDirectiveIsRegistered(): void
+    {
+        $directives = Blade::getCustomDirectives();
+
+        foreach (BladeDirectiveRegistrar::DIRECTIVES as $name) {
+            self::assertArrayHasKey($name, $directives);
+            self::assertArrayHasKey("endunless{$name}", $directives);
+        }
+    }
+
+    /**
      * Render a template and strip surrounding whitespace so the assertions read
      * cleanly.
      *

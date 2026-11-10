@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Config;
 
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
@@ -38,16 +39,16 @@ final class ImplementationConfigValidator
      */
     public static function validate(string $key, mixed $value, string $contract, string $required): void
     {
-        $reason = match (true) {
-            $value                        === null => $required,
-            !\is_string($value) || $value === ''   => 'expected a class-string, got ' . \get_debug_type($value) . '.',
-            !\class_exists($value)                 => "class '{$value}' does not exist.",
-            !\is_a($value, $contract, true)        => "class '{$value}' does not implement {$contract}.",
-            default                                => null,
+        [$issue, $reason] = match (true) {
+            $value                        === null => [IssueCode::REQUIRED, $required],
+            !\is_string($value) || $value === ''   => [IssueCode::INVALID_TYPE, 'expected a class-string, got ' . \get_debug_type($value) . '.'],
+            !\class_exists($value)                 => [IssueCode::UNKNOWN_CLASS, "class '{$value}' does not exist."],
+            !\is_a($value, $contract, true)        => [IssueCode::NOT_IMPLEMENTED, "class '{$value}' does not implement {$contract}."],
+            default                                => [null, ''],
         };
 
-        if ($reason !== null) {
-            throw new InvalidAuthorizationConfigException($key, $reason);
+        if ($issue !== null) {
+            throw new InvalidAuthorizationConfigException($key, $reason, $issue, "the name of a class implementing {$contract}", \get_debug_type($value));
         }
     }
 }

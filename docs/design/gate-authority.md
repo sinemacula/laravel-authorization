@@ -78,7 +78,7 @@ allow or deny is the Gate's answer; any define or policy for `posts:update` is n
 - `Concerns\DecidesThroughAuthorization` and `Support\PolicyResponses` -- a policy class deciding through the package,
   and the decision as a policy response.
 - `Config\ConfigValidator` -- the strict switch.
-- `Console\CheckConfigurationCommand` -- `authorization:check`, one line per check.
+- `Console\CheckConfigurationCommand` -- `authorization:check`, the Gate hook among the integrations it reports.
 
 ## Authoritative Tests
 
@@ -98,7 +98,7 @@ allow or deny is the Gate's answer; any define or policy for `posts:update` is n
 - Answering abilities by pattern, or for undeclared rows, would change what falls through and must update this note.
 - Wrapping the Gate contract, or registering the hook anywhere other than first in the provider's boot, changes the
   precedence the README documents.
-- Each setting or seam `authorization:check` comes to report adds a line to its output.
+- A new setting, seam or integration is added to what `authorization:check` reports (`Diagnostics\Inspector`).
 - Mapping a policy method's name to an action, raising the step-up exception from the policy-class trait, or turning
   a denial into a not-found response would change what a policy class's response means and must update this note
   and the README.

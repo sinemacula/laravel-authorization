@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Config;
 
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
@@ -74,6 +75,10 @@ final class IntegerSetting
             return $integer;
         }
 
-        throw new InvalidAuthorizationConfigException($path, "expected {$expected} of at least {$least}, got " . ConfigValidator::describe($value) . '.');
+        $issue = $integer === null ? IssueCode::INVALID_TYPE : IssueCode::OUT_OF_RANGE;
+
+        $reason = "expected {$expected} of at least {$least}, got " . ConfigValidator::describe($value) . '.';
+
+        throw new InvalidAuthorizationConfigException($path, $reason, $issue, "{$expected} of at least {$least}", \get_debug_type($value));
     }
 }

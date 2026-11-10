@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Config\IntegerSetting;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use Tests\Concerns\ReadsRefusedSettings;
 
 /**
  * Unit tests for reading a whole-number setting as it is written (N117).
@@ -21,6 +22,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 #[CoversClass(IntegerSetting::class)]
 final class IntegerSettingTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /**
      * Return each value holding a whole number, with the number it holds.
      *
@@ -127,5 +130,23 @@ final class IntegerSettingTest extends TestCase
                 self::assertSame($reason, $exception->getReason());
             }
         }
+    }
+
+    /**
+     * A value that is not a whole number is refused as of the wrong type, and
+     * one below the least allowed as out of range.
+     *
+     * @return void
+     */
+    public function testATypeIsToldFromARange(): void
+    {
+        self::assertSame(
+            ['authorization.x', 'invalid_type', 'a whole number of at least 1', 'string'],
+            self::refusedSetting(static fn (): int => IntegerSetting::require('authorization.x', '1.5', 1)),
+        );
+        self::assertSame(
+            ['authorization.x', 'out_of_range', 'a whole number of at least 1', 'int'],
+            self::refusedSetting(static fn (): int => IntegerSetting::require('authorization.x', 0, 1)),
+        );
     }
 }

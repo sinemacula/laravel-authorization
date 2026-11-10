@@ -17,11 +17,13 @@ use SineMacula\Laravel\Authorization\Usage\UsageTracking;
 /**
  * Wires grant usage tracking (N94, N101, N102) into the application.
  *
- * `register()` binds the usage store, the package's own on its tables by
- * default, held under a package-owned key so an application binding the
- * contract itself keeps its binding, and the recorder, one per worker for as
- * long as the worker runs, so its noting of each route once a bucket holds
- * across the requests and jobs it serves.
+ * `register()` binds the usage store and the recorder. The store, the package's
+ * own on its tables by default, is a seam bound through `SeamBindings`: its
+ * default is held under a package-owned key, a binding an application or a
+ * sibling package made before the package registers stands, and one made after
+ * replaces it. The recorder is one per worker for as long as the worker runs,
+ * so its noting of each route once a bucket holds across the requests and jobs
+ * it serves.
  *
  * `boot()`, only while tracking is on, has each recorder flush what it noted as
  * the container that resolved it terminates, at the end of each request and
@@ -55,14 +57,16 @@ final readonly class UsageRegistrar
     ) {}
 
     /**
-     * Bind the usage store and the recorder.
+     * Bind the usage store, as a seam an application may bind itself (see
+     * `SeamBindings`), and the recorder.
      *
+     * @param  \SineMacula\Laravel\Authorization\Registrars\SeamBindings  $seams
      * @return void
      */
-    public function register(): void
+    public function register(SeamBindings $seams): void
     {
-        $this->app->scoped(self::DEFAULT_STORE, DatabaseGrantUsageStore::class);
-        $this->app->bind(GrantUsageStore::class, static fn (Application $app): mixed => $app->make(self::DEFAULT_STORE));
+        $seams->bindDefault(GrantUsageStore::class, DatabaseGrantUsageStore::class);
+
         $this->app->singleton(GrantUsageRecorder::class);
     }
 

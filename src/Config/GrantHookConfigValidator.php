@@ -5,7 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Config;
 
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use SineMacula\Laravel\Authorization\Support\ClassName;
 
 /**
  * Boot-time validator for the `authorization.grant_hooks` config (AUTHZ-11.3),
@@ -42,26 +44,49 @@ final class GrantHookConfigValidator
     public static function validate(mixed $config): array
     {
         if (!\is_array($config) || !\array_is_list($config)) {
-            throw new InvalidAuthorizationConfigException(self::KEY, 'expected a list of class names, got ' . \get_debug_type($config) . '.');
+            $reason = 'expected a list of class names, got ' . \get_debug_type($config) . '.';
+
+            throw new InvalidAuthorizationConfigException(self::KEY, $reason, IssueCode::INVALID_TYPE, 'a list of class names', \get_debug_type($config));
         }
 
         $seen = [];
 
         foreach ($config as $index => $class) {
-            ImplementationConfigValidator::validate(self::KEY . ".{$index}", $class, GrantHook::class, 'expected a class-string, got null.');
-
-            // PHP names one class whatever the case, with or without a leading
-            // backslash, so a duplicate is told by its normalised name.
-            $name = \strtolower(\ltrim($class, '\\'));
-
-            if (isset($seen[$name])) {
-                throw new InvalidAuthorizationConfigException(self::KEY . ".{$index}", "class '{$class}' is listed more than once.");
-            }
-
-            $seen[$name] = true;
+            $seen = self::entry($index, $class, $seen);
         }
 
         /** @var list<class-string<\SineMacula\Laravel\Authorization\Contracts\GrantHook>> */
         return $config;
+    }
+
+    /**
+     * Return the names of the hooks seen, the entry's added, refusing an entry
+     * that does not name a class implementing the contract or names one listed
+     * before it.
+     *
+     * @param  int  $index
+     * @param  mixed  $class
+     * @param  array<string, true>  $seen
+     * @return array<string, true>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function entry(int $index, mixed $class, array $seen): array
+    {
+        ImplementationConfigValidator::validate(self::KEY . ".{$index}", $class, GrantHook::class, 'expected a class-string, got null.');
+
+        // PHP names one class whatever the case, with or without a leading
+        // backslash, so a duplicate is told by its normalised name.
+        $name = ClassName::normalise($class);
+
+        if (isset($seen[$name])) {
+            $reason = "class '{$class}' is listed more than once.";
+
+            throw new InvalidAuthorizationConfigException(self::KEY . ".{$index}", $reason, IssueCode::DUPLICATE, 'a class listed once', 'string');
+        }
+
+        $seen[$name] = true;
+
+        return $seen;
     }
 }

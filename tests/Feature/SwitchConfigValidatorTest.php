@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Reviews\Support\RoleChains;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
+use Tests\Concerns\ReadsRefusedSettings;
 use Tests\TestCase;
 
 /**
@@ -39,6 +40,8 @@ use Tests\TestCase;
 #[CoversClass(HeldLifetime::class)]
 final class SwitchConfigValidatorTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /**
      * Each switch's block may leave `enabled` out, which is on, or set it to
      * true or false, as the environment gives `true` and `false`.
@@ -194,6 +197,22 @@ final class SwitchConfigValidatorTest extends TestCase
         $config->set('authorization.rank.enabled', false);
 
         self::assertFalse(RankComparison::isEnabled());
+    }
+
+    /**
+     * The switch's setting is read from its block, true when left out, and a
+     * value that is not a boolean is refused, structured.
+     *
+     * @return void
+     */
+    public function testTheSettingIsReadFromItsBlock(): void
+    {
+        self::assertTrue(SwitchConfigValidator::enabled('gate', []));
+        self::assertFalse(SwitchConfigValidator::enabled('gate', ['enabled' => false]));
+        self::assertSame(
+            ['authorization.rank.enabled', 'invalid_type', 'true or false', 'string'],
+            self::refusedSetting(static fn () => SwitchConfigValidator::enabled('rank', ['enabled' => 'no'])),
+        );
     }
 
     /**

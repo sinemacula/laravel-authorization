@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Config;
 
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
@@ -91,41 +92,67 @@ final class TableConfigValidator
         $block = ConfigBlock::of(self::KEY, $config, \array_keys(self::LENGTHS));
         $named = [];
 
-        foreach (self::LENGTHS as $key => $length) {
-            $name   = self::nameOf($key, ConfigBlock::entry($block, $key, $key), $length);
-            $folded = \strtolower($name);
-
-            if (isset($named[$folded])) {
-                throw new InvalidAuthorizationConfigException(self::KEY . ".{$key}", "table '{$name}' is already the name of " . self::KEY . ".{$named[$folded]}.");
-            }
-
-            $named[$folded] = $key;
+        foreach (\array_keys(self::LENGTHS) as $key) {
+            $named = self::distinct($key, self::name($key, ConfigBlock::entry($block, $key, $key)), $named);
         }
     }
 
     /**
-     * Return the table's name, refusing one that is not a plain identifier of
-     * at most the length given.
+     * Return the names given, the table's added under its key, refusing a name
+     * another table already has, whatever its case.
+     *
+     * @param  string  $key
+     * @param  string  $name
+     * @param  array<string, string>  $named
+     * @return array<string, string>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function distinct(string $key, string $name, array $named): array
+    {
+        $folded = \strtolower($name);
+
+        if (isset($named[$folded])) {
+            $reason = "table '{$name}' is already the name of " . self::KEY . ".{$named[$folded]}.";
+
+            throw new InvalidAuthorizationConfigException(self::KEY . ".{$key}", $reason, IssueCode::DUPLICATE, 'a name no other table has', 'string');
+        }
+
+        $named[$folded] = $key;
+
+        return $named;
+    }
+
+    /**
+     * Return the name of the table under the key, refusing one that is not a
+     * plain identifier of at most the length the key allows.
      *
      * @param  string  $key
      * @param  mixed  $name
-     * @param  int  $length
      * @return string
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    private static function nameOf(string $key, mixed $name, int $length): string
+    public static function name(string $key, mixed $name): string
     {
+        $length   = self::LENGTHS[$key] ?? ConfigBlock::refuseUnknownKey(self::KEY, $key, \array_keys(self::LENGTHS));
+        $expected = "a plain identifier of at most {$length} characters";
+
         if (!\is_string($name) || $name === '') {
-            throw new InvalidAuthorizationConfigException(self::KEY . ".{$key}", 'expected a table name, got ' . ConfigValidator::describe($name) . '.');
+            $reason = 'expected a table name, got ' . ConfigValidator::describe($name) . '.';
+
+            throw new InvalidAuthorizationConfigException(self::KEY . ".{$key}", $reason, IssueCode::INVALID_TYPE, $expected, \get_debug_type($name));
         }
 
-        $reason = match (true) {
-            \preg_match(self::IDENTIFIER, $name) !== 1 => "table '{$name}' is not a plain identifier: " . self::IDENTIFIER_SHAPE,
-            \strlen($name) > $length                   => "table '{$name}' is longer than {$length} characters, which leaves no room for the names of its indexes and keys.",
-            default                                    => null,
+        [$issue, $reason] = match (true) {
+            \preg_match(self::IDENTIFIER, $name) !== 1 => [IssueCode::INVALID_VALUE, "table '{$name}' is not a plain identifier: " . self::IDENTIFIER_SHAPE],
+            \strlen($name) > $length                   => [
+                IssueCode::OUT_OF_RANGE,
+                "table '{$name}' is longer than {$length} characters, which leaves no room for the names of its indexes and keys.",
+            ],
+            default => [null, ''],
         };
 
-        return $reason === null ? $name : throw new InvalidAuthorizationConfigException(self::KEY . ".{$key}", $reason);
+        return $issue === null ? $name : throw new InvalidAuthorizationConfigException(self::KEY . ".{$key}", $reason, $issue, $expected, 'string');
     }
 }

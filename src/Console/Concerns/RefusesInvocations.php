@@ -11,12 +11,12 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * How `authorization:why` and `authorization:review` refuse what they cannot
- * run: an invocation the console cannot bind to the signature, such as one with
- * an unknown option or a missing argument, and an option that takes a value but
- * was given none, are invalid invocations (exit 2), and every refusal is
- * written to the standard error alone, so the standard output holds nothing but
- * what the command prints.
+ * How `authorization:why`, `authorization:review` and `authorization:check`
+ * refuse what they cannot run: an invocation the console cannot bind to the
+ * signature, such as one with an unknown option or a missing argument, and an
+ * option that takes a value but was given none, are invalid invocations (exit
+ * 2), and every refusal is written to the standard error alone, so the standard
+ * output holds nothing but what the command prints.
  *
  * A refusal's control, format, bidirectional and line separator characters are
  * escaped as the explanation text escapes names, the whole of a message that is

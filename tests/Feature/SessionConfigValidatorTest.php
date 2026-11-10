@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use Tests\Concerns\ReadsRefusedSettings;
 use Tests\Feature\Stubs\EmptyActionCatalogue;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubSessionPolicySource;
@@ -33,6 +34,8 @@ use Tests\TestCase;
 #[CoversClass(SessionConfigValidator::class)]
 final class SessionConfigValidatorTest extends TestCase
 {
+    use ReadsRefusedSettings;
+
     /** @var string The reason a scope of the wrong shape is refused for. */
     private const string NOT_A_SCOPE = 'each scope must be a non-empty string, listed on its own or mapped to a non-empty list of action patterns, such as'
         . ' [\'posts.read\', \'editor\' => [\'posts:*\']].';
@@ -183,5 +186,33 @@ final class SessionConfigValidatorTest extends TestCase
         $this->expectExceptionMessage('the scope \'editor\' names \'posts:create\', which covers no declared permission.');
 
         SessionConfigValidator::validate(['scopes' => ['editor' => ['posts:create']]], $this->container());
+    }
+
+    /**
+     * The source and the scope map are checked without building the catalogue,
+     * each refusal structured; the coverage is checked against it.
+     *
+     * @return void
+     */
+    public function testTheShapeIsCheckedWithoutTheCatalogue(): void
+    {
+        $expected = 'the name of a class implementing ' . SessionPolicySource::class;
+
+        SessionConfigValidator::source(NoSessionPolicy::class);
+
+        self::assertSame(['authorization.session.source', 'required', $expected, 'null'], self::refusedSetting(static fn () => SessionConfigValidator::source(null)));
+        self::assertSame(
+            ['authorization.session.source', 'not_implemented', $expected, 'string'],
+            self::refusedSetting(static fn () => SessionConfigValidator::source(\stdClass::class)),
+        );
+        self::assertSame(
+            ['authorization.session.scopes', 'duplicate', 'a scope named once', 'string'],
+            self::refusedSetting(static fn () => SessionConfigValidator::scopeMap(['a', 'a'])),
+        );
+        self::assertSame('invalid_type', self::refusedSetting(static fn () => SessionConfigValidator::scopeMap('a'))[1]);
+
+        $this->container()->instance(ActionCatalogue::class, new EmptyActionCatalogue);
+
+        self::assertSame('invalid_value', self::refusedSetting(fn () => SessionConfigValidator::coverage(['s' => ['nothing:declared']], $this->container()))[1]);
     }
 }
