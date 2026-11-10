@@ -910,8 +910,8 @@ final class AccessReviewTest extends TestCase
         self::assertFalse(self::reviews()->trustedPage($query, null, 1)->isComplete);
 
         try {
-            self::reviews()->trustedExport($query, 'not a sink');
-            self::fail('A sink that is no stream or callback was used.');
+            self::reviews()->trustedExport($query, \stream_context_create());
+            self::fail('A resource that is no stream was used as the sink.');
         } catch (\InvalidArgumentException $exception) {
             self::assertSame('An access review is exported to a writable stream resource or a callback.', $exception->getMessage());
         }

@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Foundation\Application;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Config\ContextConfigValidator;
@@ -287,17 +286,5 @@ final class ContextConfigValidatorTest extends TestCase
         ContextConfigValidator::validate([], $this->container());
 
         $this->expectNotToPerformAssertions();
-    }
-
-    /**
-     * Return the application container.
-     *
-     * @return \Illuminate\Foundation\Application
-     *
-     * @throws \LogicException
-     */
-    private function container(): Application
-    {
-        return $this->app ?? throw new \LogicException('The application has not been created.');
     }
 }

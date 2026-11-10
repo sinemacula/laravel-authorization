@@ -82,6 +82,32 @@ enum DecisionReason: string
     /** A package mutation was asked for while a preview is evaluated, which no right allows. */
     case ADMINISTRATION_PREVIEWING = 'administration.previewing';
 
+    /** @var array<string, string> The short description of each reason, for explanations, keyed by its value. */
+    private const array LABELS = [
+        'explicit_deny'                    => 'an applicable statement denies it',
+        'no_match'                         => 'no statement or permission names it',
+        'condition_failed'                 => 'a statement names it, but its conditions do not hold',
+        'invalid_policy'                   => 'an applicable policy cannot be evaluated',
+        'subject_inactive'                 => 'the subject or its identity is inactive',
+        'subject_unresolved'               => 'there is no subject',
+        'resource_unresolved'              => 'the resource cannot be identified',
+        'tenant_scope'                     => 'the resource belongs to a tenant outside the scope',
+        'insufficient_authentication'      => 'a statement allows it once further authentication is met',
+        'guardrail'                        => 'a guardrail does not allow it',
+        'boundary'                         => 'a permission boundary does not allow it',
+        'session_policy'                   => 'a session cap does not allow it',
+        'administration.scope'             => 'it reaches beyond the scope the actor administers',
+        'administration.owner'             => 'it edits a record from outside the tenant that owns it',
+        'administration.rank_uncomparable' => 'the ranks of the actor and the target cannot be compared',
+        'administration.rank'              => 'the target is not junior to the actor',
+        'administration.self'              => 'it benefits the actor itself',
+        'administration.not_grantable'     => 'it hands out what the actor neither holds nor may grant',
+        'administration.unprovable'        => 'it may widen authority in a way that cannot be proved permitted',
+        'administration.impersonating'     => 'it is made while impersonating',
+        'administration.conflict'          => 'what it was decided on changed before it was written',
+        'administration.previewing'        => 'it is made while a preview is evaluated',
+    ];
+
     /**
      * Return a short description of the reason, for explanations.
      *
@@ -89,29 +115,6 @@ enum DecisionReason: string
      */
     public function label(): string
     {
-        return match ($this) {
-            self::EXPLICIT_DENY                    => 'an applicable statement denies it',
-            self::NO_MATCH                         => 'no statement or permission names it',
-            self::CONDITION_FAILED                 => 'a statement names it, but its conditions do not hold',
-            self::INVALID_POLICY                   => 'an applicable policy cannot be evaluated',
-            self::SUBJECT_INACTIVE                 => 'the subject or its identity is inactive',
-            self::SUBJECT_UNRESOLVED               => 'there is no subject',
-            self::RESOURCE_UNRESOLVED              => 'the resource cannot be identified',
-            self::TENANT_SCOPE                     => 'the resource belongs to a tenant outside the scope',
-            self::INSUFFICIENT_AUTHENTICATION      => 'a statement allows it once further authentication is met',
-            self::GUARDRAIL                        => 'a guardrail does not allow it',
-            self::BOUNDARY                         => 'a permission boundary does not allow it',
-            self::SESSION_POLICY                   => 'a session cap does not allow it',
-            self::ADMINISTRATION_SCOPE             => 'it reaches beyond the scope the actor administers',
-            self::ADMINISTRATION_OWNER             => 'it edits a record from outside the tenant that owns it',
-            self::ADMINISTRATION_RANK_UNCOMPARABLE => 'the ranks of the actor and the target cannot be compared',
-            self::ADMINISTRATION_RANK              => 'the target is not junior to the actor',
-            self::ADMINISTRATION_SELF              => 'it benefits the actor itself',
-            self::ADMINISTRATION_NOT_GRANTABLE     => 'it hands out what the actor neither holds nor may grant',
-            self::ADMINISTRATION_UNPROVABLE        => 'it may widen authority in a way that cannot be proved permitted',
-            self::ADMINISTRATION_IMPERSONATING     => 'it is made while impersonating',
-            self::ADMINISTRATION_CONFLICT          => 'what it was decided on changed before it was written',
-            self::ADMINISTRATION_PREVIEWING        => 'it is made while a preview is evaluated',
-        };
+        return self::LABELS[$this->value];
     }
 }

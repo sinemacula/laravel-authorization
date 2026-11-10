@@ -74,6 +74,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
+use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
@@ -114,6 +115,8 @@ use Tests\TestCase;
 #[CoversTrait(HasPolicies::class)]
 final class AuthorizationManagerTest extends TestCase
 {
+    use ReadsDispatchedEvents;
+
     /**
      * A role granted in an organisation allows in an account below it and not
      * in one beside it; once the account moves away and the tree change is
@@ -130,7 +133,7 @@ final class AuthorizationManagerTest extends TestCase
         $config = $this->app?->make(ConfigRepository::class);
         $config->set('authorization.cache.store', 'array');
 
-        (new AuthorizationServiceProvider($this->app))->register(); // @phpstan-ignore argument.type
+        (new AuthorizationServiceProvider($this->container()))->register();
 
         [$org, $account, $sibling] = \array_map(static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]), ['org', 'account', 'sibling']);
         $tree                      = (new StubTenantTree)->put(Reference::of($account), Reference::of($org));
@@ -299,10 +302,10 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testDenialRendersAsForbidden(): void
     {
-        $this->app->make(ConfigRepository::class)->set('app.debug', false); // @phpstan-ignore method.nonObject
+        $this->container()->make(ConfigRepository::class)->set('app.debug', false);
 
         /** @var \Illuminate\Routing\Router $router */
-        $router = $this->app->make('router'); // @phpstan-ignore method.nonObject
+        $router = $this->container()->make('router');
         $router->get('/authorize', static function (): void {
             Authorization::authorize('posts:delete', 'arn:posts:1');
         });
@@ -530,10 +533,10 @@ final class AuthorizationManagerTest extends TestCase
     public function testGateParity(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make('config');
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
-        (new AuthorizationServiceProvider($this->app))->boot();
+        (new AuthorizationServiceProvider($this->container()))->boot();
 
         Permission::create(['id' => '70be15aa-1ce5-4c1f-87a5-1c8e91a02587', 'name' => 'posts:create', 'guard' => 'web']);
 
@@ -553,7 +556,7 @@ final class AuthorizationManagerTest extends TestCase
     public function testPermissionsForListsTheCaseValuesAllowed(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make('config');
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         Permission::create(['id' => '0d4a3f0e-2f5e-4c39-9b0b-4f8ab2a1c5d1', 'name' => PermissionEnum::POSTS_CREATE->value, 'guard' => 'web']);
@@ -574,7 +577,7 @@ final class AuthorizationManagerTest extends TestCase
     public function testPermissionsForSkipsAnEnumNotBackedByStrings(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make('config');
         $config->set('authorization.permission_enums', [IntBackedPermissionEnum::class, PermissionEnum::class]);
 
         $user = StubIdentity::create(['id' => '5b0f6c1e-8d2a-4f3b-9e7c-1a4d2c6b8e90']);
@@ -597,7 +600,7 @@ final class AuthorizationManagerTest extends TestCase
         Event::fake();
 
         try {
-            $this->app->make(AuthorizationManager::class)->authorize('nope'); // @phpstan-ignore method.nonObject
+            $this->container()->make(AuthorizationManager::class)->authorize('nope');
         } catch (AuthorizationException) {
             // Expected.
         }
@@ -934,10 +937,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertFalse($unmatched->isAllowed());
         self::assertSame(DecisionReason::NO_MATCH, $unmatched->reason);
 
-        $resources = Event::dispatched(DecisionEvaluated::class)
-            ->map(static fn (array $arguments): ?string => $arguments[0]->resource)
-            ->values()
-            ->all();
+        $resources = \array_map(static fn (DecisionEvaluated $event): ?string => $event->resource, self::dispatchedEvents(DecisionEvaluated::class));
 
         self::assertSame([
             StubIdentity::class . ':' . $postKey,
@@ -1032,10 +1032,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame([$model], $resolver->asked);
         self::assertSame([['posts', '7']], $resolver->askedRecords);
 
-        $failed = Event::dispatched(AuthorizationFailed::class)
-            ->map(static fn (array $arguments): ?string => $arguments[0]->resource)
-            ->values()
-            ->all();
+        $failed = \array_map(static fn (AuthorizationFailed $event): ?string => $event->resource, self::dispatchedEvents(AuthorizationFailed::class));
 
         self::assertSame([StubTenant::class . ':tenant-a', 'posts:7'], $failed);
     }
@@ -2447,7 +2444,7 @@ final class AuthorizationManagerTest extends TestCase
         $config = $this->app?->make(ConfigRepository::class);
         $config->set('authorization.cache.store', 'array');
 
-        (new AuthorizationServiceProvider($this->app))->register(); // @phpstan-ignore argument.type
+        (new AuthorizationServiceProvider($this->container()))->register();
 
         $user  = StubIdentity::create(['id' => 'user-1']);
         $read  = self::resourcePolicy('read-cap', [['effect' => 'allow', 'actions' => ['posts:read']]]);
@@ -2803,7 +2800,7 @@ final class AuthorizationManagerTest extends TestCase
         $config = $this->app?->make(ConfigRepository::class);
         $config->set('authorization.cache.store', 'array');
 
-        (new AuthorizationServiceProvider($this->app))->register(); // @phpstan-ignore argument.type
+        (new AuthorizationServiceProvider($this->container()))->register();
 
         $user  = StubIdentity::create(['id' => 'user-1']);
         $actor = self::guardrailManager();
@@ -3513,10 +3510,7 @@ final class AuthorizationManagerTest extends TestCase
             self::assertTrue($scope->cannot('posts:read', StubIdentity::class . ':post-2'));
         }
 
-        $resources = Event::dispatched(DecisionEvaluated::class)
-            ->map(static fn (array $arguments): ?string => $arguments[0]->resource)
-            ->values()
-            ->all();
+        $resources = \array_map(static fn (DecisionEvaluated $event): ?string => $event->resource, self::dispatchedEvents(DecisionEvaluated::class));
 
         $expected = [];
 
@@ -3754,11 +3748,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     private static function assertSoleDecisionEvent(Model $principal, Decision $decision): void
     {
-        $events = \array_values(
-            Event::dispatched(DecisionEvaluated::class)
-                ->map(static fn (array $arguments): DecisionEvaluated => $arguments[0])
-                ->all(),
-        );
+        $events = self::dispatchedEvents(DecisionEvaluated::class);
 
         self::assertCount(1, $events);
         self::assertEquals(Reference::of($principal), $events[0]->subject);
@@ -3833,7 +3823,7 @@ final class AuthorizationManagerTest extends TestCase
         $source = new StubSessionPolicySource($scopes);
 
         $this->app?->instance(SessionPolicySource::class, $source);
-        $this->app?->make(ConfigRepository::class)->set('authorization.session.scopes', $map); // @phpstan-ignore method.nonObject
+        $this->container()->make(ConfigRepository::class)->set('authorization.session.scopes', $map);
 
         foreach (['authorization', AuthorizationManager::class, SessionScopes::class] as $abstract) {
             $this->app?->forgetInstance($abstract);
@@ -3900,9 +3890,9 @@ final class AuthorizationManagerTest extends TestCase
     {
         $resolver = new StubSubjectResolver($user);
 
-        $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+        $this->container()->instance(SubjectResolver::class, $resolver);
+        $this->container()->forgetInstance('authorization');
+        $this->container()->forgetInstance(AuthorizationManager::class);
     }
 
     /**

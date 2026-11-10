@@ -111,18 +111,18 @@ final class ImpactTest extends TestCase
         $allowed = static fn (): Decision => Decision::allow(DecisionStage::ALLOW);
         $checks  = $this->checks($actor, $allowed);
         $reach   = Impact::reachOf(null);
-        $refuse  = static fn (array $holders, ?int $granted = null): ?DecisionReason => Impact::refusal(self::operation(), self::resource(), $reach, $holders, $checks, $granted);
+        $refuse  = static fn (Reference ...$holders): ?DecisionReason => Impact::refusal(self::operation(), self::resource(), $reach, \array_values($holders), $checks);
         $junior  = Reference::of(self::user('junior', 5));
         $peer    = Reference::of(self::user('peer', 2));
 
         self::grants()->grantRole(self::user('elsewhere'), self::rank(1), tenant: new Reference('tenant', 'a'));
 
-        self::assertNull($refuse([$junior, Reference::of(self::user('unranked'))]));
-        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $refuse([$junior, $peer]));
-        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $refuse([$junior], 2));
-        self::assertNull($refuse([$junior], 3));
-        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $refuse([Reference::of(self::user('elsewhere'))]));
-        self::assertSame(DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE, $refuse([$junior, new Reference('external', '1')]));
+        self::assertNull($refuse($junior, Reference::of(self::user('unranked'))));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $refuse($junior, $peer));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, Impact::refusal(self::operation(), self::resource(), $reach, [$junior], $checks, 2));
+        self::assertNull(Impact::refusal(self::operation(), self::resource(), $reach, [$junior], $checks, 3));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $refuse(Reference::of(self::user('elsewhere'))));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE, $refuse($junior, new Reference('external', '1')));
         $unranked = $this->checks(self::user('unranked-admin'), $allowed);
         $unread   = $this->checks(new Subject(new \stdClass), $allowed);
 
@@ -137,7 +137,7 @@ final class ImpactTest extends TestCase
 
         config(['authorization.rank.enabled' => false]);
 
-        self::assertNull($refuse([$junior, $peer, new Reference('external', '1')]));
+        self::assertNull($refuse($junior, $peer, new Reference('external', '1')));
     }
 
     /**

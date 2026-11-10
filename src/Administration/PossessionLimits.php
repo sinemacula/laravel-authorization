@@ -414,7 +414,7 @@ final class PossessionLimits
      * holding `?` or a `[...]` class could match a `*` of the name as one
      * character, so it covers a name without a wildcard alone.
      *
-     * @param  list<string>  $patterns
+     * @param  array<int, string>  $patterns
      * @param  string  $permission
      * @return bool
      */
@@ -435,7 +435,7 @@ final class PossessionLimits
      * Determine whether one of the patterns names an action the permission
      * covers.
      *
-     * @param  list<string>  $patterns
+     * @param  array<int, string>  $patterns
      * @param  string  $permission
      * @return bool
      */

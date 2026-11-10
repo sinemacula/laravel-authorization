@@ -315,7 +315,10 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionReason::EXPLICIT_DENY, $explanation->reason);
         self::assertSame(['first', 'second'], \array_map(static fn ($statement): string => $statement->policy, $explanation->statements));
         self::assertSame(\array_slice(DecisionStage::cases(), 4), $explanation->notEvaluated);
-        self::assertSame(['deny'], \array_column($explanation->toArray()['stages'], 'stage'));
+        $stages = $explanation->toArray()['stages'];
+
+        self::assertIsArray($stages);
+        self::assertSame(['deny'], \array_column($stages, 'stage'));
         self::assertStringContainsString('not evaluated: guardrail, boundary, session, allow, administration, implicit', $explanation->toText());
     }
 

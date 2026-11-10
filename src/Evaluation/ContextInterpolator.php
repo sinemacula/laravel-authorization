@@ -100,9 +100,11 @@ final class ContextInterpolator
         $references = [];
 
         foreach (self::split($subject) as $part) {
-            if (\preg_match(self::TOKEN_PATTERN, $part) === 1) {
-                $references[] = \substr($part, 2, -1);
+            if (\preg_match(self::TOKEN_PATTERN, $part) !== 1) {
+                continue;
             }
+
+            $references[] = \substr($part, 2, -1);
         }
 
         return $references;

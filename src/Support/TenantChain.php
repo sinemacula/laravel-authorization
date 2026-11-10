@@ -8,6 +8,7 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 
 /**
  * A tenant and its ancestors, nearest first, as the bound tenant tree answers
@@ -192,7 +193,8 @@ final readonly class TenantChain
             \array_push($bindings, $tenant->type, $tenant->id);
         }
 
-        $query->orderByRaw('case' . $cases . ' else ' . \count($this->tenants) . ' end', $bindings);
+        $query->orderBy(new ComposedExpression('case' . $cases . ' else ' . \count($this->tenants) . ' end'));
+        $query->addBinding($bindings, 'order');
 
         return $query;
     }

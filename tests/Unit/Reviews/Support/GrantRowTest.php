@@ -170,7 +170,7 @@ final class GrantRowTest extends TestCase
      */
     public function testARowIsLiveUntilItsExpiry(): void
     {
-        $now     = CarbonImmutable::create(2030, 1, 1, 0, 0, 0, 'UTC');
+        $now     = new CarbonImmutable('2030-01-01 00:00:00', 'UTC');
         $expires = static fn (?string $at): GrantRow => GrantRow::from(
             (object) ['target_id' => 'p', 'grantee_type' => 'u', 'grantee_id' => 'u', 'expires_at' => $at],
             'permission',

@@ -341,7 +341,16 @@ final class ReviewPagingParityTest extends TestCase
 
         self::assertSame(['header', 'footer', $written], [$header['record'] ?? null, $footer['record'] ?? null, $footer['rows'] ?? null]);
 
-        return \array_map(static fn (array $line): string => (string) $line['row_key'], $lines);
+        $keys = [];
+
+        foreach ($lines as $line) {
+            self::assertIsArray($line);
+            self::assertIsString($line['row_key'] ?? null);
+
+            $keys[] = $line['row_key'];
+        }
+
+        return $keys;
     }
 
     /**

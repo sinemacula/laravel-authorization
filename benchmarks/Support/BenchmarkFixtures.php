@@ -82,7 +82,7 @@ final class BenchmarkFixtures
     /**
      * A small list of permission names used by the RBAC and manager benches.
      *
-     * @return array<int, string>
+     * @return list<string>
      */
     public static function permissionNames(): array
     {
@@ -96,7 +96,7 @@ final class BenchmarkFixtures
     }
 
     /**
-     * Stable role name used across benches so `Role::resolveByName()`
+     * Stable role name used across benches so `RoleService::find()`
      * measurements run against a predictable fixture.
      *
      * @return string

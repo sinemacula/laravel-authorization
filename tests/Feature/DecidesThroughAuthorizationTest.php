@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\DecidingLaravelPolicy;
 use Tests\Feature\Stubs\StubIdentity;
@@ -37,6 +38,8 @@ use Tests\TestCase;
 #[CoversTrait(DecidesThroughAuthorization::class)]
 final class DecidesThroughAuthorizationTest extends TestCase
 {
+    use ReadsDispatchedEvents;
+
     /**
      * Register the policy class for the tenant model, and fake the decision
      * events so every check is observable.
@@ -209,10 +212,7 @@ final class DecidesThroughAuthorizationTest extends TestCase
         self::assertTrue($policy->decideFor($user, 'posts:edit', null, ['status' => 'draft'])->allowed());
         self::assertSame('condition_failed', $policy->decideFor($user, 'posts:edit', null, ['status' => 'live'])->code());
 
-        $resources = Event::dispatched(DecisionEvaluated::class)
-            ->map(static fn (array $arguments): ?string => $arguments[0]->resource)
-            ->values()
-            ->all();
+        $resources = \array_map(static fn (DecisionEvaluated $event): ?string => $event->resource, self::dispatchedEvents(DecisionEvaluated::class));
 
         self::assertSame([...$identifiers, 'posts:8', null, null], $resources);
     }

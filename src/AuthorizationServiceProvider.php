@@ -348,7 +348,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
     {
         $this->forgetResolutionsOnRebinding(ResolvedTenant::class);
 
-        $this->app->scoped(ResolvedTenant::class, static function (Application $app): ResolvedTenant {
+        $this->app->scoped(ResolvedTenant::class, static function (Container $app): ResolvedTenant {
             /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
             $resolver = $app->make(SubjectResolver::class);
 

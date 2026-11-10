@@ -346,7 +346,7 @@ final class AuthorityRows
      * Lock the rows of the table with the keys.
      *
      * @param  string  $table
-     * @param  list<string>  $keys
+     * @param  array<array-key, string>  $keys
      * @return void
      *
      * @throws \LogicException
@@ -414,7 +414,7 @@ final class AuthorityRows
     /**
      * Return the keys, each once, sorted.
      *
-     * @param  list<string>  $keys
+     * @param  array<array-key, string>  $keys
      * @return list<string>
      */
     private static function sorted(array $keys): array

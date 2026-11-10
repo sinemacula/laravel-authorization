@@ -34,11 +34,6 @@ use SineMacula\Laravel\Authorization\Database\UtcDateTime;
  */
 abstract class AuthorizableGrantPivot extends MorphPivot
 {
-    /** @var array<string, string> Cast map for the pivot row. */
-    protected $casts = [
-        'expires_at' => UtcDateTime::class,
-    ];
-
     /**
      * Return the connection the grant table lives on: the configured
      * `authorization.connection`, or the application's default when it is
@@ -58,5 +53,16 @@ abstract class AuthorizableGrantPivot extends MorphPivot
     public function getConnectionName(): string
     {
         return AuthorizationConnection::resolve();
+    }
+
+    /**
+     * Return the attribute casts: the expiry is written and read in UTC.
+     *
+     * @return array<string, string>
+     */
+    #[\Override]
+    protected function casts(): array
+    {
+        return ['expires_at' => UtcDateTime::class];
     }
 }

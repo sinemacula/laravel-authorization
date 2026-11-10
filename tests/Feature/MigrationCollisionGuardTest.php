@@ -97,6 +97,6 @@ final class MigrationCollisionGuardTest extends TestCase
 
         (new MigrationCollisionGuard($schema))->ensureNotExists('collision_guard_fake');
 
-        $this->addToAssertionCount(\Mockery::getContainer()->mockery_getExpectationCount());
+        self::assertSame(1, \Mockery::getContainer()->mockery_getExpectationCount());
     }
 }

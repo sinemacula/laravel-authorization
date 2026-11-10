@@ -432,9 +432,11 @@ final readonly class ResourcePolicyResolver
      */
     private static function readRecords(string $type, array $ids): array
     {
-        $resolve = static fn (ResolutionPins $pins, array $missing): array => self::resolveMany($type, $missing, $pins);
-        $found   = ResolutionCache::instance()?->rememberResourcePoliciesMany($type, $ids, $resolve)
-            ?? \array_map(static fn (Resolution $resolution): array => $resolution->value, self::resolveMany($type, $ids, new ResolutionPins));
+        $found = ResolutionCache::instance()?->rememberResourcePoliciesMany(
+            $type,
+            $ids,
+            static fn (ResolutionPins $pins, array $missing): array => self::resolveMany($type, $missing, $pins),
+        ) ?? \array_map(static fn (Resolution $resolution): array => $resolution->value, self::resolveMany($type, $ids, new ResolutionPins));
         $read = [];
 
         foreach ($ids as $id) {

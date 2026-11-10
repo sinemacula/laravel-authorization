@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Usage\RouteMap;
  * stored, and, while grant usage is tracked, the routes of the stored grants
  * behind each permission or policy it found (see `Usage\RouteMap`).
  *
- * @template TValue
+ * @template-covariant TValue
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

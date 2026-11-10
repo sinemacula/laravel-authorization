@@ -7,6 +7,7 @@ namespace Tests\Feature\Query;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Query\KeyConditions;
@@ -57,7 +58,7 @@ final class KeyConditionsTest extends TestCase
             [$condition, $reason] = KeyConditions::equals($shape, (string) $value);
 
             self::assertNull($reason);
-            self::assertSame($expected, KeyedPost::query()->whereRaw($condition)->pluck('id')->all(), (string) $value);
+            self::assertSame($expected, KeyedPost::query()->whereRaw(new ComposedExpression($condition))->pluck('id')->all(), (string) $value);
         }
 
         foreach (['-0', '+1', '01', '1.0', ' 1', 'abc', ''] as $value) {
@@ -85,7 +86,7 @@ final class KeyConditionsTest extends TestCase
         }
 
         $shape = self::shape(new ScopedDocument);
-        $codes = static fn (string $condition): array => ScopedDocument::query()->whereRaw($condition)->orderBy('row_id')->pluck('code')->all();
+        $codes = static fn (string $condition): array => ScopedDocument::query()->whereRaw(new ComposedExpression($condition))->orderBy('row_id')->pluck('code')->all();
 
         self::assertSame(['abc'], $codes(KeyConditions::equals($shape, 'abc')[0]));
         self::assertStringStartsWith('(' . $shape->dialect->equalsIndexed($shape->key, ColumnKind::STRING, 'abc') . ' AND ', KeyConditions::equals($shape, 'abc')[0]);
@@ -109,8 +110,10 @@ final class KeyConditionsTest extends TestCase
 
         $shape = self::shape(new KeyedPost);
 
-        self::assertSame([1, 10, 12], KeyedPost::query()->whereRaw(KeyConditions::of($shape, KeyTarget::prefix('1', false))[0])->orderBy('id')->pluck('id')->all());
-        self::assertSame([-1], KeyedPost::query()->whereRaw(KeyConditions::of($shape, KeyTarget::prefix('-', false))[0])->pluck('id')->all());
+        $prefixed = new ComposedExpression(KeyConditions::of($shape, KeyTarget::prefix('1', false))[0]);
+
+        self::assertSame([1, 10, 12], KeyedPost::query()->whereRaw($prefixed)->orderBy('id')->pluck('id')->all());
+        self::assertSame([-1], KeyedPost::query()->whereRaw(new ComposedExpression(KeyConditions::of($shape, KeyTarget::prefix('-', false))[0]))->pluck('id')->all());
     }
 
     /**
@@ -131,7 +134,7 @@ final class KeyConditionsTest extends TestCase
 
         $shape = self::shape(new UuidScopedDocument);
 
-        self::assertSame([$uuid], UuidScopedDocument::query()->whereRaw(KeyConditions::equals($shape, $uuid)[0])->pluck('id')->all());
+        self::assertSame([$uuid], UuidScopedDocument::query()->whereRaw(new ComposedExpression(KeyConditions::equals($shape, $uuid)[0]))->pluck('id')->all());
         self::assertSame([QueryAuthorizer::NO_ROW, null], KeyConditions::equals($shape, \strtoupper($uuid)));
         self::assertSame([QueryAuthorizer::NO_ROW, null], KeyConditions::equals($shape, '{' . $uuid . '}'));
     }

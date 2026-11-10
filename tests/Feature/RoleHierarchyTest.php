@@ -55,7 +55,7 @@ final class RoleHierarchyTest extends TestCase
     public function testChildInheritsParentPermissions(): void
     {
         $parent = $this->makeRole('admin');
-        $child  = $this->makeRole('editor', parentId: $parent->getKey());
+        $child  = $this->makeRole('editor', parentId: $parent->id);
 
         $this->makePermission('posts:create');
         $this->makePermission('posts:delete');
@@ -77,8 +77,8 @@ final class RoleHierarchyTest extends TestCase
     public function testGrandchildInheritsThroughTwoLevels(): void
     {
         $root   = $this->makeRole('admin');
-        $middle = $this->makeRole('editor', parentId: $root->getKey());
-        $leaf   = $this->makeRole('viewer', parentId: $middle->getKey());
+        $middle = $this->makeRole('editor', parentId: $root->id);
+        $leaf   = $this->makeRole('viewer', parentId: $middle->id);
 
         $this->makePermission('posts:create');
         $this->makePermission('posts:edit');
@@ -103,7 +103,7 @@ final class RoleHierarchyTest extends TestCase
     public function testDirectPermissionsUnionedWithInheritedNoDuplicates(): void
     {
         $parent = $this->makeRole('admin');
-        $child  = $this->makeRole('editor', parentId: $parent->getKey());
+        $child  = $this->makeRole('editor', parentId: $parent->id);
 
         $permission = $this->makePermission('posts:create');
 
@@ -124,7 +124,7 @@ final class RoleHierarchyTest extends TestCase
     public function testCycleDetectionOnParentAssignment(): void
     {
         $parent = $this->makeRole('admin');
-        $child  = $this->makeRole('editor', parentId: $parent->getKey());
+        $child  = $this->makeRole('editor', parentId: $parent->id);
 
         $this->expectException(RoleHierarchyCycleException::class);
 
@@ -156,7 +156,7 @@ final class RoleHierarchyTest extends TestCase
     public function testRemovingParentStopsInheritance(): void
     {
         $parent = $this->makeRole('admin');
-        $child  = $this->makeRole('editor', parentId: $parent->getKey());
+        $child  = $this->makeRole('editor', parentId: $parent->id);
 
         $this->makePermission('posts:delete');
         $this->makePermission('posts:create');
@@ -186,7 +186,7 @@ final class RoleHierarchyTest extends TestCase
     public function testIdentityWithChildRoleInheritsAncestorPermission(): void
     {
         $parent = $this->makeRole('admin');
-        $this->makeRole('editor', parentId: $parent->getKey());
+        $this->makeRole('editor', parentId: $parent->id);
 
         $this->makePermission('posts:delete');
         $parent->givePermission('posts:delete');
@@ -206,11 +206,11 @@ final class RoleHierarchyTest extends TestCase
     public function testHierarchyDisabledReturnsOnlyDirectPermissions(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->container()->make(ConfigRepository::class);
         $config->set('authorization.hierarchy.enabled', false);
 
         $parent = $this->makeRole('admin');
-        $child  = $this->makeRole('editor', parentId: $parent->getKey());
+        $child  = $this->makeRole('editor', parentId: $parent->id);
 
         $this->makePermission('posts:delete');
         $this->makePermission('posts:create');
@@ -229,8 +229,8 @@ final class RoleHierarchyTest extends TestCase
     public function testAncestorsReturnsRootFirstOrder(): void
     {
         $root   = $this->makeRole('admin');
-        $middle = $this->makeRole('editor', parentId: $root->getKey());
-        $leaf   = $this->makeRole('viewer', parentId: $middle->getKey());
+        $middle = $this->makeRole('editor', parentId: $root->id);
+        $leaf   = $this->makeRole('viewer', parentId: $middle->id);
 
         $ancestors = $leaf->ancestors();
 
@@ -247,8 +247,8 @@ final class RoleHierarchyTest extends TestCase
     public function testDescendantsReturnsSubtree(): void
     {
         $root   = $this->makeRole('admin');
-        $middle = $this->makeRole('editor', parentId: $root->getKey());
-        $leaf   = $this->makeRole('viewer', parentId: $middle->getKey());
+        $middle = $this->makeRole('editor', parentId: $root->id);
+        $leaf   = $this->makeRole('viewer', parentId: $middle->id);
 
         $descendants = $root->descendants();
 
@@ -268,8 +268,8 @@ final class RoleHierarchyTest extends TestCase
     public function testIsAncestorOfAndIsDescendantOf(): void
     {
         $root  = $this->makeRole('admin');
-        $child = $this->makeRole('editor', parentId: $root->getKey());
-        $leaf  = $this->makeRole('viewer', parentId: $child->getKey());
+        $child = $this->makeRole('editor', parentId: $root->id);
+        $leaf  = $this->makeRole('viewer', parentId: $child->id);
 
         self::assertTrue($root->isAncestorOf($child));
         self::assertTrue($root->isAncestorOf($leaf));
@@ -290,7 +290,7 @@ final class RoleHierarchyTest extends TestCase
     public function testAncestorsCycleExceptionCarriesRoleNames(): void
     {
         $root  = $this->makeRole('admin');
-        $child = $this->makeRole('editor', parentId: $root->getKey());
+        $child = $this->makeRole('editor', parentId: $root->id);
 
         $rootId  = (string) $root->getKey(); // @phpstan-ignore cast.string
         $childId = (string) $child->getKey(); // @phpstan-ignore cast.string
@@ -325,7 +325,7 @@ final class RoleHierarchyTest extends TestCase
     public function testDescendantsTerminatesOnDatabaseLevelCycle(): void
     {
         $root  = $this->makeRole('admin');
-        $child = $this->makeRole('editor', parentId: $root->getKey());
+        $child = $this->makeRole('editor', parentId: $root->id);
 
         // Inject a cycle bypassing the saving hook: point root's parent at its
         // own child.
@@ -346,7 +346,7 @@ final class RoleHierarchyTest extends TestCase
     public function testIsAncestorOfTerminatesOnDatabaseLevelCycle(): void
     {
         $root  = $this->makeRole('admin');
-        $child = $this->makeRole('editor', parentId: $root->getKey());
+        $child = $this->makeRole('editor', parentId: $root->id);
 
         // Inject a cycle: point root's parent at its own child so that walking
         // the child's ancestor chain loops.

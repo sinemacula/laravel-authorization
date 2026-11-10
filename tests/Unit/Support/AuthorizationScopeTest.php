@@ -176,7 +176,7 @@ final class AuthorizationScopeTest extends TestCase
         self::assertSame('admin', $subject->application);
         self::assertSame('api', $subject->guard);
         self::assertSame('session-1', $subject->session);
-        self::assertNull(AuthorizationScope::platform()->subjectIn(new Subject($user))?->tenant);
+        self::assertNull(AuthorizationScope::platform()->subjectIn(new Subject($user))->tenant);
         self::assertNull($scope->subjectIn(null));
     }
 

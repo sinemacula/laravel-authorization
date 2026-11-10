@@ -212,7 +212,7 @@ final class HasPoliciesTest extends TestCase
     public function testGetPoliciesLogsAndRethrowsForMalformedRow(): void
     {
         $logger = self::recordingLogger();
-        $this->app->instance('log', $logger); // @phpstan-ignore method.nonObject
+        $this->container()->instance('log', $logger);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 

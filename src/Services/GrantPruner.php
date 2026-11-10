@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
+use SineMacula\Laravel\Authorization\Services\Support\ExpiredSweep;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -110,39 +111,19 @@ final readonly class GrantPruner
      */
     public function prune(int $chunk, bool $pretend = false): PruneResult
     {
-        $expired = $pretend ? self::expiredRolePermissions()->count() : self::sweep(
-            self::expiredRolePermissions(),
-            ['role_id', 'permission_id', 'expires_at'],
-            $chunk,
-            static fn (array $rows, Operation $operation): int => self::pruneRolePermissionChunk($rows, $operation),
-        );
+        $expired = self::removeExpired($chunk, $pretend);
 
-        foreach (GrantTarget::cases() as $kind) {
-            $expired += $pretend ? self::expired($kind)->count() : self::sweep(
-                self::expired($kind),
-                [$kind->column() . ' as target_id', 'authorizable_type', 'authorizable_id', 'tenant_type', 'tenant_id', 'include_subtree', 'application', 'expires_at'],
-                $chunk,
-                static fn (array $rows, Operation $operation): int => self::pruneChunk($kind, $rows, $operation),
-            );
-        }
+        [$orphans, $unresolved]  = self::orphans($chunk);
+        [$orphaned, $boundaries] = $this->removeOrphaned($orphans, $pretend);
 
-        [$orphans, $unresolved] = self::orphans($chunk);
-        $orphaned               = 0;
-        $boundaries             = 0;
-
-        foreach ($orphans as $grantee) {
-            $boundaries += $pretend ? self::countBoundaries($grantee) : $this->boundaries->removeAll($grantee);
-            $orphaned   += $pretend ? self::countLiveGrants($grantee) : $this->grants->revokeAll($grantee);
-        }
-
-        [$owners, $unowned] = self::missingOwners(self::policiesTable(), 'owner', $chunk);
+        [$owners, $unowned] = self::missingOwners(self::table('policies'), 'owner', $chunk);
         $inline             = 0;
 
         foreach ($owners as $owner) {
             $inline += $pretend ? InlinePolicies::countOwnedBy($owner) : InlinePolicies::deleteOwnedBy($owner);
         }
 
-        [$records, $unplaced] = self::missingOwners(self::resourcePoliciesTable(), 'resource', $chunk);
+        [$records, $unplaced] = self::missingOwners(self::table('resource_policies'), 'resource', $chunk);
         $attachments          = 0;
 
         foreach ($records as $record) {
@@ -153,32 +134,56 @@ final readonly class GrantPruner
     }
 
     /**
-     * Remove the expired rows the query reads, a chunk at a time, each chunk
-     * one operation, and return how many were removed.
+     * Remove the expired grants, a role's of permissions first, or, pretending,
+     * only count them, and return how many there are.
      *
-     * Every row read is removed, or has been re-armed or removed since, so a
-     * later read never returns it and the sweep ends.
-     *
-     * @param  \Illuminate\Database\Query\Builder  $expired
-     * @param  list<string>  $columns
      * @param  int  $chunk
-     * @param  \Closure(list<array<string, string|null>>, \SineMacula\Laravel\Authorization\Support\Operation): int  $remove
+     * @param  bool  $pretend
      * @return int
      *
      * @throws \Throwable
      */
-    private static function sweep(Builder $expired, array $columns, int $chunk, \Closure $remove): int
+    private static function removeExpired(int $chunk, bool $pretend): int
     {
-        $removed = 0;
+        $expired = $pretend ? self::expiredRolePermissions()->count() : (new ExpiredSweep(self::pruneRolePermissionChunk(...)))->run(
+            self::expiredRolePermissions(),
+            ['role_id', 'permission_id', 'expires_at'],
+            $chunk,
+        );
 
-        do {
-            /** @var list<array<string, string|null>> $rows */
-            $rows = (clone $expired)->limit($chunk)->get($columns)->map(static fn (object $row): array => (array) $row)->all();
+        foreach (GrantTarget::cases() as $kind) {
+            $expired += $pretend ? self::expired($kind)->count() : (new ExpiredSweep(self::pruneChunk(...), $kind))->run(
+                self::expired($kind),
+                [$kind->column() . ' as target_id', 'authorizable_type', 'authorizable_id', 'tenant_type', 'tenant_id', 'include_subtree', 'application', 'expires_at'],
+                $chunk,
+            );
+        }
 
-            $removed += OperationScope::run(Operation::begin(), static fn (Operation $operation): int => $remove($rows, $operation));
-        } while (\count($rows) === $chunk);
+        return $expired;
+    }
 
-        return $removed;
+    /**
+     * Remove the boundaries and then the grants of each grantee that no longer
+     * exists, or, pretending, only count them, and return how many grants and
+     * how many boundaries there are.
+     *
+     * @param  array<string, \SineMacula\Laravel\Authorization\Support\Reference>  $orphans
+     * @param  bool  $pretend
+     * @return array{0: int, 1: int}
+     *
+     * @throws \Throwable
+     */
+    private function removeOrphaned(array $orphans, bool $pretend): array
+    {
+        $orphaned   = 0;
+        $boundaries = 0;
+
+        foreach ($orphans as $grantee) {
+            $boundaries += $pretend ? self::countBoundaries($grantee) : $this->boundaries->removeAll($grantee);
+            $orphaned   += $pretend ? self::countLiveGrants($grantee) : $this->grants->revokeAll($grantee);
+        }
+
+        return [$orphaned, $boundaries];
     }
 
     /**
@@ -226,12 +231,12 @@ final readonly class GrantPruner
      * Remove one chunk of expired grants, reporting each removed, and return
      * how many were removed.
      *
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  list<ExpiredRow>  $rows
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @return int
      */
-    private static function pruneChunk(GrantTarget $kind, array $rows, Operation $operation): int
+    private static function pruneChunk(array $rows, Operation $operation, GrantTarget $kind): int
     {
         $targets = self::keyed($kind, \array_column($rows, 'target_id'));
         $events  = [];
@@ -356,7 +361,7 @@ final readonly class GrantPruner
         $orphans    = [];
         $unresolved = [];
 
-        foreach ([...\array_map(static fn (GrantTarget $kind): string => $kind->table(), GrantTarget::cases()), self::boundariesTable()] as $table) {
+        foreach ([...\array_map(static fn (GrantTarget $kind): string => $kind->table(), GrantTarget::cases()), self::table('authorizable_boundaries')] as $table) {
             [$missing, $types] = self::missingOwners($table, 'authorizable', $chunk);
 
             $orphans    += $missing;
@@ -435,9 +440,11 @@ final readonly class GrantPruner
                 /** @var list<string> $ids */
                 $ids = $rows->pluck($column)->all();
 
+                $found = \array_filter($class::query()->withoutGlobalScopes()->whereKey($ids)->pluck((new $class)->getKeyName())->all(), \is_scalar(...));
+
                 // `array_diff()` compares as strings, so an integer key matches
                 // the grant's string id.
-                foreach (\array_diff($ids, $class::query()->withoutGlobalScopes()->whereKey($ids)->pluck((new $class)->getKeyName())->all()) as $id) {
+                foreach (\array_diff($ids, $found) as $id) {
                     $missing[] = $id;
                 }
             });
@@ -446,36 +453,15 @@ final readonly class GrantPruner
     }
 
     /**
-     * Return the policies table, as `authorization.tables` names it.
+     * Return the package table, as `authorization.tables` names it.
      *
+     * @param  string  $name
      * @return string
      */
-    private static function policiesTable(): string
+    private static function table(string $name): string
     {
         /** @var string */
-        return config('authorization.tables.policies', 'policies');
-    }
-
-    /**
-     * Return the resource policies table, as `authorization.tables` names it.
-     *
-     * @return string
-     */
-    private static function resourcePoliciesTable(): string
-    {
-        /** @var string */
-        return config('authorization.tables.resource_policies', 'resource_policies');
-    }
-
-    /**
-     * Return the boundaries table, as `authorization.tables` names it.
-     *
-     * @return string
-     */
-    private static function boundariesTable(): string
-    {
-        /** @var string */
-        return config('authorization.tables.authorizable_boundaries', 'authorizable_boundaries');
+        return config('authorization.tables.' . $name, $name);
     }
 
     /**
@@ -486,7 +472,7 @@ final readonly class GrantPruner
      */
     private static function countAttachments(Reference $record): int
     {
-        return AuthorizationConnection::connection()->table(self::resourcePoliciesTable())
+        return AuthorizationConnection::connection()->table(self::table('resource_policies'))
             ->where('resource_type', $record->type)
             ->where('resource_id', $record->id)
             ->count();
@@ -500,7 +486,7 @@ final readonly class GrantPruner
      */
     private static function countBoundaries(Reference $grantee): int
     {
-        return AuthorizationConnection::connection()->table(self::boundariesTable())
+        return AuthorizationConnection::connection()->table(self::table('authorizable_boundaries'))
             ->where('authorizable_type', $grantee->type)
             ->where('authorizable_id', $grantee->id)
             ->count();

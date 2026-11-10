@@ -52,8 +52,8 @@ final class SealedModels
                 /**
                  * Build a model from a row, as the model's own.
                  *
-                 * @param  mixed  $attributes
-                 * @param  mixed  $connection
+                 * @param  array<string, mixed>  $attributes
+                 * @param  string|\UnitEnum|null  $connection
                  * @return self
                  *
                  * @phpstan-ignore sineMaculaLaravel.modelBehaviour
@@ -96,7 +96,7 @@ final class SealedModels
                 /**
                  * Return an attribute, as the model's own.
                  *
-                 * @param  mixed  $key
+                 * @param  string  $key
                  * @return mixed
                  *
                  * @phpstan-ignore sineMaculaLaravel.modelBehaviour
@@ -125,7 +125,7 @@ final class SealedModels
                 /**
                  * Return an attribute's value, as the model's own.
                  *
-                 * @param  mixed  $key
+                 * @param  string  $key
                  * @return mixed
                  *
                  * @phpstan-ignore sineMaculaLaravel.modelBehaviour
@@ -141,7 +141,7 @@ final class SealedModels
                  * Set the raw attributes, as the model's own.
                  *
                  * @param  array<array-key, mixed>  $attributes
-                 * @param  mixed  $sync
+                 * @param  bool  $sync
                  * @return self
                  *
                  * @phpstan-ignore sineMaculaLaravel.modelBehaviour

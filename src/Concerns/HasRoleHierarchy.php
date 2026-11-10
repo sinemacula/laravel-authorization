@@ -228,7 +228,7 @@ trait HasRoleHierarchy // @phpstan-ignore trait.unused
      */
     private static function configuredRoleClass(): string
     {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> */
         return config('authorization.models.role', Role::class);
     }
 }

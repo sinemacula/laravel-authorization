@@ -415,7 +415,7 @@ final class DefinitionConstraints
             default     => null,
         };
 
-        return $holders === null ? DecisionReason::ADMINISTRATION_UNPROVABLE : self::growth($operation, $resource, $holders, $checks, $route, $change);
+        return $holders === null || $route === null ? DecisionReason::ADMINISTRATION_UNPROVABLE : self::growth($operation, $resource, $holders, $checks, $route, $change);
     }
 
     /**

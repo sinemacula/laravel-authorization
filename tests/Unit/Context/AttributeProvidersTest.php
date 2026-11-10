@@ -278,7 +278,7 @@ final class AttributeProvidersTest extends TestCase
     {
         $this->container->instance('not-a-provider', new \stdClass);
 
-        $providers = new AttributeProviders($this->container, ['post' => 'App\Missing'], ['user' => 'not-a-provider']);
+        $providers = $this->configured(['post' => 'App\Missing'], ['user' => 'not-a-provider']);
 
         $reads = [
             'resource' => static fn (): array => $providers->resourceValues(ResourceReference::record('post', '1')),
@@ -298,7 +298,7 @@ final class AttributeProvidersTest extends TestCase
         $this->expectException(\UnexpectedValueException::class);
         $this->expectExceptionMessage('Attribute provider \'not-a-provider\' does not implement ' . SubjectAttributeProvider::class . '.');
 
-        (new AttributeProviders($this->container, [], ['user' => 'not-a-provider']))->declarations();
+        $this->configured([], ['user' => 'not-a-provider'])->declarations();
     }
 
     /**
@@ -314,7 +314,7 @@ final class AttributeProvidersTest extends TestCase
         $this->expectException(\UnexpectedValueException::class);
         $this->expectExceptionMessage('Attribute provider \'' . ConflictingResourceAttributes::class . '\' does not implement ' . SubjectAttributeProvider::class . '.');
 
-        (new AttributeProviders($this->container, [], ['user' => ConflictingResourceAttributes::class]))->declarations();
+        $this->configured([], ['user' => ConflictingResourceAttributes::class])->declarations();
     }
 
     /**
@@ -465,9 +465,9 @@ final class AttributeProvidersTest extends TestCase
             }
         };
 
-        $this->container->instance('provider', $provider);
+        $this->container->instance($provider::class, $provider);
 
-        return (new AttributeProviders($this->container, ['post' => 'provider']))->resourceValues(ResourceReference::record('post', '1'));
+        return (new AttributeProviders($this->container, ['post' => $provider::class]))->resourceValues(ResourceReference::record('post', '1'));
     }
 
     /**
@@ -478,6 +478,23 @@ final class AttributeProvidersTest extends TestCase
     private function providers(): AttributeProviders
     {
         return new AttributeProviders($this->container, ['post' => RecordingResourceAttributes::class], ['user' => RecordingSubjectAttributes::class]);
+    }
+
+    /**
+     * Return the providers a configuration registers, which may name something
+     * that is no provider of its namespace.
+     *
+     * @param  array<string, string>  $resources
+     * @param  array<string, string>  $subjects
+     * @return \SineMacula\Laravel\Authorization\Context\AttributeProviders
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     */
+    private function configured(array $resources, array $subjects): AttributeProviders
+    {
+        $this->container->instance('config', new Repository(['authorization' => ['attributes' => ['resources' => $resources, 'subjects' => $subjects]]]));
+
+        return AttributeProviders::fromConfig($this->container);
     }
 
     /**

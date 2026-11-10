@@ -9,9 +9,10 @@ use Benchmarks\Support\BenchmarkFixtures;
 use Illuminate\Support\Str;
 use PhpBench\Attributes as Bench;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\RoleService;
 
 /**
- * PHPBench micro-benchmark for `Role::resolveByName()`.
+ * PHPBench micro-benchmark for `RoleService::find()`.
  *
  * Exercises the two precedence branches the guard-scoped lookup supports: a
  * guard-specific row (`guard = 'web'`) and a guard-agnostic row (`guard =
@@ -28,15 +29,18 @@ use SineMacula\Laravel\Authorization\Models\Role;
 #[Bench\OutputTimeUnit('microseconds')]
 final class RoleLookupBench extends BenchmarkCase
 {
+    /** @var \SineMacula\Laravel\Authorization\Services\RoleService|null Container-resolved role service under test; populated by `setUp()`. */
+    private ?RoleService $roles = null;
+
     /**
-     * Bench setUp — boot a Laravel application and seed the two role rows that
-     * the lookup branches target.
+     * Bench setUp — boot a Laravel application, seed the two role rows that the
+     * lookup branches target, and resolve the container-bound role service.
      *
      * @return void
      */
     public function setUp(): void
     {
-        $this->boot();
+        $this->roles = $this->boot()->make(RoleService::class);
 
         Role::query()->delete();
 
@@ -63,7 +67,7 @@ final class RoleLookupBench extends BenchmarkCase
     #[Bench\Revs(100)]
     public function benchResolveByNameGuardSpecific(): void
     {
-        Role::resolveByName(BenchmarkFixtures::roleName(), 'web');
+        $this->roles?->find(BenchmarkFixtures::roleName(), 'web');
     }
 
     /**
@@ -76,6 +80,6 @@ final class RoleLookupBench extends BenchmarkCase
     #[Bench\Revs(100)]
     public function benchResolveByNameGuardAgnostic(): void
     {
-        Role::resolveByName(BenchmarkFixtures::roleName() . '-agnostic', 'web');
+        $this->roles?->find(BenchmarkFixtures::roleName() . '-agnostic', 'web');
     }
 }

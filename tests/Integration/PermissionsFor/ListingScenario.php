@@ -553,11 +553,17 @@ final class ListingScenario
      *
      * @template TValue
      *
-     * @param  non-empty-list<TValue>  $values
+     * @param  list<TValue>  $values
      * @return TValue
+     *
+     * @throws \LogicException
      */
     private function pick(array $values): mixed
     {
+        if ($values === []) {
+            throw new \LogicException('There is nothing to pick from.');
+        }
+
         return $values[$this->random->getInt(0, \count($values) - 1)];
     }
 

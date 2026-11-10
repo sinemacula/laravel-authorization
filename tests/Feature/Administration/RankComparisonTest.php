@@ -188,7 +188,7 @@ final class RankComparisonTest extends TestCase
         $junior = self::holding('junior', 5);
         $senior = self::holding('senior', 1);
 
-        $this->app?->make(ConfigRepository::class)->set('authorization.rank.enabled', false); // @phpstan-ignore method.nonObject
+        $this->container()->make(ConfigRepository::class)->set('authorization.rank.enabled', false);
 
         self::assertTrue(RankComparison::canActOn($junior, $senior));
         self::assertTrue(RankComparison::canActOn(new \stdClass, $senior));

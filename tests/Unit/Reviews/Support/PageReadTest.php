@@ -29,7 +29,7 @@ final class PageReadTest extends TestCase
      */
     public function testItKeepsWhatWasRead(): void
     {
-        $at   = CarbonImmutable::create(2030, 1, 1, 0, 0, 0, 'UTC');
+        $at   = new CarbonImmutable('2030-01-01 00:00:00', 'UTC');
         $next = new ReviewPosition($at, [0]);
         $page = new PageRead([], $next, false, $at);
 

@@ -66,7 +66,10 @@ final class PolicyTest extends StringCastsTestCase
 
         self::assertTrue($user->is($inline->owner));
         self::assertTrue($user->is($inline->owner()->first()));
-        self::assertTrue($user->is(Policy::query()->with('owner')->whereKey($inline->getKey())->sole()->getRelation('owner')));
+        $eager = Policy::query()->with('owner')->whereKey($inline->getKey())->sole()->getRelation('owner');
+
+        self::assertInstanceOf(Model::class, $eager);
+        self::assertTrue($user->is($eager));
         self::assertNull($managed->owner);
     }
 

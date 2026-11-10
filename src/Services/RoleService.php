@@ -396,7 +396,7 @@ final class RoleService
 
                 // A permission decided as carried live is never written back:
                 // one gone by the write was not what was decided.
-                if ($change->outcome !== GrantOutcome::UNCHANGED && \in_array($target->id, $live, true)) {
+                if ($change->changesAnyOf($target->id, $live)) {
                     throw DependencyChangedException::rows('role_permissions');
                 }
 

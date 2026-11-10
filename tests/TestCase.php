@@ -8,6 +8,7 @@ namespace Tests;
 // function import with the class imports, which this sniff rejects.
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -84,6 +85,40 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
+     * Return the merged package config.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws \UnexpectedValueException
+     */
+    protected function authorizationConfig(): array
+    {
+        $config = [];
+
+        foreach ($this->container()->make(ConfigRepository::class)->array('authorization') as $key => $value) {
+            if (!\is_string($key)) {
+                throw new \UnexpectedValueException('The package config holds an unnamed key.');
+            }
+
+            $config[$key] = $value;
+        }
+
+        return $config;
+    }
+
+    /**
+     * Return the application container.
+     *
+     * @return \Illuminate\Foundation\Application
+     *
+     * @throws \LogicException
+     */
+    protected function container(): Application
+    {
+        return $this->app ?? throw new \LogicException('The application has not been created.');
+    }
+
+    /**
      * Register the package service provider.
      *
      * @param  mixed  $app
@@ -132,7 +167,7 @@ abstract class TestCase extends OrchestraTestCase
     #[\Override]
     protected function defineDatabaseMigrations(): void
     {
-        load_migration_paths($this->app, __DIR__ . '/../database/migrations');
+        load_migration_paths($this->container(), __DIR__ . '/../database/migrations');
     }
 
     /**
