@@ -461,7 +461,12 @@ final readonly class ResolutionCache
      */
     private function remember(string $kind, object $grantee, \Closure $resolve, \Closure $decode, ?\Closure $encode = null, bool $isGrantee = true): array
     {
-        $kind    = ResolutionCodec::kindOf($kind, $this->isTrackingUsage);
+        // Every check reads through here, so the kind is renamed for routed
+        // entries only while usage is tracked, at no cost when it is not.
+        if ($this->isTrackingUsage) {
+            $kind = ResolutionCodec::kindOf($kind, true);
+        }
+
         $memoKey = $kind . ':' . PrincipalCacheKey::for($grantee);
 
         /** @var list<mixed>|null $memoised */

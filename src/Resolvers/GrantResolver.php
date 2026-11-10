@@ -329,7 +329,7 @@ final class GrantResolver
      * an expiry already known, or null when none of them expires.
      *
      * @param  int|null  $nearest
-     * @param  \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>  ...$grants
+     * @param  \Illuminate\Database\Eloquent\Collection<int, covariant \Illuminate\Database\Eloquent\Model>  ...$grants
      * @return int|null
      */
     private static function expiresIn(?int $nearest, EloquentCollection ...$grants): ?int

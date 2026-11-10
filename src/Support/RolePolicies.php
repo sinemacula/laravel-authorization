@@ -97,7 +97,7 @@ final class RolePolicies
      * reads, in the same queries, the chain of each role held and the role each
      * attachment is to, so it can say which route each policy came through.
      *
-     * @param  \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>  $held
+     * @param  \Illuminate\Database\Eloquent\Collection<int, covariant \Illuminate\Database\Eloquent\Model>  $held
      * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $roles
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \SineMacula\Laravel\Authorization\Support\InheritedPolicies
