@@ -5,45 +5,56 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Database\QueryException;
+use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\GrantApplications;
+use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantPresence;
 use SineMacula\Laravel\Authorization\Enums\GrantScopeStatus;
+use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 use SineMacula\Laravel\Authorization\Support\GrantRoots;
+use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
- * Answers where an identity's grants lie against a tenant (AUTHZ-14.2), and
- * whether a principal holds a grant that applies in one (AUTHZ-13.8): two
- * factual questions about grants, for a trusted integration such as
- * `laravel-iam` composing SSO's principal scope or tenant admission.
+ * Answers where an identity's grants lie against a tenant (AUTHZ-14.2), whether
+ * a principal holds a grant that applies in one (AUTHZ-13.8), and whose grants
+ * reach a tenant or lie within its subtree (N131): factual questions about
+ * grants, for a trusted integration such as `laravel-iam` composing SSO's
+ * principal scope or tenant admission, or reporting the grantees a move of a
+ * tenant widens.
  *
- * Neither authorises anything: `check()` stays the one decision path (D22).
- * Neither says whether a principal is a member of a tenant, which is the
- * application's (AUTHZ-13.9), nor whether it may act there. A grant is a live
- * role, direct permission or policy attachment, a policy that only denies
- * included; an expired row, a boundary and a guardrail are not (N82, see
- * `GrantRoots`).
+ * None authorises anything: `check()` stays the one decision path (D22). None
+ * says whether a principal is a member of a tenant, which is the application's
+ * (AUTHZ-13.9), nor whether it may act there. A grant is a live role, direct
+ * permission or policy attachment, a policy that only denies included; an
+ * expired row, a boundary and a guardrail are not (N82, see `GrantRoots`).
  *
  * This is a trusted service, not an endpoint for users: even its bare answer
  * tells a caller something about grants in other tenants, so it is never
- * exposed to a user who may not see them. It returns the answer alone, never
- * the tenants, grants, names, counts or rows behind it.
+ * exposed to a user who may not see them. The two questions about one grantee
+ * return the answer alone, never the tenants, grants, names, counts or rows
+ * behind it; the two about a tenant return the grantees alone, never their
+ * grants.
  *
  * Each answer reads the grants in one query on the write connection, however
- * many grants and principals there are and however deep the tree, plus the
- * tree's own reads and the identity directory's; only when the tree's subtree
- * query fails as it runs is a second read, for the platform-wide grants, made.
+ * many grants and grantees there are and however deep the tree, plus the tree's
+ * own reads and the identity directory's; only when the tree's subtree query
+ * fails as it runs is a second read, for the platform-wide grants, made for
+ * `forIdentity()`.
  *
  * Each answer refuses, before the tenant is read or a seam resolved, while the
  * package is not healthy (see `PackageState`).
@@ -142,6 +153,84 @@ final readonly class GrantScopeQuery
             $chain === null || !$isEveryGranteeRead => GrantPresence::UNKNOWN,
             default                                 => GrantPresence::ABSENT,
         };
+    }
+
+    /**
+     * Return every grantee, a principal or an identity as its rows store it,
+     * holding a live grant that reaches the tenant: one made in the tenant, one
+     * made in an ancestor that reaches below it, or a platform-wide one, as a
+     * check there reads them (N131). A grant made in an ancestor for that
+     * ancestor alone, and a row naming half a tenant, never reach it.
+     *
+     * A subtree moved under a new parent comes to be reached by the grants that
+     * reach the parent from above it or were made there reaching below it, so a
+     * caller asks this of the moved tenant once it has moved, or of the new
+     * parent at any time, which lists as well whoever holds a grant made there
+     * for the parent alone; the subtree's own grants keep their reach. The
+     * ancestors are read from the bound tree afresh, never a batch's kept
+     * answer, so a move the tree has not been told of is seen.
+     *
+     * Given an application, only the grants that hold in it count; without one,
+     * a grant counts whichever application it holds in. The grantees are each
+     * listed once, by type and then key, byte by byte. A tree that throws is
+     * thrown, never answered as an empty list.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|\SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @param  string|null  $application
+     * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public function granteesReaching(AuthorizableTenant|Model|Reference $tenant, ?string $application = null): array
+    {
+        PackageState::guard($this->container);
+
+        $chain = TenantChain::of(self::referenceTo($tenant), TenantChain::tree(), isFresh: true);
+
+        return self::holding(static function (Builder $query, string $table) use ($chain): void {
+            $chain->grants($query, $table);
+
+            $query->where(static function (Builder $whole) use ($table): void {
+                $whole->whereNotNull($table . '.tenant_type')->orWhereNull($table . '.tenant_id');
+            });
+        }, $application);
+    }
+
+    /**
+     * Return every grantee, a principal or an identity as its rows store it,
+     * holding a live grant made in the tenant or in any tenant below it in the
+     * bound tree, whether or not it reaches below its own tenant (N131). A
+     * grant made in an ancestor, one platform-wide, and a row naming half a
+     * tenant, are not within.
+     *
+     * The subtree is nested whole in the grant query, as `forIdentity()` nests
+     * it, never loaded, so it must be a query on the package's connection; any
+     * other is refused with an `UnexpectedValueException`, and a tree that
+     * throws is thrown, never answered as an empty list. The grant query runs
+     * in a savepoint of its own, so a subtree query that fails as it runs rolls
+     * back only that query before its `QueryException` is thrown.
+     *
+     * Given an application, only the grants that hold in it count; without one,
+     * a grant counts whichever application it holds in. The grantees are each
+     * listed once, by type and then key, byte by byte.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|\SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @param  string|null  $application
+     * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     * @throws \UnexpectedValueException
+     * @throws \Throwable
+     */
+    public function granteesWithin(AuthorizableTenant|Model|Reference $tenant, ?string $application = null): array
+    {
+        PackageState::guard($this->container);
+
+        $within = GrantRoots::within(self::referenceTo($tenant), TenantChain::tree());
+
+        return AuthorizationConnection::connection()->transaction(static fn (): array => self::holding($within, $application));
     }
 
     /**
@@ -278,6 +367,83 @@ final readonly class GrantScopeQuery
         AuthorizationLog::warning('Authorization: the tenant tree could not be read for a grant scope query: ' . $exception->getMessage(), [
             'exception' => $exception::class,
         ]);
+    }
+
+    /**
+     * Return every grantee holding a live grant that meets the condition and
+     * holds in the application, read from every grant table in one query on the
+     * write connection, each grantee once, by type and then key, byte by byte,
+     * as every database orders them alike. An inline policy attached to a
+     * grantee it does not belong to is no grant (see `InlinePolicies`), and a
+     * role a policy is attached to no grantee: whoever holds the role is listed
+     * through their own grant of it (see `RolePolicies`).
+     *
+     * @param  \Closure(\Illuminate\Database\Query\Builder, string): void  $constrain
+     * @param  string|null  $application
+     * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
+     */
+    private static function holding(\Closure $constrain, ?string $application): array
+    {
+        $connection = AuthorizationConnection::connection();
+        $union      = null;
+
+        foreach (GrantTarget::cases() as $target) {
+            $rows  = self::holdersIn($connection, $target, $constrain, $application);
+            $union = $union === null ? $rows : $union->union($rows);
+        }
+
+        return Reference::sorted($union->useWritePdo()->get()
+            ->map(static fn (\stdClass $row): Reference => new Reference(self::text($row->authorizable_type), self::text($row->authorizable_id)))
+            ->all());
+    }
+
+    /**
+     * Return the query of the grantees of one grant table's live rows that meet
+     * the condition and hold in the application.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $target
+     * @param  \Closure(\Illuminate\Database\Query\Builder, string): void  $constrain
+     * @param  string|null  $application
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private static function holdersIn(Connection $connection, GrantTarget $target, \Closure $constrain, ?string $application): Builder
+    {
+        $table = $target->table();
+        $query = $connection->query()->from($table)->select([$table . '.authorizable_type', $table . '.authorizable_id']);
+
+        LiveGrants::only($query, $table);
+
+        if ($target === GrantTarget::POLICY) {
+            /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $role */
+            $role = ModelClasses::get('role');
+
+            InlinePolicies::attachedToTheirGrantee($query, $table);
+
+            // A policy attached to a role is a grant to whoever holds the role,
+            // listed through their own grant of it, never to the role.
+            $query->where($table . '.authorizable_type', '<>', (new $role)->getMorphClass());
+        }
+
+        if ($application !== null) {
+            GrantApplications::only($query, $table, $application);
+        }
+
+        $constrain($query, $table);
+
+        return $query;
+    }
+
+    /**
+     * Return a value read from a row as a string: a string as itself, anything
+     * else as empty, as every grant table stores its grantee as strings.
+     *
+     * @param  mixed  $value
+     * @return string
+     */
+    private static function text(mixed $value): string
+    {
+        return \is_string($value) ? $value : '';
     }
 
     /**

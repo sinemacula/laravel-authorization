@@ -1,12 +1,13 @@
 # Grant Scope
 
-An integration such as `laravel-iam` needs two facts about grants that no check gives: whether everything an identity
-has been granted lies within a tenant, which SSO's principal scope is composed from (AUTHZ-14.2), and whether a
-principal holds a grant that applies in a tenant, an input to a tenant's admission (AUTHZ-13.8). This note explains the
-identity directory that says whose grants count, the shared reader of grant roots, `GrantScopeQuery::forIdentity()` and
-`GrantScopeQuery::hasGrantIn()`, and why neither is membership or authorisation. It then explains the grant hooks that
-build on them (AUTHZ-11.3, N80): which grants widen an identity's scope, the hook contract and its binding, and where
-the hook runs in a grant call.
+An integration such as `laravel-iam` needs facts about grants that no check gives: whether everything an identity has
+been granted lies within a tenant, which SSO's principal scope is composed from (AUTHZ-14.2), whether a principal holds
+a grant that applies in a tenant, an input to a tenant's admission (AUTHZ-13.8), and whose grants reach a tenant or lie
+within its subtree, which a move of a tenant widens or carries (N131). This note explains the identity directory that
+says whose grants count, the shared reader of grant roots, `GrantScopeQuery::forIdentity()`,
+`GrantScopeQuery::hasGrantIn()`, `granteesReaching()` and `granteesWithin()`, and why none is membership or
+authorisation. It then explains the grant hooks that build on them (AUTHZ-11.3, N80): which grants widen an identity's
+scope, the hook contract and its binding, and where the hook runs in a grant call.
 
 ## Invariants
 
@@ -61,13 +62,14 @@ the hook runs in a grant call.
    scopes nor a machine's missing ones refuse it, while its denies, guardrails and boundaries still do.
 
 8. **A trusted service.** Even the bare status reveals a fact about other tenants, so the service is for trusted
-   integration code, never an endpoint for users. It returns the status alone, never tenant ids, grant names, counts
-   or rows.
+   integration code, never an endpoint for users. `forIdentity()` and `hasGrantIn()` return the status alone, never
+   tenant ids, grant names, counts or rows; `granteesReaching()` and `granteesWithin()` return the grantees alone,
+   never their grants or where they were made (invariant 17).
 
 9. **Bounded cost.** Each answer is one grant query, plus the tree's own reads and the directory's, whatever the number
-   of grants, grantees or tenants and the depth of the tree; only a subtree query that fails as it runs costs a second
-   query, of the platform-wide grants. Nothing is cached: completeness across an identity's principals would need
-   invalidation the resolution cache does not have.
+   of grants, grantees or tenants and the depth of the tree; only a subtree query that fails as it runs costs
+   `forIdentity()` a second query, of the platform-wide grants. Nothing is cached: completeness across an identity's
+   principals would need invalidation the resolution cache does not have.
 
 10. **Widening (AUTHZ-11.3).** `Hooks\WideningClassifier` classifies the grants a call proposes. A grant the grantee
     holds live in the same scope, unchanged or only shortened (an earlier expiry, a narrower or equal reach), is never
@@ -161,6 +163,29 @@ the hook runs in a grant call.
     as a hook's own tests, and is the client of a routed request or none, never one read from the request Laravel
     binds for the console and the queue.
 
+17. **The grantees reaching or within a tenant (BL-91, N131).** `treeChanged()` runs no grant hook, so a sibling that
+    reports a move of a tenant to its sign-on scope widening asks whose grants the move concerns.
+    `granteesReaching($tenant, $application = null)` lists every grantee, a principal or an identity as its rows store
+    it, holding a live grant that reaches the tenant as a check there reads it (`TenantChain::grants()`): made in the
+    tenant, for it alone or reaching below it, made in an ancestor and reaching below it, or platform-wide. The
+    ancestors are read from the bound tree afresh (`TenantChain::of(..., isFresh: true)`), never a batch's kept answer.
+    `granteesWithin($tenant, $application = null)` lists every grantee holding a live grant made in the tenant or below
+    it, through `GrantRoots::within()`: the tenant's own pair for the flat tree, else the tree's `subtree()` nested
+    whole. A subtree moved under a new parent comes to be reached by the grants that reach the parent from above it or
+    were made there reaching below it, so the sibling asks `granteesReaching()` of the moved tenant once it has moved,
+    or of the new parent at any time, which lists as well whoever holds a grant made there for the parent alone; the
+    grants within the subtree, which `granteesWithin()` lists, keep their reach. What counts as a grant is invariant 2,
+    and a row naming half a tenant never counts: a check takes a row with no tenant type for a platform-wide grant, but
+    neither list does. A role a policy is attached to is never listed, wherever the policy is attached: it is no
+    principal or identity, and whoever holds the role is listed through their own grant of it. A named application
+    counts the grants made for it or for every application, as `hasGrantIn()` does; none counts every grant. Each
+    grantee is listed once, ordered by type and then key byte by byte, in PHP (`Reference::sorted()`), so every database
+    lists them alike. Each list is one `UNION` query over the three grant tables on the write connection, plus the
+    tree's read of the ancestors for `granteesReaching()`, and refuses first while the package is not healthy. A list
+    cannot say `unknown`, so a tree that throws is thrown, a subtree on another connection than the package's is refused
+    with `UnexpectedValueException`, and a subtree query that fails as it runs is thrown as its `QueryException` once
+    `granteesWithin()`'s savepoint has rolled back, never answered as an empty list.
+
 ## Success Path
 
 `forIdentity(Reference::of($person), $account)` asks the directory for the person's principals and gets a complete
@@ -169,6 +194,11 @@ policy grant tables for the person and both principals, selecting the live rows 
 the subtree, or names half a tenant. No row comes back, so the answer is `WITHIN`. `hasGrantIn($user, $child)` makes
 the user a subject through the bound resolver, reads the child's chain from the tree, and asks whether any live grant
 of the user, or of its identity, applies in the child; an ancestor's subtree grant does, so the answer is `PRESENT`.
+
+An application moves an account under a second organisation and calls `treeChanged($account)`. `laravel-iam` then asks
+`granteesReaching($account)`: the package reads the account's new ancestors from the tree and, in one query, the
+grantees of the live grants made in the account, made in the second organisation reaching below it, or platform-wide,
+and returns their references, each once and in order; it reports them to its sign-on scope widening.
 
 A trusted `grantRole($principal, 'editor', tenant: $account)` with a hook configured opens the transaction, resolves
 the role and the scope without locking, and classifies the grant: the subject resolver names the person behind the
@@ -188,9 +218,14 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
   caller's transaction stays usable, as PostgreSQL otherwise would not leave it. Only the `QueryException` is caught:
   it is written to the log, and `forIdentity()` reads the platform-wide grants alone, answering as for a tree that
   throws. `hasGrantIn()` never runs the subtree query, so it is unaffected.
-- **A row naming half a tenant.** `UNKNOWN` for `forIdentity()`, unless another root is outside.
+- **A row naming half a tenant.** `UNKNOWN` for `forIdentity()`, unless another root is outside; never listed by
+  `granteesReaching()` or `granteesWithin()`.
+- **A tree that cannot be read, for a list.** `granteesReaching()` and `granteesWithin()` throw what the tree throws; a
+  subtree on another connection is refused with `UnexpectedValueException`; a subtree query that fails as it runs is
+  thrown once only its savepoint has rolled back. Neither answers an empty list it cannot vouch for.
 - **The same key under two types.** Never confused: grantees are matched by type and key together.
-- **Expired grants, boundaries, guardrails and policies attached to roles.** Never read as the grantees' grants.
+- **Expired grants, boundaries, guardrails and policies attached to roles.** Never read as the grantees' grants; a
+  role a policy is attached to is never listed by `granteesReaching()` or `granteesWithin()`.
 - **A hook that refuses.** Everything rolls back, a sync's revocations included; no event, no retry, no denial. A
   concurrency error the hook's own preparation meets is handled as any other (invariant 13).
 - **A grant relied on vanishes before the locks.** The final classification, read under the lock, finds the grant
@@ -209,7 +244,8 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
 - `Contracts\IdentityDirectory`, `Support\IdentityPrincipals` and `Resolvers\GuardUserIdentityDirectory` -- the seam,
   its answer and the default.
 - `Support\GrantRoots` -- the union over the grant tables, `within()`, `against()` and `appliesIn()`.
-- `Services\GrantScopeQuery` -- `forIdentity()`, `hasGrantIn()`, the grantees and the tree's failures.
+- `Services\GrantScopeQuery` -- `forIdentity()`, `hasGrantIn()`, the grantees and the tree's failures, and
+  `granteesReaching()` and `granteesWithin()` with their one query over the grant tables (`holding()`).
 - `Enums\GrantScopeStatus` and `Enums\GrantPresence` -- the answers.
 - `Config\ImplementationConfigValidator` and `Config\ConfigValidator` -- the `identity_directory` validation.
 - `AuthorizationServiceProvider::registerConfiguredDefaults()` and `registerManagementServices()` -- the scoped
@@ -230,14 +266,19 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
 - `Feature\Services\GrantScopeQueryTest` -- the containment matrix (the tenant, descendants, ancestors, siblings, the
   platform, no grants, an incomplete directory, every application, morph collisions, expiry, several principals,
   deny-only policies, boundaries and guardrails ignored) and presence against containment (ancestor subtree grants,
-  node-only grants, principal isolation, identity inheritance, machines, applications, unreadable trees, subtree
-  queries that fail as they run, and grantees), under the closure-table and flat trees, and the status carrying nothing
-  else.
+  node-only grants, principal isolation, identity inheritance, machines, applications, unreadable trees, subtree queries
+  that fail as they run, and grantees), under the closure-table and flat trees, and the status carrying nothing else;
+  the grantees reaching and within a tenant (the tenant, an ancestor with and without its subtree, a descendant, a
+  sibling, another organisation and the platform, expired, half-tenant and stray inline rows, a role a policy is
+  attached to, the clashing ids of a mixed-type tree, principals and identities each once in byte order, applications, a
+  model tenant, the query count, a simulated move, ancestors read afresh in a batch, a tree that throws, a subtree on
+  another connection, a subtree query failing in its savepoint and the write connection).
+- `Unit\Support\ReferenceTest` -- references sorted by type and then key, byte by byte, whatever order they come in.
 - `Feature\Support\GrantRootsTest` -- the classification, half-tenant rows, one query naming each grantee once,
   grantees sharing a key under two types, applicability, applicability under a lock table by table, inline policies,
   nested subtrees, refused subtrees and the write connection, on a connection outside the test's transaction.
 - `Performance\GrantScopeQueryBudgetTest` -- the query count is the same for one grant and ten of each kind, and at
-  depth one and depth eight.
+  depth one and depth eight, for each answer and each list of grantees.
 - `Feature\Resolvers\GuardUserIdentityDirectoryTest`, `Feature\ConfigValidatorTest` and
   `Feature\AuthorizationServiceProviderTest` -- the default directory, its validation and its binding.
 - `Feature\Hooks\WideningClassifierTest` -- the classification matrix: an identity grantee, the platform, a new
@@ -277,12 +318,16 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
 - **Widening hooks (BL-66 part 2, AUTHZ-11.3, N80).** Widening classification, the `GrantHook` contract and its one
   binding with the ordered composite, the run before the package's first lock with the coverage check and retry, the
   recursion guard and the refusal of nested calls (invariants 10 to 15).
+- **Grantees reaching or within a tenant (BL-91, N131).** `granteesReaching()` and `granteesWithin()` for a sibling
+  reporting a tenant moved (invariant 17).
 
 ## Change Triggers
 
 - Counting any other row as a grant, or leaving one out, changes invariant 2 and N82.
 - Inferring principals from anything but the directory breaks invariant 1 and N81.
-- Returning anything beyond the status breaks invariant 8.
+- Returning anything beyond the status, or for a list anything beyond the grantees, breaks invariant 8.
+- Listing a grantee whose grant does not reach the tenant or lie within it, or answering an empty list for a tree that
+  cannot be read, breaks invariant 17.
 - A per-grant or per-tenant query, or loading a subtree's ids, breaks invariant 9.
 - Caching an answer needs invalidation across every principal of an identity.
 - Handing the client to anything but the grant hook (an event, a cache key, a log or a stored row) breaks invariant 16.
