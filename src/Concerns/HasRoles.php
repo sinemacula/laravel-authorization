@@ -149,7 +149,14 @@ trait HasRoles // @phpstan-ignore trait.unused
      * the lookup ranks first attached, so a tenant's role of the same name
      * never replaces a platform grant.
      *
-     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
+     * In a tenant, a role is granted reaching the tenants below it. An entry
+     * may give a role its own reach, as `RoleReach::of('billing',
+     * includeSubtree: false)`, so one sync holds roles of both reaches; a role
+     * listed so and held live with the other reach has its reach changed in
+     * place, keeping its expiry, and `RoleAssigned` fires for it (see
+     * `GrantService::syncRoles()`).
+     *
+     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|\SineMacula\Laravel\Authorization\Support\RoleReach|string>  $roles
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  string|null  $application
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor

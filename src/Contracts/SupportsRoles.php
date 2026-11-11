@@ -36,9 +36,10 @@ interface SupportsRoles
     public function revokeRole(RoleModel|string $role): static;
 
     /**
-     * Replace this identity's roles with the supplied set.
+     * Replace this identity's roles with the supplied set, each a role, a name,
+     * or either with its own reach (`RoleReach`).
      *
-     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
+     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|\SineMacula\Laravel\Authorization\Support\RoleReach|string>  $roles
      * @return static
      */
     public function syncRoles(array $roles): static;
