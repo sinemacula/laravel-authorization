@@ -408,7 +408,9 @@ A suite package that reads these names reads them the way the package does, thro
 `Config\ModelClasses::get('role')` and `Config\DefaultGuard::get()`, each taking an optional configuration repository.
 A name the configuration leaves out is the package's own; one that is not a non-empty string is refused as above. A
 table's name is the one the package reads, with `tables.prefix` before it when it is left at its default
-(`Config\TableNames::prefix()` reads the prefix alone). The three are part of the package's stable API.
+(`Config\TableNames::prefix()` reads the prefix alone). An installer checks a prefix before writing it with
+`Config\TableNames::isValidPrefix($prefix)`, which applies the rule above. The three are part of the package's stable
+API.
 
 `authorization:check` lists every issue at once rather than stopping at the first: those the boot found, when the
 application booted for it, and otherwise those these checks find again on the configuration as it stands, except the

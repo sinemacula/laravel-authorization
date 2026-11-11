@@ -29,6 +29,40 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 final class TableNamesTest extends TestCase
 {
     /**
+     * Return prefixes with whether each is valid.
+     *
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function prefixes(): iterable
+    {
+        yield 'empty' => ['', true];
+        yield 'plain' => ['authz_', true];
+        yield 'the longest' => [\str_repeat('a', 16), true];
+        yield 'one too long' => [\str_repeat('a', 17), false];
+        yield 'upper case' => ['Authz_', false];
+        yield 'a leading digit' => ['1authz_', false];
+        yield 'a leading underscore' => ['_authz', false];
+        yield 'a dash' => ['authz-', false];
+        yield 'a space' => ['authz ', false];
+        yield 'a trailing newline' => ["authz\n", false];
+    }
+
+    /**
+     * The prefix check accepts exactly what boot validation accepts: empty, or
+     * a lower-case letter followed by lower-case letters, digits and
+     * underscores, of at most 16 characters.
+     *
+     * @param  string  $prefix
+     * @param  bool  $isValid
+     * @return void
+     */
+    #[DataProvider('prefixes')]
+    public function testAPrefixIsCheckedAsBootChecksIt(string $prefix, bool $isValid): void
+    {
+        self::assertSame($isValid, TableNames::isValidPrefix($prefix));
+    }
+
+    /**
      * A configured name is read as it is.
      *
      * @return void
