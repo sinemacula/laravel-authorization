@@ -221,13 +221,16 @@ only from it: without a tenant, only platform-wide roles and permissions are vis
 'subject_resolver' => App\Authorization\CurrentSubject::class,
 ```
 
-A resolver can say more about the subject than who and where. `scopes` carries the scopes of the credential the subject
-acts with, such as an API token's, for the session policy source to cap its checks with (see
-[Session caps and machines](#session-caps-and-machines)): null when the credential carries no cap, and `[]` when it
-carries none granted, which allows nothing. `platform` marks a subject acting on the platform, as a queued job or a
-console command acting for no tenant does: it names no tenant, and `for()` of it decides on the platform whatever tenant
-is in place (see [The programmatic API](#the-programmatic-api)). Marking the request's subject moves neither
-`forUser()` nor a model named through `for()` out of the scope in place. The shipped resolver sets neither.
+A resolver can say more about the subject than who and where. `scopes` says what the credential the subject acts with,
+such as an API token, carries, for the session policy source to cap its checks with (see [Session caps and
+machines](#session-caps-and-machines)): `CredentialScopes::uncapped()` when the credential carries no cap, and
+`CredentialScopes::of([...])` with the scopes it carries, where `of([])` carries none granted and allows nothing. Left
+null, the subject says nothing about them, which is not the same as no cap: the source then establishes the scopes of
+the credential the subject names, and fails closed when it cannot. `platform` marks a subject acting on the platform, as
+a queued job or a console command acting for no tenant does: it names no tenant, and `for()` of it decides on the
+platform whatever tenant is in place (see [The programmatic API](#the-programmatic-api)). Marking the request's subject
+moves neither `forUser()` nor a model named through `for()` out of the scope in place. The shipped resolver sets
+neither.
 
 Every seam the package gives a default for can also be bound directly on its contract, from any service provider: the
 subject resolver, the tenant tree, the identity directory, the grant hook, the console subject resolver, the resource
@@ -1158,7 +1161,8 @@ cover is denied as `session_policy` at the `session` stage. A cap grants nothing
 by every other stage, and needs an allow statement or a permission held. A check can be capped in two ways:
 
 - **The credential's scopes.** The bound `SessionPolicySource` answers the scopes the credential of the check's subject
-  carries, such as an API token's or a service account's, or null when it carries no cap.
+  carries, such as an API token's or a service account's, or null when it carries no cap, and `[]`, allowing nothing,
+  when it cannot establish them.
 - **An explicit cap.** `Authorization::capped([...])` returns a scoped manager, as `for()` does, whose checks are capped
   by the actions given, for a delegated or a restricted call.
 
@@ -1215,52 +1219,80 @@ see it. `hasPermission()`, `hasRole()`, the `role:` middleware and `@role` repor
 through, so a cap never stops a role check.
 
 **The source.** A class implementing `SineMacula\Laravel\Authorization\Contracts\SessionPolicySource` answers
-`scopesFor(Subject $subject): ?array`, the scopes as a list of strings or null. It is asked once for each check that
-gets past the subject, resource and tenant stages and whose policies, guardrails and boundaries could then be read; a
-check denied as `invalid_policy` before then asks no source. It is given the check's `Subject`, also one named with
-`for()`, so answer null for a subject the credential does not belong to. A source that throws aborts the check, so no
-decision is made.
+`scopesFor(Subject $subject): ?array`, the scopes as a list of strings, or null for no cap. It is asked once for each
+check that gets past the subject, resource and tenant stages and whose policies, guardrails and boundaries could then be
+read; a check denied as `invalid_policy` before then asks no source. It is given the check's `Subject`, also one named
+with `for()`, and answers in this order:
+
+1. **The subject says what its credential carries.** A subject resolver that knows the credential puts it on the
+   `Subject` as `scopes`, a `SineMacula\Laravel\Authorization\Support\CredentialScopes`: `CredentialScopes::uncapped()`
+   for a credential carrying no cap, answered as null, and `CredentialScopes::of([...])` with the scopes it carries,
+   answered as that list, `[]` included. The source answers from it.
+2. **The subject says nothing (`scopes` is null) but names a credential.** It names a session, or a guard whose caller
+   is now the subject's own model, the same instance or one with the same key, as an API key or a client-credentials
+   token with no session does. The source establishes that credential's scopes from what the subject names, never from
+   the request around it, and answers `[]` when it cannot, such as for a session it cannot resolve. A guard whose caller
+   is another model names no credential of the subject's.
+3. **The subject names no credential.** With no session and no guard whose caller is its model, as a queued job's or a
+   console command's subject, or another model named through `for()`, the source answers null, no cap, unless it knows
+   the credential that subject acts with. A machine principal is still allowed nothing without scopes (see
+   [Machines](#session-caps-and-machines)).
+
+A source never throws because it could not establish a credential's scopes; it answers `[]` instead. One that throws
+for any other reason aborts the check, so no decision is made.
 
 ```php
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 
-final class CredentialScopes implements SessionPolicySource
+final class TokenScopes implements SessionPolicySource
 {
-    public function __construct(private CurrentCredential $credential) {}
+    public function __construct(private CredentialStore $credentials) {}
 
     public function scopesFor(Subject $subject): ?array
     {
-        return $this->credential->isHeldBy($subject->subject) ? $this->credential->scopes() : null;
+        if ($subject->scopes !== null) {
+            return $subject->scopes->scopes(); // what the subject says its credential carries
+        }
+
+        // Its session, or its guard when the guard's caller is the subject's own model.
+        $credential = $this->credentials->namedBy($subject);
+
+        if ($credential === null) {
+            return null; // a job's or a console command's subject, or another model
+        }
+
+        // CredentialScopes, or null when the store cannot read them: then nothing is allowed.
+        return ($this->credentials->scopesOf($credential) ?? CredentialScopes::of([]))->scopes();
     }
 }
 ```
 
-A source may read the scopes from the subject itself: a subject resolver that reads the credential can put its scopes on
-the `Subject` it returns, as `scopes`, null for a credential carrying no cap and `[]` for one carrying none granted, and
-the source hands them on. The subject reaches the source as the resolver made it. `for()` of a model makes a subject
-that is no request's credential, so it carries no scopes, as it carries no session; only the request's own model, named
-while its subject has no session, is that subject itself, scopes included. The default source still answers null,
-whatever the subject carries.
+A resolver filling the scopes, and a hand-built subject, say what the credential carries:
 
 ```php
-final class SubjectScopes implements SessionPolicySource
-{
-    public function scopesFor(Subject $subject): ?array
-    {
-        return $subject->scopes;
-    }
-}
+new Subject($user, $user, session: $id, scopes: CredentialScopes::of(['posts:read'])); // capped to posts:read
+new Subject($user, $user, session: $id, scopes: CredentialScopes::uncapped());         // no cap
+new Subject($user, $user, session: $id, scopes: CredentialScopes::of([]));             // allowed nothing
+new Subject($user, $user, session: $id); // the source establishes the session's scopes, or allows nothing
 ```
 
+`CredentialScopes::of()` refuses anything but a list of strings that are not empty with `InvalidArgumentException`. The
+subject reaches the source as the resolver made it. `for()` of another model makes a subject that is no request's
+credential: it carries no session and says nothing of its scopes, so it names a credential only when its guard's caller
+is that model. Only the request's own model, named while its subject has no session, is that subject itself, scopes
+included.
+
 Name it in `config/authorization.php`, where it is checked at boot and built per request or job, or bind the contract
-yourself. The default, `NoSessionPolicy`, answers null for every subject, so no credential caps a person's checks. Under
+yourself. The default, `NoSessionPolicy`, knows no credential: it answers from the subject's own `scopes`, and null
+when the subject says nothing, so without a resolver filling them no credential caps a person's checks. Under
 the suite, `sinemacula/laravel-iam` binds a source that reads the scopes of the caller's credential from
 `laravel-authentication`.
 
 ```php
 'session' => [
-    'source' => App\Authorization\CredentialScopes::class,
+    'source' => App\Authorization\TokenScopes::class,
     'scopes' => [],
 ],
 ```
@@ -2940,10 +2972,13 @@ proved; the caller's step-up counts for the admission alone. A preview's `author
 `InsufficientAuthenticationException`: a denial for a requirement made of the subject throws a plain
 `AuthorizationException`, carrying the decision, since no step-up by the caller could meet it. The subject is evaluated
 in the caller's request context: the `request`, `environment` and `authentication` namespaces are the caller's
-request's, which is no prediction of what the subject would see when signed in. A resolved `Subject` keeps the scopes
-its credential carries, so they still cap the preview, and its platform marker: previewed with no scope given, a
-`Subject` given on the platform is previewed on the platform, on its application, rather than in the request's tenant,
-while a model is previewed in the request's scope, whatever marker the request's subject carries.
+request's, which is no prediction of what the subject would see when signed in. A resolved `Subject` keeps what its
+credential carries, so it still caps the preview: when the `Subject` says nothing of its scopes but names a credential,
+a session or a guard whose caller is its own model, the session policy source is asked before the session is dropped and
+its answer is kept as said, so a credential the source cannot establish allows nothing. It keeps its platform marker
+too: previewed with no scope given, a `Subject` given on the platform is previewed on the platform, on its application,
+rather than in the request's tenant, while a model is previewed in the request's scope, whatever marker the request's
+subject carries.
 
 **What is recorded.** Every decision about the subject dispatches `DecisionEvaluated`, or `AuthorizationFailed` for an
 `authorize()` refusal, with `subject` the previewed subject and `previewer` the caller, in the scope the decision was

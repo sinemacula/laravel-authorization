@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\UnresolvedSubjectException;
 use SineMacula\Laravel\Authorization\Resolvers\ReferenceSubjectResolver;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use Tests\Feature\Stubs\FailingSubjectResolver;
 use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\PlainIdentity;
@@ -137,7 +138,7 @@ final class ReferenceSubjectResolverTest extends TestCase
         $principal = StubIdentity::create(['id' => 'principal-9']);
         $person    = StubSecondIdentity::create(['id' => 'person-9']);
 
-        $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, $person, null, ['posts:read'], true));
+        $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, $person, null, CredentialScopes::of(['posts:read']), true));
 
         $subject = $this->resolver()->resolve(StubSecondIdentity::class . ':person-9');
 

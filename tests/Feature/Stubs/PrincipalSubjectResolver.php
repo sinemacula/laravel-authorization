@@ -6,6 +6,7 @@ namespace Tests\Feature\Stubs;
 
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 
 /**
  * A subject resolver for an application with principals: every user it is
@@ -29,7 +30,7 @@ final readonly class PrincipalSubjectResolver implements SubjectResolver
      * @param  object  $principal
      * @param  object|null  $identity
      * @param  object|null  $tenant
-     * @param  list<string>|null  $scopes
+     * @param  \SineMacula\Laravel\Authorization\Support\CredentialScopes|null  $scopes
      * @param  bool  $platform
      */
     public function __construct(
@@ -43,8 +44,8 @@ final readonly class PrincipalSubjectResolver implements SubjectResolver
         /** The tenant of the request, or null for none. */
         private ?object $tenant = null,
 
-        /** The scopes the request's credential carries, or null for no cap. */
-        private ?array $scopes = null,
+        /** What the request's credential carries, or null to say nothing. */
+        private ?CredentialScopes $scopes = null,
 
         /** Whether the request acts on the platform. */
         private bool $platform = false,
