@@ -65,7 +65,7 @@ final class SeamRecordTest extends TestCase
         $held    = new \stdClass;
         $wrapper = new \ArrayObject;
         $other   = new \stdClass;
-        $record  = self::record(earlierInstance: $held);
+        $record  = self::record(earlierInstance: $held, named: 'App\Tree');
         $wrapped = $record->wrappedBy($wrapper, $held);
         $later   = $record->wrappedBy($wrapper, $other);
         $added   = ['wrapper' => true, 'wrapped' => true];
@@ -73,6 +73,7 @@ final class SeamRecordTest extends TestCase
         self::assertNull($record->wrapper);
         self::assertNull($record->wrapped);
         self::assertSame([$wrapper, $held], [$wrapped->wrapper, $wrapped->wrapped]);
+        self::assertSame('App\Tree', $wrapped->named);
         self::assertSame(\array_diff_key(\get_object_vars($record), $added), \array_diff_key(\get_object_vars($wrapped), $added));
         self::assertSame($held, $wrapped->unwrap($wrapper));
         self::assertTrue($wrapped->isEarlier($wrapper));
@@ -88,17 +89,47 @@ final class SeamRecordTest extends TestCase
     }
 
     /**
-     * Return a record of contract `A`, with what was bound before given.
+     * The closure recorded stands for the class the configuration names when
+     * that class was bound in place of the default, and when the record holds
+     * the name the configuration gives for a class still to be bound, whether
+     * the step binding it is pending or was dropped; a record of the default
+     * stands for none.
+     *
+     * @return void
+     */
+    public function testARecordSaysWhetherItHoldsTheClassConfigured(): void
+    {
+        $default = self::record(configured: false);
+
+        self::assertTrue(self::record()->isConfigured());
+        self::assertTrue(self::record(configured: false, named: 'App\Tree')->isConfigured());
+        self::assertTrue(self::record(named: 'App\Tree')->isConfigured());
+        self::assertFalse($default->isConfigured());
+        self::assertNull($default->named);
+    }
+
+    /**
+     * Return a record of contract `A`, with what was bound before given, of the
+     * class configured unless told otherwise, and with the name the
+     * configuration gives, when given.
      *
      * @param  (\Closure(mixed ...): mixed)|null  $earlier
      * @param  object|null  $earlierInstance
      * @param  string|null  $earlierAlias
+     * @param  bool  $configured
+     * @param  string|null  $named
      * @return \SineMacula\Laravel\Authorization\Diagnostics\SeamRecord
      */
-    private static function record(?\Closure $earlier = null, ?object $earlierInstance = null, ?string $earlierAlias = null): SeamRecord
-    {
+    private static function record(
+        ?\Closure $earlier = null,
+        ?object $earlierInstance = null,
+        ?string $earlierAlias = null,
+        bool $configured = true,
+        ?string $named = null,
+    ): SeamRecord {
         $binding = static fn (): mixed => null;
+        $key     = 'authorization.a';
 
-        return new SeamRecord('A', $binding, 'authorization.default:A', 'Default', 'authorization.a', true, $earlier, $earlierInstance, $earlierAlias, 'Acme\Provider');
+        return new SeamRecord('A', $binding, 'authorization.default:A', 'Default', $key, $configured, $earlier, $earlierInstance, $earlierAlias, 'Acme\Provider', named: $named);
     }
 }

@@ -286,9 +286,15 @@ those operations, such as the manager or the resolved tenant, can still be built
 refuse.
 
 A sibling package that registers after this one and wants to replace only the package's default, never a binding the
-application made, asks `AuthorizationServiceProvider::isPackageDefault($app, $contract)`. It is true only while the
-contract holds the package's own default: a class your configuration names, an instance, any other binding and an
-unbound contract all answer false.
+application made, asks `AuthorizationServiceProvider::isPackageDefault($app, $contract)`, and so may a check that runs
+once the application has booted. It is true exactly when `authorization:check` shows the seam as the package's default,
+as it reads what the package recorded when it bound the seam: before the default is resolved and after, whether an
+instance of it is held or not. A class your configuration names answers false from the moment the package registers,
+also after a refused boot (see [The diagnostic boot](#the-diagnostic-boot)) never binds it and the default resolves in
+its place. An instance you hand the container, a sibling's declared adapter, any other binding made before the package
+registered or after, an alias, a deferred provider and an unbound contract all answer false. It builds nothing. The
+context key catalogue is the one default the container holds once resolved, so an instance handed over it after that
+cannot be told from the default, and answers true, as the report shows it.
 
 List the enums whose cases are the application's permissions, and any permission providers; the Gate asks the package
 about every permission either declares:
@@ -4704,11 +4710,13 @@ It reports:
   boots, is still the earlier binding, shown by the hook it wraps, with the configured hooks listed as
   `authorization.grant_hooks (applied to the held instance)`. One a provider bound after the package registered, which
   the configured hooks wrap as the application boots too, is a later binding, shown by its own class and decorated by
-  the configured hooks, listed the same way. A deferred provider the application knew of as the package
-  registered, which the package then left the contract to, is `deferred_loaded` once it has loaded. A seam bound to a
-  closure whose class is decided when it is first resolved is shown by the closure's file and line, `supplied by custom
-  code`; that is a note, and never fails the check. An optional contract nothing binds, such as `PolicyStore` or
-  `ScopeRegistry`, is `unbound`.
+  the configured hooks, listed the same way. A deferred provider the application knew of as the package registered,
+  which the package then left the contract to, is `deferred_loaded` once it has loaded. A seam bound to a closure whose
+  class is decided when it is first resolved is shown by the closure's file and line, `supplied by custom code`; that is
+  a note, and never fails the check. A seam whose class the configuration names is `configured` from the moment the
+  package registers, shown by the default the contract resolves to until the boot binds the class, and still when a
+  refused boot never binds it. An optional contract nothing binds, such as `PolicyStore` or `ScopeRegistry`, is
+  `unbound`.
 - **Grant hooks**: the hooks in the order they run: those `authorization.grant_hooks` lists, by class, then the hook
   bound to the contract. The chain stops at the first refusal.
 - **Connection**: the database connection's name, whether `authorization.connection` or `database.default` chose it,
