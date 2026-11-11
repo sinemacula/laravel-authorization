@@ -34,6 +34,19 @@ final readonly class GrantChange
     ) {}
 
     /**
+     * Return the expiry the row carries after the write: the one it kept when
+     * the write changed its reach alone, else the one given, which it was
+     * written with.
+     *
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return \DateTimeInterface|null
+     */
+    public function expiryAfter(?\DateTimeInterface $expiresAt): ?\DateTimeInterface
+    {
+        return $this->outcome === GrantOutcome::REACH_CHANGED ? $this->previousExpiresAt : $expiresAt;
+    }
+
+    /**
      * Determine whether the write changed the row of the key while the keys
      * list it.
      *

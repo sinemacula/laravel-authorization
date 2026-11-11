@@ -30,6 +30,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
+use SineMacula\Laravel\Authorization\Services\Support\SyncPlan;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
@@ -552,7 +553,7 @@ final class WideningPhaseTest extends TestCase
             }
 
             $table = GrantChanges::table(GrantTarget::ROLE, Reference::of($second), null, new GrantScope(self::tenant('acct1'), null, true));
-            $rows  = $table->live([GrantChanges::key($evidence)]);
+            $rows  = \array_keys($table->liveRows([GrantChanges::key($evidence)]));
 
             $rows === [] ? $table->grant(GrantChanges::key($evidence), null) : $table->revoke($rows);
         });
@@ -683,15 +684,72 @@ final class WideningPhaseTest extends TestCase
         $this->travel(2)->hours();
 
         $table     = GrantChanges::table(GrantTarget::ROLE, Reference::of($principal), null, $scope);
-        $proposals = WideningPhase::additions(GrantTarget::ROLE, $expiresAt, $scope, $table, [
+        $proposals = WideningPhase::additions(new SyncPlan(GrantTarget::ROLE, $scope, $table, [
             GrantChanges::key($held)    => $held,
             GrantChanges::key($expired) => $expired,
             GrantChanges::key($new)     => $new,
-        ]);
+        ]), $expiresAt);
 
         self::assertSame([GrantChanges::key($expired), GrantChanges::key($new)], \array_map(static fn (ProposedGrant $proposal): string => $proposal->target->id, $proposals));
         self::assertSame($expiresAt->getTimestamp(), $proposals[0]->expiresAt?->getTimestamp());
         self::assertSame('acct1', $proposals[1]->tenant?->id);
+    }
+
+    /**
+     * A sync proposes each target listed with a reach of its own that it holds
+     * live with the other reach, in the scope with that reach and with the
+     * expiry the row keeps, and nothing for one held live with the same reach
+     * or one listed with no reach of its own; a target it does not hold is
+     * proposed in the scope its entry names, with the sync's expiry. Asked to
+     * lock, it reads the live rows under the lock, and proposes the same.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncProposesTheReachesItChanges(): void
+    {
+        $this->principals();
+
+        $principal = self::principal();
+        $widened   = Role::query()->create(['name' => 'widened']);
+        $narrowed  = Role::query()->create(['name' => 'narrowed']);
+        $same      = Role::query()->create(['name' => 'same']);
+        $plain     = Role::query()->create(['name' => 'plain']);
+        $fresh     = Role::query()->create(['name' => 'fresh']);
+        $tenant    = self::tenant('acct1');
+        $below     = new GrantScope($tenant, null, true);
+        $node      = new GrantScope($tenant, null, false);
+        $held      = Carbon::now('UTC')->addDay()->startOfSecond();
+        $synced    = Carbon::now('UTC')->addWeek()->startOfSecond();
+
+        self::grants()->grantRole($principal, $widened, $held, tenant: $tenant, includeSubtree: false);
+        self::grants()->grantRole($principal, $narrowed, tenant: $tenant);
+        self::grants()->grantRole($principal, $same, tenant: $tenant, includeSubtree: false);
+        self::grants()->grantRole($principal, $plain, tenant: $tenant, includeSubtree: false);
+
+        $table   = GrantChanges::table(GrantTarget::ROLE, Reference::of($principal), null, $below);
+        $keep    = [];
+        $reaches = [GrantChanges::key($widened) => $below, GrantChanges::key($narrowed) => $node, GrantChanges::key($same) => $node, GrantChanges::key($fresh) => $node];
+
+        foreach ([$widened, $narrowed, $same, $plain, $fresh] as $role) {
+            $keep[GrantChanges::key($role)] = $role;
+        }
+
+        $locks     = $this->recordRowLocks();
+        $plan      = new SyncPlan(GrantTarget::ROLE, $below, $table, $keep, [], $reaches);
+        $proposals = WideningPhase::additions($plan, $synced);
+        $summary   = static fn (ProposedGrant $proposal): array => [$proposal->target->id, $proposal->includeSubtree, $proposal->expiresAt?->getTimestamp()];
+
+        self::assertSame([
+            [GrantChanges::key($widened), true, $held->getTimestamp()],
+            [GrantChanges::key($narrowed), false, null],
+            [GrantChanges::key($fresh), false, $synced->getTimestamp()],
+        ], \array_map($summary, $proposals));
+        self::assertSame('acct1', $proposals[0]->tenant?->id);
+        self::assertCount(0, $locks);
+        self::assertSame(\array_map($summary, $proposals), \array_map($summary, WideningPhase::additions($plan, $synced, isLocked: true)));
+        self::assertNotCount(0, $locks);
     }
 
     /**
