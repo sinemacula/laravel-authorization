@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Preview;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionMemory;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -42,7 +43,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * scope, by its tenant, whether it is decided just below it, and its
  * application, so a batch over many resources costs one admission per scope its
  * decisions are made in, not one per resource. Nothing is kept from one use to
- * the next: a right revoked meanwhile refuses the next use.
+ * the next: a right revoked meanwhile refuses the next use. Once the decisions
+ * are forgotten (see `DecisionMemory`), the use admits each scope again, at its
+ * next decision there.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,6 +56,9 @@ final class PreviewAdmission
 {
     /** @var array<string, bool> The scopes the use is admitted in, each true, by the key of the scope. */
     private array $admitted = [];
+
+    /** @var int|null The generation of the decisions the admissions were made in (see `DecisionMemory`), or null before any is. */
+    private ?int $generation = null;
 
     /**
      * Create the admissions of a use, none made yet.
@@ -82,6 +88,14 @@ final class PreviewAdmission
      */
     public function admitHere(): void
     {
+        $generation = DecisionMemory::current()->generation();
+
+        // Made before the decisions were forgotten, made again.
+        if ($generation !== $this->generation) {
+            $this->admitted   = [];
+            $this->generation = $generation;
+        }
+
         $key = TenantScope::scopeKey();
 
         if ($this->admitted[$key] ?? false) {

@@ -56,7 +56,16 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * one check at a time. The resources' tenants are read for a chunk as it
  * starts, and their attributes when the first check on a type reads `resource`;
  * a change to either made after it was read is seen from the next chunk, except
- * by the later checks of a reference whose attributes they share.
+ * by the later checks of a reference whose attributes they share. Once the
+ * decisions are forgotten (see `DecisionMemory`), a proof recorded or the
+ * tenant switched say, the next chunk reads everything ahead again: the
+ * request's subject, with its session, its credential's scopes and its tenant,
+ * when the batch is about it, while a subject the batch was given by name, with
+ * `for()`, `forUser()` or a preview, is kept; the tenant the checks are decided
+ * in, where they are made, and the attributes of every record still to be
+ * decided, a shared reference's included, while what the cache held is read
+ * afresh. The generation is read once per chunk, and a decision already made
+ * stands.
  *
  * The checks are decided in chunks of `authorization.bulk.chunk_size` (500 by
  * default), and what a chunk read is released once it is decided, the
@@ -138,17 +147,20 @@ final readonly class CheckBatch
     /**
      * Decide each check for the subject, in the order given, and return the
      * decisions keyed as the checks are. Every check is refused before any is
-     * decided when one is not a `CheckInput`.
+     * decided when one is not a `CheckInput`. Given `$isResolved`, the subject
+     * is the request's, as the subject resolver gave it, and is asked of it
+     * again once the decisions are forgotten, for the chunks still to come.
      *
      * @template TKey of array-key
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  array<TKey, mixed>  $checks
+     * @param  bool  $isResolved
      * @return array<TKey, \SineMacula\Laravel\Authorization\Evaluation\Decision>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
-    public function decide(?Subject $subject, array $checks): array
+    public function decide(?Subject $subject, array $checks, bool $isResolved = false): array
     {
         $inputs = [];
 
@@ -159,10 +171,10 @@ final readonly class CheckBatch
         $cache = \count($inputs) > 1 ? ResolutionCache::instance() : null;
 
         if ($cache === null) {
-            return $this->decideChunks($subject, $inputs);
+            return $this->decideChunks($subject, $inputs, $isResolved);
         }
 
-        return $cache->batch(fn (): array => $this->decideChunks($subject, $inputs));
+        return $cache->batch(fn (): array => $this->decideChunks($subject, $inputs, $isResolved));
     }
 
     /**
@@ -196,28 +208,41 @@ final readonly class CheckBatch
     }
 
     /**
-     * Decide the checks a chunk at a time, or, for one check, as it stands.
+     * Decide the checks a chunk at a time, or, for one check, as it stands, the
+     * request's subject, given `$isResolved`, asked of the subject resolver
+     * again with the rest once the decisions are forgotten.
      *
      * @template TKey of array-key
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  array<TKey, \SineMacula\Laravel\Authorization\Evaluation\CheckInput>  $inputs
+     * @param  bool  $isResolved
      * @return array<TKey, \SineMacula\Laravel\Authorization\Evaluation\Decision>
      *
      * @throws \Throwable
      */
-    private function decideChunks(?Subject $subject, array $inputs): array
+    private function decideChunks(?Subject $subject, array $inputs, bool $isResolved): array
     {
         if (\count($inputs) === 1) {
             return \array_map(fn (CheckInput $check): Decision => $this->decideOne($subject, $check), $inputs);
         }
 
+        $memory     = DecisionMemory::current();
+        $generation = $memory->generation();
         $attributes = new ResourceAttributeBatch([], self::activeTenant());
         $holders    = self::lastHolders($inputs);
         $about      = DecisionProvenance::of($subject, $this->previewer);
         $decisions  = [];
 
         foreach (\array_chunk($inputs, self::chunkSize(), true) as $chunk) {
+            // Read ahead again once the decisions are forgotten.
+            if ($generation !== $memory->generation()) {
+                $generation = $memory->generation();
+                $subject    = $isResolved ? $this->subjectResolver->resolve() : $subject;
+                $attributes = new ResourceAttributeBatch([], self::activeTenant());
+                $about      = DecisionProvenance::of($subject, $this->previewer);
+            }
+
             $decisions += $this->decideChunk($subject, $about, $chunk, $attributes, $holders);
         }
 

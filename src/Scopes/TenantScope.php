@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionMemory;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
@@ -278,6 +279,50 @@ final class TenantScope implements Scope
             }
 
             ResolutionCache::instance()?->tenantChanged();
+        }
+    }
+
+    /**
+     * Run the callback with the tenant and application in place held as they
+     * are, as `within()` holds those it puts in place, so the decisions of the
+     * request or job being forgotten meanwhile (see `DecisionMemory`) leave
+     * them in place until it returns: what a scope already in place is run in
+     * (see `AuthorizationScope::within()`), at the cost of reading the tenant
+     * in place. Inside a `within()`, or while the subject is being resolved,
+     * the callback runs as it is. Once it returns after the decisions were
+     * forgotten, the request's tenant is resolved again on the next query, and
+     * the resolution cache's memo, which the callback filled in the held
+     * tenant, is emptied.
+     *
+     * @template TResult
+     *
+     * @param  \Closure(): TResult  $callback
+     * @return TResult
+     */
+    public static function pinned(\Closure $callback): mixed
+    {
+        $container = Container::getInstance();
+        $held      = $container->bound(self::WITHIN) ? null : self::whileResolving(static fn (ResolvedTenant $resolved): ResolvedTenant => $resolved);
+
+        if ($held === null) {
+            return $callback();
+        }
+
+        $memory     = DecisionMemory::current();
+        $generation = $memory->generation();
+
+        $container->instance(self::WITHIN, $held);
+
+        try {
+            return $callback();
+        } finally {
+            $container->forgetInstance(self::WITHIN);
+
+            if ($memory->generation() !== $generation) {
+                self::restore($container, null);
+
+                ResolutionCache::instance()?->tenantChanged();
+            }
         }
     }
 

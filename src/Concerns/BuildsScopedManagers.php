@@ -61,9 +61,11 @@ trait BuildsScopedManagers
      * in place of the request's, both as the ambient grant scope and as the
      * subject's, for each check, batch, explanation and compile of a query
      * scoped through it, and the request's are restored afterwards, even when
-     * the check throws (see `AuthorizationScope::within()`). That is the
-     * decision `AuthorizationScope::within()` around `for()` of the subject in
-     * that scope makes, so wrapping the call still gives the same result. A
+     * the check throws (see `AuthorizationScope::within()`), held there for the
+     * whole check or batch, even when it is the request's and the decisions of
+     * the request are forgotten meanwhile (see `forgetDecisionsFor()`). That is
+     * the decision `AuthorizationScope::within()` around `for()` of the subject
+     * in that scope makes, so wrapping the call still gives the same result. A
      * `Subject` carrying the platform marker (N120) is decided on the platform
      * the same way, with no tenant, on its application, or on none, whatever
      * tenant the request or an explicit `AuthorizationScope::within()` has put
