@@ -40,6 +40,9 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  */
 final readonly class GrantTable extends ExpiringGrants
 {
+    /** @var string The alias every read of the granted key selects it as. */
+    private const string AS_TARGET = ' as target_id';
+
     /**
      * Create a new grant table writer.
      *
@@ -97,15 +100,23 @@ final readonly class GrantTable extends ExpiringGrants
     #[\Override]
     public function grant(string $id, ?\DateTimeInterface $expiresAt): GrantChange
     {
-        $change = parent::grant($id, $expiresAt);
+        return $this->withReach($id, parent::grant($id, $expiresAt));
+    }
 
-        if ($change->outcome !== GrantOutcome::UNCHANGED || $this->reachesBelow($id) === $this->includeSubtree) {
-            return $change;
-        }
-
-        $this->writeExpiry($id, $change->previousExpiresAt);
-
-        return new GrantChange(GrantOutcome::REACH_CHANGED, $change->previousExpiresAt);
+    /**
+     * Re-arm the given row as `rearm()` does, with the writer's reach, and
+     * change the reach of a live row held with the other, keeping its expiry:
+     * what a sync does for a row listed with a reach of its own. A changed
+     * reach is reported as `REACH_CHANGED`, with the expiry the row keeps.
+     *
+     * @param  string  $id
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @param  \Illuminate\Support\Carbon|null  $now
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     */
+    public function rearmWithReach(string $id, ?\DateTimeInterface $expiresAt, ?Carbon $now = null): GrantChange
+    {
+        return $this->withReach($id, $this->rearm($id, $expiresAt, $now));
     }
 
     /**
@@ -121,21 +132,53 @@ final readonly class GrantTable extends ExpiringGrants
     }
 
     /**
-     * Return the keys of the rows the grantee holds in the scope, among the
-     * given ones, whose grant has not expired at the instant given, else now:
-     * the table holds at most one row of a key in a scope, so each once. Asked
-     * to lock, the rows are read under a row lock, which sees the latest
-     * committed rows, whatever snapshot the transaction reads otherwise, and
-     * holds them until it ends.
+     * Return the writer of the same rows that writes the given reach.
+     *
+     * @param  bool  $includeSubtree
+     * @return self
+     */
+    public function reaching(bool $includeSubtree): self
+    {
+        return new self(
+            $this->connection,
+            $this->table,
+            $this->column,
+            $this->granteeType,
+            $this->granteeId,
+            $this->grantedBy,
+            $this->tenant,
+            $includeSubtree,
+            $this->application,
+        );
+    }
+
+    /**
+     * Return the expiry and the reach of each row the grantee holds live in the
+     * scope, among the given keys, keyed by key, whose grant has not expired at
+     * the instant given, else now: when it expires, null for never, and whether
+     * it reaches the tenants below its tenant. The table holds at most one row
+     * of a key in a scope, so each once. Asked to lock, the rows are read under
+     * a row lock, which sees the latest committed rows, whatever snapshot the
+     * transaction reads otherwise, and holds them until it ends.
      *
      * @param  list<string>  $ids
      * @param  \Illuminate\Support\Carbon|null  $now
      * @param  bool  $isLocked
-     * @return list<string>
+     * @return array<string, array{\Illuminate\Support\Carbon|null, bool}>
      */
-    public function live(array $ids, ?Carbon $now = null, bool $isLocked = false): array
+    public function liveRows(array $ids, ?Carbon $now = null, bool $isLocked = false): array
     {
-        return self::keys(self::lockedIf(LiveGrants::only($this->inScope(), $this->table, $now), $isLocked), $this->column, $ids);
+        $query = self::lockedIf(LiveGrants::only($this->inScope(), $this->table, $now), $isLocked)->whereIn($this->column, $ids);
+        $rows  = [];
+
+        foreach ($query->get([$this->column . self::AS_TARGET, 'expires_at', 'include_subtree']) as $row) {
+            /** @var array{target_id: string, expires_at: mixed, include_subtree: bool|int|string} $columns */
+            $columns = (array) $row;
+
+            $rows[$columns['target_id']] = [UtcDateTime::toUtc($columns['expires_at']), (bool) $columns['include_subtree']];
+        }
+
+        return $rows;
     }
 
     /**
@@ -143,7 +186,7 @@ final readonly class GrantTable extends ExpiringGrants
      * scope for the key, at the instant given, else now, read on the write
      * connection: when it expires, null for never, and whether it reaches the
      * tenants below its tenant; null when the grantee holds no live row of it.
-     * Asked to lock, the row is read under a row lock, as `live()` reads.
+     * Asked to lock, the row is read under a row lock, as `liveRows()` reads.
      *
      * @param  string  $id
      * @param  \Illuminate\Support\Carbon|null  $now
@@ -189,7 +232,7 @@ final readonly class GrantTable extends ExpiringGrants
     {
         $reaches = [];
 
-        foreach ($this->inScope()->whereIn($this->column, $ids)->get([$this->column . ' as target_id', 'include_subtree']) as $row) {
+        foreach ($this->inScope()->whereIn($this->column, $ids)->get([$this->column . self::AS_TARGET, 'include_subtree']) as $row) {
             /** @var array{target_id: string, include_subtree: bool|int|string} $columns */
             $columns = (array) $row;
 
@@ -217,7 +260,7 @@ final readonly class GrantTable extends ExpiringGrants
         $grants    = [];
         $malformed = [];
 
-        foreach ($this->grantee()->get([$this->column . ' as target_id', 'tenant_type', 'tenant_id', 'include_subtree', 'application']) as $row) {
+        foreach ($this->grantee()->get([$this->column . self::AS_TARGET, 'tenant_type', 'tenant_id', 'include_subtree', 'application']) as $row) {
             /** @var array{target_id: string, tenant_type: string|null, tenant_id: string|null, include_subtree: bool|int|string, application: string|null} $columns */
             $columns = (array) $row;
             $type    = $columns['tenant_type'];
@@ -324,6 +367,26 @@ final readonly class GrantTable extends ExpiringGrants
             'granted_by_id'   => $this->grantedBy?->id,
             'updated_at'      => Carbon::now(),
         ]);
+    }
+
+    /**
+     * Return the change, or, when it left a held row as it was but the row
+     * holds with the other reach than the writer's, write the writer's reach to
+     * it, keeping its expiry, and report the reach changed (D21).
+     *
+     * @param  string  $id
+     * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantChange  $change
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     */
+    private function withReach(string $id, GrantChange $change): GrantChange
+    {
+        if ($change->outcome !== GrantOutcome::UNCHANGED || $this->reachesBelow($id) === $this->includeSubtree) {
+            return $change;
+        }
+
+        $this->writeExpiry($id, $change->previousExpiresAt);
+
+        return new GrantChange(GrantOutcome::REACH_CHANGED, $change->previousExpiresAt);
     }
 
     /**

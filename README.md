@@ -286,9 +286,15 @@ those operations, such as the manager or the resolved tenant, can still be built
 refuse.
 
 A sibling package that registers after this one and wants to replace only the package's default, never a binding the
-application made, asks `AuthorizationServiceProvider::isPackageDefault($app, $contract)`. It is true only while the
-contract holds the package's own default: a class your configuration names, an instance, any other binding and an
-unbound contract all answer false.
+application made, asks `AuthorizationServiceProvider::isPackageDefault($app, $contract)`, and so may a check that runs
+once the application has booted. It is true exactly when `authorization:check` shows the seam as the package's default,
+as it reads what the package recorded when it bound the seam: before the default is resolved and after, whether an
+instance of it is held or not. A class your configuration names answers false from the moment the package registers,
+also after a refused boot (see [The diagnostic boot](#the-diagnostic-boot)) never binds it and the default resolves in
+its place. An instance you hand the container, a sibling's declared adapter, any other binding made before the package
+registered or after, an alias, a deferred provider and an unbound contract all answer false. It builds nothing. The
+context key catalogue is the one default the container holds once resolved, so an instance handed over it after that
+cannot be told from the default, and answers true, as the report shows it.
 
 List the enums whose cases are the application's permissions, and any permission providers; the Gate asks the package
 about every permission either declares:
@@ -545,8 +551,9 @@ Grants are idempotent: granting what the grantee holds, with the same expiry, ch
 returns `GrantOutcome::UNCHANGED`, and a concurrent duplicate never raises a unique-constraint violation. Re-granting a
 grant that has expired re-arms it with the new expiry (`REARMED`), and a new expiry on a live grant is reported as
 `EXPIRY_CHANGED`. A sync re-arms a listed grant that has expired with the sync's expiry, or with none when it is given
-none, and leaves a live one as it is. A role's permissions work the same way: `RoleService::grantPermission()` and
-`syncPermissions()`, and the role's `givePermission()` and `syncPermissions()`, each take an optional expiry. The
+none, and leaves a live one as it is, unless it is a role listed with a reach of its own and held with the other (see
+below). A role's permissions work the same way: `RoleService::grantPermission()` and `syncPermissions()`, and the
+role's `givePermission()` and `syncPermissions()`, each take an optional expiry. The
 identity traits' sync methods take no expiry, so a lapsed temporary grant they list comes back permanent; to re-arm it
 for a limited time, call `GrantService::syncRoles()` (or `syncPermissions()`, `syncPolicies()`) with an expiry. Setting
 a role's parent locks the roles involved and refuses a cycle. A role with children cannot be deleted
@@ -678,6 +685,25 @@ $user->assignRole('admin', tenant: $organisation);                          // t
 $user->assignRole('billing', tenant: $organisation, includeSubtree: false); // the organisation alone
 
 Authorization::treeChanged($account);
+```
+
+A sync gives every role it grants one reach, `includeSubtree`, and leaves the reach of a role held live as it is. To
+sync roles of both reaches in one call, list a role with its own reach, as `Support\RoleReach::of($role, false)`, beside
+role models and names. Such a role is compared with its reach: one held live with the other reach has its reach changed
+in place, in one write that keeps its row, its expiry and when it was granted, reported with `RoleAssigned` carrying the
+new reach and listed in the result's `reachChanged`, and a delegated call needs the right to grant it with that reach,
+as `grantRole()` does. Roles not listed are revoked and new ones granted, in the same transaction. In a tenant, a role
+listed with both reaches is refused with `InvalidArgumentException` before anything is written. A sync that writes
+platform-wide grants, with no tenant named or owning every role, writes them reaching everywhere whatever their entries
+say, so there both entries name the same reach and the sync goes ahead:
+
+```php
+use SineMacula\Laravel\Authorization\Support\RoleReach;
+
+$user->syncRoles([
+    'admin',                                         // the organisation and its accounts
+    RoleReach::of('billing', includeSubtree: false), // the organisation alone
+], tenant: $organisation);
 ```
 
 Every row of a subtree is typed, so tenants of different types sharing an id are never confused. A tree whose source
@@ -4720,11 +4746,13 @@ It reports:
   boots, is still the earlier binding, shown by the hook it wraps, with the configured hooks listed as
   `authorization.grant_hooks (applied to the held instance)`. One a provider bound after the package registered, which
   the configured hooks wrap as the application boots too, is a later binding, shown by its own class and decorated by
-  the configured hooks, listed the same way. A deferred provider the application knew of as the package
-  registered, which the package then left the contract to, is `deferred_loaded` once it has loaded. A seam bound to a
-  closure whose class is decided when it is first resolved is shown by the closure's file and line, `supplied by custom
-  code`; that is a note, and never fails the check. An optional contract nothing binds, such as `PolicyStore` or
-  `ScopeRegistry`, is `unbound`.
+  the configured hooks, listed the same way. A deferred provider the application knew of as the package registered,
+  which the package then left the contract to, is `deferred_loaded` once it has loaded. A seam bound to a closure whose
+  class is decided when it is first resolved is shown by the closure's file and line, `supplied by custom code`; that is
+  a note, and never fails the check. A seam whose class the configuration names is `configured` from the moment the
+  package registers, shown by the default the contract resolves to until the boot binds the class, and still when a
+  refused boot never binds it. An optional contract nothing binds, such as `PolicyStore` or `ScopeRegistry`, is
+  `unbound`.
 - **Grant hooks**: the hooks in the order they run: those `authorization.grant_hooks` lists, by class, then the hook
   bound to the contract. The chain stops at the first refusal.
 - **Connection**: the database connection's name, whether `authorization.connection` or `database.default` chose it,

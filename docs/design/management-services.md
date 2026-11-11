@@ -52,12 +52,17 @@ the subject resolver. The events themselves are described in [Events](events.md)
    through the role permission pivot, so guard parity is enforced, inside a savepoint that a concurrent duplicate rolls
    back alone.
 
-4. **Expiry.** Re-granting a grant that has expired re-arms it with the new expiry (`REARMED`). A different expiry on
-   a live grant is a change of its own (`EXPIRY_CHANGED`). A sync grants what is missing with the sync's expiry,
-   re-arms a listed grant that has expired with the same expiry, leaves a live grant as it is, and revokes what is not
-   listed. A sync given no expiry, as every identity trait sync is, re-arms a lapsed temporary grant as a permanent
-   one. A role's grants of permissions behave the same way through `RoleService::grantPermission()` and
-   `syncPermissions()`, which take the expiry before the actor.
+4. **Expiry.** Re-granting a grant that has expired re-arms it with the new expiry (`REARMED`). A different expiry on a
+   live grant is a change of its own (`EXPIRY_CHANGED`). A sync grants what is missing with the sync's expiry, re-arms a
+   listed grant that has expired with the same expiry, leaves a live grant as it is, and revokes what is not listed. A
+   role listed with its own reach (`Support\RoleReach::of($role, $includeSubtree)`) is compared with that reach: held
+   live with the other, its reach is changed in place, one write keeping its row and expiry, reported as `REACH_CHANGED`
+   with the granted event and in `SyncResult::$reachChanged`; listed with both reaches in a tenant, the sync is refused
+   with `InvalidArgumentException` before anything is written; a platform-wide sync writes every grant reaching
+   everywhere, so there both entries name the same reach and the sync goes ahead. A sync given no expiry, as every
+   identity trait sync is, re-arms a lapsed temporary grant as a permanent one. A role's grants of permissions behave
+   the same way through `RoleService::grantPermission()` and `syncPermissions()`, which take the expiry before the
+   actor.
 
 5. **One scope per grant.** A grant holds in one tenant or platform-wide (AUTHZ-5.1). The tenant that owns the
    target fixes it, and naming another tenant is refused with `GrantScopeMismatchException`; a platform target is

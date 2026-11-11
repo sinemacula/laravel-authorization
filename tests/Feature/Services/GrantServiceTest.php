@@ -60,6 +60,7 @@ use SineMacula\Laravel\Authorization\Services\SyncResult;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\RoleReach;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\AssertsDelegatedRefusals;
@@ -576,6 +577,419 @@ final class GrantServiceTest extends TestCase
         foreach (['authorizable_roles', 'authorizable_permissions', 'authorizable_policies'] as $table) {
             self::assertTrue((bool) DB::table($table)->where('authorizable_id', 'user-2')->value('include_subtree'), "{$table} did not reach below by default.");
         }
+    }
+
+    /**
+     * A sync gives each role listed with a reach of its own that reach, and a
+     * role listed alone the call's, reporting each grant with its reach, and
+     * revokes a role it does not list with the reach it had.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncGivesEachRoleItsOwnReach(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+        $gone   = self::role('gone');
+
+        foreach (['node', 'below', 'plain'] as $name) {
+            self::role($name);
+        }
+
+        self::service()->grantRole($user, $gone, tenant: $tenant, includeSubtree: false);
+
+        Event::fake();
+
+        $result = self::service()->syncRoles($user, [RoleReach::of('node', false), RoleReach::of('below', true), 'plain'], tenant: $tenant, includeSubtree: false);
+        $events = [];
+
+        foreach (self::dispatchedEvents(RoleAssigned::class) as $event) {
+            $events[$event->name] = $event->scope->includeSubtree;
+        }
+
+        self::assertEquals(['node' => false, 'below' => true, 'plain' => false], self::heldReaches());
+        self::assertEquals(['node' => false, 'below' => true, 'plain' => false], $events);
+        self::assertCount(3, $result->granted);
+        self::assertSame([$gone->id], $result->revoked);
+        self::assertSame([], $result->reachChanged);
+        Event::assertDispatched(RoleRevoked::class, static fn (RoleRevoked $event): bool => self::refersTo($event->role, $gone) && !$event->scope->includeSubtree);
+    }
+
+    /**
+     * A role held live with the other reach than its entry names has its reach
+     * changed in place, either way: one write to its row, which keeps its
+     * expiry, its creation and its key, reported in the result and with the
+     * assigned event carrying the new reach and the expiry kept, never the
+     * sync's; nothing is revoked, granted or re-armed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncChangesAHeldRolesReachInPlaceEitherWay(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+        $widen  = self::role('widen');
+        $narrow = self::role('narrow');
+        $kept   = Carbon::parse('2026-08-01 12:00:00', 'UTC');
+
+        self::service()->grantRole($user, $widen, $kept, tenant: $tenant, includeSubtree: false);
+        self::service()->grantRole($user, $narrow, tenant: $tenant);
+
+        Carbon::setTestNow('2026-07-01 13:00:00');
+        Event::fake();
+
+        $writes = new \ArrayObject;
+
+        DB::listen(static function (QueryExecuted $query) use ($writes): void {
+            if (\preg_match('/^\s*(update|delete)\b.*authorizable_roles/is', $query->sql) !== 1) {
+                return;
+            }
+
+            $writes->append($query->sql);
+        });
+
+        $result = self::service()->syncRoles($user, [RoleReach::of($widen, true), RoleReach::of('narrow', false)], Carbon::parse('2026-12-01 12:00:00', 'UTC'), tenant: $tenant);
+
+        self::assertEqualsCanonicalizing([$widen->id, $narrow->id], $result->reachChanged);
+        self::assertSame([[], [], []], [$result->granted, $result->rearmed, $result->revoked]);
+        self::assertTrue($result->isChange());
+        self::assertEquals(['widen' => true, 'narrow' => false], self::heldReaches());
+        $expiries = [$narrow->id => null, $widen->id => '2026-08-01 12:00:00'];
+
+        \ksort($expiries);
+
+        self::assertSame($expiries, self::expiries());
+        self::assertSame(['2026-07-01 12:00:00', '2026-07-01 13:00:00'], self::timestampsOf($widen));
+        self::assertSame(['2026-07-01 12:00:00', '2026-07-01 13:00:00'], self::timestampsOf($narrow));
+        self::assertSame(2, DB::table('authorizable_roles')->count());
+        self::assertCount(2, \preg_grep('/^\s*update\b/i', $writes->getArrayCopy()) ?: []);
+
+        $assigned = [];
+
+        foreach (self::dispatchedEvents(RoleAssigned::class) as $event) {
+            $assigned[$event->name] = [$event->scope->includeSubtree, $event->expiresAt?->format('Y-m-d H:i:s')];
+        }
+
+        self::assertEquals(['widen' => [true, '2026-08-01 12:00:00'], 'narrow' => [false, null]], $assigned);
+        Event::assertNotDispatched(RoleExpiryChanged::class);
+        Event::assertNotDispatched(RoleRevoked::class);
+    }
+
+    /**
+     * A sync of the roles and reaches held changes nothing, writes nothing and
+     * dispatches nothing, however often it is made; a role listed alone keeps
+     * the reach it is held with, whatever the call's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncOfTheReachesHeldChangesNothing(): void
+    {
+        $user    = self::user();
+        $tenant  = Reference::of(self::createTenant('tenant-a'));
+        $entries = [RoleReach::of(self::role('node'), false), RoleReach::of('below', true), 'plain'];
+
+        self::role('below');
+        self::role('plain');
+
+        self::service()->syncRoles($user, $entries, tenant: $tenant, includeSubtree: false);
+
+        Carbon::setTestNow('2026-07-01 13:00:00');
+        Event::fake();
+
+        $before = DB::table('authorizable_roles')->orderBy('role_id')->get()->all();
+
+        foreach ([$entries, $entries, [...\array_slice($entries, 0, 2), RoleReach::of('plain', false)]] as $synced) {
+            self::assertFalse(self::service()->syncRoles($user, $synced, tenant: $tenant)->isChange());
+        }
+
+        self::assertEquals($before, DB::table('authorizable_roles')->orderBy('role_id')->get()->all());
+        self::assertEquals(['node' => false, 'below' => true, 'plain' => false], self::heldReaches());
+        self::assertNoGrantEvents();
+    }
+
+    /**
+     * A role listed with a reach of its own whose grant has expired is re-armed
+     * with the sync's expiry and that reach, reported as re-armed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncReArmsAnExpiredRoleWithItsOwnReach(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+        $role   = self::role('editor');
+
+        self::service()->grantRole($user, $role, Carbon::parse('2026-07-01 13:00:00', 'UTC'), tenant: $tenant);
+
+        Carbon::setTestNow('2026-07-01 14:00:00');
+        Event::fake();
+
+        $synced = Carbon::parse('2026-07-09 12:00:00', 'UTC');
+        $result = self::service()->syncRoles($user, [RoleReach::of('editor', false)], $synced, tenant: $tenant);
+
+        self::assertSame([[], [$role->id], []], [$result->granted, $result->rearmed, $result->reachChanged]);
+        self::assertEquals(['editor' => false], self::heldReaches());
+        self::assertSame([$role->id => '2026-07-09 12:00:00'], self::expiries());
+        $rearmed = static fn (RoleAssigned $event): bool => !$event->scope->includeSubtree && $event->expiresAt?->getTimestamp() === $synced->getTimestamp();
+
+        Event::assertDispatched(RoleAssigned::class, $rearmed);
+        Event::assertDispatched(RoleExpiryChanged::class, static fn (RoleExpiryChanged $event): bool => !$event->scope->includeSubtree);
+    }
+
+    /**
+     * A sync with no tenant writes platform-wide grants, which reach
+     * everywhere, so a role listed as reaching no further is still written
+     * reaching below, and a sync of it again changes nothing, even with the
+     * role listed with both reaches, which there name the same reach.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPlatformSyncReachesEverywhereWhateverItsEntriesSay(): void
+    {
+        $user = self::user();
+        $role = self::role('editor');
+
+        Event::fake();
+
+        self::assertSame([$role->id], self::service()->syncRoles($user, [RoleReach::of('editor', false)])->granted);
+        self::assertTrue((bool) DB::table('authorizable_roles')->value('include_subtree'));
+        self::assertFalse(self::service()->syncRoles($user, [RoleReach::of($role, false)], includeSubtree: false)->isChange());
+        self::assertFalse(self::service()->syncRoles($user, [RoleReach::of('editor', true), RoleReach::of($role, false)])->isChange());
+        self::assertTrue((bool) DB::table('authorizable_roles')->value('include_subtree'));
+        self::assertTrue(self::dispatchedEvents(RoleAssigned::class)[0]->scope->includeSubtree);
+    }
+
+    /**
+     * A name listed with a reach of its own gives it to every held role of the
+     * name, the platform's and the tenant's alike.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testANameListedWithItsReachReachesEveryHeldRoleOfIt(): void
+    {
+        $user   = self::user();
+        $tenant = self::createTenant('tenant-a');
+        $global = self::role('editor');
+        $scoped = Role::query()->create(['name' => 'editor', ...self::ownedBy($tenant)]);
+
+        self::service()->grantRole($user, $global, tenant: $tenant);
+        self::service()->grantRole($user, $scoped, tenant: $tenant);
+
+        $result = self::service()->syncRoles($user, [RoleReach::of('editor', false)], tenant: $tenant);
+
+        self::assertEqualsCanonicalizing([$global->id, $scoped->id], $result->reachChanged);
+        self::assertSame(0, DB::table('authorizable_roles')->where('include_subtree', true)->count());
+    }
+
+    /**
+     * A role listed with both reaches is refused before anything is written,
+     * whether by name or by model; listed alone and with a reach, it takes the
+     * reach.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleListedWithBothReachesIsRefused(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+        $role   = self::role('editor');
+        $held   = self::role('held');
+
+        self::service()->grantRole($user, $held, tenant: $tenant);
+
+        Event::fake();
+
+        foreach ([[RoleReach::of('editor', true), RoleReach::of($role, false)], [RoleReach::of('editor', false), 'held', RoleReach::of('editor', true)]] as $entries) {
+            try {
+                self::service()->syncRoles($user, $entries, tenant: $tenant);
+                self::fail('The sync was not refused.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame("The role [{$role->id}] is listed with both reaches.", $exception->getMessage());
+            }
+        }
+
+        self::assertEquals(['held' => true], self::heldReaches());
+        self::assertNoGrantEvents();
+        $entries = ['editor', RoleReach::of($role, false), 'editor', RoleReach::of('editor', false)];
+
+        self::assertSame([$role->id], self::service()->syncRoles($user, $entries, tenant: $tenant)->granted);
+        self::assertEquals(['editor' => false], self::heldReaches());
+    }
+
+    /**
+     * A sync reads and writes only the rows of its own scope: a row of the role
+     * naming half a tenant, or held in another tenant or for one application,
+     * is neither held, changed nor revoked by a sync in a tenant or on the
+     * platform, so the role is granted afresh with its reach.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncIgnoresTheRowsOfAnyOtherScope(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+        $role   = self::role('editor');
+        $others = [
+            ['tenant_type' => $tenant->type, 'tenant_id' => null, 'application' => null],
+            ['tenant_type' => null, 'tenant_id' => $tenant->id, 'application' => null],
+            ['tenant_type' => $tenant->type, 'tenant_id' => 'tenant-b', 'application' => null],
+            ['tenant_type' => $tenant->type, 'tenant_id' => $tenant->id, 'application' => 'admin'],
+        ];
+
+        foreach ($others as $columns) {
+            DB::table('authorizable_roles')->insert([
+                'role_id'           => $role->id,
+                'authorizable_type' => $user->getMorphClass(),
+                'authorizable_id'   => $user->getKey(),
+                'include_subtree'   => false,
+                'expires_at'        => null,
+                ...$columns,
+            ]);
+        }
+
+        $before = self::sortedRows();
+
+        self::assertSame([$role->id], self::service()->syncRoles($user, [RoleReach::of('editor', true)], tenant: $tenant)->granted);
+        self::assertSame([$role->id], self::service()->syncRoles($user, [RoleReach::of('editor', false)])->granted);
+        self::assertSame([$role->id], self::service()->syncRoles($user, [], tenant: $tenant)->revoked);
+        self::assertSame([$role->id], self::service()->syncRoles($user, [])->revoked);
+        self::assertSame([], self::service()->syncRoles($user, [])->revoked);
+        self::assertEquals($before, self::sortedRows());
+        self::assertSame(4, DB::table('authorizable_roles')->count());
+    }
+
+    /**
+     * A delegated sync needs the right to grant each role with the reach its
+     * entry names, as a grant with that reach does: an actor administering a
+     * parent, but denied `authorization:role.grant` in its child, is refused a
+     * role reaching below the parent, granted or widened from a role held there
+     * alone, as out of scope, writing nothing; it may grant the role to the
+     * parent alone, and narrow a role held reaching below to it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedSyncNeedsTheRightToGrantTheReachEachEntryNames(): void
+    {
+        [$parent, $child] = \array_map(self::createTenant(...), ['parent', 'child']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent)));
+
+        $actor = self::administrator([]);
+        $user  = self::user();
+        $named = Role::query()->create(['name' => 'named', 'rank' => 8]);
+
+        /** @var \Tests\Feature\Stubs\StubIdentity $admin */
+        $admin = $actor->subject->subject;
+
+        self::service()->grantPermission($admin, self::permission('authorization:*'), tenant: $parent);
+        self::service()->grantRole($admin, self::roleDenying(PackagePermissions::ROLE_GRANT), tenant: $child);
+
+        $this->actAsTenant($parent);
+
+        $sync = static fn (bool $reach): SyncResult => self::service()->syncRoles($user, [RoleReach::of($named, $reach)], actor: $actor, tenant: $parent);
+
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_SCOPE, static fn (): SyncResult => $sync(true));
+        self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', 'user-1')->count());
+        self::assertSame([$named->id], $sync(false)->granted);
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_SCOPE, static fn (): SyncResult => $sync(true));
+        self::assertEquals(['named' => false], self::heldReaches());
+        self::assertSame([$named->id], self::service()->syncRoles($user, [RoleReach::of($named, true)], tenant: $parent)->reachChanged);
+        self::assertSame([$named->id], $sync(false)->reachChanged);
+        self::assertEquals(['named' => false], self::heldReaches());
+    }
+
+    /**
+     * A sync calls the grant hook for a role whose reach it widens below the
+     * tenant, with the reach and the expiry the row keeps, and not for one it
+     * narrows; a hook that refuses rolls the change back.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncCallsTheHookForAReachItWidens(): void
+    {
+        $this->closureTree();
+
+        [, [$principal]] = $this->principals();
+
+        $tenant = self::tenant('acct1');
+        $role   = self::role('editor');
+        $kept   = Carbon::parse('2026-08-01 12:00:00', 'UTC');
+
+        self::service()->grantRole($principal, $role, $kept, tenant: $tenant, includeSubtree: false);
+
+        $hook = $this->hook();
+
+        self::service()->syncRoles($principal, [RoleReach::of($role, true)], tenant: $tenant);
+
+        self::assertCount(1, $hook->widenings);
+        self::assertSame([WideningReason::NEW_SUBTREE], $hook->widenings[0]->reasons);
+        $changes = \array_map(static fn (ProposedGrant $change): array => [$change->includeSubtree, $change->expiresAt?->getTimestamp()], $hook->widenings[0]->changes);
+
+        self::assertSame([[true, $kept->getTimestamp()]], $changes);
+
+        self::service()->syncRoles($principal, [RoleReach::of($role, false)], tenant: $tenant);
+
+        self::assertCount(1, $hook->widenings);
+
+        $this->app?->instance(GrantHook::class, new RefusingGrantHook);
+
+        $widen = static fn (): mixed => self::service()->syncRoles($principal, [RoleReach::of($role, true)], tenant: $tenant);
+
+        self::assertInstanceOf(GrantRefusedException::class, self::refusalOf($widen));
+        self::assertFalse((bool) DB::table('authorizable_roles')->where('authorizable_id', 'p1')->value('include_subtree'));
+    }
+
+    /**
+     * A role whose reach a sync widens counts at once in the tenants below,
+     * though the role names were read there before, and no longer counts there
+     * once a sync narrows it again.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAReachChangedBySyncTakesEffectAtOnce(): void
+    {
+        [$parent, $child] = \array_map(self::createTenant(...), ['parent', 'child']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent)));
+
+        $user = self::user();
+
+        self::role('editor');
+        self::service()->grantRole($user, 'editor', tenant: $parent, includeSubtree: false);
+
+        $this->actAsTenant($child);
+
+        self::assertSame([], $user->getRoles());
+
+        self::service()->syncRoles($user, [RoleReach::of('editor', true)], tenant: $parent);
+
+        self::assertSame(['editor'], $user->getRoles());
+
+        self::service()->syncRoles($user, [RoleReach::of('editor', false)], tenant: $parent);
+
+        self::assertSame([], $user->getRoles());
     }
 
     /**
@@ -1384,6 +1798,8 @@ final class GrantServiceTest extends TestCase
         self::assertTrue((new SyncResult(granted: ['a']))->isChange());
         self::assertTrue((new SyncResult(rearmed: ['a']))->isChange());
         self::assertTrue((new SyncResult(revoked: ['a']))->isChange());
+        self::assertTrue((new SyncResult(reachChanged: ['a']))->isChange());
+        self::assertSame(['a'], (new SyncResult(reachChanged: ['a']))->reachChanged);
     }
 
     /**
@@ -2746,7 +3162,7 @@ final class GrantServiceTest extends TestCase
             }
 
             $table = GrantChanges::table(GrantTarget::ROLE, Reference::of($second), null, new GrantScope(self::tenant('acct1'), null, true));
-            $rows  = $table->live([GrantChanges::key($evidence)]);
+            $rows  = \array_keys($table->liveRows([GrantChanges::key($evidence)]));
 
             $rows === [] ? $table->grant(GrantChanges::key($evidence), null) : $table->revoke($rows);
         });
@@ -3056,6 +3472,69 @@ final class GrantServiceTest extends TestCase
     {
         /** @var array<string, string|null> */
         return DB::table('authorizable_roles')->pluck('expires_at', 'role_id')->sortKeys()->all();
+    }
+
+    /**
+     * Return whether each role the stub identity holds reaches the tenants
+     * below its tenant, keyed by the role's name.
+     *
+     * @return array<string, bool>
+     */
+    private static function heldReaches(): array
+    {
+        /** @var array<string, bool> */
+        return DB::table('authorizable_roles')
+            ->join('roles', 'roles.id', '=', 'authorizable_roles.role_id')
+            ->where('authorizable_roles.authorizable_id', 'user-1')
+            ->pluck('authorizable_roles.include_subtree', 'roles.name')
+            ->map(static fn (mixed $reach): bool => (bool) $reach)
+            ->all();
+    }
+
+    /**
+     * Return when the stub identity's grant of the role was created and last
+     * written.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @return array{mixed, mixed}
+     */
+    private static function timestampsOf(Role $role): array
+    {
+        $row = DB::table('authorizable_roles')->where('authorizable_id', 'user-1')->where('role_id', $role->id)->sole(['created_at', 'updated_at']);
+
+        return [$row->created_at, $row->updated_at];
+    }
+
+    /**
+     * Return every role grant row, each as its columns, in an order every
+     * database gives alike.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function sortedRows(): array
+    {
+        /** @var list<array<string, mixed>> */
+        return DB::table('authorizable_roles')
+            ->get()
+            ->map(static fn (object $row): array => (array) $row)
+            ->sortBy(static fn (array $row): string => \serialize([$row['tenant_type'], $row['tenant_id'], $row['application']]))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Create a role carrying a policy that denies the action.
+     *
+     * @param  string  $action
+     * @return \SineMacula\Laravel\Authorization\Models\Role
+     */
+    private static function roleDenying(string $action): Role
+    {
+        $role = Role::query()->create(['name' => 'restricted', 'rank' => 8]);
+
+        self::service()->attachPolicy($role, Policy::query()->create(['name' => 'restricting', 'document' => ['statements' => [['effect' => 'deny', 'actions' => [$action]]]]]));
+
+        return $role;
     }
 
     /**
