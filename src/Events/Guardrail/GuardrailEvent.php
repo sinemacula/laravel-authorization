@@ -4,7 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Guardrail;
 
-use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
+use SineMacula\Laravel\Authorization\Support\AuditProperties;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -28,7 +29,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-abstract readonly class GuardrailEvent implements AuthorizationEvent
+abstract readonly class GuardrailEvent implements AuthorizationMutation
 {
     /**
      * Create a new event instance.
@@ -52,4 +53,61 @@ abstract readonly class GuardrailEvent implements AuthorizationEvent
         /** Where the guardrail holds, or held: its tenant, or the platform. */
         public GrantScope $scope,
     ) {}
+
+    /**
+     * Return the tenant whose guardrails changed; null for the platform.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\Reference|null
+     */
+    #[\Override]
+    public function subject(): ?Reference
+    {
+        return $this->scope->tenant;
+    }
+
+    /**
+     * Return the tenant the guardrail holds in; null for the platform.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\Reference|null
+     */
+    #[\Override]
+    public function tenant(): ?Reference
+    {
+        return $this->scope->tenant;
+    }
+
+    /**
+     * Return no application: a guardrail holds in every application.
+     *
+     * @return string|null
+     */
+    #[\Override]
+    public function application(): ?string
+    {
+        return null;
+    }
+
+    /**
+     * Return no grantee: a guardrail names none.
+     *
+     * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
+     */
+    #[\Override]
+    public function grantees(): array
+    {
+        return [];
+    }
+
+    /**
+     * Return the event's other details, flat and serialisable.
+     *
+     * @return array<string, list<scalar>|scalar|null>
+     *
+     * @throws \LogicException
+     */
+    #[\Override]
+    public function auditProperties(): array
+    {
+        return AuditProperties::of($this);
+    }
 }

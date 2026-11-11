@@ -4,7 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Policy;
 
-use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
+use SineMacula\Laravel\Authorization\Events\Concerns\DescribesRecordChange;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -28,8 +29,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class Deleted implements AuthorizationEvent
+final readonly class Deleted implements AuthorizationMutation
 {
+    use DescribesRecordChange;
+
     /**
      * Create a new event instance.
      *
@@ -60,4 +63,37 @@ final readonly class Deleted implements AuthorizationEvent
         /** Every grantee the policy was attached to. */
         public array $grantees,
     ) {}
+
+    /**
+     * Return the stable identifier of the change: `policy.deleted`.
+     *
+     * @return string
+     */
+    #[\Override]
+    public function operation(): string
+    {
+        return 'policy.deleted';
+    }
+
+    /**
+     * Return the policy the change is about.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\Reference
+     */
+    #[\Override]
+    public function subject(): Reference
+    {
+        return $this->policy;
+    }
+
+    /**
+     * Return every grantee that held the policy.
+     *
+     * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
+     */
+    #[\Override]
+    public function grantees(): array
+    {
+        return $this->grantees;
+    }
 }

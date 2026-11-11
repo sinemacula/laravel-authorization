@@ -10,10 +10,11 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  *
  * Every event under `Events\Identity\` carries a `grantee` reference naming the
  * identity whose grants changed, so a listener can accept the whole set with a
- * single type hint rather than a long union. It narrows `AuthorizationEvent`,
- * which every event the package dispatches implements.
+ * single type hint rather than a long union. It narrows
+ * `AuthorizationMutation`, which every change event implements, so the grantee
+ * is also each event's subject and its one grantee.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-interface IdentityEvent extends AuthorizationEvent {}
+interface IdentityEvent extends AuthorizationMutation {}

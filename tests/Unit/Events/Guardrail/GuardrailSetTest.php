@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Events\Guardrail\GuardrailSet;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\AssertsAuditAccessors;
 
 /**
  * Unit tests for the event setting a guardrail dispatches.
@@ -23,6 +24,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 #[CoversClass(GuardrailSet::class)]
 final class GuardrailSetTest extends TestCase
 {
+    use AssertsAuditAccessors;
+
     /**
      * The event is a final readonly guardrail event carrying the operation, the
      * policy, its name and the platform scope it holds in.
@@ -43,5 +46,28 @@ final class GuardrailSetTest extends TestCase
         self::assertSame('platform-cap', $event->name);
         self::assertNull($event->scope->tenant);
         self::assertTrue($event->scope->includeSubtree);
+    }
+
+    /**
+     * The event is about the tenant whose guardrails changed, holds there in
+     * every application, names no grantee, and reports the policy, its name and
+     * its reach as plain details.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testDescribesTheChangeForAnAuditMapper(): void
+    {
+        $event = new GuardrailSet(Operation::begin(), new Reference('policy', '9'), 'cap', new GrantScope(self::tenant()));
+
+        self::assertDescribes($event, [
+            'operation'   => 'guardrail.set',
+            'subject'     => self::tenant(),
+            'tenant'      => self::tenant(),
+            'application' => null,
+            'grantees'    => [],
+            'properties'  => ['policy' => 'policy:9', 'name' => 'cap', 'scope.include_subtree' => true],
+        ]);
     }
 }

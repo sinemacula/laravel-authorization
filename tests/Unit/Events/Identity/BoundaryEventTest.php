@@ -6,6 +6,7 @@ namespace Tests\Unit\Events\Identity;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryEvent;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
@@ -38,6 +39,7 @@ final class BoundaryEventTest extends TestCase
         self::assertTrue($reflection->isAbstract());
         self::assertTrue($reflection->isReadOnly());
         self::assertTrue($reflection->implementsInterface(IdentityEvent::class));
+        self::assertTrue($reflection->implementsInterface(AuthorizationMutation::class));
 
         foreach ([BoundarySet::class, BoundaryRemoved::class] as $class) {
             $parent = (new \ReflectionClass($class))->getParentClass();

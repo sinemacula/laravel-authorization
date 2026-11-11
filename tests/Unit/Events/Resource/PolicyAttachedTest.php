@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Events\Resource\PolicyAttached;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\AssertsAuditAccessors;
 
 /**
  * Unit tests for the snapshot dispatched when a policy is attached to a
@@ -24,6 +25,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 #[CoversClass(PolicyAttached::class)]
 final class PolicyAttachedTest extends TestCase
 {
+    use AssertsAuditAccessors;
+
     /**
      * The event carries the operation, the resource, the policy, its name and
      * the scope, as plain values.
@@ -42,5 +45,34 @@ final class PolicyAttachedTest extends TestCase
 
         self::assertSame([$operation, 'posts', '7', $policy, 'sharing', $scope], $carried);
         self::assertNull((new PolicyAttached($operation, 'posts', null, $policy, 'sharing', GrantScope::platform()))->resourceId);
+    }
+
+    /**
+     * The event is about the record the policy is attached to, holds in its
+     * scope's tenant and application, names no grantee, and reports the
+     * resource, the policy, its name and its reach as plain details.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testDescribesTheChangeForAnAuditMapper(): void
+    {
+        $event = new PolicyAttached(Operation::begin(), 'posts', '7', new Reference('policy', '9'), 'sharing', self::scope());
+
+        self::assertDescribes($event, [
+            'operation'   => 'resource.policy.attached',
+            'subject'     => new Reference('posts', '7'),
+            'tenant'      => self::tenant(),
+            'application' => 'admin',
+            'grantees'    => [],
+            'properties'  => [
+                'resource_type'         => 'posts',
+                'resource_id'           => '7',
+                'policy'                => 'policy:9',
+                'name'                  => 'sharing',
+                'scope.include_subtree' => false,
+            ],
+        ]);
     }
 }

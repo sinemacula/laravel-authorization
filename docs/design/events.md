@@ -47,8 +47,9 @@ carry references, names and ids, never a value the decision read, and are dispat
 
 ## Invariants
 
-1. **One marker.** Every event class implements `AuthorizationEvent`; `IdentityEvent` extends it for the grant and
-   boundary events.
+1. **One marker.** Every event class implements `AuthorizationEvent`; `AuthorizationMutation` extends it for every
+   change event (all but the decision events and `SystemOverrideUsed`), and `IdentityEvent` extends that for the grant
+   and boundary events.
 
 2. **Snapshots of plain values.** Every event is a `final readonly` class whose constructor takes only scalars, backed
    enums, arrays of scalars or of the package's value objects, those value objects (`Support\Operation`,
@@ -128,6 +129,23 @@ carry references, names and ids, never a value the decision read, and are dispat
     its name before the change, its tenant, the change allowed (`delete`, `unprotect`, `rename`, `document-rewrite` or
     `modify`) and the operation, alongside the record's own event and with the same operation.
 
+13. **Audit accessors.** Every change event implements `Contracts\AuthorizationMutation`, so an audit mapper reads it
+    through accessors rather than its properties: `operation()`, a stable identifier unique to the event class (such as
+    `identity.role.assigned`, `role.permission.granted`, `policy.deleted`, `resource.policy.attached` or
+    `guardrail.set`, listed in the README); `subject()`, the record the change is about (the grantee of a grant or
+    boundary event, the role, permission or policy written, the role of a role permission event, the resource record of
+    a resource policy event and the tenant of a guardrail event, null for a whole resource type or the platform);
+    `tenant()` and `application()`, the scope's for a grant, boundary, resource policy or guardrail event, the owning
+    tenant and no application for the others; `grantees()`, whose access the change altered (the grantee, the role of a
+    role permission event, the grantees a delete lists, a deleted permission's roles after them, else none); and
+    `auditProperties()`, every other property, flat and serialisable through `Support\AuditProperties`: snake case
+    keys, dotted keys for a scope, a digest or the before and after of an update, a reference as `type:id`, a date as
+    ISO 8601 in UTC. It never holds the operation, which carries the client, a model or a closure, and refuses any
+    object other than the package's value objects. Each family implements the accessors once:
+    `Events\Concerns\DescribesGrantChange` for the grant and boundary events, `Events\Concerns\DescribesRecordChange`
+    for the record and role permission events, and the resource policy and guardrail base classes for theirs; each
+    event class names its own identifier.
+
 ## Success Path
 
 ```php
@@ -183,7 +201,10 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 
 ## Implementation Anchors
 
-- `Contracts\AuthorizationEvent`, `Contracts\IdentityEvent` and the classes under `Events\`.
+- `Contracts\AuthorizationEvent`, `Contracts\AuthorizationMutation`, `Contracts\IdentityEvent` and the classes under
+  `Events\`.
+- `Events\Concerns\DescribesGrantChange`, `Events\Concerns\DescribesRecordChange` and `Support\AuditProperties`: the
+  audit accessors and the flat details.
 - `Events\DecisionEvent`: the decision payload; `Evaluation\DecisionProvenance`: who a decision was about and where;
   `Evaluation\LastDecisionStore`: the last decision and its provenance; `Evaluation\CheckBatch`: the dispatch and
   store switches.
@@ -202,7 +223,10 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 ## Authoritative Tests
 
 - `EventSnapshotsTest`: every event implements the marker; every event, the decision events included, takes only plain
-  values.
+  values; every change event implements `AuthorizationMutation`, with a unique operation identifier and serialisable
+  details.
+- `AuditPropertiesTest`, `DescribesGrantChangeTest`, `DescribesRecordChangeTest` and each event class's own test: the
+  audit accessors' values.
 - `DecisionEventTest`, `DecisionEvaluatedTest`, `AuthorizationFailedTest`: the decision payload, and no value a decision
   read anywhere in the serialised event; `DecisionProvenanceTest`, `LastDecisionStoreTest` and the manager's
   `AuthorizationManagerTest`: the provenance of the last decision; `CheckBatchTest`: the dispatch and store switches.

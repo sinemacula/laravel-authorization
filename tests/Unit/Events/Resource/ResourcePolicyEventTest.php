@@ -7,6 +7,7 @@ namespace Tests\Unit\Events\Resource;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Resource\ResourcePolicyEvent;
@@ -38,6 +39,7 @@ final class ResourcePolicyEventTest extends TestCase
         self::assertTrue($reflection->isAbstract());
         self::assertTrue($reflection->isReadOnly());
         self::assertTrue($reflection->implementsInterface(AuthorizationEvent::class));
+        self::assertTrue($reflection->implementsInterface(AuthorizationMutation::class));
 
         foreach ([PolicyAttached::class, PolicyDetached::class] as $class) {
             $parent = (new \ReflectionClass($class))->getParentClass();
@@ -67,5 +69,34 @@ final class ResourcePolicyEventTest extends TestCase
         $parameters  = \array_map(static fn (\ReflectionParameter $parameter): string => $parameter->getName(), $constructor->getParameters());
 
         self::assertSame(['operation', 'resourceType', 'resourceId', 'policy', 'name', 'scope'], $parameters);
+    }
+
+    /**
+     * Each event is about the record the policy is attached to, or about no
+     * record for a whole resource type, holds in its scope's tenant and
+     * application, names no grantee and reports the rest as plain details.
+     *
+     * @return void
+     */
+    public function testDescribesTheAttachmentForAnAuditMapper(): void
+    {
+        $tenant = new Reference('team', '7');
+        $record = new PolicyAttached(Operation::begin(), 'posts', '7', new Reference('policy', '9'), 'sharing', new GrantScope($tenant, 'admin', false));
+        $type   = new PolicyDetached(Operation::begin(), 'posts', null, new Reference('policy', '9'), 'sharing', GrantScope::platform());
+
+        self::assertEquals(new Reference('posts', '7'), $record->subject());
+        self::assertSame($tenant, $record->tenant());
+        self::assertSame('admin', $record->application());
+        self::assertSame([], $record->grantees());
+        self::assertSame([
+            'resource_type'         => 'posts',
+            'resource_id'           => '7',
+            'policy'                => 'policy:9',
+            'name'                  => 'sharing',
+            'scope.include_subtree' => false,
+        ], $record->auditProperties());
+        self::assertNull($type->subject());
+        self::assertNull($type->tenant());
+        self::assertNull($type->application());
     }
 }
