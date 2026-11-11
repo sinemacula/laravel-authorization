@@ -76,4 +76,22 @@ final class BoundarySetTest extends TestCase
             ],
         ]);
     }
+
+    /**
+     * The event reports the call that made the change, trusted or delegated,
+     * with or without an impersonator, and never its client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        self::assertDescribesTheCall(static fn (Operation $operation): BoundarySet => new BoundarySet(
+            $operation,
+            self::grantee(),
+            new Reference('policy', '9'),
+            'cap',
+            new GrantScope(self::tenant(), null, false),
+            new Reference('policy', '8'),
+        ));
+    }
 }

@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\AssertsAuditAccessors;
 
 /**
  * Unit tests for the audit accessors the grant and boundary events share.
@@ -24,6 +25,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 #[CoversTrait(DescribesGrantChange::class)]
 final class DescribesGrantChangeTest extends TestCase
 {
+    use AssertsAuditAccessors;
+
     /**
      * The grantee is the subject and the one grantee, and the scope's tenant
      * and application are where the change holds.
@@ -59,5 +62,22 @@ final class DescribesGrantChangeTest extends TestCase
         self::assertNull($event->application());
         self::assertSame([$grantee], $event->grantees());
         self::assertSame(['policy' => 'policy:9', 'name' => 'cap', 'scope.include_subtree' => true], $event->auditProperties());
+    }
+
+    /**
+     * A grant or boundary event reports the call that made the change, trusted
+     * or delegated, with or without an impersonator, and never its client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        self::assertDescribesTheCall(static fn (Operation $operation): PermissionRevoked => new PermissionRevoked(
+            $operation,
+            self::grantee(),
+            new Reference('permission', '5'),
+            'posts.update',
+            self::scope(),
+        ));
     }
 }

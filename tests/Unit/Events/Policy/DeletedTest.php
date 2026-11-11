@@ -54,4 +54,22 @@ final class DeletedTest extends TestCase
             ],
         ]);
     }
+
+    /**
+     * The event reports the call that made the change, trusted or delegated,
+     * with or without an impersonator, and never its client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        self::assertDescribesTheCall(static fn (Operation $operation): Deleted => new Deleted(
+            $operation,
+            new Reference('policy', '9'),
+            'sharing',
+            self::tenant(),
+            new DocumentDigest(1, 'abc'),
+            [self::grantee()],
+        ));
+    }
 }

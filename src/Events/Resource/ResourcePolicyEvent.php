@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Resource;
 
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
+use SineMacula\Laravel\Authorization\Events\Concerns\DescribesOperation;
 use SineMacula\Laravel\Authorization\Support\AuditProperties;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -29,6 +30,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  */
 abstract readonly class ResourcePolicyEvent implements AuthorizationMutation
 {
+    use DescribesOperation;
+
     /**
      * Create a new event instance.
      *

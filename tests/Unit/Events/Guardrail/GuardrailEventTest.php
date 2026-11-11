@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Events\Guardrail\GuardrailSet;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\AssertsAuditAccessors;
 
 /**
  * Unit tests for what every change to a guardrail carries.
@@ -27,6 +28,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 #[CoversClass(GuardrailEvent::class)]
 final class GuardrailEventTest extends TestCase
 {
+    use AssertsAuditAccessors;
+
     /**
      * The shared shape is an abstract readonly authorization event, never
      * dispatched itself and about no grantee, that the set and removed events
@@ -88,5 +91,19 @@ final class GuardrailEventTest extends TestCase
         self::assertSame(['policy' => 'policy:9', 'name' => 'cap', 'scope.include_subtree' => true], $tenanted->auditProperties());
         self::assertNull($platform->subject());
         self::assertNull($platform->tenant());
+    }
+
+    /**
+     * Each event reports the call that made the change, trusted or delegated,
+     * with or without an impersonator, and never its client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        $policy = new Reference('policy', '9');
+
+        self::assertDescribesTheCall(static fn (Operation $operation): GuardrailSet => new GuardrailSet($operation, $policy, 'cap', GrantScope::platform()));
+        self::assertDescribesTheCall(static fn (Operation $operation): GuardrailRemoved => new GuardrailRemoved($operation, $policy, 'cap', GrantScope::platform()));
     }
 }

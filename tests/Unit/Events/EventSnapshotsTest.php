@@ -217,6 +217,30 @@ final class EventSnapshotsTest extends TestCase
     }
 
     /**
+     * No change event reports the IP address or the user agent of the call that
+     * made it, though its operation carries them: neither through an accessor
+     * nor in its details.
+     *
+     * @param  class-string<\SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation>  $class
+     * @return void
+     */
+    #[DataProvider('mutations')]
+    public function testNoChangeEventReportsTheClient(string $class): void
+    {
+        $at       = new \DateTimeImmutable('2026-03-04T05:06:07Z');
+        $event    = self::sample($class, new Operation('op-client', new Reference('principal', '5'), $at, false, null, null, [], '203.0.113.9', 'Browser/1.0'));
+        $reported = [];
+
+        foreach ((new \ReflectionClass(AuthorizationMutation::class))->getMethods() as $method) {
+            $reported[$method->getName()] = (new \ReflectionMethod($event, $method->getName()))->invoke($event);
+        }
+
+        self::assertStringContainsString('203.0.113.9', \serialize($event));
+        self::assertStringNotContainsString('203.0.113.9', \serialize($reported));
+        self::assertStringNotContainsString('Browser/1.0', \serialize($reported));
+    }
+
+    /**
      * The value objects the events carry are snapshots of plain values too.
      *
      * @return void
@@ -229,18 +253,19 @@ final class EventSnapshotsTest extends TestCase
     }
 
     /**
-     * Return an instance of the change event, each parameter given a sample of
-     * its type.
+     * Return an instance of the change event, made by the operation given or a
+     * new one, each other parameter given a sample of its type.
      *
      * @param  class-string<\SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation>  $class
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation|null  $operation
      * @return \SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation
      */
-    private static function sample(string $class): AuthorizationMutation
+    private static function sample(string $class, ?Operation $operation = null): AuthorizationMutation
     {
         $arguments = [];
 
         foreach ((new \ReflectionMethod($class, '__construct'))->getParameters() as $parameter) {
-            $arguments[] = self::sampleOf($parameter);
+            $arguments[] = $parameter->getName() === 'operation' && $operation !== null ? $operation : self::sampleOf($parameter);
         }
 
         return new $class(...$arguments);

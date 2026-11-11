@@ -11,7 +11,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * The audit accessors the role, permission and policy record events and the
  * role permission events share: the change holds where the record's owning
  * tenant is, in no one application, and names no grantee unless the event says
- * otherwise.
+ * otherwise. The call that made the change is read through
+ * `DescribesOperation`.
  *
  * Each event using it names its own operation identifier and subject, and an
  * event whose change altered someone's access names its grantees.
@@ -23,6 +24,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  */
 trait DescribesRecordChange
 {
+    use DescribesOperation;
+
     /**
      * Return the tenant that owns the record; null for the platform.
      *

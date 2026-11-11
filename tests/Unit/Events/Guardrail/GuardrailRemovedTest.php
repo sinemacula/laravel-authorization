@@ -69,4 +69,20 @@ final class GuardrailRemovedTest extends TestCase
             'properties'  => ['policy' => 'policy:9', 'name' => 'cap', 'scope.include_subtree' => true],
         ]);
     }
+
+    /**
+     * The event reports the call that made the change, trusted or delegated,
+     * with or without an impersonator, and never its client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        self::assertDescribesTheCall(static fn (Operation $operation): GuardrailRemoved => new GuardrailRemoved(
+            $operation,
+            new Reference('policy', '9'),
+            'cap',
+            GrantScope::platform(),
+        ));
+    }
 }

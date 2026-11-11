@@ -13,7 +13,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * subject and the one grantee, and the scope's tenant and application are where
  * the change holds.
  *
- * Each event using it names its own operation identifier.
+ * Each event using it names its own operation identifier, and reads the call
+ * that made the change through `DescribesOperation`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -22,6 +23,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  */
 trait DescribesGrantChange
 {
+    use DescribesOperation;
+
     /**
      * Return the grantee whose grants changed.
      *

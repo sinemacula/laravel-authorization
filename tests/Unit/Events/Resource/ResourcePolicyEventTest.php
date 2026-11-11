@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Events\Resource\ResourcePolicyEvent;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\AssertsAuditAccessors;
 
 /**
  * Unit tests for what every change to a resource policy attachment carries.
@@ -26,6 +27,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 #[CoversClass(ResourcePolicyEvent::class)]
 final class ResourcePolicyEventTest extends TestCase
 {
+    use AssertsAuditAccessors;
+
     /**
      * The shared shape is an abstract readonly event, never dispatched itself,
      * that the attached and detached events extend unchanged.
@@ -98,5 +101,19 @@ final class ResourcePolicyEventTest extends TestCase
         self::assertNull($type->subject());
         self::assertNull($type->tenant());
         self::assertNull($type->application());
+    }
+
+    /**
+     * Each event reports the call that made the change, trusted or delegated,
+     * with or without an impersonator, and never its client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        $policy = new Reference('policy', '9');
+
+        self::assertDescribesTheCall(static fn (Operation $operation): PolicyAttached => new PolicyAttached($operation, 'posts', '7', $policy, 'sharing', GrantScope::platform()));
+        self::assertDescribesTheCall(static fn (Operation $operation): PolicyDetached => new PolicyDetached($operation, 'posts', null, $policy, 'sharing', GrantScope::platform()));
     }
 }

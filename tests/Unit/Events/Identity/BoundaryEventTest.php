@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\BoundarySet;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\AssertsAuditAccessors;
 
 /**
  * Unit tests for what every change to a grantee's permission boundary carries.
@@ -26,6 +27,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 #[CoversClass(BoundaryEvent::class)]
 final class BoundaryEventTest extends TestCase
 {
+    use AssertsAuditAccessors;
+
     /**
      * The shared shape is an abstract readonly grant event, never dispatched
      * itself, that the set and removed events extend.
@@ -65,5 +68,19 @@ final class BoundaryEventTest extends TestCase
         foreach ([new BoundarySet($operation, $grantee, $policy, 'cap', $scope), new BoundaryRemoved($operation, $grantee, $policy, 'cap', $scope)] as $event) {
             self::assertSame([$operation, $grantee, $policy, 'cap', $scope], [$event->operation, $event->grantee, $event->policy, $event->name, $event->scope]);
         }
+    }
+
+    /**
+     * Each event reports the call that made the change, trusted or delegated,
+     * with or without an impersonator, and never its client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        $policy = new Reference('policy', '9');
+
+        self::assertDescribesTheCall(static fn (Operation $operation): BoundarySet => new BoundarySet($operation, self::grantee(), $policy, 'cap', GrantScope::platform()));
+        self::assertDescribesTheCall(static fn (Operation $operation): BoundaryRemoved => new BoundaryRemoved($operation, self::grantee(), $policy, 'cap', GrantScope::platform()));
     }
 }

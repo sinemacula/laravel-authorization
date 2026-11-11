@@ -54,4 +54,23 @@ final class RoleExpiryChangedTest extends TestCase
             ],
         ]);
     }
+
+    /**
+     * The event reports the call that made the change, trusted or delegated,
+     * with or without an impersonator, and never its client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        self::assertDescribesTheCall(static fn (Operation $operation): RoleExpiryChanged => new RoleExpiryChanged(
+            $operation,
+            self::grantee(),
+            new Reference('role', '3'),
+            'editor',
+            self::scope(),
+            null,
+            self::date(),
+        ));
+    }
 }

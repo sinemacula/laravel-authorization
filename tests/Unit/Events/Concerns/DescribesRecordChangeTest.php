@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\AssertsAuditAccessors;
 
 /**
  * Unit tests for the audit accessors the role, permission and policy record
@@ -25,6 +26,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 #[CoversTrait(DescribesRecordChange::class)]
 final class DescribesRecordChangeTest extends TestCase
 {
+    use AssertsAuditAccessors;
+
     /**
      * The change holds where the record's owning tenant is, in no one
      * application, and names no grantee.
@@ -53,5 +56,24 @@ final class DescribesRecordChangeTest extends TestCase
 
         self::assertNull($event->tenant());
         self::assertSame(['policy' => 'policy:9', 'name' => 'sharing', 'document.version' => 1, 'document.digest' => 'abc', 'is_system' => false], $event->auditProperties());
+    }
+
+    /**
+     * A record or role permission event reports the call that made the change,
+     * trusted or delegated, with or without an impersonator, and never its
+     * client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        self::assertDescribesTheCall(static fn (Operation $operation): PolicyCreated => new PolicyCreated(
+            $operation,
+            new Reference('policy', '9'),
+            'sharing',
+            null,
+            new DocumentDigest(1, 'abc'),
+            false,
+        ));
     }
 }

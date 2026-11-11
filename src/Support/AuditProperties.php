@@ -16,10 +16,11 @@ use Illuminate\Support\Str;
  * a map of changes is flattened under a dotted key (`scope.include_subtree`,
  * `document.digest`, `changes.before.name`). A reference is written as
  * `type:id`, a date as an ISO 8601 string in UTC and a backed enum as its
- * value. The operation is left out, since it carries the call and its client,
- * and so are the grantee, the grantees, the tenant and the scope's tenant and
- * application, which the other accessors return. Any object besides these, a
- * model or a closure included, is refused, so a mapper never stores one.
+ * value. The operation is left out, since it carries the call's client and the
+ * call accessors return the rest of it, and so are the grantee, the grantees,
+ * the tenant and the scope's tenant and application, which the other accessors
+ * return. Any object besides these, a model or a closure included, is refused,
+ * so a mapper never stores one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

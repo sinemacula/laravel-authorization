@@ -2634,6 +2634,14 @@ Event::listen(static function (AuthorizationMutation $event): void {
     $event->application();     // the application it holds in, or null for every application
     $event->grantees();        // a Reference to every grantee whose access it changed, or none
     $event->auditProperties(); // ['role' => 'role:3', 'name' => 'editor', 'scope.include_subtree' => true, ...]
+
+    // The call that made the change
+    $event->operationId();     // the call's id, shared by every event it dispatched and every decision made for it
+    $event->isTrusted();       // true for trusted system work, made without an acting context
+    $event->actor();           // Reference to the acting principal, the reference a trusted command names, or null
+    $event->actorIdentity();   // Reference to the identity behind the acting principal, or null
+    $event->impersonator();    // Reference to whoever was impersonating the acting subject, or null
+    $event->occurredAt();      // DateTimeImmutable: when the call was made, in UTC
 });
 ```
 
@@ -2641,8 +2649,11 @@ Event::listen(static function (AuthorizationMutation $event): void {
 snake case, a scope, a document digest or the before and after of an update sit under dotted keys
 (`scope.include_subtree`, `document.digest`, `changes.before.name`), a reference is written as `type:id`, a date as an
 ISO 8601 string in UTC, and a list of references as a list of strings. It never holds a model, a closure or the
-operation: the call that made the change, with its id, actor and time, stays on `$event->operation`. The grantee, the
-grantees and the tenant are left out, since the other accessors return them.
+operation: the call that made the change is read through the call accessors above. The grantee, the grantees and the
+tenant are left out, since the other accessors return them.
+
+The IP address and the user agent the call came from are deliberately absent: they are personal data, carried to the
+grant hook alone, so no accessor returns them and `auditProperties()` never holds them.
 
 | Event                              | `operation()`                        | `subject()`                          | `grantees()`                     |
 |------------------------------------|--------------------------------------|--------------------------------------|----------------------------------|

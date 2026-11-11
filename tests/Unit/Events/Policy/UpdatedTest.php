@@ -65,4 +65,23 @@ final class UpdatedTest extends TestCase
             ],
         ]);
     }
+
+    /**
+     * The event reports the call that made the change, trusted or delegated,
+     * with or without an impersonator, and never its client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        self::assertDescribesTheCall(static fn (Operation $operation): Updated => new Updated(
+            $operation,
+            new Reference('policy', '9'),
+            'sharing',
+            self::tenant(),
+            ['before' => ['name' => 'draft'], 'after' => ['name' => 'sharing']],
+            new DocumentDigest(2, 'def'),
+            new DocumentDigest(1, 'abc'),
+        ));
+    }
 }

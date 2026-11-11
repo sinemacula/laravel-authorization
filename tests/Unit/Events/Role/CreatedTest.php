@@ -47,4 +47,15 @@ final class CreatedTest extends TestCase
             'properties'  => ['role' => 'role:3', 'name' => 'editor', 'guard' => 'web', 'is_system' => true],
         ]);
     }
+
+    /**
+     * The event reports the call that made the change, trusted or delegated,
+     * with or without an impersonator, and never its client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        self::assertDescribesTheCall(static fn (Operation $operation): Created => new Created($operation, new Reference('role', '3'), 'editor', 'web', self::tenant(), true));
+    }
 }

@@ -75,4 +75,22 @@ final class PolicyAttachedTest extends TestCase
             ],
         ]);
     }
+
+    /**
+     * The event reports the call that made the change, trusted or delegated,
+     * with or without an impersonator, and never its client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        self::assertDescribesTheCall(static fn (Operation $operation): PolicyAttached => new PolicyAttached(
+            $operation,
+            'posts',
+            '7',
+            new Reference('policy', '9'),
+            'sharing',
+            self::scope(),
+        ));
+    }
 }

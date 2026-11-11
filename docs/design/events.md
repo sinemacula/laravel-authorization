@@ -141,10 +141,13 @@ carry references, names and ids, never a value the decision read, and are dispat
     `auditProperties()`, every other property, flat and serialisable through `Support\AuditProperties`: snake case
     keys, dotted keys for a scope, a digest or the before and after of an update, a reference as `type:id`, a date as
     ISO 8601 in UTC. It never holds the operation, which carries the client, a model or a closure, and refuses any
-    object other than the package's value objects. Each family implements the accessors once:
-    `Events\Concerns\DescribesGrantChange` for the grant and boundary events, `Events\Concerns\DescribesRecordChange`
-    for the record and role permission events, and the resource policy and guardrail base classes for theirs; each
-    event class names its own identifier.
+    object other than the package's value objects. The call that made the change is read from the event's operation
+    through `operationId()`, `isTrusted()`, `actor()`, `actorIdentity()`, `impersonator()` and `occurredAt()` (in UTC);
+    the call's IP address and user agent are personal data for the grant hook alone, so no accessor returns them. Each
+    family implements the accessors once: `Events\Concerns\DescribesGrantChange` for the grant and boundary events,
+    `Events\Concerns\DescribesRecordChange` for the record and role permission events, and the resource policy and
+    guardrail base classes for theirs, each reading the call through `Events\Concerns\DescribesOperation`; each event
+    class names its own identifier.
 
 ## Success Path
 
@@ -203,8 +206,8 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 
 - `Contracts\AuthorizationEvent`, `Contracts\AuthorizationMutation`, `Contracts\IdentityEvent` and the classes under
   `Events\`.
-- `Events\Concerns\DescribesGrantChange`, `Events\Concerns\DescribesRecordChange` and `Support\AuditProperties`: the
-  audit accessors and the flat details.
+- `Events\Concerns\DescribesGrantChange`, `Events\Concerns\DescribesRecordChange`, `Events\Concerns\DescribesOperation`
+  and `Support\AuditProperties`: the audit accessors, the call accessors and the flat details.
 - `Events\DecisionEvent`: the decision payload; `Evaluation\DecisionProvenance`: who a decision was about and where;
   `Evaluation\LastDecisionStore`: the last decision and its provenance; `Evaluation\CheckBatch`: the dispatch and
   store switches.
@@ -225,8 +228,8 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 - `EventSnapshotsTest`: every event implements the marker; every event, the decision events included, takes only plain
   values; every change event implements `AuthorizationMutation`, with a unique operation identifier and serialisable
   details.
-- `AuditPropertiesTest`, `DescribesGrantChangeTest`, `DescribesRecordChangeTest` and each event class's own test: the
-  audit accessors' values.
+- `AuditPropertiesTest`, `DescribesGrantChangeTest`, `DescribesRecordChangeTest`, `DescribesOperationTest` and each
+  event class's own test: the audit and call accessors' values, and that none reports the call's client.
 - `DecisionEventTest`, `DecisionEvaluatedTest`, `AuthorizationFailedTest`: the decision payload, and no value a decision
   read anywhere in the serialised event; `DecisionProvenanceTest`, `LastDecisionStoreTest` and the manager's
   `AuthorizationManagerTest`: the provenance of the last decision; `CheckBatchTest`: the dispatch and store switches.
