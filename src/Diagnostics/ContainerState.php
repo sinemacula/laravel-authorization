@@ -124,9 +124,10 @@ final class ContainerState
             return [];
         }
 
+        /** @var \Closure(\Illuminate\Container\Container): list<string> $scoped */
         $scoped = \Closure::bind(static fn (BaseContainer $container): array => $container->scopedInstances, null, BaseContainer::class);
 
-        return \array_values(\array_filter($scoped($container), \is_string(...)));
+        return $scoped($container);
     }
 
     /**

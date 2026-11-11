@@ -33,6 +33,7 @@ final class RequestStateTest extends TestCase
     {
         $container = new Container;
 
+        $container->scoped('other.first', static fn (): \stdClass => new \stdClass);
         $container->scoped(LastDecisionStore::class);
         $container->scoped('authorization', static fn (): \stdClass => new \stdClass);
         $container->scoped('authorization.default:Contract', static fn (): \stdClass => new \stdClass);
