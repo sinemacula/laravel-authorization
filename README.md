@@ -551,8 +551,9 @@ Grants are idempotent: granting what the grantee holds, with the same expiry, ch
 returns `GrantOutcome::UNCHANGED`, and a concurrent duplicate never raises a unique-constraint violation. Re-granting a
 grant that has expired re-arms it with the new expiry (`REARMED`), and a new expiry on a live grant is reported as
 `EXPIRY_CHANGED`. A sync re-arms a listed grant that has expired with the sync's expiry, or with none when it is given
-none, and leaves a live one as it is. A role's permissions work the same way: `RoleService::grantPermission()` and
-`syncPermissions()`, and the role's `givePermission()` and `syncPermissions()`, each take an optional expiry. The
+none, and leaves a live one as it is, unless it is a role listed with a reach of its own and held with the other (see
+below). A role's permissions work the same way: `RoleService::grantPermission()` and `syncPermissions()`, and the
+role's `givePermission()` and `syncPermissions()`, each take an optional expiry. The
 identity traits' sync methods take no expiry, so a lapsed temporary grant they list comes back permanent; to re-arm it
 for a limited time, call `GrantService::syncRoles()` (or `syncPermissions()`, `syncPolicies()`) with an expiry. Setting
 a role's parent locks the roles involved and refuses a cycle. A role with children cannot be deleted
@@ -653,6 +654,25 @@ $user->assignRole('admin', tenant: $organisation);                          // t
 $user->assignRole('billing', tenant: $organisation, includeSubtree: false); // the organisation alone
 
 Authorization::treeChanged($account);
+```
+
+A sync gives every role it grants one reach, `includeSubtree`, and leaves the reach of a role held live as it is. To
+sync roles of both reaches in one call, list a role with its own reach, as `Support\RoleReach::of($role, false)`, beside
+role models and names. Such a role is compared with its reach: one held live with the other reach has its reach changed
+in place, in one write that keeps its row, its expiry and when it was granted, reported with `RoleAssigned` carrying the
+new reach and listed in the result's `reachChanged`, and a delegated call needs the right to grant it with that reach,
+as `grantRole()` does. Roles not listed are revoked and new ones granted, in the same transaction. In a tenant, a role
+listed with both reaches is refused with `InvalidArgumentException` before anything is written. A sync that writes
+platform-wide grants, with no tenant named or owning every role, writes them reaching everywhere whatever their entries
+say, so there both entries name the same reach and the sync goes ahead:
+
+```php
+use SineMacula\Laravel\Authorization\Support\RoleReach;
+
+$user->syncRoles([
+    'admin',                                         // the organisation and its accounts
+    RoleReach::of('billing', includeSubtree: false), // the organisation alone
+], tenant: $organisation);
 ```
 
 Every row of a subtree is typed, so tenants of different types sharing an id are never confused. A tree whose source

@@ -56,39 +56,82 @@ final class GrantChanges
 
     /**
      * Return the changes a sync makes, each to be decided before any is
-     * written: a grant, in the written scope, of each kept row the grantee does
-     * not hold live there (a new one, or one whose grant has expired and is
-     * re-armed), the same row kept unchanged for each of the keys given as held
-     * live, and a revocation of each row it drops, with the reach it had. The
-     * sync judges the live keys at one instant and re-arms its rows as of the
-     * same instant, so a row decided as kept unchanged is never re-armed; a
-     * sync that changes nothing at all decides its revocation unchanged, so its
-     * action is still decided.
+     * written: a grant of each kept row the grantee does not hold live (a new
+     * one, or one whose grant has expired and is re-armed), with the sync's
+     * expiry; a grant, with the expiry it keeps, of each row held live with the
+     * other reach than its entry names; the same row kept unchanged for each
+     * other row held live; and a revocation of each row it drops, with the
+     * reach it had. Each kept row is decided in the scope the plan writes it in
+     * (`SyncPlan::scopeOf()`). The sync judges the live rows at one instant and
+     * re-arms its rows as of the same instant, so a row decided as kept
+     * unchanged is never re-armed; a sync that changes nothing at all decides
+     * its revocation unchanged, so its action is still decided.
      *
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  \SineMacula\Laravel\Authorization\Services\Support\SyncPlan  $plan
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
-     * @param  list<string>  $live
-     * @param  array<array-key, \Illuminate\Database\Eloquent\Model>  $keep
+     * @param  array<array-key, array{\Illuminate\Support\Carbon|null, bool}>  $live
      * @param  array<array-key, bool>  $revoked
-     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $written
      * @param  \DateTimeInterface|null  $expiresAt
      * @return non-empty-list<\SineMacula\Laravel\Authorization\Administration\OperationResource>
      */
-    public static function ofSync(GrantTarget $kind, Reference $grantee, array $live, array $keep, array $revoked, GrantScope $written, ?\DateTimeInterface $expiresAt): array
+    public static function ofSync(SyncPlan $plan, Reference $grantee, array $live, array $revoked, ?\DateTimeInterface $expiresAt): array
     {
+        $kind    = $plan->kind;
         $changes = [];
+        $kept    = self::keptAsHeld($live, $plan->reaches);
 
-        foreach ($keep as $id => $model) {
-            $changes[] = \in_array((string) $id, $live, true)
-                ? OperationResource::unchanged($kind->grantAction(), $grantee, $model, $written)
-                : OperationResource::grant($kind->grantAction(), $grantee, $model, $written, $expiresAt);
+        foreach ($plan->keep as $model) {
+            $id        = self::key($model);
+            $scope     = $plan->scopeOf($id);
+            $changes[] = \in_array($id, $kept, true)
+                ? OperationResource::unchanged($kind->grantAction(), $grantee, $model, $scope)
+                : OperationResource::grant($kind->grantAction(), $grantee, $model, $scope, self::expiryOf($live, $id, $expiresAt));
         }
 
         foreach ($kind->find(\array_map(\strval(...), \array_keys($revoked))) as $model) {
-            $changes[] = OperationResource::revoke($kind->revokeAction(), $grantee, $model, new GrantScope($written->tenant, $written->application, $revoked[self::key($model)]));
+            $held      = new GrantScope($plan->written->tenant, $plan->written->application, $revoked[self::key($model)]);
+            $changes[] = OperationResource::revoke($kind->revokeAction(), $grantee, $model, $held);
         }
 
-        return $changes === [] ? [OperationResource::unchanged($kind->revokeAction(), $grantee, null, $written)] : $changes;
+        return $changes === [] ? [OperationResource::unchanged($kind->revokeAction(), $grantee, null, $plan->written)] : $changes;
+    }
+
+    /**
+     * Return the keys of the rows held live, of those given, that a sync keeps
+     * as they are: each but a row listed with a reach of its own (the scopes
+     * given) that holds with the other reach.
+     *
+     * @param  array<array-key, array{\Illuminate\Support\Carbon|null, bool}>  $live
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\GrantScope>  $reaches
+     * @return list<string>
+     */
+    public static function keptAsHeld(array $live, array $reaches): array
+    {
+        $kept = [];
+
+        foreach ($live as $id => [, $isBelow]) {
+            if (($reaches[$id] ?? null)?->includeSubtree === !$isBelow) {
+                continue;
+            }
+
+            $kept[] = (string) $id;
+        }
+
+        return $kept;
+    }
+
+    /**
+     * Return the expiry a sync grants the kept row of the key with: the one the
+     * row held live keeps, when it is held live, else the sync's.
+     *
+     * @param  array<array-key, array{\Illuminate\Support\Carbon|null, bool}>  $live
+     * @param  array-key  $id
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return \DateTimeInterface|null
+     */
+    public static function expiryOf(array $live, int|string $id, ?\DateTimeInterface $expiresAt): ?\DateTimeInterface
+    {
+        return \array_key_exists($id, $live) ? $live[$id][0] : $expiresAt;
     }
 
     /**

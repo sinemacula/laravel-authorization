@@ -9,12 +9,10 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Administration\OperationGrantee;
 use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
-use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\NestedGrantException;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
-use SineMacula\Laravel\Authorization\Services\Support\GrantTable;
-use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Services\Support\SyncPlan;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -148,29 +146,31 @@ final readonly class WideningPhase
     /**
      * Return the grants a sync proposes: each target it keeps that the grantee
      * does not hold live in the written scope, a new grant or the re-arm of an
-     * expired one, with the sync's expiry. A target held live is left as it is,
-     * so it proposes nothing. Asked to lock, for the check after the locks, the
-     * rows held live are read under the lock.
+     * expired one, with the sync's expiry, and each it holds live with the
+     * other reach than its entry names (`Support\RoleReach`), with the expiry
+     * the row keeps, each in the scope the plan writes it in. Any other target
+     * held live is left as it is, so it proposes nothing. Asked to lock, for
+     * the check after the locks, the rows held live are read under the lock.
      *
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  \SineMacula\Laravel\Authorization\Services\Support\SyncPlan  $plan
      * @param  \DateTimeInterface|null  $expiresAt
-     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $written
-     * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantTable  $table
-     * @param  array<string, \Illuminate\Database\Eloquent\Model>  $keep
      * @param  bool  $isLocked
      * @return list<\SineMacula\Laravel\Authorization\Hooks\ProposedGrant>
      */
-    public static function additions(GrantTarget $kind, ?\DateTimeInterface $expiresAt, GrantScope $written, GrantTable $table, array $keep, bool $isLocked = false): array
+    public static function additions(SyncPlan $plan, ?\DateTimeInterface $expiresAt, bool $isLocked = false): array
     {
-        $live      = $table->live(\array_map(\strval(...), \array_keys($keep)), isLocked: $isLocked);
+        $live      = $plan->table->liveRows($plan->kept(), isLocked: $isLocked);
+        $kept      = GrantChanges::keptAsHeld($live, $plan->reaches);
         $proposals = [];
 
-        foreach ($keep as $model) {
-            if (\in_array(GrantChanges::key($model), $live, true)) {
+        foreach ($plan->keep as $model) {
+            $id = GrantChanges::key($model);
+
+            if (\in_array($id, $kept, true)) {
                 continue;
             }
 
-            $proposals[] = ProposedGrant::of($kind, $model, $written, $expiresAt);
+            $proposals[] = ProposedGrant::of($plan->kind, $model, $plan->scopeOf($id), GrantChanges::expiryOf($live, $id, $expiresAt));
         }
 
         return $proposals;
