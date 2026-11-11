@@ -219,8 +219,9 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
   caller's transaction stays usable, as PostgreSQL otherwise would not leave it. Only the `QueryException` is caught:
   it is written to the log, and `forIdentity()` reads the platform-wide grants alone, answering as for a tree that
   throws. `hasGrantIn()` never runs the subtree query, so it is unaffected.
-- **A row naming half a tenant.** `UNKNOWN` for `forIdentity()`, unless another root is outside; never listed by
-  `granteesReaching()` or `granteesWithin()`.
+- **A row naming half a tenant.** `UNKNOWN` for `forIdentity()`, unless another root is outside; never a grant for
+  `hasGrantIn()`, since a check applies a grant stored that way nowhere (N130: what restricts of such a row applies
+  everywhere instead, see `Support\TenantColumns`); never listed by `granteesReaching()` or `granteesWithin()`.
 - **A tree that cannot be read, for a list.** `granteesReaching()` and `granteesWithin()` throw what the tree throws; a
   subtree on another connection is refused with `UnexpectedValueException`; a subtree query that fails as it runs is
   thrown once only its savepoint has rolled back. Neither answers an empty list it cannot vouch for.

@@ -440,6 +440,13 @@ final class GrantService
      * nothing, each of the call's actions is decided unchanged at platform
      * scope, so an actor that may not take them is refused either way.
      *
+     * A row naming half a tenant, which the package never writes, is revoked or
+     * removed too, decided at platform scope in the row's application, so it
+     * needs the actor's platform authority for the action, never a scope it
+     * names half of; it is counted, and written to the log as malformed rather
+     * than reported by an event, which would name it the platform's (see
+     * `Support\TenantColumns`).
+     *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return int
@@ -456,7 +463,7 @@ final class GrantService
 
         $revoked = OperationScope::run($operation, static function (Operation $operation) use ($actor, $reference): int {
             if ($actor === null) {
-                $events = GrantChanges::revokeEverywhere($reference, $operation);
+                [$events, $malformed] = GrantChanges::revokeEverywhere($reference, $operation);
             } else {
                 // The grantee's rows are locked before they are read, so what
                 // is revoked is exactly what was decided, never a row granted
@@ -464,16 +471,18 @@ final class GrantService
                 OperationScope::pins()?->lockGrantees($reference);
 
                 $unchanged = static fn (string $action): OperationResource => OperationResource::unchanged($action, $reference, null, GrantScope::platform());
-                $changes   = GrantChanges::everything($reference);
 
-                $actor->authorizeChanges($operation, $changes, ...\array_map($unchanged, $operation->actions));
+                [$changes, $grants, $boundaries] = GrantChanges::everything($reference);
 
-                $events = GrantChanges::revokeDecided($reference, $operation, $changes);
+                $actor->authorizeChanges($operation, [...$changes, ...GrantChanges::malformed($reference, $grants, $boundaries)], ...\array_map($unchanged, $operation->actions));
+
+                $events    = GrantChanges::revokeDecided($reference, $operation, $changes);
+                $malformed = GrantChanges::revokeMalformed($reference, $operation, $grants, $boundaries);
             }
 
             OperationScope::dispatch(...$events);
 
-            return \count($events);
+            return \count($events) + $malformed;
         }, $actor);
 
         foreach (GrantTarget::cases() as $kind) {

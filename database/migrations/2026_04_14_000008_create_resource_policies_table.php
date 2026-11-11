@@ -24,6 +24,7 @@ declare(strict_types = 1);
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\ExactReferences;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
@@ -37,10 +38,8 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        /** @var string $table */
-        $table = config('authorization.tables.resource_policies', 'resource_policies');
-        /** @var string $policiesTable */
-        $policiesTable = config('authorization.tables.policies', 'policies');
+        $table         = TableNames::get('resource_policies');
+        $policiesTable = TableNames::get('policies');
 
         $schema = Schema::connection($this->getConnection());
 
@@ -97,8 +96,7 @@ return new class extends Migration {
      */
     public function down(): void
     {
-        /** @var string $table */
-        $table = config('authorization.tables.resource_policies', 'resource_policies');
+        $table = TableNames::get('resource_policies');
 
         Schema::connection($this->getConnection())->dropIfExists($table);
     }

@@ -30,6 +30,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\NumberedIdentity;
+use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -129,6 +130,54 @@ final class GrantPrunerTest extends TestCase
         self::assertSame(['editor', 'posts:delete', null], [$lapsed[0]->roleName, $lapsed[0]->permissionName, $lapsed[0]->tenant]);
         self::assertSame($role->id, $lapsed[0]->role->id);
         self::assertSame('2026-07-01 10:00:00 UTC', $lapsed[0]->expiredAt->format('Y-m-d H:i:s e'));
+    }
+
+    /**
+     * An expired grant naming half a tenant, a key without a type or a type
+     * without a key, is removed and counted, but reported by no expiry event,
+     * which would name it the platform's or a tenant's: it is written to the
+     * log as malformed instead. A whole grant expiring beside it is reported.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnExpiredGrantNamingHalfATenantIsRemovedAndLoggedAsMalformed(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $logger = new RecordingLogger;
+        $edit   = Permission::create(['name' => 'posts:edit']);
+        $row    = ['permission_id' => $edit->id, 'authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1', 'expires_at' => '2026-07-01 11:00:00'];
+
+        $this->app?->instance('log', $logger);
+
+        DB::table('authorizable_permissions')->insert([...$row, 'tenant_id' => 'tenant-a']);
+        DB::table('authorizable_permissions')->insert([...$row, 'tenant_type' => 'stub_tenant']);
+        $user->givePermission(Permission::create(['name' => 'posts:read']), Carbon::parse('2026-07-01 11:30:00'));
+
+        Event::fake();
+
+        self::assertSame(3, self::pruner()->prune(1000)->expired);
+        self::assertSame(0, DB::table('authorizable_permissions')->count());
+
+        $expired = self::dispatchedEvents(PermissionExpired::class);
+
+        self::assertCount(1, $expired);
+        self::assertSame('posts:read', $expired[0]->name);
+        self::assertEqualsCanonicalizing(
+            [
+                'Authorization: removed an expired permission grant naming half a tenant, malformed (tenant_type=null, tenant_id=tenant-a).',
+                'Authorization: removed an expired permission grant naming half a tenant, malformed (tenant_type=stub_tenant, tenant_id=null).',
+            ],
+            \array_column($logger->records, 'message'),
+        );
+        self::assertEqualsCanonicalizing(
+            [
+                ['grantee' => "{$user->getMorphClass()}:user-1", 'target_id' => $edit->id, 'tenant_type' => null, 'tenant_id' => 'tenant-a'],
+                ['grantee' => "{$user->getMorphClass()}:user-1", 'target_id' => $edit->id, 'tenant_type' => 'stub_tenant', 'tenant_id' => null],
+            ],
+            \array_column($logger->records, 'context'),
+        );
     }
 
     /**

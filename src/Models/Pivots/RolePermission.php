@@ -84,14 +84,15 @@ final class RolePermission extends Pivot
 
     /**
      * Reject a save when the role cannot carry the permission: their guards are
-     * concrete and different, or another tenant owns the permission (see
-     * `RoleParity`). Parent models are resolved from the in-memory
-     * `pivotParent` / loaded relations where possible; a missing parent raises
-     * `OrphanedRolePermissionException`.
+     * concrete and different, another tenant owns the permission, or either
+     * names half a tenant (see `RoleParity`). Parent models are resolved from
+     * the in-memory `pivotParent` / loaded relations where possible; a missing
+     * parent raises `OrphanedRolePermissionException`.
      *
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException
      */
     private function ensureParity(): void

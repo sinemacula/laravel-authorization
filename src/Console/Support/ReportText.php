@@ -14,9 +14,9 @@ use Symfony\Component\Console\Formatter\OutputFormatter;
 
 /**
  * The configuration report as `authorization:check` prints it as text (N113):
- * one line per issue first, then a section each for the settings, the seams,
- * the grant hooks, the connection and the integrations, each line `[subject]
- * state`, and a last line with the outcome.
+ * one line per issue first, then a section each for the settings, the tables,
+ * the seams, the grant hooks, the connection and the integrations, each line
+ * `[subject] state`, and a last line with the outcome.
  *
  * The text holds what the report holds, and nothing else: names, classes,
  * drivers, paths and what the package wrote, never a value the report does not
@@ -77,6 +77,7 @@ final class ReportText
         return [
             ...\array_map(self::issue(...), $report->issues),
             ...self::section('Settings', \array_map(self::setting(...), $report->settings)),
+            ...self::section('Tables', self::tables($report->tables)),
             ...self::section('Seams', \array_map(SeamText::line(...), $report->seams)),
             ...self::section(self::GRANT_HOOKS, \array_map(self::grantHook(...), $report->grantHooks)),
             ...self::section('Connection', self::connection($report->connection)),
@@ -178,7 +179,7 @@ final class ReportText
 
     /**
      * Return a value the report shows: a name, a class, a whole number, a
-     * switch, null, or a list or map of names.
+     * switch, null, an empty prefix, or a list or map of names.
      *
      * @param  mixed  $value
      * @return string
@@ -186,6 +187,7 @@ final class ReportText
     private static function value(mixed $value): string
     {
         return match (true) {
+            $value === ''      => 'empty',
             \is_array($value)  => self::entries($value),
             \is_string($value) => self::escape($value),
             \is_bool($value)   => $value ? 'true' : 'false',
@@ -209,6 +211,31 @@ final class ReportText
         }
 
         return '[' . \implode(', ', $shown) . ']';
+    }
+
+    /**
+     * Return the lines of the tables: the prefix of their default names, then
+     * the name each table takes, and whether it was set explicitly or is the
+     * key's own with the prefix before it.
+     *
+     * @param  array{prefix: string|null, names: list<array{key: string, name: string|null, explicit: bool}>}  $tables
+     * @return list<string>
+     */
+    private static function tables(array $tables): array
+    {
+        $prefix = $tables['prefix'];
+        $lines  = [self::line('table prefix', match ($prefix) {
+            null    => 'not known, as the setting was refused',
+            ''      => 'none',
+            default => self::escape($prefix),
+        })];
+
+        foreach ($tables['names'] as $table) {
+            $name    = $table['name'] === null ? 'not known, as its setting or the prefix was refused' : self::escape($table['name']);
+            $lines[] = self::line('table ' . $table['key'], $name . ($table['explicit'] ? '; set explicitly, so used as written' : '; the default, with the prefix'));
+        }
+
+        return $lines;
     }
 
     /**

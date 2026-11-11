@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Diagnostics\Checks;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Config\TableConfigValidator;
 use SineMacula\Laravel\Authorization\Diagnostics\Checks\RootChecks;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
 use SineMacula\Laravel\Authorization\Diagnostics\IssueCollector;
@@ -46,6 +47,43 @@ final class RootChecksTest extends TestCase
             'permission_enums'   => [3, 'Missing\Enum'],
             'application_access' => ['portal' => '', 'admin' => 'admin.access', '' => 'x'],
         ]));
+    }
+
+    /**
+     * The prefix is checked on its own path; once it is refused, each name left
+     * at its default is skipped as depending on it, while each name set
+     * explicitly is still checked as it is written.
+     *
+     * @return void
+     */
+    public function testARefusedPrefixSkipsTheDefaultNamesAlone(): void
+    {
+        $skipped = \array_map(
+            static fn (string $key): array => ["authorization.tables.{$key}", 'skipped'],
+            \array_slice(\array_keys(TableConfigValidator::LENGTHS), 2),
+        );
+
+        self::assertSame(
+            [['authorization.tables.prefix', 'invalid_value'], ['authorization.tables.permissions', 'invalid_value'], ...$skipped],
+            $this->issues(['tables' => ['prefix' => 'App_', 'roles' => 'authz_roles', 'permissions' => 'a b']]),
+        );
+        $skip = $this->findings(['tables' => ['prefix' => null, 'roles' => 'authz_roles']])[1];
+
+        self::assertSame(['authorization.tables.permissions', 'skipped', 'authorization.tables.prefix'], [$skip->path, $skip->code->value, $skip->dependsOn]);
+    }
+
+    /**
+     * Once the prefix passes, each name is checked as the package reads it: a
+     * default name with the prefix before it, so a name set explicitly that the
+     * prefix gives another table is refused as a duplicate.
+     *
+     * @return void
+     */
+    public function testAnAcceptedPrefixIsPutBeforeTheDefaultNames(): void
+    {
+        self::assertSame([], $this->issues(['tables' => ['prefix' => 'app_', 'roles' => 'permissions']]));
+        self::assertSame([['authorization.tables.permissions', 'duplicate']], $this->issues(['tables' => ['prefix' => 'x_', 'roles' => 'x_permissions']]));
+        self::assertSame([['authorization.tables.prefixes', 'unknown_key']], $this->issues(['tables' => ['prefixes' => 'app_']]));
     }
 
     /**
@@ -160,10 +198,22 @@ final class RootChecksTest extends TestCase
      */
     private function issues(array $settings): array
     {
+        return \array_map(static fn (ConfigIssue $issue): array => [$issue->path, $issue->code->value], $this->findings($settings));
+    }
+
+    /**
+     * Return each issue the checks find in the suite's configuration with the
+     * settings given.
+     *
+     * @param  array<string, mixed>  $settings
+     * @return list<\SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue>
+     */
+    private function findings(array $settings): array
+    {
         $collector = new IssueCollector;
 
         (new RootChecks($collector, $this->container(), [...$this->authorizationConfig(), ...$settings]))->run();
 
-        return \array_map(static fn (ConfigIssue $issue): array => [$issue->path, $issue->code->value], $collector->findings()->issues);
+        return $collector->findings()->issues;
     }
 }

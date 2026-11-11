@@ -88,6 +88,52 @@ final class PolicyGuardrailsTest extends TestCase
     }
 
     /**
+     * A guardrail row naming half a tenant, a key without a type or a type
+     * without a key, refuses an edit too, counted as malformed and never named
+     * as the platform or a tenant, whose order it never takes.
+     *
+     * @return void
+     */
+    public function testAGuardrailNamingHalfATenantIsCountedAsMalformed(): void
+    {
+        $policy = self::policy('rail');
+
+        self::set($policy, new Reference('stub_tenant', 'tenant-a'));
+        self::set($policy, new Reference('stub_tenant', 'tenant-b'));
+
+        DB::table('guardrails')->where('tenant_id', 'tenant-a')->update(['tenant_type' => null]);
+
+        try {
+            PolicyGuardrails::assertEditable($policy);
+            self::fail('The edit was not refused.');
+        } catch (GuardrailException $exception) {
+            self::assertEquals([new Reference('stub_tenant', 'tenant-b')], $exception->getTenants());
+            self::assertStringContainsString('is a guardrail on stub_tenant:tenant-b, 1 malformed row(s) naming half a tenant; ', $exception->getMessage());
+        }
+
+        DB::table('guardrails')->where('tenant_id', 'tenant-b')->update(['tenant_id' => null]);
+        self::set($policy, null);
+
+        try {
+            PolicyGuardrails::assertDeletable($policy);
+            self::fail('The deletion was not refused.');
+        } catch (GuardrailException $exception) {
+            self::assertSame([null], $exception->getTenants());
+            self::assertStringContainsString('is a guardrail on the platform, 2 malformed row(s) naming half a tenant; ', $exception->getMessage());
+        }
+
+        DB::table('guardrails')->whereNull('tenant_type')->whereNull('tenant_id')->delete();
+        DB::table('guardrails')->whereNotNull('tenant_type')->update(['tenant_type' => null, 'tenant_id' => 'tenant-b']);
+
+        try {
+            PolicyGuardrails::assertEditable($policy);
+            self::fail('The edit was not refused.');
+        } catch (GuardrailException $exception) {
+            self::assertSame([], $exception->getTenants());
+        }
+    }
+
+    /**
      * Once every guardrail the policy is has been removed, it is edited and
      * deleted again.
      *

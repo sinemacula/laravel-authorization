@@ -81,19 +81,18 @@ still left out.
    A grant or attachment row that names half a tenant (a type without a key, or a key without a type), which the
    package never writes, is listed and marked as damaged (N99), never presented as a clean platform origin: its
    `grant_state` is `malformed`, whether or not it has expired, and its `origin_scope` shows the tenant columns as
-   stored (`Reviews\OriginScope`), the missing half null. It is listed exactly where a check reads it today: a check
-   reads a key without a type at the platform, by its missing type alone, so such a row is listed wherever what applies
-   is read, and a type without a key nowhere, so no review of what applies lists it. A review of everywhere, which
-   needs platform-wide admission, lists a type without a key all the same, and so do its expiries and an actor's
-   grants. No review rooted within a tenant lists either: a key without a type is read at the platform, and a type
-   without a key cannot be shown to lie within the tenant, and a scoped review never discloses another tenant's
-   holders (N96). A route resting on such a row is `malformed` too: one without a type meets an attachment, or a
-   grant, as the platform's does, and one without a key meets only a row that holds everywhere. Forward resolution is
-   unchanged; a later backlog item makes checks ignore these rows.
+   stored (`Reviews\OriginScope`), the missing half null. A check reads neither half as the platform's or any
+   tenant's (N130, `Support\TenantColumns`): what grants of such a row applies nowhere, and what restricts of it (a
+   boundary, a guardrail, the denies of an attachment) applies everywhere, so it is never a placed grant and no review
+   of what applies lists it. A review of everywhere, which needs platform-wide admission, lists it all the same, and so
+   do its expiries and an actor's grants. No review rooted within a tenant lists either, since neither can be
+   shown to lie within the tenant, and a scoped review never discloses another tenant's holders (N96). A route resting
+   on such a row is `malformed` too, and such a row meets an attachment, or a grant, only one that holds everywhere. A
+   role naming half a tenant is seen in no review of what applies, as the tenant scope shows it nowhere.
 
    | Stored tenant    | `appliesIn()` (any tenant, or the platform) | `rootedWithin()` (any tenant) | `everywhere()` |
    |------------------|---------------------------------------------|-------------------------------|----------------|
-   | Key without type | Listed, read at the platform                | Not listed                    | Listed         |
+   | Key without type | Not listed                                  | Not listed                    | Listed         |
    | Type without key | Not listed                                  | Not listed                    | Listed         |
 
    The same holds for holders, holdings, expiries and an actor's grants, each following its scope selection.
@@ -393,9 +392,9 @@ tracking covered the whole window and `unknown` where it did not.
   resolved subject; a grant to a grantee whose record is gone is listed as `unknown`.
 - A target whose key no definition could have (every definition is keyed by a UUID) is held by no one, on every
   database, without a query, rather than reaching a `uuid` column it cannot be compared with.
-- A grant or attachment row naming half a tenant is listed where a check reads it, and a type without a key in a
-  review of everywhere too, never in one rooted within a tenant; either is marked `malformed`, its origin scope as
-  stored.
+- A grant or attachment row naming half a tenant is listed only in a review of everywhere, as a check applies its
+  grants nowhere (and its restrictions everywhere, N130), never in one of what applies or one rooted within a tenant;
+  either half is marked `malformed`, its origin scope as stored.
 - A window whose bounds fall within one second holds no stored expiry, since every expiry is a whole second.
 - A cursor changed in any byte, written in any text but its canonical one, issued for another query, scope, reviewer
   or the trusted path, or of another schema version is refused with `InvalidReviewCursorException`; a page of a

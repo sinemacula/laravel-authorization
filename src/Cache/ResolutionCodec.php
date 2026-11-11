@@ -122,14 +122,17 @@ final class ResolutionCodec
 
     /**
      * Return what the persistent tier holds of a policy: its stored key, its
-     * document and, for a resource policy, the resource it is attached to.
+     * document, for a resource policy the resource it is attached to, and the
+     * position each statement holds in the stored document, so a policy read
+     * with some of its statements alone, its denies say, names each statement
+     * at the same position once read back as when it was resolved.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
-     * @return array{id: string|null, document: array<string, mixed>, resource: string|null}
+     * @return array{id: string|null, document: array<string, mixed>, resource: string|null, positions: list<int>}
      */
     public static function encodePolicy(Policy $policy): array
     {
-        return ['id' => $policy->id, 'document' => $policy->toArray(), 'resource' => $policy->resource];
+        return ['id' => $policy->id, 'document' => $policy->toArray(), 'resource' => $policy->resource, 'positions' => \array_keys($policy->statements)];
     }
 
     /**
@@ -178,8 +181,10 @@ final class ResolutionCodec
     }
 
     /**
-     * Hydrate one stored policy back into an evaluation policy, refusing one
-     * that is not a document with its key.
+     * Hydrate one stored policy back into an evaluation policy, each statement
+     * at the position it was stored with, refusing one that is not a document
+     * with its key. An entry kept without positions holds each statement at its
+     * place in the document.
      *
      * @param  mixed  $entry
      * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
@@ -197,7 +202,40 @@ final class ResolutionCodec
 
         /** @var array<string, mixed> $document */
         $document = $entry['document'];
+        $policy   = Policy::fromArray($document);
 
-        return Policy::fromArray($document)->withId($id)->withResource($resource);
+        return new Policy($policy->name, self::positioned($policy->statements, $entry['positions'] ?? null), $policy->version, $id, $resource);
+    }
+
+    /**
+     * Return the statements read back, each at its stored position, or at its
+     * place in the document when none were stored, refusing positions that are
+     * not a distinct key of the policy's for each statement.
+     *
+     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Statement>  $statements
+     * @param  mixed  $positions
+     * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Statement>
+     *
+     * @throws \UnexpectedValueException
+     */
+    private static function positioned(array $statements, mixed $positions): array
+    {
+        if ($positions === null) {
+            return $statements;
+        }
+
+        $isOnePerStatement = \is_array($positions) && \array_is_list($positions) && \count($positions) === \count($statements);
+
+        if (!$isOnePerStatement || \count(\array_unique($positions, \SORT_REGULAR)) !== \count($positions)) {
+            throw new \UnexpectedValueException('Cached policy positions are not one distinct position for each statement.');
+        }
+
+        foreach ($positions as $position) {
+            if (!\is_int($position) || $position < 0) {
+                throw new \UnexpectedValueException('Cached policy position is not a statement\'s place in its document.');
+            }
+        }
+
+        return \array_combine($positions, \array_values($statements));
     }
 }

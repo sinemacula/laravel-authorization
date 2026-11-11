@@ -319,8 +319,9 @@ final class GrantScopeQueryTest extends TestCase
     }
 
     /**
-     * A grant row naming half a tenant cannot be read, so it gives unknown,
-     * unless another grant is proven outside.
+     * A grant row naming half a tenant, a type without a key or a key without a
+     * type, cannot be read, so it gives unknown, unless another grant is proven
+     * outside; and, applying nowhere, it is no grant in any tenant.
      *
      * @return void
      */
@@ -330,16 +331,20 @@ final class GrantScopeQueryTest extends TestCase
 
         $identity = self::identity('identity');
 
-        DB::table('authorizable_permissions')->insert([
-            'permission_id'     => Permission::create(['name' => 'half:read'])->getKey(),
-            'authorizable_type' => $identity->getMorphClass(),
-            'authorizable_id'   => $identity->getKey(),
-            'tenant_type'       => self::TENANT,
-            'tenant_id'         => null,
-            'include_subtree'   => true,
-        ]);
+        foreach ([[self::TENANT, null], [null, 'acct1']] as $index => [$type, $id]) {
+            DB::table('authorizable_permissions')->insert([
+                'permission_id'     => Permission::create(['name' => 'half:read-' . $index])->getKey(),
+                'authorizable_type' => $identity->getMorphClass(),
+                'authorizable_id'   => $identity->getKey(),
+                'tenant_type'       => $type,
+                'tenant_id'         => $id,
+                'include_subtree'   => true,
+            ]);
 
-        self::assertSame(GrantScopeStatus::UNKNOWN, self::scopes()->forIdentity(Reference::of($identity), self::tenant('acct1')));
+            self::assertSame(GrantScopeStatus::UNKNOWN, self::scopes()->forIdentity(Reference::of($identity), self::tenant('acct1')));
+            self::assertSame(GrantPresence::ABSENT, self::scopes()->hasGrantIn($identity, self::tenant('acct1')));
+            self::assertSame(GrantPresence::ABSENT, self::scopes()->hasGrantIn($identity, self::tenant('org2')));
+        }
 
         self::grant($identity, 'role', self::tenant('acct2'));
 

@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * The rows that make up authority, gathered for one part of a delegated
@@ -311,7 +312,7 @@ final class AuthorityRows
         \ksort($chained, \SORT_STRING);
 
         $query = self::table('guardrails')->where(static function (Builder $where) use ($chained): void {
-            $where->where(static fn (Builder $platform): Builder => $platform->whereNull('tenant_type')->whereNull('tenant_id'));
+            TenantChain::whereNullTenant($where, 'tenant_type', 'tenant_id');
 
             self::pairs($where, 'tenant_type', 'tenant_id', $chained, 'or');
         });

@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigurationReport;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\ReportStatus;
+use SineMacula\Laravel\Authorization\Diagnostics\TableReader;
 
 /**
  * Unit tests for the configuration report's status and versioned shape.
@@ -47,12 +48,15 @@ final class ConfigurationReportTest extends TestCase
      */
     public function testTheShapeIsVersioned(): void
     {
-        $report = new ConfigurationReport([], [], [], ['database' => []], [], [new ConfigIssue('authorization.a', IssueCode::DUPLICATE)]);
+        $tables = ['prefix' => 'app_', 'names' => [['key' => 'roles', 'name' => 'app_roles', 'explicit' => false]]];
+        $report = new ConfigurationReport([], [], [], ['database' => []], [], [new ConfigIssue('authorization.a', IssueCode::DUPLICATE)], $tables);
 
+        self::assertSame(TableReader::UNREAD, (new ConfigurationReport([], [], [], [], [], []))->tables);
         self::assertSame([
             'version'      => 1,
             'status'       => 'refused',
             'settings'     => [],
+            'tables'       => $tables,
             'seams'        => [],
             'grant_hooks'  => [],
             'connection'   => ['database' => []],

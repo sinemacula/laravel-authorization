@@ -252,6 +252,56 @@ final class PossessionLimitsTest extends TestCase
     }
 
     /**
+     * What restricts naming half a tenant, a key without a type or a type
+     * without a key, limits a grant in any reach, since it holds everywhere: a
+     * deny attached to the subject or to a resource, a boundary and a guardrail
+     * stored that way, and any attachment of a policy naming half a tenant,
+     * wherever it is attached; the same rows in a tenant outside the reach do
+     * not.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testWhatRestrictsNamingHalfATenantLimitsInEveryReach(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $subject = new Subject($user, $user);
+        $scope   = new GrantScope(new Reference('tenant', 'parent'));
+        $grantee = ['authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1', 'include_subtree' => true];
+        $rows    = [
+            'posts:edit'    => ['authorizable_policies', [...$grantee, 'policy_id' => self::denying('own', 'posts:edit')->id]],
+            'posts:share'   => ['resource_policies', ['resource_type' => 'posts', 'resource_id' => '7', 'policy_id' => self::denying('resource', 'posts:share')->id]],
+            'posts:read'    => ['authorizable_boundaries', [...$grantee, 'policy_id' => self::allowing('bound', 'posts:list')->id]],
+            'posts:publish' => ['guardrails', ['policy_id' => self::allowing('rail', 'posts:list')->id]],
+        ];
+
+        foreach ($rows as $permission => [$table, $row]) {
+            DB::table($table)->insert([...$row, 'tenant_type' => 'tenant', 'tenant_id' => 'other']);
+
+            self::assertFalse(self::limits($permission, subject: $subject, scope: $scope), $permission);
+
+            foreach ([['tenant_type' => null], ['tenant_type' => 'tenant', 'tenant_id' => null]] as $half) {
+                DB::table($table)->where('policy_id', $row['policy_id'])->update([...['tenant_type' => 'tenant', 'tenant_id' => 'other'], ...$half]);
+
+                self::assertTrue(self::limits($permission, subject: $subject, scope: $scope), $permission);
+            }
+
+            DB::table($table)->where('policy_id', $row['policy_id'])->delete();
+        }
+
+        $owned = self::denying('owned', 'posts:draft');
+
+        self::grants()->attachPolicy($user, $owned, tenant: new Reference('tenant', 'other'));
+
+        self::assertFalse(self::limits('posts:draft', subject: $subject, scope: $scope));
+
+        DB::table('policies')->where('id', $owned->id)->update(['tenant_type' => 'tenant']);
+
+        self::assertTrue(self::limits('posts:draft', subject: $subject, scope: $scope));
+    }
+
+    /**
      * More resource-policy attachments, or more guardrails, in the reach than
      * the impact limit allows limit every permission; inside a delegated
      * operation, those within it are locked and pinned, with the policies read,

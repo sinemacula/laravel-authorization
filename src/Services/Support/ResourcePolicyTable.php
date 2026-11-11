@@ -9,6 +9,7 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * The attachments of policies to one resource within one scope, read and
@@ -175,7 +176,7 @@ final readonly class ResourcePolicyTable
         $query = $this->scope->application === null ? $query->whereNull('application') : $query->where('application', $this->scope->application);
 
         if ($this->scope->tenant === null) {
-            return $query->whereNull('tenant_type')->whereNull('tenant_id');
+            return TenantChain::whereNullTenant($query, 'tenant_type', 'tenant_id');
         }
 
         return $query->where('tenant_type', $this->scope->tenant->type)->where('tenant_id', $this->scope->tenant->id);
