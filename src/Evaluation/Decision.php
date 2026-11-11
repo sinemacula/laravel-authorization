@@ -27,7 +27,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
  * reused (N37): never beyond the instant a met requirement stops being met, nor
  * in another session. It keeps that session only as a non-reversible
  * fingerprint, never the session id, so the decision stays safe to log or
- * store.
+ * store. It also names every authentication requirement it read, by the names
+ * of its parts, whether on a statement that allowed or one that denied, or in a
+ * further check made for it, and whether met or not: what could change its
+ * answer were the session's authentication state another, and none for a
+ * decision no requirement could change (see `HeldPermission`).
  *
  * A decision made in explain mode (N89), as `Authorization::explain()` makes
  * it, also carries its evidence: where each grant that allowed it came from,
@@ -52,6 +56,7 @@ final readonly class Decision
      * @param  list<\SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement>  $requirements
      * @param  \SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness|null  $freshness
      * @param  \SineMacula\Laravel\Authorization\Evaluation\DecisionEvidence|null  $evidence
+     * @param  list<string>  $requirementsRead
      */
     private function __construct(
 
@@ -78,6 +83,9 @@ final readonly class Decision
 
         /** The evidence an explained check recorded; null for a decision made without explain mode. */
         public ?DecisionEvidence $evidence = null,
+
+        /** The name of each part of every authentication requirement the decision read, allow or deny, met or not, once each, sorted; none when it read none. */
+        public array $requirementsRead = [],
     ) {}
 
     /**
@@ -171,23 +179,37 @@ final readonly class Decision
      */
     public function withStep(TraceEntry $entry): self
     {
-        return new self($this->effect, $this->reason, $this->stage, $this->statements, [...$this->trace, $entry], $this->requirements, $this->freshness, $this->evidence);
+        $trace = [...$this->trace, $entry];
+
+        return new self($this->effect, $this->reason, $this->stage, $this->statements, $trace, $this->requirements, $this->freshness, $this->evidence, $this->requirementsRead);
     }
 
     /**
-     * Return the decision with how long it may be reused, or itself when it
-     * read no authentication requirement.
+     * Return the decision with how long it may be reused and the name of each
+     * part of every authentication requirement it read, or itself when neither
+     * it nor what is given read a requirement. What is given adds to what the
+     * decision already carries, as a further check made for it in the same
+     * session does: it may be reused only until the earlier instant either
+     * stops being met, and names every requirement either read, once each,
+     * sorted.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness|null  $freshness
+     * @param  list<string>  $requirementsRead
      * @return self
      */
-    public function withFreshness(?RequirementFreshness $freshness): self
+    public function withFreshness(?RequirementFreshness $freshness, array $requirementsRead = []): self
     {
-        if ($freshness === null) {
+        $stricter = RequirementFreshness::stricterOf($this->freshness, $freshness);
+
+        if ($stricter === null) {
             return $this;
         }
 
-        return new self($this->effect, $this->reason, $this->stage, $this->statements, $this->trace, $this->requirements, $freshness, $this->evidence);
+        $read = \array_unique([...$this->requirementsRead, ...$requirementsRead]);
+
+        \sort($read, \SORT_STRING);
+
+        return new self($this->effect, $this->reason, $this->stage, $this->statements, $this->trace, $this->requirements, $stricter, $this->evidence, $read);
     }
 
     /**
@@ -198,7 +220,7 @@ final readonly class Decision
      */
     public function withEvidence(DecisionEvidence $evidence): self
     {
-        return new self($this->effect, $this->reason, $this->stage, $this->statements, $this->trace, $this->requirements, $this->freshness, $evidence);
+        return new self($this->effect, $this->reason, $this->stage, $this->statements, $this->trace, $this->requirements, $this->freshness, $evidence, $this->requirementsRead);
     }
 
     /**

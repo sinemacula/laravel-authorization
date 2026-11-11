@@ -68,6 +68,27 @@ final readonly class RequirementFreshness
     }
 
     /**
+     * Return the stricter of two freshnesses of decisions made in the same
+     * session, either of which may be absent: the one whose met requirement
+     * stops being met first, the first when neither stops or both stop at the
+     * same instant, or null when neither is given.
+     *
+     * @param  self|null  $first
+     * @param  self|null  $second
+     * @return self|null
+     *
+     * @internal
+     */
+    public static function stricterOf(?self $first, ?self $second): ?self
+    {
+        if ($first === null || $second === null) {
+            return $first ?? $second;
+        }
+
+        return $second->metUntil !== null && ($first->metUntil === null || $second->metUntil < $first->metUntil) ? $second : $first;
+    }
+
+    /**
      * Return the non-reversible fingerprint of the session, its SHA-256 hash,
      * or null when there is no session.
      *

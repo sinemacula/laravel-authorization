@@ -346,6 +346,56 @@ final class DecisionTest extends TestCase
     }
 
     /**
+     * A decision reads no requirement until withFreshness() names what it read,
+     * which withStep() and withEvidence() keep, and withFreshness() for no
+     * freshness gives the decision itself back, naming none.
+     *
+     * @return void
+     */
+    public function testTheRequirementsReadAreKeptAcrossTheDecision(): void
+    {
+        $decision = Decision::allow(DecisionStage::ALLOW, [new StatementReference('p', 0)]);
+        $read     = $decision->withFreshness(new RequirementFreshness('session-1'), ['multifactor', 'phishing_resistant']);
+
+        self::assertSame([], $decision->requirementsRead);
+        self::assertSame([], Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT)->requirementsRead);
+        self::assertSame([], Decision::insufficientAuthentication(DecisionStage::IMPLICIT, [], self::requirements())->requirementsRead);
+        self::assertSame([], $decision->withFreshness(new RequirementFreshness('session-1'))->requirementsRead);
+        self::assertSame($decision, $decision->withFreshness(null, ['multifactor']));
+        self::assertSame(['multifactor', 'phishing_resistant'], $read->requirementsRead);
+        self::assertSame(['multifactor', 'phishing_resistant'], $read->withStep(new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD))->requirementsRead);
+        self::assertSame(['multifactor', 'phishing_resistant'], $read->withEvidence(new DecisionEvidence([]))->requirementsRead);
+    }
+
+    /**
+     * withFreshness() adds to what the decision already read: it names every
+     * requirement either read, once each, sorted, and is reused no longer than
+     * the earlier instant either stops being met; adding no freshness keeps the
+     * decision's own.
+     *
+     * @return void
+     */
+    public function testWithFreshnessAddsToWhatTheDecisionRead(): void
+    {
+        $one     = new RequirementFreshness('session-1', new \DateTimeImmutable('2026-11-06 13:00:00'));
+        $noon    = new RequirementFreshness('session-1', new \DateTimeImmutable('2026-11-06 12:00:00'));
+        $later   = new RequirementFreshness('session-1', new \DateTimeImmutable('2026-11-06 14:00:00'));
+        $read    = Decision::allow(DecisionStage::ALLOW, [new StatementReference('p', 0)])->withFreshness($one, ['phishing_resistant', 'multifactor', 'phishing_resistant']);
+        $added   = $read->withFreshness($noon, ['multifactor', 'biometric']);
+        $kept    = $read->withFreshness(null);
+        $outlast = $read->withFreshness($later, ['multifactor']);
+
+        self::assertSame(['multifactor', 'phishing_resistant'], $read->requirementsRead);
+        self::assertSame(['biometric', 'multifactor', 'phishing_resistant'], $added->requirementsRead);
+        self::assertSame($noon, $added->freshness);
+        self::assertSame($read->statements, $added->statements);
+        self::assertSame($one, $kept->freshness);
+        self::assertSame(['multifactor', 'phishing_resistant'], $kept->requirementsRead);
+        self::assertSame($one, $outlast->freshness);
+        self::assertSame(['multifactor', 'phishing_resistant'], $outlast->requirementsRead);
+    }
+
+    /**
      * isFreshFor() always holds for a decision that read no requirement, and
      * otherwise asks its freshness.
      *

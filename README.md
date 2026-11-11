@@ -116,9 +116,11 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   the [bulk checks](#bulk-checks) section names.
 - **Effective permissions**: `permissionsFor()` lists the actions of the permission catalogue a subject may take in a
   scope (a tenant or the platform, an application and a resource, named with `AuthorizationScope`), exactly those
-  `check()` would allow there, for a UI to show or hide its controls. The actions share one read of the subject's
-  grants and policies, and listing them records no decision and dispatches no event, except on a preview, whose
-  listing dispatches one event per action (see Preview).
+  `check()` would allow there, for a UI to show or hide its controls. The actions share one read of the subject's grants
+  and policies, and listing them records no decision and dispatches no event, except on a preview, whose listing
+  dispatches one event per action (see Preview). `heldPermissionsFor()` lists the same actions, each naming every
+  authentication requirement its decision read, so an action no requirement could change can be told from one that may
+  depend on the session's current authentication state.
 - **Preview**: `previewFor($subject)` answers what another subject may do, for "what can this person do?" screens, while
   the caller stays who is asking. The caller must hold `authorization:subject.preview` for the subject in every scope a
   decision is made in, admitted as a check about the caller at every use; the subject is evaluated with no session,
@@ -2692,6 +2694,7 @@ or about the subject of the scoped manager it is called on:
 | `forgetLastDecision()`                            | Clears the latest decision of the request or job                                                                          |
 | `forgetDecisionsFor($session, $identity)`         | Forgets everything the request or job remembers towards its decisions (see [Forgetting](#forgetting-decisions))           |
 | `permissionsFor($subject, $scope, $context)`      | Lists the actions of the permission catalogue the subject may take in the scope                                           |
+| `heldPermissionsFor($subject, $scope, $context)`  | Lists the same actions, each a `HeldPermission` naming the authentication requirements its decision read                  |
 | `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's scope, or a `Subject` in its own scope          |
 | `forUser($user)`                                  | Returns a scoped manager deciding about the subject the resolver translates the user into                                 |
 | `previewFor($subject, $scope)`                    | Returns a preview deciding about the subject as the caller, admitted at every use (see [Preview](#preview))               |
@@ -2703,17 +2706,16 @@ or about the subject of the scoped manager it is called on:
 | `AccessReview::page()`, `stream()`, `export()`    | Not on the manager: a review a keyset page, a lazy stream or JSON Lines at a time, each with a `trusted…()` counterpart   |
 
 `check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` deciding as `checkMany()`
-decides a batch of one: every other method but `queryScope()` and `permissionsFor()` adapts one of them, and each
-decision they make is recorded as the last decision and reported with `DecisionEvaluated`; `queryScope()` compiles a
-scope from the same pipeline without deciding a check, and `permissionsFor()` decides each action through the path
-`checkMany()` takes but as introspection, so both record and report nothing, except on a preview, where the admission is
-recorded and reported at every use and a listing dispatches each action's `DecisionEvaluated` (see
-[Preview](#preview)). `permissionsFor()` takes its subject as an
-argument, null for the one the manager's checks are about (see [Effective permissions](#effective-permissions)). The
-resource and the context take the same forms everywhere: a model, a `[type, id]` pair, a `ResourceReference`, an
-`AuthorizableResource`, a model class or a string names the resource (see
-[Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the context is the caller's
-values, read under `input` (see [The check's context](#the-checks-context)).
+decides a batch of one: every other method but `queryScope()` and the listings adapts one of them, and each decision
+they make is recorded as the last decision and reported with `DecisionEvaluated`; `queryScope()` compiles a scope from
+the same pipeline without deciding a check, and `permissionsFor()` decides each action through the path `checkMany()`
+takes but as introspection, so both record and report nothing, except on a preview, where the admission is recorded and
+reported at every use and a listing dispatches each action's `DecisionEvaluated` (see [Preview](#preview)).
+`permissionsFor()` and `heldPermissionsFor()` take their subject as an argument, null for the one the manager's checks
+are about (see [Effective permissions](#effective-permissions)). The resource and the context take the same forms
+everywhere: a model, a `[type, id]` pair, a `ResourceReference`, an `AuthorizableResource`, a model class or a string
+names the resource (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the
+context is the caller's values, read under `input` (see [The check's context](#the-checks-context)).
 
 ```php
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -3033,6 +3035,39 @@ Gate.
 both parties, though none is stored, and the preview's admission is recorded and reported as any check (see
 [Preview](#preview)). Break-glass grants, when they arrive, will define how a listing that relies on one is reported.
 
+**Held permissions and their requirements.** `heldPermissionsFor()` takes the same arguments as `permissionsFor()` and
+lists the same actions, in the same order, through the same path, each as a
+`SineMacula\Laravel\Authorization\Evaluation\HeldPermission`: its `action`, and its `requirements`, the name of every
+part of every authentication requirement its decision read (`multifactor`, `phishing_resistant` and so on, as the policy
+document names them), once each, sorted. A requirement counts wherever the decision read it: on a statement that allowed
+or on one that denied, a boundary's or a guardrail's included, or in a further check the decision made, such as the
+right to act while impersonated on an administration operation or an access review, whether it was met or not. The list
+names every requirement read, not only those that decided the answer, so an entry can be conditional even when no
+requirement would change the answer today: an allow whose other conditions failed, or one beside another allow that
+needs nothing, is still read, and its requirement still named. The guarantee runs one way. `isUnconditional()`, true
+when `requirements` is empty, is the safe test: no requirement was read, so none could change the answer, and the action
+is held whatever the session has proved. A conditional entry may depend on the session's authentication state, a fresh
+multifactor step say, or a deny guarded by a requirement that does not apply while it is unmet, and should be treated as
+possibly held only while that state lasts. Everything else is as for `permissionsFor()`: the subject, the scope and
+the context are taken the same way, an action whose check would be `insufficient_authentication` is not listed, and the
+listing records nothing, refuses and throws alike. The model's `HasPermissions` trait lists its own, with
+`$user->heldPermissionsFor($scope, $context)`.
+
+```php
+use SineMacula\Laravel\Authorization\Evaluation\HeldPermission;
+
+$held = Authorization::heldPermissionsFor($user, AuthorizationScope::current());
+
+// [HeldPermission('posts:create', []), HeldPermission('posts:export', ['multifactor'])]
+$unconditional = array_filter($held, fn (HeldPermission $permission): bool => $permission->isUnconditional());
+```
+
+For an audit of what a subject holds, list for the real subject and its session, a resolved `Subject` or null for the
+request's own, and treat a conditional entry as not unconditionally held: it says what the subject may do now, in this
+session, not what it holds in every session, though it may hold it in every session too. A model named as `for()` names
+it has no session, so a requirement made of it is never met: an allow that needs one is not listed, and a deny guarded
+by one does not apply, its action listed as conditional.
+
 **What it costs.** The actions are decided together, through the path `checkMany()` takes, so the subject is resolved
 once and its grants, roles, policies, boundaries and caps, the guardrails and the resource's tenant, attached policies
 and attributes are read once for the listing: listing fifty actions costs the queries listing five costs. The catalogue
@@ -3271,6 +3306,8 @@ $result->isTruncated; // true only when a row was left out by the limit
 $result->isComplete;  // false only when an identity's principals could not all be listed
 $result->toArray();   // each row in its versioned shape
 
+$result->isStoredInventoryOnly; // true only for a review narrowed to an action (see below)
+
 $reviews->trusted(ReviewQuery::expiring(ReviewScope::everywhere(), now(), now()->addMonth())); // a scheduled job
 ```
 
@@ -3312,6 +3349,7 @@ Holders, holdings, expiries and an actor's grants each follow their scope select
 | `ReviewQuery::expiring($scope, $from, $until)`   | Grants, attachments and role permission edges expiring within `[from, until)`, in UTC                  |
 | `ReviewQuery::grantedBy($actor, $scope)`         | Grants whose `granted_by` pair is exactly the actor's                                                  |
 | `ReviewQuery::unused($scope, $since)`            | Live grants with no observed use since the instant (see [Usage tracking](#usage-tracking))             |
+| `forAction($action)`                             | Of holdings, the routes giving the action (see [below](#where-a-subject-holds-an-action))              |
 | `withLimit($limit)`                              | The same review returning at most that many rows                                                       |
 
 A permission target means that definition, never a policy statement or wildcard grant that might authorise its action,
@@ -3361,6 +3399,7 @@ document or value. Its shape is versioned (`version: 1`):
 | `granted_by`                             | The last actor to grant or change the starting row; null for a trusted write                 |
 | `grant_state`, `subject_state`           | `live`, `expired` or `malformed`; `active`, `inactive` or `unknown`                          |
 | `usage`                                  | `status` (`used`, `unused` or `unknown`), the last observed use and the coverage             |
+| `action_evidence`                        | Only in a review narrowed to an action, what gives it and where (see below)                  |
 
 The rows come in one total order, the same on SQLite, PostgreSQL and MySQL: by source kind, target, grantee, origin
 scope (the platform before a tenant, every application before a named one) and route (the first role of its chain, how
@@ -3434,6 +3473,8 @@ do {
 | `isComplete`  | As a result's: false only when an identity's principals could not all be listed                          |
 | `isLast()`    | Whether `nextCursor` is null                                                                             |
 
+A page of a review narrowed to an action also says `isStoredInventoryOnly`, as its result does.
+
 A page resumes after the last row of the page before by keyset over the review's one order, never at an offset, so a
 page costs the same queries whatever its number, and `review()` is simply the first page of `page()`, through the same
 query, admission and rows. A page of a target's direct holders seeks to its keyset through an index leading with the
@@ -3448,16 +3489,17 @@ with `AuthorizationException`.
 
 **Cursors.** A cursor is opaque and tamper-evident: an HMAC-SHA256 signature, keyed from the application key
 (`app.key`), over its payload and over what it is bound to: the query (its kind, target or subject, scope selection,
-tenant, application selector, window, actor and `directOnly`) and the reviewer (its principal and any impersonator) or
-the trusted path. Its payload holds the row schema version, the review's instant and the sort key of the last row
-returned, whose parts are the references and scope values that row already shows, never a name or a value; a route is
-keyed by its first role and its length, so a cursor stays a few kilobytes at most however deep the role hierarchy runs.
-A cursor is read only in the one text that encodes it, each part the canonical, unpadded base64url of its bytes. A
-cursor used with another query, scope or reviewer, a trusted cursor given to a reviewer and the reverse, one of another
-schema version, and one changed in any byte, even to text that decodes to the same bytes, are each refused with
-`InvalidReviewCursorException`, whose one message says nothing of why. The limit is not bound, so a client may change
-its page size between pages. Signing a cursor needs the application key; without one, `MissingAppKeyException` is thrown
-when a cursor is issued or read, and a review that fits on one page needs none.
+tenant, application selector, window, actor, `directOnly` and the action a review of holdings is narrowed to) and the
+reviewer (its principal and any impersonator) or the trusted path. Its payload holds the row schema version, the
+review's instant and the sort key of the last row returned, whose parts are the references and scope values that row
+already shows, never a name or a value; a route is keyed by its first role and its length, so a cursor stays a few
+kilobytes at most however deep the role hierarchy runs. A cursor is read only in the one text that encodes it, each part
+the canonical, unpadded base64url of its bytes. A cursor used with another query, scope or reviewer, a trusted cursor
+given to a reviewer and the reverse, one of another schema version, and one changed in any byte, even to text that
+decodes to the same bytes, are each refused with `InvalidReviewCursorException`, whose one message says nothing of why.
+The limit is not bound, so a client may change its page size between pages. Signing a cursor needs the application key;
+without one, `MissingAppKeyException` is thrown when a cursor is issued or read, and a review that fits on one page
+needs none.
 
 **The consistency mode: a live scan.** The review's instant is frozen when its first page is read and carried by the
 cursor, so every page classifies each expiry at that instant: a grant that expires between pages is still listed, and
@@ -3490,6 +3532,9 @@ review's order, then a footer:
 | `row`    | The row's versioned shape (see the fields above), references alone                                                                                                           |
 | `footer` | `version`, how many `rows` were written, `scan_ended_at`, and whether it is `complete`: false only for an identity's holdings whose directory could not list every principal |
 
+A review narrowed to an action (see [Where a subject holds an action](#where-a-subject-holds-an-action)) adds two keys
+to the end of its header, the `action` and `stored_inventory_only`, always true; every other header keeps its shape.
+
 The output is UTF-8 and deterministic: the same rows at the same instants give the same bytes. Each line is one JSON
 object with its keys in a fixed order, slashes and Unicode unescaped, the line and paragraph separators escaped, and
 invalid UTF-8 refused with `JsonException` rather than replaced. An export the reviewer stops being admitted to part
@@ -3510,6 +3555,129 @@ table's unique index. The migration honours the configured table names and conne
 **What is left out.** Boundaries, guardrails and resource-policy attachments restrict or extend what a check decides,
 but are not held, so no review lists them. Snapshot exports and CSV are not offered. See
 [Access reviews](docs/design/access-reviews.md) for the design.
+
+#### Where a subject holds an action
+
+`forAction($action)` narrows a review of holdings to the routes that give one action, so an integration can find every
+tenant, subtree and platform record where a subject holds, say, `audit:read`, without reading each membership in turn:
+
+```php
+use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
+use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
+
+$query  = ReviewQuery::holdings($person, ReviewScope::everywhere())->forAction('audit:read');
+$result = $reviews->review($query, ActingContext::current());
+
+$result->rows;                  // the routes giving audit:read, each with what gives it ($row->evidence)
+$result->isStoredInventoryOnly; // true: only the stored grants were read (see below)
+$result->isComplete;            // false when the identity directory could not list every principal
+```
+
+**What a row means.** The action is literal, an action's name made of letters, digits and `_ - : .`, never a wildcard:
+`forAction('audit:*')` is refused with `InvalidArgumentException`, as is `forAction()` on any review but holdings. A row
+is a holdings route whose target gives the action:
+
+- a permission whose name covers the action by the rules a check matches a held permission by: case-sensitive, a held
+  `audit:*` or `*` covering it, never matched with SQL `LIKE`; held directly, through a role or a role above it, or
+  through the identity;
+- a policy with a statement naming the action as a check's policy matcher reads it (its `actions` covering the action,
+  or its `not_actions` leaving it out), attached directly or to a role; an allow statement naming `principals` applies
+  only in a policy attached to a resource, so it gives a holder nothing and is passed over;
+- never a role itself: a role grant is no row here, only the permissions and policies the role carries.
+
+A permission or policy whose definition is gone gives nothing and is left out. Principal and identity mode are those of
+`holdings()`: an identity's rows include those of every principal its directory lists, and a principal's include its
+identity's grants that reach it, never a sibling's. The routes are kept before the rows are ordered and cut to a page,
+so a page holds its limit of matching rows in the review's one order, however many routes do not match. Admission,
+paging, streaming, exports and the trusted path are those of every review: the reviewer needs
+`authorization:review.read` on the holdings review, as for the unfiltered one. The cursor binds the action too, so one
+issued for another action or for the unfiltered review is refused. The permissions' names and the policies' documents
+are read on the write connection, in a fixed number of queries for each page, never one for each route.
+
+**Evidence and effect.** Each row of a filtered review carries an `ActionEvidence` as `$row->evidence`, and under
+`action_evidence` in its array and export shape. Every other review's rows have none and keep their shape, at `version`
+1:
+
+- `action`: the action asked about;
+- `evidence`: `permission` or `policy_statement`;
+- `effect`: `allow` for a permission, or for a policy with an allow statement naming the action; `deny` for a policy
+  whose statements naming it only deny; null for a policy whose document cannot be read;
+- `guard`: the guard a permission is scoped to; null for every guard and for a policy;
+- `complete`: false only for a policy whose stored document is invalid or over the limits, so whether it names the
+  action is unknown; the route is kept, never dropped;
+- `has_deny`: whether a statement naming the action denies it, so a policy that both allows and denies the action reads
+  `effect: allow` with `has_deny: true`;
+- `has_conditions`, `has_resource_patterns`, `has_requirements`: whether a statement naming the action carries
+  conditions, names resources or states an authentication requirement, each reported and never evaluated;
+- `reach`: where the route reaches, compactly.
+
+**Compact reach.** `reach` is read from the route's origin scope and never expanded into the tenants it covers: its
+`kind` is `node` (the tenant alone), `subtree` (the tenant and every tenant below it, given by its root) or `platform`
+(an explicit record naming no tenant, never an empty list of tenants), beside the `tenant`, `application` (null for
+every application) and `include_subtree` an origin scope holds. A route held for one application stays that
+application's in a review of `ApplicationSelector::any()`, and permissions scoped to different guards stay separate
+rows. A role's policy reaches its holder only where the role's grant and the attachment hold together, so for a policy
+carried by a role `reach` is their overlap: the narrower tenant, below it only when both reach below, and the
+application either names. The row's `origin_scope` stays the role grant's as stored, as in every review of holdings. A
+route resting on a row that names half a tenant keeps its `malformed` grant state, and its `reach` shows that row's
+tenant columns as stored, with the application the grant or the attachment names, never every application when either
+names one.
+
+**Deny evidence.** A policy that only denies the action is a holding, listed with `effect: deny`: evidence that a stored
+grant refuses the action there, never authority.
+
+**It never authorises.** A filtered review is introspection, as every review is: it evaluates no statement, condition,
+deny or cap, records no last decision and dispatches no decision event. A permission or an allow statement it lists can
+still be defeated by a deny, a boundary, a guardrail, a resource restriction, a session cap, or a condition or
+requirement that does not hold. It says where stored grants give the action, never whether an operation succeeds: for
+that, call `check()` for the operation, in its tenant and application.
+
+**The stored inventory.** The review reads the stored grants alone. A policy a dynamic `PolicyStore` supplies, and a
+policy attached to a resource, can give the action outside them, so a filtered review's result and pages say
+`isStoredInventoryOnly` (true), and its export header carries the `action` and `stored_inventory_only: true`. An
+unfiltered review says false, and its header keeps its shape. Read the rows as candidates, never as every place the
+action is allowed. An identity whose directory may leave a principal out keeps `isComplete` false, on an empty page too.
+
+**An audit-access policy.** To keep an audit-access policy built per membership in step with grants held elsewhere,
+read every page, never the first alone, keep the allowing evidence, note what could be missing, and still decide each
+operation with `check()`:
+
+```php
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Subject;
+
+$query    = ReviewQuery::holdings($person, ReviewScope::everywhere())->forAction('audit:read');
+$cursor   = null;
+$places   = [];
+$isWhole  = true;
+
+do {
+    $page    = $reviews->trustedPage($query, $cursor);
+    $isWhole = $isWhole && $page->isComplete;
+
+    foreach ($page->rows as $row) {
+        $evidence = $row->evidence;              // never null in a filtered review
+        $isWhole  = $isWhole && $evidence->isComplete;
+
+        if ($evidence->effect === PolicyEffect::ALLOW) {
+            $places[] = $evidence->toArray()['reach']; // ['kind' => 'subtree', 'tenant' => [...], ...]
+        }
+    }
+
+    $cursor = $page->nextCursor;
+} while ($cursor !== null);
+
+// Then, before showing an audit log in an account, decide the operation itself:
+Authorization::for(new Subject($user, $person, $account, 'admin'))->check('audit:read', $log)->isAllowed();
+```
+
+`$places` lists where an allow is stored, and `$isWhole` false says a principal or an unreadable policy may add more.
+Recompute it when grants, policies, identities or the tenant tree change: the review is a live scan, not a subscription.
+From the console, `authorization:review holdings {subject} --everywhere --action=audit:read` exports the same filter
+over every stored grant; without `--everywhere` (or another scope option) it reviews only what applies at the platform,
+for no application. The command resolves `{subject}` through the console subject resolver, so it reviews in principal
+mode, not in the identity mode `$person` gives above.
 
 #### Usage tracking
 
@@ -3556,7 +3724,7 @@ a delegated change's own check. A role check (`hasRole()`, `@role`, `role:`) is 
 |--------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
 | `previewFor()` and its admission                                               | A preview decides about another subject as the caller, who uses none of its grants      |
 | `explain()` and `authorization:why`                                            | An explanation runs the check to show it, not to act on it (N89)                        |
-| `permissionsFor()`                                                             | A listing of what a subject may do is introspection (N70)                               |
+| `permissionsFor()` and `heldPermissionsFor()`                                  | A listing of what a subject may do is introspection (N70)                               |
 | `whereAuthorized()` and `queryScope()`                                         | A scoped query compiles SQL and decides no record                                       |
 | A review's admission and its reads                                             | Reviewing who holds what is introspection, and must not create the use it reports       |
 | A delegated change's administration stage                                      | Its further checks weigh the change, and a refused change counts nothing it was allowed |
@@ -4963,6 +5131,7 @@ never runs as whoever is signed in to it.
 php artisan authorization:review holders role:01a1be88-d4d3-72cc-b9bc-620cc97d4906 --tenant=team:7 --application=admin
 php artisan authorization:review holders permission:01a1be88-d4e0-7153-8120-e043891fb9d3 --everywhere --direct-only
 php artisan authorization:review holdings user:1 --rooted-within=team:7
+php artisan authorization:review holdings user:1 --everywhere --action=audit:read
 php artisan authorization:review expiring --everywhere --from=2026-12-01 --until=2027-01-01 --output=expiring.jsonl
 php artisan authorization:review granted_by --actor=user:7 --everywhere --output=granted.jsonl --force
 php artisan authorization:review unused --since=2026-09-01 --everywhere --output=unused.jsonl
@@ -4976,6 +5145,7 @@ php artisan authorization:review unused --since=2026-09-01 --everywhere --output
 | `--rooted-within`   | Review the grants made in the tenant or below it                                                                                                                                                                            |                                                      |
 | `--everywhere`      | Review every stored grant                                                                                                                                                                                                   |                                                      |
 | `--application`     | `none`, `any` or the application's name                                                                                                                                                                                     | `none` for a tenant or the platform, `any` otherwise |
+| `--action`          | For `holdings`, only the routes whose permission or policy gives the action, named literally                                                                                                                                | Every route; refused for the others                  |
 | `--from`, `--until` | For `expiring`, the window `[from, until)`, each a date and time, in UTC when it names no zone                                                                                                                              | Required for `expiring`; refused for the others      |
 | `--actor`           | For `granted_by`, the actor as `{morph type}:{key}`, matched exactly as stored                                                                                                                                              | Required for `granted_by`; refused for the others    |
 | `--since`           | For `unused`, the instant to look back to, a date and time, in UTC when it names no zone                                                                                                                                    | Required for `unused`; refused for the others        |
@@ -4991,7 +5161,7 @@ exit codes are those of `authorization:why`:
 | Code | When                                                                                                                                                                                                                                       |
 |------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `0`  | The export was written                                                                                                                                                                                                                     |
-| `2`  | An invalid invocation: an unknown option, a missing argument or option value, an option the query does not take, a reference, tenant, window or subject that cannot be read or resolved, or an output file that exists or cannot be opened |
+| `2`  | An invalid invocation: an unknown option, a missing argument or option value, an option the query does not take, a reference, tenant, window, action or subject that cannot be read or resolved, or an existing or unwritable output file  |
 | `1`  | The review failed, such as on a stored role hierarchy cycle: the error names the exception's class alone, and the export has no footer                                                                                                     |
 
 Errors go to the standard error, name the argument or option and never a value given (a subject or tenant that is

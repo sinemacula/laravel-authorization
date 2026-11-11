@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Config\ReviewConfigValidator;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Reviews\Enums\ReviewKind;
 use SineMacula\Laravel\Authorization\Reviews\Support\Definitions;
 use SineMacula\Laravel\Authorization\Subject;
@@ -27,7 +28,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   model of the same kind, see `SubjectGrants::grantingIdentity()`), never a
  *   sibling principal's; given an identity, the identity's grants and those of
  *   every principal the identity directory lists, each row keeping its actual
- *   grantee, and the result saying whether that list was complete;
+ *   grantee, and the result saying whether that list was complete; narrowed by
+ *   `forAction()` to the routes whose target gives one action, the places where
+ *   the subject holds it, never whether a check allows it;
  * - `expiring()`: the stored grants, attachments and role edges whose expiry
  *   falls within the UTC half-open window `[from, until)`, each bound kept to
  *   the microsecond: an expiry is stored to the whole second, its fraction
@@ -71,6 +74,7 @@ final readonly class ReviewQuery
      * @param  \Carbon\CarbonImmutable|null  $from
      * @param  \Carbon\CarbonImmutable|null  $until
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  string|null  $action
      */
     private function __construct(
 
@@ -103,6 +107,9 @@ final readonly class ReviewQuery
 
         /** The actor whose last grants are listed. */
         public ?Reference $actor = null,
+
+        /** The action a review of holdings keeps only the routes giving; null for every route. */
+        public ?string $action = null,
     ) {}
 
     /**
@@ -234,7 +241,56 @@ final readonly class ReviewQuery
             throw new \InvalidArgumentException('An access review returns at most a whole number of rows of at least 1.');
         }
 
-        return new self($this->kind, $this->scope, $limit, $this->target, $this->subject, $this->identity, $this->isDirectOnly, $this->from, $this->until, $this->actor);
+        return new self(
+            $this->kind,
+            $this->scope,
+            $limit,
+            $this->target,
+            $this->subject,
+            $this->identity,
+            $this->isDirectOnly,
+            $this->from,
+            $this->until,
+            $this->actor,
+            $this->action,
+        );
+    }
+
+    /**
+     * Return this review of holdings keeping only the routes whose target gives
+     * the action, each with what gives it (see `ActionEvidence`): a permission
+     * whose name covers it, or a policy with a statement naming it, the route's
+     * reach kept compact. The action is literal, a catalogue action name with
+     * no wildcard, so it never widens what a held name or pattern covers.
+     *
+     * @param  string  $action
+     * @return self
+     *
+     * @throws \InvalidArgumentException
+     */
+    public function forAction(string $action): self
+    {
+        if ($this->kind !== ReviewKind::HOLDINGS) {
+            throw new \InvalidArgumentException('Only a review of holdings keeps the routes giving an action.');
+        }
+
+        if (!Permission::isValidAuthorizationName($action) || \str_contains($action, '*')) {
+            throw new \InvalidArgumentException('A review of holdings keeps the routes giving one literal action, named by letters, digits and _ - : . alone.');
+        }
+
+        return new self(
+            $this->kind,
+            $this->scope,
+            $this->limit,
+            $this->target,
+            $this->subject,
+            $this->identity,
+            $this->isDirectOnly,
+            $this->from,
+            $this->until,
+            $this->actor,
+            $action,
+        );
     }
 
     /**

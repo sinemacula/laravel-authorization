@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Reviews\Enums\GrantState;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
+use SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState;
 use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRow;
@@ -191,6 +192,42 @@ final class RowCollectorTest extends TestCase
 
         self::assertSame([0, true, true], [$rows->room(), $rows->isFull(), $rows->isTruncated()]);
         self::assertSame(['a'], \array_map(static fn (ReviewRow $row): string => $row->subject->id, $rows->rows()));
+    }
+
+    /**
+     * Narrowing keeps only the rows the narrowing returns, by their index among
+     * every row collected, each as it gives it, with its sort key and place, so
+     * the limit, the truncation and where the next page starts count the rows
+     * kept alone; narrowing to none leaves nothing.
+     *
+     * @return void
+     */
+    public function testNarrowingKeepsOnlyTheRowsItReturns(): void
+    {
+        $rows = new RowCollector(ReviewRun::of(ReviewScope::everywhere()), 2);
+
+        foreach (['e', 'd', 'c', 'b', 'a'] as $grantee) {
+            $rows->route(SourceKind::ROLE_GRANT, new Reference('u', $grantee), self::grant($grantee, 'r', null), new Reference('role', 'r'), ['r']);
+        }
+
+        $given = [];
+
+        $rows->narrow(static function (array $read) use (&$given): array {
+            $given = \array_map(static fn (ReviewRow $row): string => $row->subject->id, $read);
+
+            return [3 => $read[3]->withSubjectState(SubjectState::ACTIVE), 1 => $read[1], 4 => $read[4]];
+        });
+
+        self::assertSame(['e', 'd', 'c', 'b', 'a'], $given);
+        self::assertSame([true, 0], [$rows->isTruncated(), $rows->room()]);
+        self::assertSame(['d', 'b'], \array_map(static fn (ReviewRow $row): string => $row->subject->id, $rows->rows()));
+        self::assertSame(SubjectState::ACTIVE, $rows->rows()[1]->subjectState);
+        self::assertSame(['a', 'b'], \array_map(static fn (ReviewRow $row): string => $row->subject->id, $rows->rows(true)));
+        self::assertSame([0, 'role', 'r', 'u', 'b', 0, '', 0, '', 0, '', true, 'r', 1], $rows->next());
+
+        $rows->narrow(static fn (array $read): array => []);
+
+        self::assertSame([[], false, null, 3], [$rows->rows(), $rows->isTruncated(), $rows->next(), $rows->room()]);
     }
 
     /**

@@ -284,6 +284,48 @@ final class RequirementCheckTest extends TestCase
     }
 
     /**
+     * A check that read no requirement has read none.
+     *
+     * @return void
+     */
+    public function testNothingIsReadWithoutARequirement(): void
+    {
+        self::assertSame([], (new RequirementCheck(new StubRequirementChecker(RequirementResult::met()), self::subject('s')))->read());
+    }
+
+    /**
+     * Every part of every requirement read is named, whether it was met, unmet
+     * or undecidable, or judged without a checker or a session, once each and
+     * sorted, whatever order the requirements and their parts were read in.
+     *
+     * @return void
+     */
+    public function testEveryPartReadIsNamedOnceSorted(): void
+    {
+        $checker = new StubRequirementChecker(RequirementResult::met(), ['phishing_resistant' => RequirementResult::unmet(['phishing_resistant'])]);
+        $check   = new RequirementCheck($checker, self::subject('session-1'));
+
+        $check->assess(new AuthenticationRequirement(['phishing_resistant' => null]));
+        $check->assess(new AuthenticationRequirement(['multifactor' => null, 'assurance_level' => null], 'high'));
+        $check->assess(new AuthenticationRequirement(['additional_verification' => null, 'multifactor' => 60]));
+
+        self::assertSame(['additional_verification', 'assurance_level', 'multifactor', 'phishing_resistant'], $check->read());
+
+        $unchecked = new RequirementCheck(null, self::subject(null));
+
+        $unchecked->assess(self::requirement());
+        $unchecked->assess(new AuthenticationRequirement(['multifactor' => null]));
+
+        self::assertSame(['multifactor', 'phishing_resistant'], $unchecked->read());
+
+        $undecidable = new RequirementCheck(new StubRequirementChecker(new \RuntimeException('checker down')), self::subject('session-1'));
+
+        $undecidable->assess(new AuthenticationRequirement(['multifactor' => null, 'assurance_level' => null], 'high'));
+
+        self::assertSame(['assurance_level', 'multifactor'], $undecidable->read());
+    }
+
+    /**
      * Return the requirement most tests judge: multifactor within fifteen
      * minutes, and a phishing-resistant authenticator.
      *

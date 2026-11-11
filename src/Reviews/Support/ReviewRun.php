@@ -308,6 +308,35 @@ final readonly class ReviewRun
     }
 
     /**
+     * Return where a role's grant and a policy attachment to the role that hold
+     * together somewhere (see `intersects()`) hold together: the narrower of
+     * their tenant reaches, the reach below their tenant only when both reach
+     * below it where they name the same one, and the application one names,
+     * else every application. The tenant chain of the run, or of the
+     * attachment's tenant as settled (see `settle()`), says which tenant lies
+     * below the other, so this asks the tree nothing more.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $grant
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $attachment
+     * @return \SineMacula\Laravel\Authorization\Support\GrantScope
+     */
+    public function overlap(GrantScope $grant, GrantScope $attachment): GrantScope
+    {
+        $outer = $grant->tenant;
+        $inner = $attachment->tenant;
+
+        $narrower = match (true) {
+            $inner       === null                                      => $grant,
+            $outer       === null                                      => $attachment,
+            $outer->type === $inner->type && $outer->id === $inner->id => new GrantScope($outer, null, $grant->includeSubtree && $attachment->includeSubtree),
+            $this->isAbove($outer, $inner)                             => $attachment,
+            default                                                    => $grant,
+        };
+
+        return new GrantScope($narrower->tenant, $grant->application ?? $attachment->application, $narrower->includeSubtree);
+    }
+
+    /**
      * Limit a query of a role's grants to the rows of the table that hold
      * together with the attachment somewhere, as `intersects()` weighs them:
      * their applications meet, and, outside a review of a scope a check is
@@ -350,6 +379,31 @@ final readonly class ReviewRun
         $scopes = static fn (array $rows): array => \array_values(\array_filter(\array_map(static fn (GrantRow $row): ?GrantScope => $row->scope, $rows)));
 
         $this->relations->settle($scopes($grants), $scopes(\array_merge([], ...\array_values($attachments))));
+    }
+
+    /**
+     * Determine whether the tenant lies above the other: it comes later in the
+     * run's chain, in a review of what applies in a tenant, where both lie on
+     * it; else it is an ancestor of the other in the other's chain.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $other
+     * @return bool
+     */
+    private function isAbove(Reference $tenant, Reference $other): bool
+    {
+        $chain    = $this->chain->tenants ?? $this->relations->chainOf($other);
+        $position = static function (Reference $sought) use ($chain): int {
+            foreach ($chain as $depth => $link) {
+                if ($link->type === $sought->type && $link->id === $sought->id) {
+                    return $depth;
+                }
+            }
+
+            return -1;
+        };
+
+        return $position($tenant) > $position($other);
     }
 
     /**

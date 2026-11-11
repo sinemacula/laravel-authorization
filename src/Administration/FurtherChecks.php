@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Administration;
 use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionMemory;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -26,6 +27,12 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * the same right for every role, permission or policy it hands out reads its
  * limits once, until the decisions are forgotten (see `DecisionMemory`).
  *
+ * Every authentication requirement a further check reads is part of the
+ * decision it is made for: the checks keep the requirements each further
+ * decision read, and carry them into the decision that leaves the stage,
+ * allowed or refused (see `carriedInto()`), so that decision names every
+ * requirement read for it and is reused no longer than any of them stays met.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -38,6 +45,12 @@ final class FurtherChecks
 
     /** @var int|null The generation of the decisions the limits were found in (see `DecisionMemory`), or null before any is. */
     private ?int $generation = null;
+
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness|null How long the further checks decided so far may be reused; null while none read a requirement. */
+    private ?RequirementFreshness $freshness = null;
+
+    /** @var list<string> The name of each part of every requirement the further checks decided so far read, any of them repeated. */
+    private array $requirementsRead = [];
 
     /**
      * Create the further checks of one decision.
@@ -64,7 +77,8 @@ final class FurtherChecks
 
     /**
      * Decide the action for the subject on the resource, or on none, in the
-     * scope in place, through every stage up to the allow.
+     * scope in place, through every stage up to the allow, keeping the
+     * authentication requirements the decision read (see `carriedInto()`).
      *
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
@@ -72,7 +86,25 @@ final class FurtherChecks
      */
     public function decide(string $action, ?ResourceReference $resource = null): Decision
     {
-        return ($this->decide)($action, $resource);
+        $decision = ($this->decide)($action, $resource);
+
+        $this->freshness        = RequirementFreshness::stricterOf($this->freshness, $decision->freshness);
+        $this->requirementsRead = [...$this->requirementsRead, ...$decision->requirementsRead];
+
+        return $decision;
+    }
+
+    /**
+     * Return the decision with every authentication requirement the further
+     * checks decided so far read added to its own, and reusable no longer than
+     * any of them stays met, or the decision itself when neither read one.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     */
+    public function carriedInto(Decision $decision): Decision
+    {
+        return $decision->withFreshness($this->freshness, $this->requirementsRead);
     }
 
     /**

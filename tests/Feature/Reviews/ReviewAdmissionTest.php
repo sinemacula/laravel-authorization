@@ -13,6 +13,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\HeldPermission;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
@@ -26,6 +28,7 @@ use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Reviews\ReviewResource;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -520,14 +523,58 @@ final class ReviewAdmissionTest extends TestCase
     }
 
     /**
+     * An authentication requirement the impersonated right needs is read by the
+     * review's admission, so it is part of the review right's decision: while
+     * it is met, the right is listed as conditional on it, and its check may be
+     * reused no longer than the requirement stays met; while it is not, the
+     * right is not listed, and its check is refused as impersonating.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARequirementTheImpersonatedRightNeedsIsCarried(): void
+    {
+        $reviewer = self::reviewer('reviewer', null);
+        $until    = new \DateTimeImmutable('+1 hour');
+        $query    = ReviewQuery::holders(self::role('reviewed'), ReviewScope::appliesIn(null, ApplicationSelector::none()));
+        $review   = ReviewResource::of($query)->actedBy(Reference::of(self::identity('impersonator')));
+        $scope    = AuthorizationScope::current()->withResource($review);
+
+        self::attachStatements($reviewer, 'impersonated-reviews', [[
+            'effect'     => 'allow',
+            'actions'    => [PackagePermissions::ADMINISTRATION_IMPERSONATED],
+            'conditions' => ['eq' => ['resource.type' => ReviewResource::TYPE], 'authentication_requirement' => ['authentication' => ['multifactor' => []]]],
+        ]]);
+
+        $manager = $this->signIn($reviewer, checker: new StubRequirementChecker(RequirementResult::met($until)));
+        $listed  = $manager->heldPermissionsFor(null, $scope);
+        $held    = \array_column(\array_map(static fn (HeldPermission $permission): array => [$permission->action, $permission->requirements], $listed), 1, 0);
+
+        self::assertSame(['multifactor'], $held[PackagePermissions::REVIEW_READ] ?? null);
+        self::assertTrue($manager->check(PackagePermissions::REVIEW_READ, $review)->isAllowed());
+        self::assertSame(['multifactor'], $manager->lastDecision()?->requirementsRead);
+        self::assertEquals($until, $manager->lastDecision()->freshness?->metUntil);
+
+        $unmet = $this->signIn($reviewer, checker: new StubRequirementChecker(RequirementResult::unmet(['multifactor'])));
+        $check = $unmet->check(PackagePermissions::REVIEW_READ, $review);
+
+        self::assertNotContains(PackagePermissions::REVIEW_READ, $unmet->permissionsFor(null, $scope));
+        self::assertSame(DecisionReason::ADMINISTRATION_IMPERSONATING, $check->reason);
+        self::assertSame(['multifactor'], $check->requirementsRead);
+    }
+
+    /**
      * Only an allowed review right on a review resource is weighed: any other
-     * resource, or none, leaves the decision as it is.
+     * resource, or none, leaves the decision as it is, and a refusal keeps the
+     * freshness of the decision it refuses and the requirements it read.
      *
      * @return void
      */
     public function testOnlyAReviewResourceIsWeighed(): void
     {
-        $allow  = Decision::allow(DecisionStage::ALLOW);
+        $fresh  = new RequirementFreshness('session-1');
+        $allow  = Decision::allow(DecisionStage::ALLOW)->withFreshness($fresh, ['multifactor']);
         $deny   = static fn (): Decision => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::ALLOW);
         $checks = new FurtherChecks(new Subject(new \stdClass), $deny, static fn (): null => null);
         $review = (new ReviewResource(ReviewKind::EXPIRING, ReviewScope::everywhere()))->toResourceReference();
@@ -539,6 +586,8 @@ final class ReviewAdmissionTest extends TestCase
         $weighed = ReviewAdmission::weigh($allow, PackagePermissions::REVIEW_READ, $review, $checks);
 
         self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, $weighed->reason);
+        self::assertSame($fresh, $weighed->freshness);
+        self::assertSame(['multifactor'], $weighed->requirementsRead);
     }
 
     /**
