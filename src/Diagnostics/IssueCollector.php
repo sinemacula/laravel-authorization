@@ -42,19 +42,32 @@ final class IssueCollector
      */
     public function verify(string $path, \Closure $check): bool
     {
+        return $this->attempt($path, $check) === null;
+    }
+
+    /**
+     * Run the check of the setting under the path, recording what it refuses,
+     * and return the class of what it threw, or null when it passed.
+     *
+     * @param  string  $path
+     * @param  \Closure(): mixed  $check
+     * @return class-string<\Throwable>|null
+     */
+    public function attempt(string $path, \Closure $check): ?string
+    {
         try {
             $check();
 
-            return true;
+            return null;
         } catch (InvalidAuthorizationConfigException $refusal) {
             $this->issues[] = ConfigIssue::refused($refusal);
-        } catch (InvalidPermissionCatalogueException) {
+        } catch (InvalidPermissionCatalogueException $refusal) {
             $this->issues[] = new ConfigIssue($path, IssueCode::INVALID_CATALOGUE);
-        } catch (\Throwable $exception) {
-            $this->issues[] = ConfigIssue::internal($path, $exception);
+        } catch (\Throwable $refusal) {
+            $this->issues[] = ConfigIssue::internal($path, $refusal);
         }
 
-        return false;
+        return $refusal::class;
     }
 
     /**

@@ -4,7 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
+use Illuminate\Container\Container;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 
 /**
  * The actions the application declares: every permission name of the configured
@@ -41,16 +43,22 @@ final class DeclaredActionCatalogue implements ActionCatalogue
 
     /**
      * Determine whether the action pattern covers at least one permission name
-     * the application declares.
+     * the application declares, refusing, before the names are read or those
+     * read are matched, while the package of the current application refuses
+     * (see `PackageState`); the boot's validation asks it while the package is
+     * pending.
      *
      * @param  string  $pattern
      * @return bool
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     #[\Override]
     public function covers(string $pattern): bool
     {
+        PackageState::guardBuild(Container::getInstance());
+
         foreach ($this->names() as $name) {
             if ($pattern === $name || \fnmatch($pattern, $name, \FNM_NOESCAPE)) {
                 return true;
@@ -76,7 +84,7 @@ final class DeclaredActionCatalogue implements ActionCatalogue
 
         $names = [];
 
-        foreach ($this->catalogue->definitions() as $definition) {
+        foreach ($this->catalogue->declared() as $definition) {
             if (PackagePermissions::isDeclared($definition->name)) {
                 continue;
             }

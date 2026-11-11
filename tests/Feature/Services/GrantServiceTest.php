@@ -67,6 +67,7 @@ use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Concerns\WidensGrants;
 use Tests\Feature\Stubs\ApiGuardedUser;
@@ -95,7 +96,7 @@ use Tests\TestCase;
 final class GrantServiceTest extends TestCase
 {
     use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals, ComparesReferences,
-        RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, UsesAnAuthorizationConnection, WidensGrants;
+        RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage, UsesAnAuthorizationConnection, WidensGrants;
 
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
@@ -2655,6 +2656,39 @@ final class GrantServiceTest extends TestCase
         self::assertSame(GrantOutcome::GRANTED, self::service()->grantRole(Reference::of($principal), self::role('new'), tenant: self::tenant('acct1')));
         self::assertSame([[WideningReason::NEW_TENANT->value]], $hook->reasons());
         self::assertSame([$person->getMorphClass(), 'person'], [$hook->widenings[0]->identity->type, $hook->widenings[0]->identity->id]);
+    }
+
+    /**
+     * Once the package refuses, every operation of the service refuses by its
+     * own guard, before it reads or writes anything.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryOperationRefusesOnceThePackageRefuses(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $role    = Role::create(['name' => 'editor']);
+        $policy  = new Policy(['name' => 'unsaved']);
+        $service = $this->container()->make(GrantService::class);
+
+        Permission::create(['name' => 'posts:read']);
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'grantRole'        => static fn () => $service->grantRole($user, $role),
+            'revokeRole'       => static fn () => $service->revokeRole($user, $role),
+            'syncRoles'        => static fn () => $service->syncRoles($user, [$role]),
+            'grantPermission'  => static fn () => $service->grantPermission($user, 'posts:read'),
+            'revokePermission' => static fn () => $service->revokePermission($user, 'posts:read'),
+            'syncPermissions'  => static fn () => $service->syncPermissions($user, ['posts:read']),
+            'attachPolicy'     => static fn () => $service->attachPolicy($user, $policy),
+            'detachPolicy'     => static fn () => $service->detachPolicy($user, $policy),
+            'syncPolicies'     => static fn () => $service->syncPolicies($user, [$policy]),
+            'revokeAll'        => static fn () => $service->revokeAll($user),
+        ]);
     }
 
     /**

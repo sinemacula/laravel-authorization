@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use Tests\Concerns\ChecksAccess;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
@@ -38,7 +39,7 @@ use Tests\TestCase;
 #[CoversClass(BladeHelpers::class)]
 final class BladeHelpersTest extends TestCase
 {
-    use ChecksAccess;
+    use ChecksAccess, RefusesThePackage;
 
     /**
      * The role helpers count the roles the subject's identity holds, and none
@@ -298,6 +299,25 @@ final class BladeHelpersTest extends TestCase
             self::assertSame($expected, Gate::forUser($identity)->allows($action));
             self::assertSame($expected, BladeHelpers::hasPermission($action));
         }
+    }
+
+    /**
+     * Once the package refuses, every Blade helper refuses by its own guard,
+     * reading nothing.
+     *
+     * @return void
+     */
+    public function testEveryHelperRefusesOnceThePackageRefuses(): void
+    {
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'currentSubject'    => BladeHelpers::currentSubject(...),
+            'hasRole'           => static fn () => BladeHelpers::hasRole('editor'),
+            'hasAllRoles'       => static fn () => BladeHelpers::hasAllRoles(['editor']),
+            'hasPermission'     => static fn () => BladeHelpers::hasPermission(['posts:read']),
+            'hasAllPermissions' => static fn () => BladeHelpers::hasAllPermissions(['posts:read']),
+        ]);
     }
 
     /**

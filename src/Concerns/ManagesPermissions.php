@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Database\RolePermissionRelation;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Services\RoleService;
@@ -33,6 +34,9 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * service: it fires none of those events, decides nothing and leaves the
  * resolution cache stale, so it is unsupported for any change that must be
  * audited.
+ *
+ * The permission checks refuse while the package is not healthy (see
+ * `PackageState`), before any row is read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -226,6 +230,8 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      */
     public function getPermissions(): array
     {
+        PackageState::guardCurrent();
+
         return RoleGraph::permissionNamesHeldBy([$this]);
     }
 

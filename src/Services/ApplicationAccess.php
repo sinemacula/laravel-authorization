@@ -8,6 +8,7 @@ use Illuminate\Container\Container;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ConfigValue;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
@@ -34,6 +35,9 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  *
  * It only builds the check and asks the decision; it decides nothing itself.
  *
+ * Asking refuses while the package is not healthy (see `PackageState`), before
+ * an application named for no permission is allowed.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -59,6 +63,8 @@ final class ApplicationAccess
      */
     public function mayUse(string $application, object $principal, ?object $tenant): bool
     {
+        PackageState::guardCurrent();
+
         $permission = self::permissionFor($application);
 
         if ($permission === null) {

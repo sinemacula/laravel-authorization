@@ -30,6 +30,7 @@ use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksGrantExpiry;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\NonMorphRolesGrantee;
 use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\StubIdentity;
@@ -56,7 +57,7 @@ use Tests\TestCase;
 #[CoversTrait(HasPolicies::class)]
 final class HasPoliciesTest extends TestCase
 {
-    use ChecksGrantExpiry;
+    use ChecksGrantExpiry, RefusesThePackage;
 
     /**
      * Reset the clock.
@@ -521,6 +522,25 @@ final class HasPoliciesTest extends TestCase
 
         self::assertTrue($policy->exists);
         self::assertSame([false], $trusted->getArrayCopy());
+    }
+
+    /**
+     * Once the package refuses, reading the policies refuses by its own guard
+     * though the resolution cache holds them, reading nothing.
+     *
+     * @return void
+     */
+    public function testThePoliciesRefuseWithAWarmCacheOnceThePackageRefuses(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->getPolicies();
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'getPolicies' => static fn () => $user->getPolicies(),
+        ]);
     }
 
     /**

@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Scope;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
@@ -34,6 +35,11 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * request's tenant is resolved again once it returns. While a resolution is
  * under way it marks it in the container, rather than on the scope, since each
  * scoped model holds its own instance of the scope.
+ *
+ * Applying the scope, `within()` and every getter of the tenant refuse while
+ * the package is not healthy (see `PackageState`), before the subject resolver
+ * is resolved or a tenant held is read, so a scoped model's query refuses
+ * rather than reading rows under a tenant resolved unvalidated.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -243,10 +249,14 @@ final class TenantScope implements Scope
      * @param  \Closure(): TResult  $callback
      * @param  bool  $isBelow
      * @return TResult
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public static function within(?object $tenant, ?string $application, \Closure $callback, bool $isBelow = false): mixed
     {
         $container = Container::getInstance();
+
+        PackageState::guard($container);
         $resolving = $container->bound(self::RESOLVING);
         $outer     = $container->bound(self::WITHIN) ? $container->make(self::WITHIN) : null;
 
@@ -310,7 +320,9 @@ final class TenantScope implements Scope
     /**
      * Read from the tenant resolved for the current request or job, or return
      * null for a query run while the subject, or its tenant's ancestors, are
-     * being resolved.
+     * being resolved, refusing first, before the resolver is resolved or a
+     * tenant held is read, while the package is not healthy (see
+     * `PackageState`).
      *
      * Resolving the subject can itself query a scoped model: the shipped
      * resolver reads the signed-in user, and a user model that eager-loads its
@@ -329,6 +341,8 @@ final class TenantScope implements Scope
     private static function whileResolving(\Closure $read): mixed
     {
         $container = Container::getInstance();
+
+        PackageState::guard($container);
 
         if ($container->bound(self::RESOLVING)) {
             return null;

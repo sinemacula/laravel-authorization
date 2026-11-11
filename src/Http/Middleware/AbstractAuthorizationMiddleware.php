@@ -8,6 +8,7 @@ use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Http\Request;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
@@ -32,6 +33,9 @@ use SineMacula\Laravel\Authorization\Support\Messages;
  * Run it after authentication and after any step-up middleware, so a request
  * that is not signed in, or not signed in strongly enough, is answered by those
  * before it is denied here.
+ *
+ * A request refuses while the package is not healthy (see `PackageState`),
+ * before the arguments are read or the manager resolved.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,6 +68,8 @@ abstract class AbstractAuthorizationMiddleware
      */
     public function handle(Request $request, \Closure $next, string ...$arguments): mixed
     {
+        PackageState::guardCurrent();
+
         self::refuseExtraArguments($arguments);
 
         $this->authorize($request, self::namesOf($arguments[0] ?? ''), $arguments[1] ?? null);

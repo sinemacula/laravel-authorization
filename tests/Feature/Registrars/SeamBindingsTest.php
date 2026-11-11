@@ -29,15 +29,20 @@ use SineMacula\Laravel\Authorization\Diagnostics\CurrentBinding;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
 use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
+use SineMacula\Laravel\Authorization\Registrars\PendingRegistration;
 use SineMacula\Laravel\Authorization\Registrars\SeamBindings;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
+use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use Tests\Feature\Stubs\DeferredBindingProvider;
+use Tests\Feature\Stubs\FixedResourceTenantResolver;
+use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\Feature\Stubs\StubSubjectResolver;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Fixtures\GrantHooks\RecordingGrantHook;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
 use Tests\TestCase;
@@ -433,10 +438,10 @@ final class SeamBindingsTest extends TestCase
     }
 
     /**
-     * Registering with a malformed seam setting does not fail, and binds the
-     * package's default as when nothing is configured: the contract resolves
-     * through the package's own closure, which a sibling package replaces, and
-     * a policy store is not bound at all.
+     * Registering with a malformed seam setting does not fail, and, once the
+     * application boots, binds the package's default as when nothing is
+     * configured: the contract resolves through the package's own closure,
+     * which a sibling package replaces, and a policy store is not bound at all.
      *
      * @param  class-string  $contract
      * @param  string  $key
@@ -447,6 +452,8 @@ final class SeamBindingsTest extends TestCase
     public function testAMalformedSeamBindsTheDefault(string $contract, string $key, mixed $value): void
     {
         $app = self::registered(self::malformed($key, $value));
+
+        $app->boot();
 
         if ($contract === PolicyStore::class) {
             self::assertFalse($app->bound(PolicyStore::class));
@@ -771,6 +778,194 @@ final class SeamBindingsTest extends TestCase
     }
 
     /**
+     * Handed the steps left to the boot, the registrar binds the class the
+     * configuration names only once they run: until then the contract resolves
+     * the default through a closure the registrar declares, so a sibling
+     * reading the binding table leaves it, and the record holds the default.
+     *
+     * @return void
+     */
+    public function testHandedTheStepsAConfiguredClassIsBoundAsTheyRun(): void
+    {
+        $app     = self::application(['tenant_tree' => StubTenantTree::class, 'policy_store' => StubPolicyStore::class]);
+        $pending = new PendingRegistration;
+        $seams   = self::seams($app, $pending);
+
+        $seams->bindConfigured(TenantTree::class, 'authorization.tenant_tree', FlatTenantTree::class);
+        $seams->bindConfigured(PolicyStore::class, 'authorization.policy_store', null);
+
+        $before  = BindingRegistry::of($app)->get(TenantTree::class);
+        $default = $app->make(TenantTree::class);
+
+        self::assertSame(SeamBindings::class, self::declaringClassOf($app, TenantTree::class));
+        self::assertInstanceOf(FlatTenantTree::class, $default);
+        self::assertFalse($before?->configured);
+        self::assertFalse($app->bound(PolicyStore::class));
+        self::assertTrue($pending->isPending());
+
+        $pending->run();
+
+        $after = BindingRegistry::of($app)->get(TenantTree::class);
+
+        self::assertInstanceOf(StubTenantTree::class, $app->make(TenantTree::class));
+        self::assertInstanceOf(StubPolicyStore::class, $app->make(PolicyStore::class));
+        self::assertTrue($after?->configured);
+    }
+
+    /**
+     * Handed the steps, a configured name that turns out to name no class
+     * implementing the contract binds the default through the closure built for
+     * the default's key once they run, as when nothing is configured, and binds
+     * no policy store at all, before they run or after, its record showing no
+     * class configured.
+     *
+     * @return void
+     */
+    public function testHandedTheStepsAMalformedNameBindsTheDefaultAsTheyRun(): void
+    {
+        $app     = self::application(['tenant_tree' => 'App\Missing\Tree', 'policy_store' => \stdClass::class]);
+        $pending = new PendingRegistration;
+        $seams   = self::seams($app, $pending);
+
+        $seams->bindConfigured(TenantTree::class, 'authorization.tenant_tree', FlatTenantTree::class);
+        $seams->bindConfigured(PolicyStore::class, 'authorization.policy_store', null);
+
+        self::assertFalse($app->bound(PolicyStore::class));
+        self::assertNotNull(BindingRegistry::of($app)->get(PolicyStore::class));
+
+        $pending->run();
+
+        self::assertSame(self::class, self::declaringClassOf($app, TenantTree::class));
+        self::assertFalse(BindingRegistry::of($app)->get(TenantTree::class)?->configured);
+        self::assertSame($app->getBindings()[TenantTree::class]['concrete'], BindingRegistry::of($app)->get(TenantTree::class)->binding);
+        self::assertInstanceOf(FlatTenantTree::class, $app->make(TenantTree::class));
+        self::assertFalse($app->bound(PolicyStore::class));
+        self::assertFalse(BindingRegistry::of($app)->get(PolicyStore::class)->configured);
+    }
+
+    /**
+     * Handed the steps, the grant hooks the configuration lists are extended
+     * around the bound hook only once they run.
+     *
+     * @return void
+     */
+    public function testHandedTheStepsTheGrantHooksAreExtendedAsTheyRun(): void
+    {
+        $app     = self::application(['grant_hooks' => [RecordingGrantHook::class]]);
+        $pending = new PendingRegistration;
+
+        self::seams($app, $pending)->bindGrantHooks();
+
+        self::assertSame([], ContainerState::extenders($app, GrantHook::class));
+
+        $pending->run();
+
+        self::assertInstanceOf(ListedGrantHooks::class, $app->make(GrantHook::class));
+    }
+
+    /**
+     * Handed the steps, the extender running the listed hooks keeps the place
+     * it had among the contract's extenders as the package registered: after
+     * one registered before, which receives the bound hook, and before one
+     * registered after, which receives the wrapped hook.
+     *
+     * @return void
+     */
+    public function testHandedTheStepsTheGrantHooksExtenderKeepsItsPlace(): void
+    {
+        $app      = self::application(['grant_hooks' => [RecordingGrantHook::class]]);
+        $pending  = new PendingRegistration;
+        $received = [];
+        $record   = static function (string $when) use (&$received): \Closure {
+            return static function (GrantHook $hook) use ($when, &$received): GrantHook {
+                $received[$when] = $hook;
+
+                return $hook;
+            };
+        };
+
+        $app->extend(GrantHook::class, $record('earlier'));
+
+        self::seams($app, $pending)->bindGrantHooks();
+
+        $app->extend(GrantHook::class, $record('later'));
+
+        $pending->run();
+
+        $resolved = $app->make(GrantHook::class);
+
+        self::assertCount(3, ContainerState::extenders($app, GrantHook::class));
+        self::assertInstanceOf(GrantHooks::class, $received['earlier'] ?? null);
+        self::assertInstanceOf(ListedGrantHooks::class, $received['later'] ?? null);
+        self::assertSame($received['later'], $resolved);
+    }
+
+    /**
+     * Handed the steps, an instance or an alias a provider puts on a contract
+     * the configuration names a class for, after the package registered, stands
+     * once they run, as a binding made afterwards does.
+     *
+     * @return void
+     */
+    public function testHandedTheStepsALaterInstanceOrAliasStands(): void
+    {
+        $tree = new FlatTenantTree;
+        $made = [
+            'an instance' => static fn (Application $app) => $app->instance(TenantTree::class, $tree),
+            'an alias'    => static function (Application $app) use ($tree): void {
+                $app->instance('acme.tree', $tree);
+                $app->alias('acme.tree', TenantTree::class);
+            },
+        ];
+
+        foreach ($made as $kind => $make) {
+            $app     = self::application(['tenant_tree' => StubTenantTree::class]);
+            $pending = new PendingRegistration;
+
+            self::seams($app, $pending)->bindConfigured(TenantTree::class, 'authorization.tenant_tree', FlatTenantTree::class);
+
+            $make($app);
+            $pending->run();
+
+            self::assertSame($tree, $app->make(TenantTree::class), $kind);
+            self::assertTrue(BindingRegistry::of($app)->get(TenantTree::class)?->configured, $kind);
+        }
+    }
+
+    /**
+     * The resource tenant resolver, the default or a class configured, is
+     * wrapped in the declared resolver the provider builds around it.
+     *
+     * @return void
+     */
+    public function testTheResourceTenantResolverIsBuiltByTheBuilderGiven(): void
+    {
+        foreach ([[], ['resource_tenant_resolver' => FixedResourceTenantResolver::class]] as $authorization) {
+            $app = self::registered($authorization);
+
+            $app->boot();
+
+            self::assertInstanceOf(DeclaredResourceTenant::class, $app->make(ResourceTenantResolver::class));
+        }
+    }
+
+    /**
+     * Return the class that declares the closure the contract is bound to.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @param  class-string  $contract
+     * @return string|null
+     */
+    private static function declaringClassOf(Application $app, string $contract): ?string
+    {
+        $concrete = $app->getBindings()[$contract]['concrete'] ?? null;
+
+        self::assertInstanceOf(\Closure::class, $concrete);
+
+        return (new \ReflectionFunction($concrete))->getClosureScopeClass()?->getName();
+    }
+
+    /**
      * Return the authorization configuration setting the seam's key to the
      * value, its subject resolver the stub, so nothing else resolves the
      * application's guard.
@@ -842,14 +1037,15 @@ final class SeamBindingsTest extends TestCase
     /**
      * Return the registrar of the seams in the application, handed a closure
      * building the closure each contract is bound to, as the service provider
-     * hands it one.
+     * hands it one, and, when given, the steps left to the boot.
      *
      * @param  \Illuminate\Foundation\Application  $app
+     * @param  \SineMacula\Laravel\Authorization\Registrars\PendingRegistration|null  $later
      * @return \SineMacula\Laravel\Authorization\Registrars\SeamBindings
      */
-    private static function seams(Application $app): SeamBindings
+    private static function seams(Application $app, ?PendingRegistration $later = null): SeamBindings
     {
-        return new SeamBindings($app, static fn (string $key): \Closure => static fn (ApplicationContract $app): mixed => $app->make($key));
+        return new SeamBindings($app, static fn (string $key): \Closure => static fn (ApplicationContract $app): mixed => $app->make($key), $later);
     }
 
     /**

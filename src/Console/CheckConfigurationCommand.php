@@ -22,10 +22,17 @@ use Symfony\Component\Console\Output\OutputInterface;
  *
  * The report is built by `Diagnostics\Inspector` without building any seam,
  * connecting to anything or running a query, so it is safe before migrations
- * have run. The configuration is checked as the boot checks it, collecting
- * every issue rather than stopping at the first, by its structural checks
- * alone; what the boot checks by building something (a context source, an
- * attribute provider, the cache store) is shown as checked at boot.
+ * have run. Run from the console, or by a command a sibling package declares as
+ * running it in the same process, the application boots the package for
+ * diagnosis (see `Diagnostics\DiagnosticMode`): a broken configuration no
+ * longer stops the boot, every operation of the package refuses instead, and
+ * the report holds every issue that boot found, with what became of each check
+ * it runs by building what a setting names (a context source, an attribute
+ * provider, the cache store): checked at boot, failed at boot, or not run, as
+ * the structural check found an issue first. On an application that booted
+ * otherwise, the configuration is checked again, collecting every issue rather
+ * than stopping at the first, by its structural checks alone, and what the boot
+ * checks by building something is shown as checked at boot.
  *
  * It is printed as text by default, one line per issue first, then a section
  * each for the settings, the seams, the grant hooks, the connection and the
@@ -42,7 +49,9 @@ use Symfony\Component\Console\Output\OutputInterface;
  * configuration or 3 for anything else, naming the exception's class alone, so
  * a command calling it in-process never sees it throw. The console's own
  * bootstrap, and a deferred provider loaded before the command runs, are
- * outside it, so it cannot catch what they throw.
+ * outside it, so it cannot catch what they throw: a caller that boots an
+ * application itself to call it must turn the diagnostic switch on before the
+ * application boots (see `Diagnostics\DiagnosticMode::enable()`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

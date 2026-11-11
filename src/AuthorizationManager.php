@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Evaluation\CheckBatch;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
@@ -74,6 +75,10 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
  * analysis of this file by itself does not see (hence php:S1144), and so is the
  * preview the trait's `previewFor()` sets.
  *
+ * Every operation refuses while the package is not healthy (see
+ * `PackageState`), before the subject is resolved or a decision read, the state
+ * handed to the manager as it is built and kept by each scoped clone.
+ *
  * @SuppressWarnings("php:S1144")
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -100,6 +105,7 @@ final class AuthorizationManager
      * @param  \SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver|null  $guardrails
      * @param  \SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver|null  $sessionCaps
      * @param  \SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder|null  $usage
+     * @param  \SineMacula\Laravel\Authorization\Diagnostics\PackageState|null  $state
      */
     public function __construct(
 
@@ -138,6 +144,9 @@ final class AuthorizationManager
 
         /** Notes the grant routes everyday checks use while grant usage is tracked; null when it is not. */
         private readonly ?GrantUsageRecorder $usage = null,
+
+        /** Where the package stands in the application that built the manager, consulted before every operation; null for a manager built outside one. */
+        private readonly ?PackageState $state = null,
     ) {
         $this->pipeline = new DecisionPipeline($evaluator, $policyResolver, $contexts, $resourcePolicies, $guardrails, $sessionCaps);
     }
@@ -191,6 +200,8 @@ final class AuthorizationManager
      */
     public function any(array $actions, mixed $resource = null, array $context = []): bool // phpcs:ignore SineMacula.NamingConventions.BooleanMethodName.NotPredicate
     {
+        $this->state?->ensureHealthy();
+
         $list = ActionList::of('any', $actions);
 
         // Resolved once, in the subject's scope as a check resolves it, so a
@@ -220,6 +231,8 @@ final class AuthorizationManager
      */
     public function all(array $actions, mixed $resource = null, array $context = []): bool // phpcs:ignore SineMacula.NamingConventions.BooleanMethodName.NotPredicate
     {
+        $this->state?->ensureHealthy();
+
         $list = ActionList::of('all', $actions);
 
         // Resolved once, in the subject's scope as a check resolves it, so a
@@ -260,6 +273,8 @@ final class AuthorizationManager
      */
     public function authorize(string $action, mixed $resource = null, array $context = []): void
     {
+        $this->state?->ensureHealthy();
+
         // Resolved once, in the subject's scope as a check resolves it, so a
         // bound resource tenant resolver is asked once.
         $reference = $this->inSubjectScope(static fn (): false|ResourceReference|null => ResourceReferences::of($resource));
@@ -300,6 +315,8 @@ final class AuthorizationManager
      */
     public function furtherChecks(): ?FurtherChecks
     {
+        $this->state?->ensureHealthy();
+
         $subject = $this->currentSubject();
 
         return $subject === null ? null : $this->pipeline->furtherChecksFor($subject);
@@ -322,6 +339,8 @@ final class AuthorizationManager
      */
     public function reportRefusal(string $action, mixed $resource, Decision $decision): AuthorizationException
     {
+        $this->state?->ensureHealthy();
+
         $reference = ResourceReferences::of($resource);
         $subject   = $this->currentSubject();
 
@@ -367,6 +386,8 @@ final class AuthorizationManager
      */
     public function check(string $action, mixed $resource = null, array $context = []): Decision
     {
+        $this->state?->ensureHealthy();
+
         $check = new CheckInput($action, $resource, $context);
 
         if ($this->preview !== null) {
@@ -408,6 +429,8 @@ final class AuthorizationManager
      */
     public function checkMany(array $checks): array
     {
+        $this->state?->ensureHealthy();
+
         if ($this->preview !== null) {
             return $this->preview->run(fn (?Subject $target): array => $this->batch()->decide($target, $checks));
         }
@@ -431,6 +454,8 @@ final class AuthorizationManager
      */
     public function canEach(string $action, iterable $resources, array $context = []): array
     {
+        $this->state?->ensureHealthy();
+
         $checks = [];
 
         foreach ($resources as $key => $resource) {
@@ -455,6 +480,8 @@ final class AuthorizationManager
      */
     public function filterAuthorized(string $action, iterable $resources, array $context = []): array|Collection
     {
+        $this->state?->ensureHealthy();
+
         if ($resources instanceof Collection) {
             $allowed = $this->canEach($action, $resources->all(), $context);
 
@@ -494,6 +521,8 @@ final class AuthorizationManager
      */
     public function queryScope(Model $model, string $action, array $context = []): AuthorizedQuery
     {
+        $this->state?->ensureHealthy();
+
         $authorizer = $this->pipeline->queryAuthorizer();
         $preview    = $this->preview;
         $compile    = static fn (?Subject $subject): string => $authorizer->compile($subject, $model, $action, $context);
@@ -523,6 +552,8 @@ final class AuthorizationManager
      */
     public function lastDecision(): ?Decision
     {
+        $this->state?->ensureHealthy();
+
         $decision = $this->lastDecisionStore->get();
 
         return $decision?->freshness === null || $this->lastDecisionStore->wasRecordedIn($this->subjectResolver->resolve()?->session) ? $decision : null;
@@ -563,6 +594,8 @@ final class AuthorizationManager
      */
     public function explain(string $action, mixed $resource = null, array $context = []): Explanation
     {
+        $this->state?->ensureHealthy();
+
         $check   = new CheckInput($action, $resource, $context);
         $explain = fn (?Subject $target): Decision => $this->batch(isExplaining: true)->decideOne($target, $check);
 
@@ -638,6 +671,8 @@ final class AuthorizationManager
      */
     public function permissionsFor(?object $subject, AuthorizationScope $scope, array $context = []): array
     {
+        $this->state?->ensureHealthy();
+
         $preview = $this->preview;
 
         if ($subject !== null && $preview !== null) {
@@ -711,6 +746,8 @@ final class AuthorizationManager
      */
     public function currentSubject(): ?Subject
     {
+        $this->state?->ensureHealthy();
+
         return $this->isSubjectNamed ? $this->subjectOverride : $this->subjectResolver->resolve();
     }
 

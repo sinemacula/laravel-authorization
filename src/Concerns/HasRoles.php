@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
@@ -32,6 +33,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * helper called without an actor is an integration surface for the
  * application's own code, never an endpoint for user-controlled administration.
  * `removeRole()` takes no actor, so it is always trusted.
+ *
+ * The role checks and `canActOn()` refuse while the package is not healthy (see
+ * `PackageState`), before the resolution cache or the loaded roles are read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -182,6 +186,8 @@ trait HasRoles // @phpstan-ignore trait.unused
      */
     public function hasRole(Role|string $role, ?string $guard = null): bool
     {
+        PackageState::guardCurrent();
+
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
         $roles = $this->authorizationLoadedGrants('roles');
 
@@ -208,6 +214,8 @@ trait HasRoles // @phpstan-ignore trait.unused
      */
     public function getRoles(): array
     {
+        PackageState::guardCurrent();
+
         $resolve = fn (ResolutionPins $pins): Resolution => GrantResolver::roles($this->roles(), $pins);
 
         return ResolutionCache::instance()?->rememberRoles($this, $resolve) ?? $resolve(new ResolutionPins)->value;
@@ -235,6 +243,8 @@ trait HasRoles // @phpstan-ignore trait.unused
      */
     public function canActOn(object $target): bool
     {
+        PackageState::guardCurrent();
+
         return RankComparison::canActOn($this, $target);
     }
 

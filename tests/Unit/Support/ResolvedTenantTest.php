@@ -11,6 +11,11 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings;
+use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
@@ -213,5 +218,37 @@ final class ResolvedTenantTest extends TestCase
         }
 
         self::assertEquals([[$tenant, $org], [$tenant, $org], [$tenant, $sibling], [$tenant, $sibling]], $chains);
+    }
+
+    /**
+     * `from()` builds the holder while the package of the current container is
+     * pending, as what the boot validates may be handed it, and refuses once it
+     * refuses, before the resolver is asked.
+     *
+     * @return void
+     */
+    public function testFromRefusesOnlyOnceThePackageRefuses(): void
+    {
+        $container = new Container;
+        $state     = PackageState::start($container);
+        $resolver  = $this->createMock(SubjectResolver::class);
+
+        $resolver->expects(self::once())->method('resolve')->willReturn(new Subject(new \stdClass));
+
+        Container::setInstance($container);
+
+        try {
+            self::assertSame($resolver, ResolvedTenant::from($resolver)->resolver);
+
+            $state->refuse(new ConfigFindings([new ConfigIssue('authorization.nonsense', IssueCode::UNKNOWN_KEY)], []));
+
+            ResolvedTenant::from($resolver);
+
+            self::fail('The holder was built while the package refuses.');
+        } catch (InvalidAuthorizationConfigException $refusal) {
+            self::assertSame('authorization.nonsense', $refusal->getConfigKey());
+        } finally {
+            Container::setInstance(null);
+        }
     }
 }

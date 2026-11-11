@@ -10,14 +10,17 @@ namespace SineMacula\Laravel\Authorization\Diagnostics;
  * bound, the key it forwards to, the class it builds, whether a class the
  * configuration names was bound in place of the default, and, for the grant
  * hook, the decorator running the configured hooks that replaced an instance
- * held at once.
+ * held at once, with the instance it decorates: the one held as the package
+ * registered, or one a provider handed the container after it.
  *
- * The record is taken once, as the package registers, and never changes. The
- * report compares what supplies the contract at the time it runs (see
- * `CurrentBinding::supplier()`) with the objects recorded here, by identity, to
- * tell the package's binding from one made before it registered and one made
- * after: both the closure and the instance held before are recorded, and either
- * matches.
+ * The record is taken as the package binds the seam, as it registers, or, for a
+ * class the configuration names, as the application boots, when it is bound,
+ * still recording what was bound before the package registered, and never
+ * changes. The report compares what supplies the contract at the time it runs
+ * (see `CurrentBinding::supplier()`) with the objects recorded here, by
+ * identity, to tell the package's binding from one made before it registered
+ * and one made after: both the closure and the instance held before are
+ * recorded, and either matches.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,6 +43,7 @@ final readonly class SeamRecord
      * @param  string|null  $earlierAlias
      * @param  string|null  $deferredProvider
      * @param  object|null  $wrapper
+     * @param  object|null  $wrapped
      */
     public function __construct(
 
@@ -73,18 +77,22 @@ final readonly class SeamRecord
         /** The deferred provider that provided the contract as the package registered, else null. */
         public ?string $deferredProvider,
 
-        /** The decorator running the configured grant hooks that replaced the instance held as the package registered, else null. */
+        /** The decorator running the configured grant hooks that replaced the instance held as the application booted, else null. */
         public ?object $wrapper = null,
+
+        /** The instance the decorator replaced, held as the package registered or handed the container after, else null. */
+        public ?object $wrapped = null,
     ) {}
 
     /**
      * Return the record with the decorator that replaced the instance held as
-     * the package registered.
+     * the application booted, and that instance.
      *
      * @param  object|null  $wrapper
+     * @param  object|null  $wrapped
      * @return self
      */
-    public function wrappedBy(?object $wrapper): self
+    public function wrappedBy(?object $wrapper, ?object $wrapped): self
     {
         return new self(
             $this->contract,
@@ -98,6 +106,7 @@ final readonly class SeamRecord
             $this->earlierAlias,
             $this->deferredProvider,
             $wrapper,
+            $wrapped,
         );
     }
 
@@ -115,26 +124,28 @@ final readonly class SeamRecord
     /**
      * Determine whether what supplies the contract now was bound before the
      * package registered: the closure or the instance held then, or the
-     * decorator that replaced that instance at once.
+     * decorator that replaced that instance, never one that replaced an
+     * instance handed the container later.
      *
      * @param  object|null  $supplier
      * @return bool
      */
     public function isEarlier(?object $supplier): bool
     {
-        return $supplier !== null && \in_array($supplier, [$this->earlier, $this->earlierInstance, $this->wrapper], true);
+        $earlier = $this->wrapped === $this->earlierInstance ? [$this->earlier, $this->earlierInstance, $this->wrapper] : [$this->earlier, $this->earlierInstance];
+
+        return $supplier !== null && \in_array($supplier, $earlier, true);
     }
 
     /**
-     * Return the instance held as it is shown: the instance held before the
-     * package registered in place of the decorator that replaced it, any other
-     * as it is.
+     * Return the instance held as it is shown: the instance the decorator
+     * replaced in place of the decorator, any other as it is.
      *
      * @param  object|null  $instance
      * @return object|null
      */
     public function unwrap(?object $instance): ?object
     {
-        return $instance !== null && $instance === $this->wrapper ? $this->earlierInstance : $instance;
+        return $instance !== null && $instance === $this->wrapper ? $this->wrapped : $instance;
     }
 }

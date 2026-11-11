@@ -21,8 +21,10 @@ namespace SineMacula\Laravel\Authorization\Diagnostics\Settings;
  *
  * `status` is `ok`, `refused`, `skipped` (not checked, as a setting it depends
  * on was refused), `unchecked` (its check failed in a way the package did not
- * foresee) or `checked_at_boot` (its checks that build what it names ran, and
- * passed, as the application booted).
+ * foresee), `checked_at_boot` (its checks that build what it names ran, and
+ * passed, as the application booted), `failed_at_boot` (they ran as the
+ * application booted for diagnosis, and failed) or `not_run` (they were left to
+ * the boot, which did not run them, as the structural check found an issue).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

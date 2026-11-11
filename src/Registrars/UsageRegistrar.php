@@ -4,12 +4,14 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Registrars;
 
+use Illuminate\Contracts\Bus\Dispatcher as BusDispatcher;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobProcessed;
 use SineMacula\Laravel\Authorization\Contracts\GrantUsageStore;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Usage\DatabaseGrantUsageStore;
 use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
 use SineMacula\Laravel\Authorization\Usage\UsageTracking;
@@ -58,16 +60,25 @@ final readonly class UsageRegistrar
 
     /**
      * Bind the usage store, as a seam an application may bind itself (see
-     * `SeamBindings`), and the recorder.
+     * `SeamBindings`), and the recorder, each refusing, before anything it
+     * needs is built, while the package refuses (see `PackageState`).
      *
      * @param  \SineMacula\Laravel\Authorization\Registrars\SeamBindings  $seams
      * @return void
      */
     public function register(SeamBindings $seams): void
     {
-        $seams->bindDefault(GrantUsageStore::class, DatabaseGrantUsageStore::class);
+        $seams->bindDefault(GrantUsageStore::class, static function (Application $app): GrantUsageStore {
+            PackageState::guardBuild($app);
 
-        $this->app->singleton(GrantUsageRecorder::class);
+            return $app->make(DatabaseGrantUsageStore::class);
+        }, builds: DatabaseGrantUsageStore::class);
+
+        $this->app->singleton(GrantUsageRecorder::class, static function (Application $app): GrantUsageRecorder {
+            PackageState::guardBuild($app);
+
+            return new GrantUsageRecorder($app->make(BusDispatcher::class));
+        });
     }
 
     /**

@@ -11,6 +11,7 @@ use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
 use SineMacula\Laravel\Authorization\Services\Support\ExpiredSweep;
@@ -63,6 +64,9 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * inline policies among them, since a real run revokes those before it deletes
  * the policies, then the attachments of each record that is gone.
  *
+ * Pruning refuses while the package is not healthy (see `PackageState`), before
+ * any row is read.
+ *
  * @phpstan-type ExpiredRow array{
  *     target_id: string,
  *     authorizable_type: string,
@@ -112,6 +116,8 @@ final readonly class GrantPruner
      */
     public function prune(int $chunk, bool $pretend = false): PruneResult
     {
+        PackageState::guardCurrent();
+
         $expired = self::removeExpired($chunk, $pretend);
 
         [$orphans, $unresolved]  = self::orphans($chunk);

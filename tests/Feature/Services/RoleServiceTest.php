@@ -49,6 +49,7 @@ use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomRole;
@@ -71,7 +72,7 @@ use Tests\TestCase;
 final class RoleServiceTest extends TestCase
 {
     use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals, ComparesReferences,
-        RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, UsesAnAuthorizationConnection;
+        RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage, UsesAnAuthorizationConnection;
 
     /**
      * A delegated revocation of a role's permission is decided under its action
@@ -1265,6 +1266,37 @@ final class RoleServiceTest extends TestCase
         }
 
         self::assertSame(['posts:edit'], $role->getPermissions());
+    }
+
+    /**
+     * Once the package refuses, every operation of the service refuses by its
+     * own guard, before it reads or writes anything.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryOperationRefusesOnceThePackageRefuses(): void
+    {
+        $role    = Role::create(['name' => 'editor']);
+        $service = $this->container()->make(RoleService::class);
+
+        Permission::create(['name' => 'posts:read']);
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'create'           => static fn () => $service->create('viewer'),
+            'rename'           => static fn () => $service->rename($role, 'author'),
+            'describe'         => static fn () => $service->describe($role, 'Edits'),
+            'delete'           => static fn () => $service->delete($role),
+            'find'             => static fn () => $service->find('editor'),
+            'list'             => static fn () => $service->list(),
+            'setParent'        => static fn () => $service->setParent($role, null),
+            'grantPermission'  => static fn () => $service->grantPermission($role, 'posts:read'),
+            'revokePermission' => static fn () => $service->revokePermission($role, 'posts:read'),
+            'syncPermissions'  => static fn () => $service->syncPermissions($role, ['posts:read']),
+        ]);
     }
 
     /**

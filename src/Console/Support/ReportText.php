@@ -62,6 +62,8 @@ final class ReportText
         'skipped'         => 'skipped',
         'unchecked'       => 'not checked',
         'checked_at_boot' => 'checked at boot',
+        'failed_at_boot'  => 'failed at boot',
+        'not_run'         => 'not run at boot',
     ];
 
     /**

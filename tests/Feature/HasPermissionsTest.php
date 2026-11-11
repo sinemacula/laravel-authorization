@@ -28,6 +28,7 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Concerns\ChecksGrantsByName;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
@@ -47,7 +48,7 @@ use Tests\TestCase;
 #[CoversTrait(HasPermissions::class)]
 final class HasPermissionsTest extends TestCase
 {
-    use ChecksGrantExpiry, ChecksGrantsByName;
+    use ChecksGrantExpiry, ChecksGrantsByName, RefusesThePackage;
 
     /**
      * Reset the clock.
@@ -347,6 +348,31 @@ final class HasPermissionsTest extends TestCase
         self::assertRefusedAsNothingAllowed(static fn () => $user->givePermissionTo('posts:edit', $actor));
         self::assertRefusedAsNothingAllowed(static fn () => $user->revokePermissionTo('posts:edit', $actor));
         self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', 'user-actor')->count());
+    }
+
+    /**
+     * Once the package refuses, the permission checks refuse by their own guard
+     * though the resolution cache holds the answer, reading nothing.
+     *
+     * @return void
+     */
+    public function testThePermissionChecksRefuseWithAWarmCacheOnceThePackageRefuses(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        Permission::create(['name' => 'posts:read']);
+
+        $user->givePermission('posts:read');
+
+        self::assertTrue($user->hasPermission('posts:read'));
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'getPermissions'                   => static fn () => $user->getPermissions(),
+            'getPermissions through a check'   => static fn () => $user->hasPermission('posts:read'),
+            'getPermissions through the names' => static fn () => $user->getPermissionNames(),
+        ]);
     }
 
     /**

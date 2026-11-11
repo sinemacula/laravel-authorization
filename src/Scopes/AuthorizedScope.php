@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Query\Reentrancy;
@@ -41,6 +42,9 @@ use SineMacula\Laravel\Authorization\Query\Refusal;
  * a scope is being decided, or one of the subject's own model, refuses
  * (`reentrant`), rather than recursing or reading the decision's sources
  * through itself.
+ *
+ * Applying the scope refuses while the package is not healthy (see
+ * `PackageState`), before the manager is resolved.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -80,6 +84,8 @@ final readonly class AuthorizedScope implements Scope
     #[\Override]
     public function apply(Builder $builder, Model $model): void
     {
+        PackageState::guardCurrent();
+
         if (Reentrancy::isDeciding()) {
             $this->refuseReentrant($model);
         }

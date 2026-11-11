@@ -37,6 +37,7 @@ use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\InterleavesWrites;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -56,7 +57,7 @@ use Tests\TestCase;
 #[CoversClass(ResourcePolicyService::class)]
 final class ResourcePolicyServiceTest extends TestCase
 {
-    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents, RefusesThePackage;
 
     /**
      * The service is bound once in the container.
@@ -739,6 +740,29 @@ final class ResourcePolicyServiceTest extends TestCase
         self::assertSame(1, self::service()->detach($policy, ['docs', 'aB3']));
         self::assertSame(['Ab3'], DB::table('resource_policies')->pluck('resource_id')->all());
         self::assertSame(['sharing'], self::namesFor(ResourceReference::record('docs', 'Ab3')));
+    }
+
+    /**
+     * Once the package refuses, every operation of the service refuses by its
+     * own guard, before it reads or writes anything.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryOperationRefusesOnceThePackageRefuses(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $policy  = new Policy(['name' => 'unsaved']);
+        $service = $this->container()->make(ResourcePolicyService::class);
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'attach'    => static fn () => $service->attach($policy, $user),
+            'detach'    => static fn () => $service->detach($policy, $user),
+            'detachAll' => static fn () => $service->detachAll($user),
+        ]);
     }
 
     /**

@@ -9,6 +9,7 @@ use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 
@@ -63,7 +64,8 @@ final readonly class PermissionCatalogue
     /**
      * Return every permission the package, the configured enums and the
      * configured providers declare, in the order they are declared, the
-     * package's first.
+     * package's first, refusing, before any provider runs, while the package is
+     * not healthy (see `PackageState`).
      *
      * @return list<\SineMacula\Laravel\Authorization\Support\PermissionDefinition>
      *
@@ -72,6 +74,28 @@ final readonly class PermissionCatalogue
      */
     public function definitions(): array
     {
+        PackageState::guard($this->container);
+
+        return $this->declared();
+    }
+
+    /**
+     * Return every permission the package, the configured enums and the
+     * configured providers declare, as `definitions()` does, refusing, before
+     * any provider runs, only while the package refuses (see `PackageState`):
+     * the read of the declared action catalogue, which the boot's validation
+     * checks the session scopes against while the package is pending, and which
+     * a policy's document is checked against as it is set.
+     *
+     * @return list<\SineMacula\Laravel\Authorization\Support\PermissionDefinition>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public function declared(): array
+    {
+        PackageState::guardBuild($this->container);
+
         $definitions = [];
 
         foreach ([...self::packageDefinitions(), ...$this->enumDefinitions(), ...$this->providerDefinitions()] as [$source, $definition]) {

@@ -32,6 +32,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\PreviewsSubjects;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\FixedSubjectResolver;
@@ -62,7 +63,7 @@ use Tests\TestCase;
 #[CoversClass(AccessReview::class)]
 final class AccessReviewTest extends TestCase
 {
-    use PreviewsSubjects, ReviewsAccess, UsesAnAuthorizationConnection {
+    use PreviewsSubjects, RefusesThePackage, ReviewsAccess, UsesAnAuthorizationConnection {
         ReviewsAccess::permission insteadof PreviewsSubjects;
     }
 
@@ -945,6 +946,35 @@ final class AccessReviewTest extends TestCase
         $this->expectException(MissingAppKeyException::class);
 
         self::reviews()->trustedPage($query, null, 1);
+    }
+
+    /**
+     * Once the package refuses, every review refuses by its own guard, before
+     * the reviewer is admitted or a row is read.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryReviewRefusesOnceThePackageRefuses(): void
+    {
+        $reviewer = ActingContext::for(StubIdentity::create(['id' => 'user-1']));
+        $query    = ReviewQuery::holders(self::role('reviewed'), ReviewScope::everywhere());
+        $review   = $this->container()->make(AccessReview::class);
+        $sink     = static fn (): null => null;
+
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'review'        => static fn () => $review->review($query, $reviewer),
+            'trusted'       => static fn () => $review->trusted($query),
+            'page'          => static fn () => $review->page($query, $reviewer),
+            'trustedPage'   => static fn () => $review->trustedPage($query),
+            'stream'        => static fn () => $review->stream($query, $reviewer),
+            'trustedStream' => static fn () => $review->trustedStream($query),
+            'export'        => static fn () => $review->export($query, $reviewer, $sink),
+            'trustedExport' => static fn () => $review->trustedExport($query, $sink),
+        ]);
     }
 
     /**

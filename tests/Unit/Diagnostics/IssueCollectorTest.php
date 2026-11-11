@@ -51,6 +51,35 @@ final class IssueCollectorTest extends TestCase
     }
 
     /**
+     * Attempting a check returns nothing when it passes, and the class of what
+     * it threw when it fails, recording the failure as verifying does.
+     *
+     * @return void
+     */
+    public function testAnAttemptReturnsTheClassOfWhatItThrew(): void
+    {
+        $collector = new IssueCollector;
+
+        self::assertNull($collector->attempt('authorization.a', static fn (): bool => true));
+        self::assertSame(InvalidAuthorizationConfigException::class, $collector->attempt(
+            'authorization.b',
+            static fn (): never => throw new InvalidAuthorizationConfigException('authorization.b', 'no', IssueCode::INVALID_VALUE),
+        ));
+        self::assertSame(
+            InvalidPermissionCatalogueException::class,
+            $collector->attempt('authorization.c', static fn (): never => throw new InvalidPermissionCatalogueException('x', 'no')),
+        );
+        self::assertSame(\RuntimeException::class, $collector->attempt('authorization.d', static fn (): never => throw new \RuntimeException('secret')));
+
+        self::assertSame([
+            ['authorization.b', 'invalid_value'],
+            ['authorization.c', 'invalid_catalogue'],
+            ['authorization.d', 'internal'],
+        ], self::pathsAndCodes($collector));
+        self::assertSame(\RuntimeException::class, $collector->findings()->issues[2]->exception);
+    }
+
+    /**
      * A block that is not an array is refused and read as none; a block is
      * returned whole with each unknown key refused on its own.
      *

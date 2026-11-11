@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Query\Reentrancy;
 use SineMacula\Laravel\Authorization\Scopes\AuthorizedScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
@@ -36,7 +37,7 @@ use Tests\TestCase;
 #[CoversClass(AuthorizedScope::class)]
 final class AuthorizedScopeTest extends TestCase
 {
-    use ScopesQueries;
+    use RefusesThePackage, ScopesQueries;
 
     /**
      * Every query of the model keeps the rows `check()` allows the current
@@ -182,5 +183,20 @@ final class AuthorizedScopeTest extends TestCase
         } finally {
             Container::setInstance($container);
         }
+    }
+
+    /**
+     * Once the package refuses, applying the scope refuses by its own guard,
+     * before the manager is asked.
+     *
+     * @return void
+     */
+    public function testApplyingTheScopeRefusesOnceThePackageRefuses(): void
+    {
+        $this->refuseThePackage();
+
+        $this->assertEachRefused([
+            'apply' => static fn () => (new AuthorizedScope('posts:read'))->apply(StubIdentity::query(), new StubIdentity),
+        ]);
     }
 }

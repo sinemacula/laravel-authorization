@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
@@ -20,6 +21,9 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * `isRanked`) that the RBAC guard uses when deciding whether one role may act
  * on another. Extracted from `Role` so the model keeps to schema, relations,
  * and lifecycle.
+ *
+ * The rank and ancestry comparisons refuse while the package is not healthy
+ * (see `PackageState`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -144,6 +148,8 @@ trait HasRoleHierarchy // @phpstan-ignore trait.unused
      */
     public function isAncestorOf(Role $role): bool
     {
+        PackageState::guardCurrent();
+
         /** @var string $selfKey */
         $selfKey = $this->getKey();
 
@@ -184,6 +190,8 @@ trait HasRoleHierarchy // @phpstan-ignore trait.unused
      */
     public function outranks(Role $other): bool
     {
+        PackageState::guardCurrent();
+
         if (!$this->isRanked() || !$other->isRanked()) {
             return false;
         }
@@ -209,6 +217,8 @@ trait HasRoleHierarchy // @phpstan-ignore trait.unused
      */
     public function outranksOrEquals(Role $other): bool
     {
+        PackageState::guardCurrent();
+
         if (!$this->isRanked() || !$other->isRanked()) {
             return false;
         }

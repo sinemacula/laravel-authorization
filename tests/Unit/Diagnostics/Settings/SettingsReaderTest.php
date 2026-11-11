@@ -6,8 +6,10 @@ namespace Tests\Unit\Diagnostics\Settings;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Diagnostics\BootCheck;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\BootCheckOutcome;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Diagnostics\Settings\SettingCatalogue;
 use SineMacula\Laravel\Authorization\Diagnostics\Settings\SettingRow;
@@ -68,6 +70,36 @@ final class SettingsReaderTest extends TestCase
     }
 
     /**
+     * Given what became of each check the diagnostic boot ran, a setting whose
+     * check failed is shown as failed at boot, before its own issue; one left
+     * to the boot that the boot did not run as not run, unless it was refused
+     * itself; one that passed as checked at boot; and one with nothing to build
+     * as ok.
+     *
+     * @return void
+     */
+    public function testEachBootCheckIsShownByWhatBecameOfIt(): void
+    {
+        $context = 'authorization.context.sources';
+        $scopes  = 'authorization.session.scopes';
+        $store   = 'authorization.cache.store';
+        $issues  = [ConfigIssue::internal($context, new \RuntimeException), new ConfigIssue("{$scopes}.0", IssueCode::UNKNOWN_CLASS)];
+        $checks  = [new BootCheck($context, BootCheckOutcome::FAILED, \RuntimeException::class), BootCheck::notRun($scopes), BootCheck::notRun($store)];
+
+        $failed = self::rows([], $issues, [$context, $scopes, $store, 'authorization.attributes.subjects'], $checks);
+
+        self::assertSame('failed_at_boot', $failed[$context]['status']);
+        self::assertSame('refused', $failed[$scopes]['status']);
+        self::assertSame('not_run', $failed[$store]['status']);
+        self::assertSame('checked_at_boot', $failed['authorization.attributes.subjects']['status']);
+
+        $passed = self::rows([], [], [$store], [BootCheck::ran($store, null), BootCheck::notRun($scopes)]);
+
+        self::assertSame('checked_at_boot', $passed[$store]['status']);
+        self::assertSame('ok', $passed[$scopes]['status']);
+    }
+
+    /**
      * A setting set shows its value where it may, its type and an unknown
      * source; one left out shows none and the default source; a setting under a
      * value that is not an array is left out.
@@ -115,11 +147,12 @@ final class SettingsReaderTest extends TestCase
      * @param  mixed  $root
      * @param  list<\SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue>  $issues
      * @param  list<string>  $checkedAtBoot
+     * @param  list<\SineMacula\Laravel\Authorization\Diagnostics\BootCheck>  $bootChecks
      * @return array<string, array<string, mixed>>
      */
-    private static function rows(mixed $root, array $issues = [], array $checkedAtBoot = []): array
+    private static function rows(mixed $root, array $issues = [], array $checkedAtBoot = [], array $bootChecks = []): array
     {
-        $rows = (new SettingsReader($root, new ConfigFindings($issues, $checkedAtBoot)))->rows();
+        $rows = (new SettingsReader($root, new ConfigFindings($issues, $checkedAtBoot), $bootChecks))->rows();
 
         return \array_column(\array_map(static fn (SettingRow $row): array => $row->toArray(), $rows), null, 'path');
     }

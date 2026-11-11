@@ -8,18 +8,24 @@ use Illuminate\Config\Repository;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Diagnostics\BootChecks;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigurationReport;
 use SineMacula\Laravel\Authorization\Diagnostics\Declarations;
+use SineMacula\Laravel\Authorization\Diagnostics\DiagnosticMode;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\Lifetime;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\PackageStatus;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\ReportStatus;
 use SineMacula\Laravel\Authorization\Diagnostics\Inspector;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Diagnostics\SeamRow;
 use SineMacula\Laravel\Authorization\Diagnostics\Settings\SettingCatalogue;
 use SineMacula\Laravel\Authorization\Diagnostics\Settings\SettingRow;
 use Tests\Fixtures\Diagnostics\ExplodingTenantTree;
 use Tests\Fixtures\Diagnostics\Explosions;
+use Tests\Fixtures\Diagnostics\ThrowingContextSource;
 use Tests\Fixtures\GrantHooks\RecordingGrantHook;
 use Tests\Fixtures\GrantHooks\SecondGrantHook;
 use Tests\TestCase;
@@ -154,6 +160,35 @@ final class InspectorTest extends TestCase
         self::assertFalse($rows['authorization.models.rol']['known']);
         self::assertSame('refused', $rows['authorization.bulk.chunk_size']['status']);
         self::assertSame('ok', $rows['authorization.models.role']['status']);
+    }
+
+    /**
+     * Booted for diagnosis, the report shows what the boot stored rather than
+     * checking again: the very issues it found, the failure of a check that
+     * builds what a setting names among them, which the structural check alone
+     * cannot find, and that check's outcome on its setting.
+     *
+     * @return void
+     */
+    public function testBootedForDiagnosisWhatTheBootFoundIsReported(): void
+    {
+        $app = $this->container();
+
+        DiagnosticMode::enable($app);
+        $app['config']->set('authorization.context.sources', [ThrowingContextSource::class]);
+
+        $state = PackageState::start($app);
+
+        (new AuthorizationServiceProvider($app))->boot();
+
+        $report = $this->inspect();
+        $rows   = \array_column(\array_map(static fn (SettingRow $row): array => $row->toArray(), $report->settings), 'status', 'path');
+
+        self::assertSame(PackageStatus::REFUSING, $state->status());
+        self::assertNotSame([], $report->issues);
+        self::assertSame($state->findings()?->issues, $report->issues);
+        self::assertSame('failed_at_boot', $rows[BootChecks::CONTEXT]);
+        self::assertSame(ReportStatus::INCOMPLETE, $report->status);
     }
 
     /**

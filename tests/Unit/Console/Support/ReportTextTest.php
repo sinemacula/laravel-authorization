@@ -69,6 +69,8 @@ final class ReportTextTest extends TestCase
             new SettingRow('authorization.bulk.chunk_size', true, true, [500], 'int', 'skipped'),
             new SettingRow('authorization.connection', true, true, [null], 'null', 'unchecked'),
             new SettingRow('authorization.context.sources', true, true, [['App\One', 'App\Two']], 'array(2)', 'checked_at_boot'),
+            new SettingRow('authorization.session.scopes', true, true, [['read']], 'array(1)', 'failed_at_boot'),
+            new SettingRow('authorization.cache.store', true, true, ['array'], 'string', 'not_run'),
             new SettingRow('authorization.attributes.resources', true, true, [['App\Provider' => 'post']], 'array(1)', 'ok'),
             new SettingRow('authorization.cache.prefix', true, true, null, 'string', 'ok'),
             new SettingRow('authorization.rank.enabled', true, false, null, null, 'ok'),
@@ -81,11 +83,13 @@ final class ReportTextTest extends TestCase
             '[setting authorization.bulk.chunk_size] skipped; 500',
             '[setting authorization.connection] not checked; null',
             '[setting authorization.context.sources] checked at boot; [App\One, App\Two]',
+            '[setting authorization.session.scopes] failed at boot; [read]',
+            '[setting authorization.cache.store] not run at boot; array',
             '[setting authorization.attributes.resources] ok; [App\Provider => post]',
             '[setting authorization.cache.prefix] ok; value not shown (string)',
             '[setting authorization.rank.enabled] ok; not set, so its default applies',
             '[setting authorization.secret] refused; unknown key; value not shown (array(3))',
-        ], \array_slice($lines, 2, 9));
+        ], \array_slice($lines, 2, 11));
     }
 
     /**

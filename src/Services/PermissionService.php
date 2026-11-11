@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
@@ -47,6 +48,9 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  * its mode and the action, once the write commits; the actor is never read from
  * the authenticated user.
  *
+ * Every operation refuses while the package is not healthy (see
+ * `PackageState`), before it reads or writes.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -78,6 +82,8 @@ final class PermissionService
         ?ActingContext $actor = null,
         AuthorizableTenant|Model|null $tenant = null,
     ): Permission {
+        PackageState::guardCurrent();
+
         $class = self::permissionClass();
 
         return RecordWriter::create($actor, PackagePermissions::PERMISSION_CREATE, RecordWriter::ownedBy(new $class, $tenant), $id, [
@@ -100,6 +106,8 @@ final class PermissionService
      */
     public function rename(Permission|string $permission, string $name, ?ActingContext $actor = null): Permission
     {
+        PackageState::guardCurrent();
+
         return RecordWriter::save($actor, PackagePermissions::PERMISSION_RENAME, static fn (): Permission => self::resolve($permission), ['name' => $name]);
     }
 
@@ -115,6 +123,8 @@ final class PermissionService
      */
     public function describe(Permission|string $permission, ?string $description, ?ActingContext $actor = null): Permission
     {
+        PackageState::guardCurrent();
+
         return RecordWriter::save($actor, PackagePermissions::PERMISSION_UPDATE, static fn (): Permission => self::resolve($permission), ['description' => $description]);
     }
 
@@ -130,6 +140,8 @@ final class PermissionService
      */
     public function delete(Permission|string $permission, ?ActingContext $actor = null): void
     {
+        PackageState::guardCurrent();
+
         RecordWriter::delete($actor, PackagePermissions::PERMISSION_DELETE, static fn (): Permission => self::resolve($permission));
     }
 
@@ -147,6 +159,8 @@ final class PermissionService
      */
     public function find(string $name, ?string $guard = null): Permission
     {
+        PackageState::guardCurrent();
+
         return self::lookup($name, $guard);
     }
 
@@ -160,6 +174,8 @@ final class PermissionService
      */
     public function list(?string $guard = null, ?ActingContext $actor = null): Collection
     {
+        PackageState::guardCurrent();
+
         // @phpstan-ignore staticMethod.dynamicCall
         return self::permissionClass()::query()
             ->when($guard !== null, static fn (Builder $query) => $query->where(static fn (Builder $inner) => $inner->where('guard', $guard)->orWhereNull('guard')))

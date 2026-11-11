@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
+use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
@@ -38,6 +39,9 @@ use SineMacula\Laravel\Authorization\Support\RolePolicies;
  * (AUTHZ-11.1). Without one it is trusted system work: nothing is decided, so a
  * helper called without an actor is an integration surface for the
  * application's own code, never an endpoint for user-controlled administration.
+ *
+ * Reading the policies refuses while the package is not healthy (see
+ * `PackageState`), before the resolution cache is read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -214,6 +218,8 @@ trait HasPolicies // @phpstan-ignore trait.unused
      */
     public function getPolicies(): array
     {
+        PackageState::guardCurrent();
+
         $resolve = fn (ResolutionPins $pins): Resolution => GrantResolver::policies($this->policies(), $pins, RolePolicies::heldBy($this));
 
         return ResolutionCache::instance()?->rememberPolicies($this, $resolve) ?? $resolve(new ResolutionPins)->value;
