@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use Tests\Feature\Stubs\PermissiveActionCatalogue;
 use Tests\Feature\Stubs\PermissiveContextKeyCatalogue;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
+use Tests\Fixtures\TenantTrees\KeyedTenantTree;
 
 // phpcs:enable PSR12.Files.FileHeader
 
@@ -217,9 +218,10 @@ abstract class TestCase extends OrchestraTestCase
      * table's primary key (so it can hold null, empty and long keys), each with
      * tenant columns, tickets whose tenant is an integer team id, posts whose
      * tenant id column is an integer, documents keyed by a uuid, posts keyed by
-     * a given 64-bit integer (SQLite's rowid there), and the closure table of
-     * the fixture tenant tree. The document key and the closure table compare
-     * bytes on MySQL, as a key or a tenant compared with a value must.
+     * a given 64-bit integer (SQLite's rowid there), the closure table of the
+     * fixture tenant tree, and those of the trees keyed by integers and UUIDs.
+     * The document key and the closure table compare bytes on MySQL, as a key
+     * or a tenant compared with a value must.
      *
      * @return void
      */
@@ -293,6 +295,8 @@ abstract class TestCase extends OrchestraTestCase
 
             $schema->unsignedInteger('depth');
         });
+
+        KeyedTenantTree::createTables();
     }
 
     /**

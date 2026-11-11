@@ -23,8 +23,13 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * The rank, possession and administered-scope rules read what the grantee or
  * the actor holds, and what could cap or deny the actor, across this reach (see
  * `RankComparison`, `PossessionLimits` and `AdministeredScope`). A tree that
- * cannot be read, or a subtree query that is no query, throws, so the reach is
- * never guessed.
+ * cannot be read, a subtree query that is no query, or one returning a row
+ * without both its tenant's type and key, throws, the last an
+ * `UnexpectedValueException` naming the tree, so the reach is never guessed.
+ * The rules reading the reach catch it and fail closed, without logging it: the
+ * rank rule answers `administration.rank_uncomparable`, the possession route
+ * counts every permission as limited, and a role's resource policies count as
+ * unreadable, each refusing the change (see `Contracts\TenantTree`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -132,11 +137,35 @@ final readonly class GrantReach
         $below = [];
 
         foreach ($query->get() as $row) {
-            /** @var array{tenant_type: int|string, tenant_id: int|string} $columns */
-            $columns = (array) $row;
-            $below[] = new Reference((string) $columns['tenant_type'], (string) $columns['tenant_id']);
+            $below[] = self::tenantOf((array) $row, $tree);
         }
 
         return $below;
+    }
+
+    /**
+     * Return the tenant a row of the tree's subtree names, refusing a row
+     * without both its type and its key, which the tree must select for every
+     * tenant, rather than guess the type or read a key as some other tenant's.
+     *
+     * @param  array<array-key, mixed>  $columns
+     * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
+     * @return \SineMacula\Laravel\Authorization\Support\Reference
+     *
+     * @throws \UnexpectedValueException
+     */
+    private static function tenantOf(array $columns, TenantTree $tree): Reference
+    {
+        $type = $columns['tenant_type'] ?? null;
+        $id   = $columns['tenant_id']   ?? null;
+
+        if ((!\is_string($type) && !\is_int($type)) || (!\is_string($id) && !\is_int($id))) {
+            $message = 'The subtree of the tenant tree ' . $tree::class . ' returned a row without both a tenant_type and a tenant_id: '
+                . 'a subtree must select both columns, typed, for every tenant.';
+
+            throw new \UnexpectedValueException($message);
+        }
+
+        return new Reference((string) $type, (string) $id);
     }
 }
