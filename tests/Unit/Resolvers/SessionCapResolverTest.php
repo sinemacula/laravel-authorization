@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Feature\Stubs\CredentialScopesSource;
 use Tests\Feature\Stubs\StubMachine;
@@ -73,8 +74,8 @@ final class SessionCapResolverTest extends TestCase
         $user     = new \stdClass;
         $resolver = new SessionCapResolver(new CredentialScopesSource, new SessionScopes(['editor' => ['posts:*']]));
 
-        self::assertSame([['credential', ['posts:*', 'users:read']]], $resolver->capsFor(new Subject($user, $user, scopes: ['editor', 'users:read']))->caps);
-        self::assertSame([['credential', []]], $resolver->capsFor(new Subject($user, $user, scopes: []))->caps);
+        self::assertSame([['credential', ['posts:*', 'users:read']]], $resolver->capsFor(new Subject($user, $user, scopes: CredentialScopes::of(['editor', 'users:read'])))->caps);
+        self::assertSame([['credential', []]], $resolver->capsFor(new Subject($user, $user, scopes: CredentialScopes::of([])))->caps);
         self::assertSame([], $resolver->capsFor(new Subject($user, $user))->caps);
     }
 

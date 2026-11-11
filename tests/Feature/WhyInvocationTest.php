@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ActsAsTenant;
@@ -385,7 +386,7 @@ final class WhyInvocationTest extends TestCase
         $this->app?->forgetInstance('authorization');
         $this->app?->forgetInstance(AuthorizationManager::class);
 
-        $subject  = new Subject($user, $user, null, null, 'web', 'session-1', [], true);
+        $subject  = new Subject($user, $user, null, null, 'web', 'session-1', CredentialScopes::of([]), true);
         $platform = self::of(['action' => 'posts:read'], [])->explain(self::manager(), $subject);
         $asked    = \array_pop($source->calls);
 

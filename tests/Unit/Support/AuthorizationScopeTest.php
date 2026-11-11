@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\StubIdentity;
@@ -193,15 +194,16 @@ final class AuthorizationScopeTest extends TestCase
         $user     = new StubIdentity;
         $platform = AuthorizationScope::platform('admin');
         $tenant   = AuthorizationScope::tenant(new Reference('accounts', '7'));
-        $marked   = new Subject($user, $user, null, 'web', 'api', 'session-1', ['posts:read'], true);
+        $scopes   = CredentialScopes::of(['posts:read']);
+        $marked   = new Subject($user, $user, null, 'web', 'api', 'session-1', $scopes, true);
 
-        self::assertSame(['posts:read'], $platform->subjectIn($marked)->scopes);
+        self::assertSame($scopes, $platform->subjectIn($marked)->scopes);
         self::assertTrue($platform->subjectIn($marked)->platform);
         self::assertSame('admin', $platform->subjectIn($marked)->application);
-        self::assertSame(['posts:read'], $tenant->subjectIn($marked)->scopes);
+        self::assertSame($scopes, $tenant->subjectIn($marked)->scopes);
         self::assertFalse($tenant->subjectIn($marked)->platform);
         self::assertSame($tenant->tenant, $tenant->subjectIn($marked)->tenant);
-        self::assertSame([], $platform->subjectIn(new Subject($user, scopes: []))->scopes);
+        self::assertSame([], $platform->subjectIn(new Subject($user, scopes: CredentialScopes::of([])))->scopes?->scopes());
         self::assertNull($platform->subjectIn(new Subject($user))->scopes);
         self::assertFalse($platform->subjectIn(new Subject($user))->platform);
     }
