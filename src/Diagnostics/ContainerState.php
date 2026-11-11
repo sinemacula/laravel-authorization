@@ -111,6 +111,25 @@ final class ContainerState
     }
 
     /**
+     * Return the abstracts the container forgets between requests and jobs,
+     * those bound with `scoped()`, in the order they were bound, or none for a
+     * container that is not Laravel's.
+     *
+     * @param  \Illuminate\Contracts\Container\Container  $container
+     * @return list<string>
+     */
+    public static function scopedAbstracts(Container $container): array
+    {
+        if (!$container instanceof BaseContainer) {
+            return [];
+        }
+
+        $scoped = \Closure::bind(static fn (BaseContainer $container): array => $container->scopedInstances, null, BaseContainer::class);
+
+        return \array_values(\array_filter($scoped($container), \is_string(...)));
+    }
+
+    /**
      * Return the extenders the container still holds for the abstract, after
      * its alias is followed, in the order they were registered. An extender
      * Laravel applied at once to an instance it already held is not kept, so it
