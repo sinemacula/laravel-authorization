@@ -730,6 +730,44 @@ type and an id shaped as the fixture's are, so integer or UUID key columns can h
 every id is digits, a new UUID when every id is a UUID, else `outside`. A tree whose keys take another shape overrides
 it with one its storage can hold.
 
+**A fake tree for tests.** To test the rest of an application under a hierarchy without a tree table of its own, bind
+`SineMacula\Laravel\Authorization\Testing\FakeTenantTree`, an in-memory tree built from typed tenants, each with its
+parent, or null for one at the top, every parent before its children, or added one at a time:
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Testing\FakeTenantTree;
+
+$tree = FakeTenantTree::of([
+    [new Reference('organisation', '1'), null],
+    [new Reference('team', '1'), new Reference('organisation', '1')],
+]);
+
+$tree->add(new Reference('team', '2'), new Reference('organisation', '1'));
+
+$this->app->instance(TenantTree::class, $tree);
+```
+
+Tenants are told apart by type and id together, byte for byte, so tenants of different types sharing an id are never
+confused, and a tenant the tree does not hold is one at the top with nothing below it. Adding a tenant held already, or
+one under a parent not held, throws an `InvalidArgumentException`. The fake keeps the contract above: the package's own
+tests pass the kit against it, with mixed types, on SQLite, PostgreSQL and MySQL. Its subtree is a query of literal
+rows, reading no table, however many tenants it holds, on the application's default connection as it stands when the
+subtree is asked for, so it nests in `whereAuthorized()` for models on that connection, and in the grant scope query
+when the package's tables are there too. When the models, or the package's tables, are on another connection, name it as
+the second argument of `of()`, or the first of the constructor: `new FakeTenantTree('tenants')`.
+
+The fake can change once bound: `move()` puts a tenant it holds under another parent, or at the top for null, carrying
+the tenants below it, and refuses a parent that is the tenant or below it. As with a real tree, the package keeps what
+it has read of the tree for the request, so report the move before asking again:
+
+```php
+$tree->move(new Reference('team', '2'), null);
+
+Authorization::treeChanged(new Reference('team', '2'));
+```
+
 The trait methods (`assignRole()`, `givePermission()`, `attachPolicy()`, `$role->givePermission()` and the others) go
 through the same services. Without `actor:` they are trusted; given `actor:`, they pass it on, so the change is decided
 as that administrator (see [Trusted surfaces](#delegated-administration)). A raw relation write such as
@@ -5014,7 +5052,8 @@ $this->actingAsSubject(new Subject($user, $user, session: 'session-1'));
 ```
 
 `SineMacula\Laravel\Authorization\Testing\Concerns\TenantTreeContract` checks a tenant tree of your own against the
-contract the package reads it by (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)).
+contract the package reads it by, and `SineMacula\Laravel\Authorization\Testing\FakeTenantTree` is an in-memory tree
+to bind in tests of your own (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)).
 
 ### Design notes
 
