@@ -42,6 +42,20 @@ final class ReviewResultTest extends TestCase
     }
 
     /**
+     * Only a result of a review filtered by an action says its rows cover only
+     * the stored grants.
+     *
+     * @return void
+     */
+    public function testItSaysWhetherItCoversOnlyTheStoredGrants(): void
+    {
+        $at = new CarbonImmutable('2030-01-01 00:00:00', 'UTC');
+
+        self::assertFalse((new ReviewResult([], false, true, $at))->isStoredInventoryOnly);
+        self::assertTrue((new ReviewResult([], false, true, $at, true))->isStoredInventoryOnly);
+    }
+
+    /**
      * Return a row with the key.
      *
      * @param  string  $key

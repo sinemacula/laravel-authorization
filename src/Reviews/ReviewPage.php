@@ -22,6 +22,12 @@ use Carbon\CarbonImmutable;
  * not a snapshot: a row written or revoked between pages may appear or
  * disappear, but a row present throughout is returned exactly once.
  *
+ * `isStoredInventoryOnly` is true for a review of holdings filtered by an
+ * action (see `ReviewQuery::forAction()`): its rows are the stored grant routes
+ * giving the action, and a policy a dynamic `PolicyStore` gives, or a policy
+ * attached to a resource, may give it too outside what the review reads, so the
+ * rows are never the complete set of places the action is allowed.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -34,6 +40,7 @@ final readonly class ReviewPage
      * @param  string|null  $nextCursor
      * @param  \Carbon\CarbonImmutable  $reviewedAt
      * @param  bool  $isComplete
+     * @param  bool  $isStoredInventoryOnly
      */
     public function __construct(
 
@@ -48,6 +55,9 @@ final readonly class ReviewPage
 
         /** Whether the identity directory listed every principal of the identity whose holdings were reviewed; true for every other review. */
         public bool $isComplete,
+
+        /** Whether the rows cover only the stored grants, outside which a dynamic or resource policy may give the action; false for a review not filtered by one. */
+        public bool $isStoredInventoryOnly = false,
     ) {}
 
     /**

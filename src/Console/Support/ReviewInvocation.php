@@ -31,8 +31,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   `role`, `permission` or `policy`, or the definition's morph type; and
  *   `--direct-only` to list its direct grants alone. `holdings` takes the saved
  *   subject as `{morphType}:{key}`, which the console subject resolver resolves
- *   to its principal and identity, as `authorization:why` does. The other
- *   queries take no reference.
+ *   to its principal and identity, as `authorization:why` does, and `--action`
+ *   to keep only the routes whose permission or policy gives the action (see
+ *   `ReviewQuery::forAction()`), one action's literal name. The other queries
+ *   take no reference.
  * - `expiring` takes `--from` and `--until`, each a date and time read in UTC
  *   when it names no zone; `granted_by` takes `--actor` as `{morphType}:{key}`,
  *   matched exactly as stored; `unused` takes `--since`, read as `--from` is.
@@ -56,6 +58,9 @@ final readonly class ReviewInvocation
 {
     /** @var array<string, \SineMacula\Laravel\Authorization\Enums\GrantTarget> The short names a holders reference may give its type by. */
     private const array TARGETS = ['role' => GrantTarget::ROLE, 'permission' => GrantTarget::PERMISSION, 'policy' => GrantTarget::POLICY];
+
+    /** @var list<string> The options a query takes without needing them. */
+    private const array OPTIONAL = ['direct-only', 'action'];
 
     /**
      * Create a new invocation.
@@ -125,7 +130,7 @@ final readonly class ReviewInvocation
 
         return match ($this->kind) {
             ReviewKind::HOLDERS    => ReviewQuery::holders(self::target((string) $this->reference), $this->scope, ($options['direct-only'] ?? false) === true),
-            ReviewKind::HOLDINGS   => ReviewQuery::holdings(self::subject($subjects, (string) $this->reference), $this->scope),
+            ReviewKind::HOLDINGS   => self::forAction(ReviewQuery::holdings(self::subject($subjects, (string) $this->reference), $this->scope), $options['action'] ?? null),
             ReviewKind::EXPIRING   => ReviewQuery::expiring($this->scope, $this->instantOf('from'), $this->instantOf('until')),
             ReviewKind::GRANTED_BY => ReviewQuery::grantedBy(self::reference('actor', $options['actor'] ?? null), $this->scope),
             ReviewKind::UNUSED     => ReviewQuery::unused($this->scope, $this->instantOf('since')),
@@ -184,8 +189,9 @@ final readonly class ReviewInvocation
 
     /**
      * Refuse an option the query does not take, and a missing one it needs:
-     * `--direct-only` is the holders', `--from` and `--until` the expiries',
-     * `--actor` an actor's grants', and `--since` the unused grants'.
+     * `--direct-only` is the holders', `--action` the holdings', `--from` and
+     * `--until` the expiries', `--actor` an actor's grants', and `--since` the
+     * unused grants'; the first two may be left out.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\ReviewKind  $kind
      * @param  array<string, mixed>  $options
@@ -197,6 +203,7 @@ final readonly class ReviewInvocation
     {
         $owners = [
             'direct-only' => ReviewKind::HOLDERS,
+            'action'      => ReviewKind::HOLDINGS,
             'from'        => ReviewKind::EXPIRING,
             'until'       => ReviewKind::EXPIRING,
             'actor'       => ReviewKind::GRANTED_BY,
@@ -210,7 +217,7 @@ final readonly class ReviewInvocation
                 throw new \InvalidArgumentException("The --{$option} option is taken by the {$owner->value} query alone.");
             }
 
-            if (!$isGiven && $kind === $owner && $option !== 'direct-only') {
+            if (!$isGiven && $kind === $owner && !\in_array($option, self::OPTIONAL, true)) {
                 throw new \InvalidArgumentException("The {$owner->value} query needs the --{$option} option.");
             }
         }
@@ -255,6 +262,30 @@ final readonly class ReviewInvocation
 
         if (\count(\array_filter($given)) > 1) {
             throw new \InvalidArgumentException('Give at most one of the --tenant, --rooted-within and --everywhere options.');
+        }
+    }
+
+    /**
+     * Return the review of holdings keeping only the routes giving the action
+     * `--action` names, or every route when it is not given, refusing one that
+     * is no action's literal name by the option alone.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
+     * @param  mixed  $action
+     * @return \SineMacula\Laravel\Authorization\Reviews\ReviewQuery
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function forAction(ReviewQuery $query, mixed $action): ReviewQuery
+    {
+        if ($action === null) {
+            return $query;
+        }
+
+        try {
+            return $query->forAction(\is_string($action) ? $action : '');
+        } catch (\InvalidArgumentException) {
+            throw new \InvalidArgumentException('The --action option must be one action\'s name, with no wildcard (e.g. audit:read).');
         }
     }
 

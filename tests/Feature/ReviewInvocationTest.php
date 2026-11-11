@@ -59,6 +59,12 @@ final class ReviewInvocationTest extends TestCase
         yield 'direct only for an actor' => [['query' => 'granted_by'], ['actor' => 'u:a', 'direct-only' => true], 'The --direct-only option is taken by the holders query alone.'];
         yield 'a window for holders' => [$holders, ['from' => 'now'], 'The --from option is taken by the expiring query alone.'];
         yield 'an actor for holders' => [$holders, ['actor' => 'u:a'], 'The --actor option is taken by the granted_by query alone.'];
+        yield 'an action for holders' => [$holders, ['action' => 'audit:read'], 'The --action option is taken by the holdings query alone.'];
+        yield 'an action for expiring' => [
+            ['query' => 'expiring'],
+            ['from' => 'now', 'until' => 'tomorrow', 'action' => 'audit:read'],
+            'The --action option is taken by the holdings query alone.',
+        ];
         yield 'expiring with no start' => [['query' => 'expiring'], ['until' => 'tomorrow'], 'The expiring query needs the --from option.'];
         yield 'expiring with no end' => [['query' => 'expiring'], ['from' => 'now'], 'The expiring query needs the --until option.'];
         yield 'an actor\'s grants with no actor' => [['query' => 'granted_by'], [], 'The granted_by query needs the --actor option.'];
@@ -210,6 +216,34 @@ final class ReviewInvocationTest extends TestCase
             self::fail('A refusing resolver resolved a subject.');
         } catch (UnresolvedSubjectException $exception) {
             self::assertSame(['The reference names no saved row.', $refused], [$exception->getMessage(), $exception->getPrevious()]);
+        }
+    }
+
+    /**
+     * A review of holdings keeps only the routes giving the action `--action`
+     * names, and every route without it; an action that is no literal name, a
+     * wildcard, a character no name holds or none at all, is refused by the
+     * option alone, never the value given.
+     *
+     * @return void
+     */
+    public function testAnActionNarrowsTheHoldings(): void
+    {
+        $ann      = StubIdentity::query()->create(['id' => 'ann']);
+        $resolver = new FixedConsoleSubjectResolver(new Subject($ann, $ann));
+        $holdings = ['query' => 'holdings', 'reference' => 'user:ann'];
+
+        self::assertSame('audit:read', ReviewInvocation::of($holdings, ['action' => 'audit:read'])->query($resolver)->action);
+        self::assertNull(ReviewInvocation::of($holdings, [])->query($resolver)->action);
+        self::assertNull(ReviewInvocation::of($holdings, ['action' => null])->query($resolver)->action);
+
+        foreach (['audit:*', '*', 'sentinel value', '', true] as $action) {
+            try {
+                ReviewInvocation::of($holdings, ['action' => $action])->query($resolver);
+                self::fail('An action that is no literal name was taken.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame('The --action option must be one action\'s name, with no wildcard (e.g. audit:read).', $exception->getMessage());
+            }
         }
     }
 
