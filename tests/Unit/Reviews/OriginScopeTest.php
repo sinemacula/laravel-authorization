@@ -6,6 +6,7 @@ namespace Tests\Unit\Reviews;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Reviews\Enums\ReachKind;
 use SineMacula\Laravel\Authorization\Reviews\OriginScope;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -61,5 +62,22 @@ final class OriginScopeTest extends TestCase
         self::assertNull($noType->tenant());
         self::assertSame(['tenant' => ['type' => 'tenant', 'id' => null], 'application' => null, 'include_subtree' => true], $noKey->toArray());
         self::assertSame(['tenant' => ['type' => null, 'id' => 't1'], 'application' => 'web', 'include_subtree' => false], $noType->toArray());
+    }
+
+    /**
+     * A row reaches the platform when it names no tenant column, whatever its
+     * stored reach; else its tenant and those below when it reaches below, or
+     * its tenant alone; half a tenant reads by the half it names.
+     *
+     * @return void
+     */
+    public function testItSaysHowFarItReaches(): void
+    {
+        self::assertSame(ReachKind::PLATFORM, (new OriginScope(null, null, 'web', false))->reach());
+        self::assertSame(ReachKind::PLATFORM, OriginScope::of(GrantScope::platform())->reach());
+        self::assertSame(ReachKind::SUBTREE, (new OriginScope('tenant', 't1', null, true))->reach());
+        self::assertSame(ReachKind::NODE, (new OriginScope('tenant', 't1', null, false))->reach());
+        self::assertSame(ReachKind::SUBTREE, (new OriginScope('tenant', null, null, true))->reach());
+        self::assertSame(ReachKind::NODE, (new OriginScope(null, 't1', null, false))->reach());
     }
 }

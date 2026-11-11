@@ -744,7 +744,7 @@ final class GrantTableTest extends TestCase
         $table->grant($unasked->id, null);
         self::table('user-2')->grant($forever->id, null);
 
-        $live = $table->live([$forever->id, $later->id, $expired->id]);
+        $live = \array_keys($table->liveRows([$forever->id, $later->id, $expired->id]));
 
         \sort($live);
 
@@ -753,9 +753,9 @@ final class GrantTableTest extends TestCase
         \sort($expected);
 
         self::assertSame($expected, $live);
-        self::assertSame([], self::table(tenant: self::tenant())->live([$forever->id]));
-        self::assertSame([], $table->live([]));
-        self::assertSame([$forever->id], $table->live([$forever->id, $later->id], Carbon::parse(self::NOW)->addDays(2)));
+        self::assertSame([], self::table(tenant: self::tenant())->liveRows([$forever->id]));
+        self::assertSame([], $table->liveRows([]));
+        self::assertSame([$forever->id], \array_keys($table->liveRows([$forever->id, $later->id], Carbon::parse(self::NOW)->addDays(2))));
     }
 
     /**
@@ -805,11 +805,11 @@ final class GrantTableTest extends TestCase
 
         $locks = $this->recordRowLocks();
 
-        self::assertSame([$forever->id], $table->live([$forever->id, $expired->id]));
+        self::assertSame([$forever->id], \array_keys($table->liveRows([$forever->id, $expired->id])));
         self::assertSame([null, true], $table->liveRow($forever->id));
         self::assertCount(0, $locks);
 
-        self::assertSame([$forever->id], $table->live([$forever->id, $expired->id], isLocked: true));
+        self::assertSame([$forever->id], \array_keys($table->liveRows([$forever->id, $expired->id], isLocked: true)));
         self::assertSame([null, true], $table->liveRow($forever->id, isLocked: true));
         self::assertNull($table->liveRow($expired->id, isLocked: true));
         self::assertSame(['authorizable_roles', 'authorizable_roles', 'authorizable_roles'], \array_column($locks->getArrayCopy(), 0));
@@ -817,6 +817,138 @@ final class GrantTableTest extends TestCase
         foreach ($locks as [, $bindings]) {
             self::assertContains('user-1', $bindings);
         }
+    }
+
+    /**
+     * The live rows are read with their expiry and reach, keyed by key, in the
+     * scope alone and among the keys asked about: one that has expired, at the
+     * instant given or now, is not live, and another grantee's, another scope's
+     * or another key's is never read; asked to lock, they are read under a row
+     * lock of the grantee's rows, and as they are read without one.
+     *
+     * @return void
+     */
+    public function testTheLiveRowsAreReadWithTheirExpiryAndReach(): void
+    {
+        $forever = Role::create(['name' => 'forever']);
+        $later   = Role::create(['name' => 'later']);
+        $expired = Role::create(['name' => 'expired']);
+        $unasked = Role::create(['name' => 'unasked']);
+        $below   = self::table(tenant: self::tenant());
+        $table   = self::table(tenant: self::tenant(), includeSubtree: false);
+        $asked   = [$forever->id, $later->id, $expired->id];
+
+        $table->grant($forever->id, null);
+        $below->grant($later->id, Carbon::parse(self::NOW)->addDay());
+        $table->grant($expired->id, Carbon::parse(self::NOW)->subDay());
+        $table->grant($unasked->id, null);
+        self::table('user-2', tenant: self::tenant())->grant($expired->id, null);
+        self::table()->grant($expired->id, null);
+
+        $locks = $this->recordRowLocks();
+        $rows  = $table->liveRows($asked);
+
+        self::assertEquals([$forever->id => [null, false], $later->id => [Carbon::parse(self::NOW)->addDay(), true]], $rows);
+        self::assertSame('UTC', $rows[$later->id][0]?->getTimezone()->getName());
+        self::assertSame([$forever->id], \array_keys($table->liveRows($asked, Carbon::parse(self::NOW)->addDays(2))));
+        self::assertSame([], $table->liveRows([]));
+        self::assertSame([$expired->id => [null, true]], self::table()->liveRows($asked));
+        self::assertCount(0, $locks);
+        self::assertEquals($rows, $table->liveRows($asked, isLocked: true));
+        self::assertSame(['authorizable_roles'], \array_column($locks->getArrayCopy(), 0));
+
+        foreach ($locks as [, $bindings]) {
+            self::assertContains('user-1', $bindings);
+        }
+    }
+
+    /**
+     * A writer of the same rows with the given reach writes that reach, in the
+     * same scope, for the same grantee and actor, and leaves the writer it was
+     * made from writing its own.
+     *
+     * @return void
+     */
+    public function testAWriterOfTheSameRowsCanWriteTheOtherReach(): void
+    {
+        $role  = self::role();
+        $other = self::role('viewer');
+        $actor = new Reference('stub_identity', 'admin');
+        $below = new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', 'user-1', $actor, self::tenant(), true, 'admin');
+        $node  = $below->reaching(false);
+
+        $node->grant($role->id, null);
+        $below->grant($other->id, null);
+
+        self::assertEquals([$role->id => false, $other->id => true], self::reaches());
+        self::assertEqualsCanonicalizing([[$role->id, 'stub_identity', 'admin'], [$other->id, 'stub_identity', 'admin']], self::grantors());
+        $scopes = DB::table('authorizable_roles')->distinct()->get(['tenant_type', 'tenant_id', 'application']);
+
+        self::assertSame([['stub_tenant', 'tenant-a', 'admin']], $scopes->map(static fn (object $row): array => \array_values((array) $row))->all());
+        self::assertSame(GrantOutcome::REACH_CHANGED, $node->reaching(true)->grant($role->id, null)->outcome);
+        self::assertSame(['user-1', 'user-1'], DB::table('authorizable_roles')->pluck('authorizable_id')->all());
+    }
+
+    /**
+     * The expiry a row carries after a write is the one it kept when only its
+     * reach changed, else the one it was written with.
+     *
+     * @return void
+     */
+    public function testTheExpiryAfterAWriteIsTheOneKeptOnlyForAChangedReach(): void
+    {
+        $kept    = Carbon::parse('2026-07-02 12:00:00');
+        $written = Carbon::parse('2026-07-09 12:00:00');
+
+        self::assertSame($kept, (new GrantChange(GrantOutcome::REACH_CHANGED, $kept))->expiryAfter($written));
+        self::assertNull((new GrantChange(GrantOutcome::REACH_CHANGED))->expiryAfter($written));
+
+        foreach ([GrantOutcome::GRANTED, GrantOutcome::REARMED, GrantOutcome::EXPIRY_CHANGED, GrantOutcome::UNCHANGED] as $outcome) {
+            self::assertSame($written, (new GrantChange($outcome, $kept))->expiryAfter($written), $outcome->value);
+            self::assertNull((new GrantChange($outcome, $kept))->expiryAfter(null), $outcome->value);
+        }
+    }
+
+    /**
+     * Re-arming with the reach grants a row not held with the writer's reach,
+     * changes the reach alone of a live row held with the other, keeping its
+     * expiry and its row, reported with that expiry and recording the actor,
+     * leaves one held with the same reach as it is, and re-arms an expired one
+     * with the new expiry and the writer's reach, its liveness judged at the
+     * instant given.
+     *
+     * @return void
+     */
+    public function testRearmingWithTheReachChangesTheReachOfALiveRowInPlace(): void
+    {
+        $held    = self::role();
+        $fresh   = self::role('viewer');
+        $actor   = new Reference('stub_identity', 'admin');
+        $expiry  = Carbon::parse('2026-07-02 12:00:00');
+        $another = Carbon::parse('2026-07-09 12:00:00');
+
+        self::table(tenant: self::tenant())->grant($held->id, $expiry);
+
+        Carbon::setTestNow('2026-07-01 12:30:00');
+
+        $node   = self::table(grantedBy: $actor, tenant: self::tenant(), includeSubtree: false);
+        $change = $node->rearmWithReach($held->id, $another);
+
+        self::assertSame(GrantOutcome::REACH_CHANGED, $change->outcome);
+        self::assertSame('2026-07-02 12:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
+        self::assertEquals([$held->id => false], self::reaches());
+        self::assertSame(['2026-07-02 12:00:00'], self::expiries());
+        self::assertSame([self::NOW, '2026-07-01 12:30:00'], [self::rows()[0]['created_at'], self::rows()[0]['updated_at']]);
+        self::assertSame([[$held->id, 'stub_identity', 'admin']], self::grantors());
+        self::assertSame(GrantOutcome::UNCHANGED, $node->rearmWithReach($held->id, $another)->outcome);
+        self::assertSame(GrantOutcome::GRANTED, $node->rearmWithReach($fresh->id, null)->outcome);
+        self::assertEquals([$held->id => false, $fresh->id => false], self::reaches());
+
+        $change = self::table(tenant: self::tenant())->rearmWithReach($held->id, $another, Carbon::parse('2026-07-03 12:00:00'));
+
+        self::assertSame(GrantOutcome::REARMED, $change->outcome);
+        self::assertEquals([$held->id => true, $fresh->id => false], self::reaches());
+        self::assertSame('2026-07-09 12:00:00', DB::table('authorizable_roles')->where('role_id', $held->id)->value('expires_at'));
     }
 
     /**

@@ -9,7 +9,8 @@ use Carbon\CarbonImmutable;
 /**
  * One page of an access review as it was read: its rows, in the review's order,
  * where the next page starts (none on the last), whether the identity's
- * principals could all be listed, and the instant it was read at.
+ * principals could all be listed, the instant it was read at, and whether its
+ * rows cover only the stored grants.
  *
  * `AccessReview` reads every review, page, stream and export through the one
  * read that returns this (D22), then shapes it as a `ReviewResult`, a
@@ -29,6 +30,7 @@ final readonly class PageRead
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewPosition|null  $next
      * @param  bool  $isComplete
      * @param  \Carbon\CarbonImmutable  $at
+     * @param  bool  $isStoredInventoryOnly
      */
     public function __construct(
 
@@ -43,5 +45,8 @@ final readonly class PageRead
 
         /** The instant the review is made at, in UTC, frozen for every page. */
         public CarbonImmutable $at,
+
+        /** Whether the rows cover only the stored grants, as a review filtered by an action says; false for every other review. */
+        public bool $isStoredInventoryOnly = false,
     ) {}
 }

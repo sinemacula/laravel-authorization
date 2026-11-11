@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Reviews\AccessReview;
 use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
+use SineMacula\Laravel\Authorization\Reviews\ReviewResource;
 use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Subject;
@@ -924,6 +925,159 @@ final class AccessReviewTest extends TestCase
         $this->expectException(ReviewExportException::class);
 
         self::reviews()->trustedExport($query, $readOnly);
+    }
+
+    /**
+     * A review of where a subject holds an action says its rows cover only the
+     * stored grants, on its result and on every page, and an unfiltered one
+     * does not; its pages, stream and export return the same rows, each with
+     * its evidence, in one order; and its cursor serves it alone: one of an
+     * unfiltered review or of another action is refused for it, and its own for
+     * them, as is one changed in any byte.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAReviewOfAnActionPagesStreamsAndExportsAlike(): void
+    {
+        self::keyCursors();
+
+        $ann  = self::identity('ann');
+        $read = self::permission('audit:read');
+
+        foreach ([null, self::tenant('org1'), self::tenant('acct1')] as $tenant) {
+            self::grants()->grantPermission($ann, $read, tenant: $tenant);
+            self::grants()->grantPermission($ann, self::permission('other:' . ($tenant->id ?? 'platform')), tenant: $tenant);
+        }
+
+        self::grants()->grantPermission($ann, self::permission('audit:*'));
+
+        $plain = ReviewQuery::holdings(new Subject($ann, $ann), ReviewScope::everywhere());
+        $query = $plain->forAction('audit:read');
+
+        $result = self::trusted($query);
+        $first  = self::reviews()->trustedPage($query, null, 2);
+        $keys   = static fn (iterable $rows): array => \array_map(static fn (ReviewRow $row): string => $row->rowKey, [...$rows]);
+
+        self::assertSame([true, false], [$result->isStoredInventoryOnly, self::trusted($plain)->isStoredInventoryOnly]);
+        self::assertSame([true, false], [$first->isStoredInventoryOnly, self::reviews()->trustedPage($plain, null, 2)->isStoredInventoryOnly]);
+        self::assertCount(4, $result->rows);
+        self::assertSame($keys($result->rows), [...$keys($first->rows), ...$keys(self::reviews()->trustedPage($query, $first->nextCursor, 2)->rows)]);
+        self::assertSame($keys($result->rows), $keys(self::reviews()->trustedStream($query, 3)));
+
+        $exported = [];
+
+        self::reviews()->trustedExport($query, static function (string $line) use (&$exported): void {
+            $exported[] = \json_decode($line, true, 512, \JSON_THROW_ON_ERROR);
+        }, 3);
+
+        self::assertSame(['audit:read', true], [$exported[0]['action'] ?? null, $exported[0]['stored_inventory_only'] ?? null]);
+        self::assertSame(\array_map(static fn (array $row): array => ['record' => 'row', ...$row], $result->toArray()), \array_slice($exported, 1, 4));
+
+        $cursor = (string) $first->nextCursor;
+
+        foreach ([$plain, $plain->forAction('audit:write')] as $other) {
+            $refused = false;
+
+            try {
+                self::reviews()->trustedPage($other, $cursor, 2);
+            } catch (InvalidReviewCursorException) {
+                $refused = true;
+            }
+
+            self::assertTrue($refused);
+        }
+
+        $this->expectException(InvalidReviewCursorException::class);
+
+        self::reviews()->trustedPage($query, \substr($cursor, 0, -1) . (\str_ends_with($cursor, 'A') ? 'B' : 'A'), 2);
+    }
+
+    /**
+     * A review of where a subject holds an action is admitted exactly as its
+     * holdings are: a reviewer with no right is refused it, as a review, a
+     * page, a stream or an export, before anything is read or written; one with
+     * the read right is shown the rows the trusted path returns, through each
+     * entry point, but refused its export; one with both rights exports what
+     * the trusted path exports; and its cursors serve the reviewer alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAReviewOfAnActionIsAdmittedAsItsHoldingsAre(): void
+    {
+        self::keyCursors();
+
+        Carbon::setTestNow(CarbonImmutable::parse('2026-11-08 12:00:00', 'UTC'));
+
+        $ann = self::identity('ann');
+
+        self::grants()->grantPermission($ann, self::permission('audit:read'));
+        self::grants()->grantPermission($ann, self::permission('audit:*'));
+        self::grants()->grantPermission($ann, self::permission('posts:read'));
+
+        $query   = ReviewQuery::holdings(new Subject($ann, $ann), ReviewScope::everywhere())->forAction('audit:read');
+        $trusted = self::trusted($query);
+        $lines   = [];
+        $sink    = static function (string $line) use (&$lines): void {
+            $lines[] = $line;
+        };
+
+        self::assertSame(ReviewResource::of(ReviewQuery::holdings(new Subject($ann, $ann), ReviewScope::everywhere()))->attributes(), ReviewResource::of($query)->attributes());
+
+        $this->signIn(self::reviewerWith('nobody'));
+
+        $refusals = [
+            static fn (): mixed => self::reviews()->review($query, ActingContext::current()),
+            static fn (): mixed => self::reviews()->page($query, ActingContext::current()),
+            static fn (): mixed => [...self::reviews()->stream($query, ActingContext::current())],
+            static fn (): mixed => self::reviews()->export($query, ActingContext::current(), $sink),
+        ];
+
+        foreach ($refusals as $index => $refused) {
+            try {
+                $refused();
+                self::fail("Entry point {$index} was admitted with no right.");
+            } catch (AuthorizationException $exception) {
+                self::assertSame(DecisionReason::NO_MATCH, $exception->getReason());
+            }
+        }
+
+        self::assertSame([], $lines);
+
+        $this->signIn(self::reviewerWith('reader', PackagePermissions::REVIEW_READ));
+
+        $page = self::reviews()->page($query, ActingContext::current(), null, 1);
+
+        $shape = static fn (iterable $rows): array => \array_map(static fn (ReviewRow $row): array => $row->toArray(), [...$rows]);
+
+        self::assertCount(2, $trusted->rows);
+        self::assertSame($trusted->toArray(), self::reviews()->review($query, ActingContext::current())->toArray());
+        self::assertSame($trusted->toArray(), $shape([...$page->rows, ...self::reviews()->page($query, ActingContext::current(), $page->nextCursor, 1)->rows]));
+        self::assertSame($trusted->toArray(), $shape(self::reviews()->stream($query, ActingContext::current(), 1)));
+        self::assertTrue($page->isStoredInventoryOnly);
+        self::assertCursorRefused(static fn (): mixed => self::reviews()->trustedPage($query, $page->nextCursor, 1));
+
+        try {
+            self::reviews()->export($query, ActingContext::current(), $sink);
+            self::fail('An export was admitted with the read right alone.');
+        } catch (AuthorizationException) {
+            self::assertSame([], $lines);
+        }
+
+        $this->signIn(self::reviewerWith('exporter', PackagePermissions::REVIEW_READ, PackagePermissions::REVIEW_EXPORT));
+
+        $written = '';
+
+        self::assertSame(2, self::reviews()->export($query, ActingContext::current(), $sink, 1));
+        self::assertSame(2, self::reviews()->trustedExport($query, static function (string $line) use (&$written): void {
+            $written .= $line;
+        }, 1));
+        self::assertSame($written, \implode('', $lines));
+
+        Carbon::setTestNow();
     }
 
     /**

@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
+use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRows;
 use SineMacula\Laravel\Authorization\Reviews\Support\HoldingRoutes;
@@ -293,6 +294,38 @@ final class HoldingRoutesTest extends TestCase
         $rooted = self::described(self::trusted(ReviewQuery::holdings(new Subject($ann, $ann), ReviewScope::rootedWithin(self::tenant('acct1')))));
 
         self::assertEqualsCanonicalizing(['permission_grant ann acct1:read', 'permission_grant ann team1:read'], $rooted);
+    }
+
+    /**
+     * A review filtered by an action keeps only the routes whose permission or
+     * policy gives it, each with what gives it, before the rows are cut to the
+     * limit; an unfiltered review keeps every route, none with evidence.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAReviewFilteredByAnActionKeepsOnlyTheRoutesGivingIt(): void
+    {
+        $editor = self::role('editor');
+        $ann    = self::identity('ann');
+
+        $editor->givePermissionTo(self::permission('posts:*'));
+
+        self::grants()->grantRole($ann, $editor);
+        self::grants()->grantPermission($ann, self::permission('comments:read'));
+        self::grants()->grantPermission($ann, self::permission('posts:edit'));
+
+        $query    = ReviewQuery::holdings(new Subject($ann, $ann), ReviewScope::everywhere());
+        $filtered = self::trusted($query->forAction('posts:edit')->withLimit(1));
+        $all      = self::trusted($query);
+
+        self::assertSame(['permission_grant ann posts:edit'], self::described($filtered));
+        self::assertTrue($filtered->isTruncated);
+        self::assertSame('posts:edit', $filtered->rows[0]->evidence?->action);
+        self::assertCount(2, self::trusted($query->forAction('posts:edit'))->rows);
+        self::assertCount(4, $all->rows);
+        self::assertSame([null, null, null, null], \array_map(static fn (ReviewRow $row): mixed => $row->evidence, $all->rows));
     }
 
     /**

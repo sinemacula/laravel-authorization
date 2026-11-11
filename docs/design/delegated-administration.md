@@ -64,7 +64,9 @@ administration never grants anything it cannot justify.
    is decided on authority an earlier change would have handed out. There is no blanket action. `revokeAll()` decides
    `boundary.remove` for each boundary it removes. A sync judges which kept rows are live at one instant and re-arms as
    of the same instant, so a row it decided as kept unchanged is never re-armed undecided, even when it expires before
-   it is written.
+   it is written. A role a sync lists with its own reach (`Support\RoleReach`) and holds live with the other is decided
+   as a grant with that reach and the expiry the row keeps, as `grantRole()` decides a changed reach, so a wider one
+   needs the scope its subtree reaches and a narrower one is judged narrowing.
 
 7. **A call that changes nothing is still decided (in this release).** A delegated call that finds nothing to change
    decides the change it was asked for (`OperationResource::unchanged()`, or the revocation of the first candidate of a

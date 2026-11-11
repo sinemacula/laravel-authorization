@@ -17,6 +17,12 @@ use Carbon\CarbonImmutable;
  * directory could not list every principal (N81); a principal left out of that
  * list may hold grants the review could not read.
  *
+ * `isStoredInventoryOnly` is true for a review of holdings filtered by an
+ * action (see `ReviewQuery::forAction()`): its rows are the stored grant routes
+ * giving the action, and a policy a dynamic `PolicyStore` gives, or a policy
+ * attached to a resource, may give it too outside what the review reads, so the
+ * rows are never the complete set of places the action is allowed.
+ *
  * A refused review returns nothing at all: no rows, counts, truncation or
  * completeness (see `AccessReview`).
  *
@@ -32,6 +38,7 @@ final readonly class ReviewResult
      * @param  bool  $isTruncated
      * @param  bool  $isComplete
      * @param  \Carbon\CarbonImmutable  $reviewedAt
+     * @param  bool  $isStoredInventoryOnly
      */
     public function __construct(
 
@@ -46,6 +53,9 @@ final readonly class ReviewResult
 
         /** The instant the review was made at, in UTC, against which each row's expiry is read. */
         public CarbonImmutable $reviewedAt,
+
+        /** Whether the rows cover only the stored grants, outside which a dynamic or resource policy may give the action; false for a review not filtered by one. */
+        public bool $isStoredInventoryOnly = false,
     ) {}
 
     /**

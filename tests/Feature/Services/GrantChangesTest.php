@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
+use SineMacula\Laravel\Authorization\Services\Support\SyncPlan;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
@@ -87,8 +88,8 @@ final class GrantChangesTest extends TestCase
         $scope     = GrantScope::platform();
         $table     = GrantChanges::table(GrantTarget::ROLE, $reference, null, $scope);
         $keep      = [$live->id => $live, $expired->id => $expired, $fresh->id => $fresh];
-        $live      = $table->live(\array_map(\strval(...), \array_keys($keep)));
-        $changes   = GrantChanges::ofSync(GrantTarget::ROLE, $reference, $live, $keep, [$dropped->id => false], $scope, null);
+        $live      = $table->liveRows(\array_map(\strval(...), \array_keys($keep)));
+        $changes   = GrantChanges::ofSync(new SyncPlan(GrantTarget::ROLE, $scope, $table, $keep), $reference, $live, [$dropped->id => false], null);
 
         self::assertSame([
             [PackagePermissions::ROLE_GRANT, 'live', true, true],
@@ -98,10 +99,88 @@ final class GrantChangesTest extends TestCase
         ], \array_map(self::summary(...), $changes));
         self::assertFalse($changes[3]->attributes()['subtree']);
 
-        $none = GrantChanges::ofSync(GrantTarget::ROLE, $reference, [], [], [], $scope, null);
+        $none = GrantChanges::ofSync(new SyncPlan(GrantTarget::ROLE, $scope, $table, []), $reference, [], [], null);
 
         self::assertSame([[PackagePermissions::ROLE_REVOKE, null, true, true]], \array_map(self::summary(...), $none));
         self::assertSame([$reference->type, 'user-1'], [$none[0]->attributes()['grantee_type'], $none[0]->attributes()['grantee_id']]);
+    }
+
+    /**
+     * A row listed with a reach of its own is decided in the scope with that
+     * reach: held live with the other reach, as a grant with the expiry it
+     * keeps, the narrowing one judged narrowing; held live with the same reach,
+     * kept unchanged; not held, granted with the sync's expiry. A row listed
+     * with no reach of its own, held live with the other reach than the written
+     * scope's, is kept unchanged in the written scope.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncDecidesARowListedWithItsReachInThatReach(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $tenant  = new Reference('stub_tenant', 'tenant-a');
+        $widened = Role::create(['name' => 'widened']);
+        $narrow  = Role::create(['name' => 'narrowed']);
+        $same    = Role::create(['name' => 'same']);
+        $plain   = Role::create(['name' => 'plain']);
+        $fresh   = Role::create(['name' => 'fresh']);
+        $held    = Carbon::parse('2026-08-01 12:00:00', 'UTC');
+        $synced  = Carbon::parse('2026-09-01 12:00:00', 'UTC');
+
+        self::grants()->grantRole($user, $widened, $held, tenant: $tenant, includeSubtree: false);
+        self::grants()->grantRole($user, $narrow, $held, tenant: $tenant);
+        self::grants()->grantRole($user, $same, tenant: $tenant, includeSubtree: false);
+        self::grants()->grantRole($user, $plain, tenant: $tenant, includeSubtree: false);
+
+        $reference = Reference::of($user);
+        $written   = new GrantScope($tenant, null, true);
+        $reaches   = [$widened->id => new GrantScope($tenant, null, true), $narrow->id => new GrantScope($tenant, null, false), $same->id => new GrantScope($tenant, null, false)];
+        $keep      = [$widened->id => $widened, $narrow->id => $narrow, $same->id => $same, $plain->id => $plain, $fresh->id => $fresh];
+        $table     = GrantChanges::table(GrantTarget::ROLE, $reference, null, $written);
+        $live      = $table->liveRows(\array_map(\strval(...), \array_keys($keep)));
+        $changes   = GrantChanges::ofSync(new SyncPlan(GrantTarget::ROLE, $written, $table, $keep, [], $reaches), $reference, $live, [], $synced);
+
+        self::assertSame([
+            [PackagePermissions::ROLE_GRANT, 'widened', false, null],
+            [PackagePermissions::ROLE_GRANT, 'narrowed', true, null],
+            [PackagePermissions::ROLE_GRANT, 'same', true, true],
+            [PackagePermissions::ROLE_GRANT, 'plain', true, true],
+            [PackagePermissions::ROLE_GRANT, 'fresh', false, null],
+        ], \array_map(self::summary(...), $changes));
+        self::assertSame([true, false, false, true, true], \array_map(static fn (OperationResource $change): mixed => $change->attributes()['subtree'], $changes));
+        self::assertSame(
+            [$held->format(\DATE_ATOM), $held->format(\DATE_ATOM), null, null, $synced->format(\DATE_ATOM)],
+            \array_map(static fn (OperationResource $change): mixed => $change->attributes()['expires_at'] ?? null, $changes),
+        );
+    }
+
+    /**
+     * Of the rows held live, a sync keeps as they are each but one listed with
+     * a reach of its own that holds with the other; the expiry a kept row is
+     * granted with is the one its live row keeps, a forever one included, else
+     * the sync's. A key PHP stores as an integer is returned as a string.
+     *
+     * @return void
+     */
+    public function testASyncKeepsTheLiveRowsItsReachesLeaveAsTheyAre(): void
+    {
+        $later = Carbon::parse('2026-08-01 12:00:00', 'UTC');
+        $sync  = Carbon::parse('2026-09-01 12:00:00', 'UTC');
+        $live  = ['below' => [$later, true], 'node' => [null, false], 'plain' => [null, false], '7' => [null, true]];
+        $scope = new GrantScope(new Reference('stub_tenant', 'tenant-a'), null, false);
+
+        self::assertSame(['below', 'node', 'plain', '7'], GrantChanges::keptAsHeld($live, []));
+        self::assertSame(['node', 'plain', '7'], GrantChanges::keptAsHeld($live, ['below' => $scope, 'node' => $scope, 'absent' => $scope]));
+        self::assertSame(['below', 'plain'], GrantChanges::keptAsHeld($live, ['node' => new GrantScope($scope->tenant), '7' => $scope]));
+        self::assertSame([], GrantChanges::keptAsHeld([], ['node' => $scope]));
+        self::assertSame($later, GrantChanges::expiryOf($live, 'below', $sync));
+        self::assertNull(GrantChanges::expiryOf($live, 'node', $sync));
+        self::assertSame($sync, GrantChanges::expiryOf($live, 'absent', $sync));
+        self::assertNull(GrantChanges::expiryOf($live, 'absent', null));
     }
 
     /**
@@ -262,7 +341,7 @@ final class GrantChangesTest extends TestCase
         $table->grant($role->id, null);
 
         self::assertSame([$role->id], $table->held());
-        self::assertSame([$role->id], $table->live([$role->id]));
+        self::assertSame([$role->id], \array_keys($table->liveRows([$role->id])));
         self::assertSame(['admin', '9'], \array_values((array) DB::table('authorizable_roles')->sole(['granted_by_type', 'granted_by_id'])));
         self::assertSame([], GrantChanges::table(GrantTarget::ROLE, new Reference('user', '1'), null, GrantScope::platform())->held());
     }
