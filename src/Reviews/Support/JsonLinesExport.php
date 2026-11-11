@@ -17,7 +17,10 @@ use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
  *   the `query` kind, the `scope` (its selection, its tenant or null, and its
  *   application selection and name), the review's instant (`reviewed_at`), when
  *   the scan began (`scan_started_at`), and the consistency mode, `live`: the
- *   export is a live scan, not a snapshot.
+ *   export is a live scan, not a snapshot; for a review of holdings filtered by
+ *   an action, then the `action` and `stored_inventory_only`, true, as its rows
+ *   cover only the stored grants (see `ReviewResult`), a header without an
+ *   action keeping its shape.
  * - Then one line a row: `record` `row` and the row's versioned shape (see
  *   `ReviewRow::toArray()`), references alone, in the review's order.
  * - The last line is the footer: `record` `footer`, the `version`, how many
@@ -162,6 +165,7 @@ final class JsonLinesExport
             'reviewed_at'     => self::instant($reviewedAt),
             'scan_started_at' => self::instant($startedAt),
             'consistency'     => self::CONSISTENCY,
+            ...($query->action === null ? [] : ['action' => $query->action, 'stored_inventory_only' => true]),
         ];
     }
 

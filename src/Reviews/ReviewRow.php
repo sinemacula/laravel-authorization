@@ -48,7 +48,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   review knows of the subject;
  * - `usage`: what the review knows of the route's use, `used`, `unused` or
  *   `unknown`, with its last observed use and the coverage of tracking (see
- *   `RowUsage`); `unknown` while grant usage tracking is off.
+ *   `RowUsage`); `unknown` while grant usage tracking is off;
+ * - `action_evidence`: only on a review of holdings filtered by an action (see
+ *   `ReviewQuery::forAction()`), what gives the action and where (see
+ *   `ActionEvidence`); absent from every other review's rows, which keep their
+ *   shape. Adding it keeps the shape at version 1, as the package is
+ *   unreleased.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -80,6 +85,7 @@ final readonly class ReviewRow
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\GrantState  $grantState
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState  $subjectState
      * @param  \SineMacula\Laravel\Authorization\Reviews\RowUsage|null  $usage
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ActionEvidence|null  $evidence
      *
      * @formatter:on
      *
@@ -131,6 +137,9 @@ final readonly class ReviewRow
 
         /** What the review knows of the route's use; null when it was not read, which reads as unknown. */
         public ?RowUsage $usage = null,
+
+        /** What gives the action an action-filtered review of holdings asks about; null for every other review. */
+        public ?ActionEvidence $evidence = null,
     ) {}
 
     /**
@@ -157,6 +166,7 @@ final readonly class ReviewRow
             $this->grantState,
             $state,
             $this->usage,
+            $this->evidence,
         );
     }
 
@@ -184,6 +194,36 @@ final readonly class ReviewRow
             $this->grantState,
             $this->subjectState,
             $usage,
+            $this->evidence,
+        );
+    }
+
+    /**
+     * Return the row with what gives the action an action-filtered review of
+     * holdings asks about.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ActionEvidence  $evidence
+     * @return self
+     */
+    public function withEvidence(ActionEvidence $evidence): self
+    {
+        return new self(
+            $this->rowKey,
+            $this->subject,
+            $this->grantee,
+            $this->target,
+            $this->sourceKind,
+            $this->sourceKey,
+            $this->originScope,
+            $this->viaIdentity,
+            $this->rolePath,
+            $this->supportingGrants,
+            $this->times,
+            $this->grantedBy,
+            $this->grantState,
+            $this->subjectState,
+            $this->usage,
+            $evidence,
         );
     }
 
@@ -210,13 +250,14 @@ final readonly class ReviewRow
     }
 
     /**
-     * Return the row in its versioned shape, as plain values.
+     * Return the row in its versioned shape, as plain values, with what gives
+     * the action last, only for a review filtered by one.
      *
      * @return array<string, mixed>
      */
     public function toArray(): array
     {
-        return [
+        $row = [
             'version'           => self::VERSION,
             'row_key'           => $this->rowKey,
             'subject'           => self::referenceArray($this->subject),
@@ -237,6 +278,8 @@ final readonly class ReviewRow
             'subject_state'     => $this->subjectState->value,
             'usage'             => ($this->usage ?? RowUsage::unknown())->toArray(),
         ];
+
+        return $this->evidence === null ? $row : [...$row, 'action_evidence' => $this->evidence->toArray()];
     }
 
     /**
