@@ -82,6 +82,27 @@ final class JsonLinesExportTest extends TestCase
     }
 
     /**
+     * The header of a review of holdings filtered by an action names the action
+     * and says its rows cover only the stored grants, after every other field;
+     * an unfiltered review's header has neither key.
+     *
+     * @return void
+     */
+    public function testTheHeaderOfAFilteredReviewNamesItsAction(): void
+    {
+        $at       = CarbonImmutable::parse('2026-11-08 12:00:00', 'UTC');
+        $holdings = ReviewQuery::holdings(new Reference('u', 'a'), ReviewScope::everywhere());
+        $filtered = JsonLinesExport::header($holdings->forAction('audit:read'), $at, $at);
+        $plain    = JsonLinesExport::header($holdings, $at, $at);
+
+        self::assertSame(['audit:read', true], [$filtered['action'], $filtered['stored_inventory_only']]);
+        self::assertSame(['consistency', 'action', 'stored_inventory_only'], \array_slice(\array_keys($filtered), -3));
+        self::assertSame($plain, \array_diff_key($filtered, ['action' => true, 'stored_inventory_only' => true]));
+        self::assertSame('consistency', \array_key_last($plain));
+        self::assertSame('holdings', $plain['query']);
+    }
+
+    /**
      * A line is one JSON object and a line feed, its slashes and Unicode left
      * as they are and its line separators escaped, and invalid UTF-8 is refused
      * rather than replaced.

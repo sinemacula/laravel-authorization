@@ -301,7 +301,7 @@ final readonly class AccessReview
         $read     = $this->read($sized, $position);
         $next     = $read->next === null ? null : ReviewCursor::forApplication()->issue($read->next, $query, $reviewer);
 
-        return new ReviewPage($read->rows, $next, $read->at, $read->isComplete);
+        return new ReviewPage($read->rows, $next, $read->at, $read->isComplete, $read->isStoredInventoryOnly);
     }
 
     /**
@@ -385,7 +385,7 @@ final readonly class AccessReview
         $read = $usage->annotate($rows->rows($query->kind === ReviewKind::HOLDINGS));
         $next = $rows->next();
 
-        return new PageRead(SubjectStates::apply($read, $query->subject), $next === null ? null : $position->after($next), $isComplete, $run->now);
+        return new PageRead(SubjectStates::apply($read, $query->subject), $next === null ? null : $position->after($next), $isComplete, $run->now, $query->action !== null);
     }
 
     /**
@@ -430,7 +430,7 @@ final readonly class AccessReview
      */
     private static function resultOf(PageRead $page): ReviewResult
     {
-        return new ReviewResult($page->rows, $page->next !== null, $page->isComplete, $page->at);
+        return new ReviewResult($page->rows, $page->next !== null, $page->isComplete, $page->at, $page->isStoredInventoryOnly);
     }
 
     /**
