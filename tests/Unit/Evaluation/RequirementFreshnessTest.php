@@ -113,4 +113,30 @@ final class RequirementFreshnessTest extends TestCase
         self::assertFalse($freshness->holdsFor('session-1'));
         self::assertTrue($freshness->hasLapsed());
     }
+
+    /**
+     * The stricter of two is the one whose met requirement lapses first, the
+     * first when neither lapses or both lapse at the same instant, the one
+     * given when the other is absent, and none when neither is given.
+     *
+     * @return void
+     */
+    public function testTheStricterOfTwoLapsesFirst(): void
+    {
+        $noon  = new RequirementFreshness('session-1', new \DateTimeImmutable('2026-11-06 12:00:00'));
+        $one   = new RequirementFreshness('session-1', new \DateTimeImmutable('2026-11-06 13:00:00'));
+        $also  = new RequirementFreshness('session-1', new \DateTimeImmutable('2026-11-06 12:00:00'));
+        $open  = new RequirementFreshness('session-1');
+        $other = new RequirementFreshness('session-1');
+
+        self::assertNull(RequirementFreshness::stricterOf(null, null));
+        self::assertSame($noon, RequirementFreshness::stricterOf($noon, null));
+        self::assertSame($noon, RequirementFreshness::stricterOf(null, $noon));
+        self::assertSame($noon, RequirementFreshness::stricterOf($noon, $one));
+        self::assertSame($noon, RequirementFreshness::stricterOf($one, $noon));
+        self::assertSame($noon, RequirementFreshness::stricterOf($open, $noon));
+        self::assertSame($noon, RequirementFreshness::stricterOf($noon, $open));
+        self::assertSame($noon, RequirementFreshness::stricterOf($noon, $also));
+        self::assertSame($open, RequirementFreshness::stricterOf($open, $other));
+    }
 }

@@ -32,8 +32,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * consults both direct grants and role-inherited permissions, so a consumer
  * does not need to branch on assignment style. `canEach` and `filterAuthorized`
  * decide the model's checks over many resources through the authorization
- * manager, and `permissionsFor` lists the actions the model may take in a
- * scope.
+ * manager, `permissionsFor` lists the actions the model may take in a scope,
+ * and `heldPermissionsFor` lists them with the authentication requirements each
+ * read.
  *
  * Each write helper takes an optional `actor:`, an acting context it hands to
  * the service, so the change is delegated and decided as that actor
@@ -294,6 +295,22 @@ trait HasPermissions // @phpstan-ignore trait.unused
     public function permissionsFor(AuthorizationScope $scope, array $context = []): array
     {
         return Authorization::permissionsFor($this, $scope, $context);
+    }
+
+    /**
+     * Return the actions this model may take in the scope, as
+     * `permissionsFor()` lists them, each with the authentication requirements
+     * its decision read: a delegate to
+     * `Authorization::heldPermissionsFor($this, ...)`, deciding every action
+     * through the full decision and recording none.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
+     * @param  array<string, mixed>  $context
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\HeldPermission>
+     */
+    public function heldPermissionsFor(AuthorizationScope $scope, array $context = []): array
+    {
+        return Authorization::heldPermissionsFor($this, $scope, $context);
     }
 
     // ------------------------------------------------------------------

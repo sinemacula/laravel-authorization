@@ -86,7 +86,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *
  * A decision that read a requirement carries how long it may be reused: in the
  * session it was made in, until the earliest instant a met requirement it read
- * stops being met (N37).
+ * stops being met (N37), and the name of every part of every requirement it
+ * read, on an allow or a deny, met or not.
  *
  * Each step of a statement it assessed names the `${…}` references the
  * statement names; through the context of an explained check, it also carries
@@ -170,7 +171,7 @@ final class PolicyEvaluator
         $context    = CheckContext::from($context);
         $statements = ($this->entries ??= new StatementEntries)->of($policies, $boundaries, $guardrails);
 
-        return $this->decide($statements, $action, $resource, $context, $permission)->withFreshness($context->requirementFreshness());
+        return $this->decide($statements, $action, $resource, $context, $permission)->withFreshness($context->requirementFreshness(), $context->requirementsRead());
     }
 
     /**

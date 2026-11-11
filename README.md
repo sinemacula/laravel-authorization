@@ -116,9 +116,11 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   the [bulk checks](#bulk-checks) section names.
 - **Effective permissions**: `permissionsFor()` lists the actions of the permission catalogue a subject may take in a
   scope (a tenant or the platform, an application and a resource, named with `AuthorizationScope`), exactly those
-  `check()` would allow there, for a UI to show or hide its controls. The actions share one read of the subject's
-  grants and policies, and listing them records no decision and dispatches no event, except on a preview, whose
-  listing dispatches one event per action (see Preview).
+  `check()` would allow there, for a UI to show or hide its controls. The actions share one read of the subject's grants
+  and policies, and listing them records no decision and dispatches no event, except on a preview, whose listing
+  dispatches one event per action (see Preview). `heldPermissionsFor()` lists the same actions, each naming every
+  authentication requirement its decision read, so an action no requirement could change can be told from one that may
+  depend on the session's current authentication state.
 - **Preview**: `previewFor($subject)` answers what another subject may do, for "what can this person do?" screens, while
   the caller stays who is asking. The caller must hold `authorization:subject.preview` for the subject in every scope a
   decision is made in, admitted as a check about the caller at every use; the subject is evaluated with no session,
@@ -2657,6 +2659,7 @@ or about the subject of the scoped manager it is called on:
 | `forgetLastDecision()`                            | Clears the latest decision of the request or job                                                                          |
 | `forgetDecisionsFor($session, $identity)`         | Forgets everything the request or job remembers towards its decisions (see [Forgetting](#forgetting-decisions))           |
 | `permissionsFor($subject, $scope, $context)`      | Lists the actions of the permission catalogue the subject may take in the scope                                           |
+| `heldPermissionsFor($subject, $scope, $context)`  | Lists the same actions, each a `HeldPermission` naming the authentication requirements its decision read                  |
 | `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's scope, or a `Subject` in its own scope          |
 | `forUser($user)`                                  | Returns a scoped manager deciding about the subject the resolver translates the user into                                 |
 | `previewFor($subject, $scope)`                    | Returns a preview deciding about the subject as the caller, admitted at every use (see [Preview](#preview))               |
@@ -2668,17 +2671,16 @@ or about the subject of the scoped manager it is called on:
 | `AccessReview::page()`, `stream()`, `export()`    | Not on the manager: a review a keyset page, a lazy stream or JSON Lines at a time, each with a `trusted…()` counterpart   |
 
 `check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` deciding as `checkMany()`
-decides a batch of one: every other method but `queryScope()` and `permissionsFor()` adapts one of them, and each
-decision they make is recorded as the last decision and reported with `DecisionEvaluated`; `queryScope()` compiles a
-scope from the same pipeline without deciding a check, and `permissionsFor()` decides each action through the path
-`checkMany()` takes but as introspection, so both record and report nothing, except on a preview, where the admission is
-recorded and reported at every use and a listing dispatches each action's `DecisionEvaluated` (see
-[Preview](#preview)). `permissionsFor()` takes its subject as an
-argument, null for the one the manager's checks are about (see [Effective permissions](#effective-permissions)). The
-resource and the context take the same forms everywhere: a model, a `[type, id]` pair, a `ResourceReference`, an
-`AuthorizableResource`, a model class or a string names the resource (see
-[Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the context is the caller's
-values, read under `input` (see [The check's context](#the-checks-context)).
+decides a batch of one: every other method but `queryScope()` and the listings adapts one of them, and each decision
+they make is recorded as the last decision and reported with `DecisionEvaluated`; `queryScope()` compiles a scope from
+the same pipeline without deciding a check, and `permissionsFor()` decides each action through the path `checkMany()`
+takes but as introspection, so both record and report nothing, except on a preview, where the admission is recorded and
+reported at every use and a listing dispatches each action's `DecisionEvaluated` (see [Preview](#preview)).
+`permissionsFor()` and `heldPermissionsFor()` take their subject as an argument, null for the one the manager's checks
+are about (see [Effective permissions](#effective-permissions)). The resource and the context take the same forms
+everywhere: a model, a `[type, id]` pair, a `ResourceReference`, an `AuthorizableResource`, a model class or a string
+names the resource (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the
+context is the caller's values, read under `input` (see [The check's context](#the-checks-context)).
 
 ```php
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -2997,6 +2999,39 @@ Gate.
 `DecisionEvaluated` and no `AuthorizationFailed`. On a preview, each action's `DecisionEvaluated` is dispatched, naming
 both parties, though none is stored, and the preview's admission is recorded and reported as any check (see
 [Preview](#preview)). Break-glass grants, when they arrive, will define how a listing that relies on one is reported.
+
+**Held permissions and their requirements.** `heldPermissionsFor()` takes the same arguments as `permissionsFor()` and
+lists the same actions, in the same order, through the same path, each as a
+`SineMacula\Laravel\Authorization\Evaluation\HeldPermission`: its `action`, and its `requirements`, the name of every
+part of every authentication requirement its decision read (`multifactor`, `phishing_resistant` and so on, as the policy
+document names them), once each, sorted. A requirement counts wherever the decision read it: on a statement that allowed
+or on one that denied, a boundary's or a guardrail's included, or in a further check the decision made, such as the
+right to act while impersonated on an administration operation or an access review, whether it was met or not. The list
+names every requirement read, not only those that decided the answer, so an entry can be conditional even when no
+requirement would change the answer today: an allow whose other conditions failed, or one beside another allow that
+needs nothing, is still read, and its requirement still named. The guarantee runs one way. `isUnconditional()`, true
+when `requirements` is empty, is the safe test: no requirement was read, so none could change the answer, and the action
+is held whatever the session has proved. A conditional entry may depend on the session's authentication state, a fresh
+multifactor step say, or a deny guarded by a requirement that does not apply while it is unmet, and should be treated as
+possibly held only while that state lasts. Everything else is as for `permissionsFor()`: the subject, the scope and
+the context are taken the same way, an action whose check would be `insufficient_authentication` is not listed, and the
+listing records nothing, refuses and throws alike. The model's `HasPermissions` trait lists its own, with
+`$user->heldPermissionsFor($scope, $context)`.
+
+```php
+use SineMacula\Laravel\Authorization\Evaluation\HeldPermission;
+
+$held = Authorization::heldPermissionsFor($user, AuthorizationScope::current());
+
+// [HeldPermission('posts:create', []), HeldPermission('posts:export', ['multifactor'])]
+$unconditional = array_filter($held, fn (HeldPermission $permission): bool => $permission->isUnconditional());
+```
+
+For an audit of what a subject holds, list for the real subject and its session, a resolved `Subject` or null for the
+request's own, and treat a conditional entry as not unconditionally held: it says what the subject may do now, in this
+session, not what it holds in every session, though it may hold it in every session too. A model named as `for()` names
+it has no session, so a requirement made of it is never met: an allow that needs one is not listed, and a deny guarded
+by one does not apply, its action listed as conditional.
 
 **What it costs.** The actions are decided together, through the path `checkMany()` takes, so the subject is resolved
 once and its grants, roles, policies, boundaries and caps, the guardrails and the resource's tenant, attached policies
@@ -3654,7 +3689,7 @@ a delegated change's own check. A role check (`hasRole()`, `@role`, `role:`) is 
 |--------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
 | `previewFor()` and its admission                                               | A preview decides about another subject as the caller, who uses none of its grants      |
 | `explain()` and `authorization:why`                                            | An explanation runs the check to show it, not to act on it (N89)                        |
-| `permissionsFor()`                                                             | A listing of what a subject may do is introspection (N70)                               |
+| `permissionsFor()` and `heldPermissionsFor()`                                  | A listing of what a subject may do is introspection (N70)                               |
 | `whereAuthorized()` and `queryScope()`                                         | A scoped query compiles SQL and decides no record                                       |
 | A review's admission and its reads                                             | Reviewing who holds what is introspection, and must not create the use it reports       |
 | A delegated change's administration stage                                      | Its further checks weigh the change, and a refused change counts nothing it was allowed |
