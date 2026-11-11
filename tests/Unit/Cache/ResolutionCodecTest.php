@@ -97,11 +97,73 @@ final class ResolutionCodecTest extends TestCase
         $written  = [ResolutionCodec::encodePolicy($policy), ResolutionCodec::encodePolicy($unkeyed)];
         $hydrated = ResolutionCodec::policies($written);
 
-        self::assertSame(['id' => 'key', 'document' => $policy->toArray(), 'resource' => 'posts:7'], $written[0]);
-        self::assertSame(['id' => null, 'document' => $unkeyed->toArray(), 'resource' => null], $written[1]);
+        self::assertSame(['id' => 'key', 'document' => $policy->toArray(), 'resource' => 'posts:7', 'positions' => [0]], $written[0]);
+        self::assertSame(['id' => null, 'document' => $unkeyed->toArray(), 'resource' => null, 'positions' => [0]], $written[1]);
         self::assertEquals([$policy, $unkeyed], $hydrated);
         self::assertSame('key', $hydrated[0]->id);
         self::assertSame('posts:7', $hydrated[0]->resource);
+    }
+
+    /**
+     * A policy read with some of its statements alone, its denies, keeps each
+     * statement at its position in the stored document once read back; an entry
+     * kept without positions holds each at its place in the document.
+     *
+     * @return void
+     */
+    public function testKeepsEachStatementAtItsPosition(): void
+    {
+        $statements = [
+            ['effect' => 'allow', 'actions' => ['posts:read']],
+            ['effect' => 'deny', 'actions' => ['posts:write'], 'sid' => 'NoWrite'],
+            ['effect' => 'deny', 'actions' => ['posts:purge']],
+        ];
+        $denies   = Policy::fromArray(['name' => 'p', 'statements' => $statements])->withId('key')->denies();
+        $written  = ResolutionCodec::encodePolicy($denies);
+        $hydrated = ResolutionCodec::policies([$written])[0];
+
+        self::assertSame([1, 2], $written['positions']);
+        self::assertSame([1, 2], \array_keys($hydrated->statements));
+        self::assertSame('NoWrite', $hydrated->statements[1]->sid);
+        self::assertSame(['key', null], [$hydrated->id, $hydrated->resource]);
+
+        unset($written['positions']);
+
+        self::assertSame([0, 1], \array_keys(ResolutionCodec::policies([$written])[0]->statements));
+    }
+
+    /**
+     * Stored positions that are not one distinct place in the document for each
+     * statement.
+     *
+     * @return iterable<string, array{mixed}>
+     */
+    public static function corruptPositions(): iterable
+    {
+        yield 'not a list' => ['1'];
+        yield 'a map' => [[1 => 0, 2 => 1]];
+        yield 'too few' => [[0]];
+        yield 'too many' => [[0, 1, 2]];
+        yield 'repeated' => [[1, 1]];
+        yield 'not an integer' => [[0, '1']];
+        yield 'negative' => [[-1, 0]];
+    }
+
+    /**
+     * A stored policy whose positions are not one distinct place in its
+     * document for each statement is refused.
+     *
+     * @param  mixed  $positions
+     * @return void
+     */
+    #[DataProvider('corruptPositions')]
+    public function testRefusesCorruptPositions(mixed $positions): void
+    {
+        $document = ['name' => 'p', 'statements' => [['effect' => 'deny', 'actions' => ['posts:read']], ['effect' => 'deny', 'actions' => ['posts:write']]]];
+
+        $this->expectException(\UnexpectedValueException::class);
+
+        ResolutionCodec::policies([['id' => 'k', 'document' => $document, 'positions' => $positions]]);
     }
 
     /**

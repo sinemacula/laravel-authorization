@@ -32,6 +32,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\PolicyPrincipals;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Sets, replaces and removes the permission boundaries of principals and
@@ -217,6 +218,12 @@ final class BoundaryService
      * before any is made, and when the grantee has none, the removal is decided
      * unchanged at platform scope, so its action is decided either way.
      *
+     * A boundary naming half a tenant, which the package never writes, caps
+     * everywhere (see `Support\TenantColumns`), so its removal is decided at
+     * platform scope, needing the actor to remove a platform boundary, and it
+     * is removed as stored, counted, and written to the log as malformed rather
+     * than reported by an event, which would name it the platform's.
+     *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return int
@@ -232,24 +239,26 @@ final class BoundaryService
         /** @var int<0, max> */
         return OperationScope::run(Operation::begin($actor, [PackagePermissions::BOUNDARY_REMOVE]), static function (Operation $operation) use ($actor, $reference): int {
             if ($actor === null) {
-                $events = self::removeEverywhere($reference, $operation);
+                [$events, $malformed] = self::removeEverywhere($reference, $operation);
             } else {
                 // The actor's authority, then the grantee's rows, are locked
                 // before the boundaries are read, so what is removed is exactly
                 // what was decided, never a boundary set meanwhile.
                 OperationScope::pins()?->lockGrantees($reference);
 
-                $boundaries = self::table($reference, $operation, GrantScope::platform())->everywhere();
-                $unchanged  = OperationResource::unchanged(PackagePermissions::BOUNDARY_REMOVE, $reference, null, GrantScope::platform());
+                [$boundaries, $half] = self::table($reference, $operation, GrantScope::platform())->everywhere();
 
-                $actor->authorizeChanges($operation, self::removals($reference, $boundaries), $unchanged);
+                $unchanged = OperationResource::unchanged(PackagePermissions::BOUNDARY_REMOVE, $reference, null, GrantScope::platform());
 
-                $events = self::removeDecided($reference, $operation, $boundaries);
+                $actor->authorizeChanges($operation, [...self::removals($reference, $boundaries), ...self::malformedRemovals($reference, $half)], $unchanged);
+
+                $events    = self::removeDecided($reference, $operation, $boundaries);
+                $malformed = self::removeMalformed($reference, $operation, $half);
             }
 
             OperationScope::dispatch(...$events);
 
-            return \count($events);
+            return \count($events) + $malformed;
         }, $actor);
     }
 
@@ -296,11 +305,13 @@ final class BoundaryService
      * Remove the grantee's boundaries in every scope, inside the caller's
      * operation, and return a `BoundaryRemoved` for each, for the caller to
      * dispatch with its own: what revoking everything a deleted grantee held
-     * does.
+     * does; with how many boundaries naming half a tenant were removed, each
+     * written to the log as malformed rather than reported by an event (see
+     * `removeMalformed()`), found by the same read.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
-     * @return list<\SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved>
+     * @return array{list<\SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved>, int}
      *
      * @internal
      */
@@ -308,11 +319,50 @@ final class BoundaryService
     {
         $events = [];
 
-        foreach (self::table($grantee, $operation, GrantScope::platform())->removeEverywhere() as [$policy, $scope]) {
+        [$removed, $malformed] = self::table($grantee, $operation, GrantScope::platform())->removeEverywhere();
+
+        foreach ($removed as [$policy, $scope]) {
             $events[] = self::removedEvent($operation, $grantee, $policy, $scope);
         }
 
-        return $events;
+        return [$events, self::reportMalformed($grantee, $operation, $malformed)];
+    }
+
+    /**
+     * Return the removal of each of the grantee's boundaries naming half a
+     * tenant given, as the operation resource it is decided on: at platform
+     * scope, since such a boundary caps everywhere.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  list<array{policy_id: string, tenant_type: string|null, tenant_id: string|null}>  $rows
+     * @return list<\SineMacula\Laravel\Authorization\Administration\OperationResource>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
+     *
+     * @internal
+     */
+    public static function malformedRemovals(Reference $grantee, array $rows): array
+    {
+        return self::removals($grantee, \array_map(static fn (array $row): array => [$row['policy_id'], GrantScope::platform()], $rows));
+    }
+
+    /**
+     * Remove each of the grantee's boundaries naming half a tenant given, as
+     * stored, inside the caller's operation, and return how many were removed:
+     * one no longer there is passed over.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  list<array{policy_id: string, tenant_type: string|null, tenant_id: string|null}>  $rows
+     * @return int
+     *
+     * @internal
+     */
+    public static function removeMalformed(Reference $grantee, Operation $operation, array $rows): int
+    {
+        $table = self::table($grantee, $operation, GrantScope::platform());
+
+        return self::reportMalformed($grantee, $operation, \array_values(\array_filter($rows, static fn (array $row): bool => $table->removeMalformed($row) === 1)));
     }
 
     /**
@@ -339,6 +389,30 @@ final class BoundaryService
         }
 
         return $removals;
+    }
+
+    /**
+     * Write each boundary naming half a tenant that was removed to the log as
+     * malformed, once the operation commits, since no event can say where it
+     * held, and invalidate the cache as their events would; and return how many
+     * there were.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  list<array{policy_id: string, tenant_type: string|null, tenant_id: string|null}>  $removed
+     * @return int
+     */
+    private static function reportMalformed(Reference $grantee, Operation $operation, array $removed): int
+    {
+        foreach ($removed as $row) {
+            TenantColumns::reportRemoved('a boundary', $row['tenant_type'], $row['tenant_id'], ['grantee' => "{$grantee->type}:{$grantee->id}", 'policy_id' => $row['policy_id']]);
+        }
+
+        $event = static fn (array $row): BoundaryRemoved => self::removedEvent($operation, $grantee, $row['policy_id'], GrantScope::platform());
+
+        OperationScope::invalidate(...\array_map($event, $removed));
+
+        return \count($removed);
     }
 
     /**

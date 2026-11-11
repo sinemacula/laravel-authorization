@@ -6,9 +6,11 @@ namespace Tests\Feature\Services;
 
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
@@ -20,6 +22,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
+use SineMacula\Laravel\Authorization\Services\Support\SyncPlan;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
@@ -27,6 +30,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\ApiGuardedUser;
+use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\VanishedPolicy;
 use Tests\TestCase;
@@ -87,8 +91,8 @@ final class GrantChangesTest extends TestCase
         $scope     = GrantScope::platform();
         $table     = GrantChanges::table(GrantTarget::ROLE, $reference, null, $scope);
         $keep      = [$live->id => $live, $expired->id => $expired, $fresh->id => $fresh];
-        $live      = $table->live(\array_map(\strval(...), \array_keys($keep)));
-        $changes   = GrantChanges::ofSync(GrantTarget::ROLE, $reference, $live, $keep, [$dropped->id => false], $scope, null);
+        $live      = $table->liveRows(\array_map(\strval(...), \array_keys($keep)));
+        $changes   = GrantChanges::ofSync(new SyncPlan(GrantTarget::ROLE, $scope, $table, $keep), $reference, $live, [$dropped->id => false], null);
 
         self::assertSame([
             [PackagePermissions::ROLE_GRANT, 'live', true, true],
@@ -98,10 +102,88 @@ final class GrantChangesTest extends TestCase
         ], \array_map(self::summary(...), $changes));
         self::assertFalse($changes[3]->attributes()['subtree']);
 
-        $none = GrantChanges::ofSync(GrantTarget::ROLE, $reference, [], [], [], $scope, null);
+        $none = GrantChanges::ofSync(new SyncPlan(GrantTarget::ROLE, $scope, $table, []), $reference, [], [], null);
 
         self::assertSame([[PackagePermissions::ROLE_REVOKE, null, true, true]], \array_map(self::summary(...), $none));
         self::assertSame([$reference->type, 'user-1'], [$none[0]->attributes()['grantee_type'], $none[0]->attributes()['grantee_id']]);
+    }
+
+    /**
+     * A row listed with a reach of its own is decided in the scope with that
+     * reach: held live with the other reach, as a grant with the expiry it
+     * keeps, the narrowing one judged narrowing; held live with the same reach,
+     * kept unchanged; not held, granted with the sync's expiry. A row listed
+     * with no reach of its own, held live with the other reach than the written
+     * scope's, is kept unchanged in the written scope.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncDecidesARowListedWithItsReachInThatReach(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $tenant  = new Reference('stub_tenant', 'tenant-a');
+        $widened = Role::create(['name' => 'widened']);
+        $narrow  = Role::create(['name' => 'narrowed']);
+        $same    = Role::create(['name' => 'same']);
+        $plain   = Role::create(['name' => 'plain']);
+        $fresh   = Role::create(['name' => 'fresh']);
+        $held    = Carbon::parse('2026-08-01 12:00:00', 'UTC');
+        $synced  = Carbon::parse('2026-09-01 12:00:00', 'UTC');
+
+        self::grants()->grantRole($user, $widened, $held, tenant: $tenant, includeSubtree: false);
+        self::grants()->grantRole($user, $narrow, $held, tenant: $tenant);
+        self::grants()->grantRole($user, $same, tenant: $tenant, includeSubtree: false);
+        self::grants()->grantRole($user, $plain, tenant: $tenant, includeSubtree: false);
+
+        $reference = Reference::of($user);
+        $written   = new GrantScope($tenant, null, true);
+        $reaches   = [$widened->id => new GrantScope($tenant, null, true), $narrow->id => new GrantScope($tenant, null, false), $same->id => new GrantScope($tenant, null, false)];
+        $keep      = [$widened->id => $widened, $narrow->id => $narrow, $same->id => $same, $plain->id => $plain, $fresh->id => $fresh];
+        $table     = GrantChanges::table(GrantTarget::ROLE, $reference, null, $written);
+        $live      = $table->liveRows(\array_map(\strval(...), \array_keys($keep)));
+        $changes   = GrantChanges::ofSync(new SyncPlan(GrantTarget::ROLE, $written, $table, $keep, [], $reaches), $reference, $live, [], $synced);
+
+        self::assertSame([
+            [PackagePermissions::ROLE_GRANT, 'widened', false, null],
+            [PackagePermissions::ROLE_GRANT, 'narrowed', true, null],
+            [PackagePermissions::ROLE_GRANT, 'same', true, true],
+            [PackagePermissions::ROLE_GRANT, 'plain', true, true],
+            [PackagePermissions::ROLE_GRANT, 'fresh', false, null],
+        ], \array_map(self::summary(...), $changes));
+        self::assertSame([true, false, false, true, true], \array_map(static fn (OperationResource $change): mixed => $change->attributes()['subtree'], $changes));
+        self::assertSame(
+            [$held->format(\DATE_ATOM), $held->format(\DATE_ATOM), null, null, $synced->format(\DATE_ATOM)],
+            \array_map(static fn (OperationResource $change): mixed => $change->attributes()['expires_at'] ?? null, $changes),
+        );
+    }
+
+    /**
+     * Of the rows held live, a sync keeps as they are each but one listed with
+     * a reach of its own that holds with the other; the expiry a kept row is
+     * granted with is the one its live row keeps, a forever one included, else
+     * the sync's. A key PHP stores as an integer is returned as a string.
+     *
+     * @return void
+     */
+    public function testASyncKeepsTheLiveRowsItsReachesLeaveAsTheyAre(): void
+    {
+        $later = Carbon::parse('2026-08-01 12:00:00', 'UTC');
+        $sync  = Carbon::parse('2026-09-01 12:00:00', 'UTC');
+        $live  = ['below' => [$later, true], 'node' => [null, false], 'plain' => [null, false], '7' => [null, true]];
+        $scope = new GrantScope(new Reference('stub_tenant', 'tenant-a'), null, false);
+
+        self::assertSame(['below', 'node', 'plain', '7'], GrantChanges::keptAsHeld($live, []));
+        self::assertSame(['node', 'plain', '7'], GrantChanges::keptAsHeld($live, ['below' => $scope, 'node' => $scope, 'absent' => $scope]));
+        self::assertSame(['below', 'plain'], GrantChanges::keptAsHeld($live, ['node' => new GrantScope($scope->tenant), '7' => $scope]));
+        self::assertSame([], GrantChanges::keptAsHeld([], ['node' => $scope]));
+        self::assertSame($later, GrantChanges::expiryOf($live, 'below', $sync));
+        self::assertNull(GrantChanges::expiryOf($live, 'node', $sync));
+        self::assertSame($sync, GrantChanges::expiryOf($live, 'absent', $sync));
+        self::assertNull(GrantChanges::expiryOf($live, 'absent', null));
     }
 
     /**
@@ -158,8 +240,9 @@ final class GrantChangesTest extends TestCase
         BoundaryService::instance()?->set($user, $cap, $tenant);
         self::grants()->grantRole(StubIdentity::create(['id' => 'user-2']), Role::create(['name' => 'other']));
 
-        $changes = GrantChanges::everything(Reference::of($user));
+        [$changes, $grants, $boundaries] = GrantChanges::everything(Reference::of($user));
 
+        self::assertSame([[], []], [$grants, $boundaries]);
         self::assertSame(
             [PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE],
             \array_map(static fn (OperationResource $change): string => $change->action, $changes),
@@ -168,7 +251,99 @@ final class GrantChangesTest extends TestCase
         self::assertNull($changes[1]->tenant);
         self::assertEquals(Reference::of($tenant), $changes[3]->tenant);
         self::assertSame('cap', $changes[3]->attributes()['policy']);
-        self::assertSame([], GrantChanges::everything(new Reference('user', 'nobody')));
+        self::assertSame([[], [], []], GrantChanges::everything(new Reference('user', 'nobody')));
+    }
+
+    /**
+     * The rows naming half a tenant are never among everything a grantee holds
+     * in a scope: each is its own revocation, or boundary removal, decided at
+     * platform scope in its application; revoking them removes them alone,
+     * writes each to the log as malformed and counts them, boundaries included,
+     * the cache invalidated as their events would, none dispatched.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRowsNamingHalfATenantAreDecidedAtPlatformScopeAndRevokedApart(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $grantee = Reference::of($user);
+        $logger  = new RecordingLogger;
+        $half    = ['authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1', 'tenant_type' => null, 'tenant_id' => 'tenant-a'];
+        $edit    = Permission::create(['name' => 'posts:edit']);
+
+        $this->app?->instance('log', $logger);
+
+        self::grants()->grantPermission($user, Permission::create(['name' => 'posts:read']));
+
+        DB::table('authorizable_permissions')->insert(['permission_id' => $edit->id, ...$half, 'application' => 'web']);
+        $deny = Policy::create(['name' => 'deny', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:read']]]]]);
+
+        DB::table('authorizable_policies')->insert(['policy_id' => $deny->id, ...$half]);
+        $cap = Policy::create(['name' => 'cap', 'document' => ['statements' => []]]);
+
+        DB::table('authorizable_boundaries')->insert(['policy_id' => $cap->id, ...$half, 'tenant_type' => 'stub_tenant', 'tenant_id' => null]);
+
+        [$changes, $grants, $boundaries] = GrantChanges::everything($grantee);
+
+        $malformed = GrantChanges::malformed($grantee, $grants, $boundaries);
+
+        self::assertCount(1, $changes);
+        $actions = \array_map(static fn (OperationResource $change): string => $change->action, $malformed);
+        $scopes  = \array_map(static fn (OperationResource $change): ?GrantScope => $change->change?->scope, $malformed);
+
+        self::assertSame([PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE], $actions);
+        self::assertEquals([new GrantScope(null, 'web'), GrantScope::platform(), GrantScope::platform()], $scopes);
+        self::assertSame([null, null, null], \array_map(static fn (OperationResource $change): ?Reference => $change->tenant, $malformed));
+        $policies = static fn (): array => \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $user->getPolicies());
+
+        self::assertSame(['deny'], $policies());
+
+        Event::fake([PermissionRevoked::class, BoundaryRemoved::class]);
+
+        $revoke = static fn (Operation $operation): int => GrantChanges::revokeMalformed($grantee, $operation, $grants, $boundaries);
+
+        self::assertSame(3, OperationScope::run(Operation::begin(), $revoke));
+        self::assertSame(1, DB::table('authorizable_permissions')->where('authorizable_id', 'user-1')->count());
+        self::assertSame(0, DB::table('authorizable_boundaries')->count());
+        self::assertSame([], $policies());
+
+        [, $left, $leftBoundaries] = GrantChanges::everything($grantee);
+
+        self::assertSame([[], []], [$left, $leftBoundaries]);
+
+        // Rows no longer there are neither counted nor written to the log.
+        self::assertSame(0, OperationScope::run(Operation::begin(), $revoke));
+        Event::assertNotDispatched(PermissionRevoked::class);
+        Event::assertNotDispatched(BoundaryRemoved::class);
+        self::assertSame(
+            [
+                'Authorization: removed a permission grant naming half a tenant, malformed (tenant_type=null, tenant_id=tenant-a).',
+                'Authorization: removed a policy grant naming half a tenant, malformed (tenant_type=null, tenant_id=tenant-a).',
+                'Authorization: removed a boundary naming half a tenant, malformed (tenant_type=stub_tenant, tenant_id=null).',
+            ],
+            \array_column($logger->records, 'message'),
+        );
+        self::assertSame(
+            [
+                ['grantee' => "{$grantee->type}:user-1", 'target_id' => $edit->id, 'tenant_type' => null, 'tenant_id' => 'tenant-a'],
+                ['grantee' => "{$grantee->type}:user-1", 'target_id' => $deny->id, 'tenant_type' => null, 'tenant_id' => 'tenant-a'],
+                ['grantee' => "{$grantee->type}:user-1", 'policy_id' => $cap->id, 'tenant_type' => 'stub_tenant', 'tenant_id' => null],
+            ],
+            \array_column($logger->records, 'context'),
+        );
+
+        // Revoking everything as trusted work removes them the same way, found
+        // by the same reads as the rest, before the rest.
+        DB::table('authorizable_permissions')->insert(['permission_id' => $edit->id, ...$half]);
+
+        [$events, $removed] = OperationScope::run(Operation::begin(), static fn (Operation $operation): array => GrantChanges::revokeEverywhere($grantee, $operation));
+
+        self::assertSame([PermissionRevoked::class], \array_map(\get_class(...), $events));
+        self::assertSame(1, $removed);
+        self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', 'user-1')->count());
+        self::assertCount(4, $logger->records);
     }
 
     /**
@@ -194,7 +369,7 @@ final class GrantChangesTest extends TestCase
         self::grants()->grantPermission($user, Permission::create(['name' => 'posts:edit']));
         BoundaryService::instance()?->set($user, $cap, $tenant);
 
-        $decided = GrantChanges::everything($grantee);
+        [$decided] = GrantChanges::everything($grantee);
 
         self::grants()->grantPermission($user, Permission::create(['name' => 'posts:read']), tenant: $tenant);
 
@@ -207,7 +382,7 @@ final class GrantChangesTest extends TestCase
         $gone = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $grantee, Permission::create(['name' => 'posts:delete']), GrantScope::platform());
 
         try {
-            $decided = [...GrantChanges::everything($grantee), $gone];
+            $decided = [...GrantChanges::everything($grantee)[0], $gone];
 
             OperationScope::run($operation, static fn (Operation $operation): array => GrantChanges::revokeDecided($grantee, $operation, $decided));
 
@@ -220,10 +395,11 @@ final class GrantChangesTest extends TestCase
 
         BoundaryService::instance()?->set($user, $cap);
 
-        $everything = OperationScope::run($operation, static fn (Operation $operation): array => GrantChanges::revokeEverywhere($grantee, $operation));
+        [$everything, $removed] = OperationScope::run($operation, static fn (Operation $operation): array => GrantChanges::revokeEverywhere($grantee, $operation));
 
         self::assertSame([PermissionRevoked::class, BoundaryRemoved::class], \array_map(\get_class(...), $everything));
-        self::assertSame([], GrantChanges::everything($grantee));
+        self::assertSame(0, $removed);
+        self::assertSame([[], [], []], GrantChanges::everything($grantee));
     }
 
     /**
@@ -262,7 +438,7 @@ final class GrantChangesTest extends TestCase
         $table->grant($role->id, null);
 
         self::assertSame([$role->id], $table->held());
-        self::assertSame([$role->id], $table->live([$role->id]));
+        self::assertSame([$role->id], \array_keys($table->liveRows([$role->id])));
         self::assertSame(['admin', '9'], \array_values((array) DB::table('authorizable_roles')->sole(['granted_by_type', 'granted_by_id'])));
         self::assertSame([], GrantChanges::table(GrantTarget::ROLE, new Reference('user', '1'), null, GrantScope::platform())->held());
     }

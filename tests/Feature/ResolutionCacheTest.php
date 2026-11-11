@@ -461,7 +461,7 @@ final class ResolutionCacheTest extends TestCase
 
         $entry = $this->store->get(\str_replace(':policies:', ':boundaries:', self::policiesKey()));
         self::assertIsArray($entry);
-        self::assertSame([['id' => 'cap-key', 'document' => $boundary->toArray(), 'resource' => null]], $entry['value']);
+        self::assertSame([['id' => 'cap-key', 'document' => $boundary->toArray(), 'resource' => null, 'positions' => [0]]], $entry['value']);
 
         $read = $this->request()->rememberBoundaries(self::grantee(), fn (): Resolution => $this->resolve([]));
 
@@ -488,8 +488,8 @@ final class ResolutionCacheTest extends TestCase
         $entry = $this->store->get(self::policiesKey());
         self::assertIsArray($entry);
         self::assertSame([
-            ['id' => 'policy-key', 'document' => $keyed->toArray(), 'resource' => null],
-            ['id' => null, 'document' => $unkeyed->toArray(), 'resource' => null],
+            ['id' => 'policy-key', 'document' => $keyed->toArray(), 'resource' => null, 'positions' => [0]],
+            ['id' => null, 'document' => $unkeyed->toArray(), 'resource' => null, 'positions' => [0]],
         ], $entry['value']);
 
         $read = $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([]));
@@ -799,7 +799,7 @@ final class ResolutionCacheTest extends TestCase
         $entry = $this->store->get($key);
 
         self::assertIsArray($entry);
-        self::assertSame([['id' => 'policy-key', 'document' => $policy->toArray(), 'resource' => 'posts:7']], $entry['value']);
+        self::assertSame([['id' => 'policy-key', 'document' => $policy->toArray(), 'resource' => 'posts:7', 'positions' => [0]]], $entry['value']);
         self::assertIsArray($entry['versions']);
         self::assertSame([$this->versions()->resourcePoliciesKey(), $this->versions()->resourcePoliciesKey('posts')], \array_keys($entry['versions']));
 
@@ -833,7 +833,7 @@ final class ResolutionCacheTest extends TestCase
         $entry = $this->store->get($key);
 
         self::assertIsArray($entry);
-        self::assertSame([['id' => 'rail-key', 'document' => $policy->toArray(), 'resource' => null]], $entry['value']);
+        self::assertSame([['id' => 'rail-key', 'document' => $policy->toArray(), 'resource' => null, 'positions' => [0]]], $entry['value']);
         self::assertIsArray($entry['versions']);
         self::assertSame([$this->versions()->guardrailsKey()], \array_keys($entry['versions']));
 

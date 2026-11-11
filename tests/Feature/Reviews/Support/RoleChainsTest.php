@@ -6,6 +6,7 @@ namespace Tests\Feature\Reviews\Support;
 
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
@@ -100,6 +101,50 @@ final class RoleChainsTest extends TestCase
         self::assertSame([self::key($top) => [self::key($top)]], RoleChains::below($run, [self::key($top)]));
         self::assertSame([self::key($bottom) => [self::key($bottom)]], RoleChains::above($run, [self::key($bottom), self::key($middle)]));
         self::assertSame([], RoleChains::below($run, [self::key($middle)]));
+    }
+
+    /**
+     * Return the tenant columns of a role naming half a tenant: a key without a
+     * type, and a type without a key.
+     *
+     * @return iterable<string, array{string|null, string|null}>
+     */
+    public static function halfTenants(): iterable
+    {
+        yield 'a key without a type' => [null, 'acct1'];
+        yield 'a type without a key' => ['tenant', null];
+    }
+
+    /**
+     * A role naming half a tenant, a key without a type or a type without a
+     * key, is seen in no review of what applies, at the platform or in a
+     * tenant, so it ends a chain there, as the tenant scope shows it nowhere; a
+     * review of everywhere, or one rooted within a tenant, reads it.
+     *
+     * @param  string|null  $type
+     * @param  string|null  $id
+     * @return void
+     */
+    #[DataProvider('halfTenants')]
+    public function testARoleNamingHalfATenantIsSeenInNoReviewOfWhatApplies(?string $type, ?string $id): void
+    {
+        $this->tree();
+
+        [$top, $middle, $bottom] = self::hierarchy();
+
+        DB::table('roles')->where('id', $middle->getKey())->update(['tenant_type' => $type, 'tenant_id' => $id]);
+
+        $whole = [self::key($bottom) => [self::key($bottom), self::key($middle), self::key($top)]];
+
+        foreach ([ReviewScope::appliesIn(null, ApplicationSelector::none()), ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none())] as $scope) {
+            $run = ReviewRun::of($scope);
+
+            self::assertSame([self::key($bottom) => [self::key($bottom)]], RoleChains::above($run, [self::key($bottom)]));
+            self::assertSame([], RoleChains::below($run, [self::key($middle)]));
+        }
+
+        self::assertSame($whole, RoleChains::above(ReviewRun::of(ReviewScope::everywhere()), [self::key($bottom)]));
+        self::assertSame($whole, RoleChains::above(ReviewRun::of(ReviewScope::rootedWithin(self::tenant('acct1'))), [self::key($bottom)]));
     }
 
     /**

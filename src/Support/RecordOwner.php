@@ -22,8 +22,8 @@ use SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException;
 final class RecordOwner
 {
     /**
-     * Refuse a row with one tenant column and not the other, and a saved row
-     * whose owner would change.
+     * Refuse a row with one tenant column and not the other (see
+     * `assertWhole()`), and a saved row whose owner would change.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $record
      * @param  string  $kind
@@ -34,18 +34,36 @@ final class RecordOwner
      */
     public static function assertValid(Model $record, string $kind): void
     {
-        $type = $record->getAttribute('tenant_type');
-        $id   = $record->getAttribute('tenant_id');
-
-        if (($type === null) !== ($id === null)) {
-            throw new InvalidTenantColumnsException(modelKind: $kind, missingColumn: $type === null ? 'tenant_type' : 'tenant_id');
-        }
+        self::assertWhole($record, $kind);
 
         if ($record->exists && $record->isDirty(['tenant_type', 'tenant_id'])) {
             /** @var string $name */
             $name = $record->getAttribute('name');
 
             throw new OwnerChangedException($kind, $name);
+        }
+    }
+
+    /**
+     * Refuse a row with one tenant column and not the other, for the action
+     * named: a row naming half a tenant is neither the platform's nor any
+     * tenant's, so it is never saved, nor granted anywhere as though the
+     * platform owned it.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $record
+     * @param  string  $kind
+     * @param  string  $action
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
+     */
+    public static function assertWhole(Model $record, string $kind, string $action = 'save'): void
+    {
+        $type = $record->getAttribute('tenant_type');
+        $id   = $record->getAttribute('tenant_id');
+
+        if (($type === null) !== ($id === null)) {
+            throw new InvalidTenantColumnsException(modelKind: $kind, missingColumn: $type === null ? 'tenant_type' : 'tenant_id', action: $action);
         }
     }
 }

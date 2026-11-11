@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\ParentGuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
@@ -134,6 +135,41 @@ final class RoleObserverTest extends TestCase
         $role->save();
 
         self::assertSame('web', $role->fresh()?->guard);
+    }
+
+    /**
+     * A parent, child or permission naming half a tenant, linked to the role by
+     * a stored row, applies nowhere, so it never keeps the role's guard from
+     * changing; making such a role the parent is still refused, as linking it.
+     *
+     * @return void
+     */
+    public function testAGuardChangePassesOverLinksNamingHalfATenant(): void
+    {
+        $parent     = Role::query()->create(['name' => 'parent', 'guard' => 'web']);
+        $role       = Role::query()->create(['name' => 'role', 'parent_id' => $parent->id]);
+        $child      = Role::query()->create(['name' => 'child', 'guard' => 'web', 'parent_id' => $role->id]);
+        $permission = Permission::query()->create(['name' => 'posts:read', 'guard' => 'web']);
+
+        $role->permissions()->attach($permission->id);
+
+        foreach (['roles' => [$parent->id, $child->id], 'permissions' => [$permission->id]] as $table => $keys) {
+            DB::table($table)->whereIn('id', $keys)->update(['tenant_type' => null, 'tenant_id' => 'tenant-a']);
+        }
+
+        $role->guard = 'api';
+        $role->save();
+
+        self::assertSame('api', $role->fresh()?->guard);
+
+        $other = Role::query()->create(['name' => 'other', 'guard' => 'api']);
+
+        $other->parent_id = $parent->id;
+
+        $this->expectException(InvalidTenantColumnsException::class);
+        $this->expectExceptionMessage('Cannot link parent role with inconsistent tenant columns');
+
+        $other->save();
     }
 
     /**
@@ -340,6 +376,24 @@ final class RoleObserverTest extends TestCase
 
         self::assertSame($refused, self::isRefused(['name' => 'super-admin', 'guard' => $tenantGuard] + self::TENANT));
         self::assertSame($refused ? 1 : 2, CustomRole::query()->withoutGlobalScopes()->count());
+    }
+
+    /**
+     * A system role naming half a tenant, a key without a type, which the
+     * package never writes, is not the platform's, so a tenant role may share
+     * its name.
+     *
+     * @return void
+     */
+    public function testATenantRoleMayShareTheNameOfASystemRoleNamingHalfATenant(): void
+    {
+        $half = CustomRole::query()->create(['name' => 'super-admin', 'guard' => 'web'] + self::TENANT);
+
+        DB::table('roles')->where('id', $half->getKey())->update(['tenant_type' => null, 'is_system' => true]);
+
+        self::assertSame(1, DB::table('roles')->whereNull('tenant_type')->where('tenant_id', 'tenant-a')->where('is_system', true)->count());
+
+        self::assertFalse(self::isRefused(['name' => 'super-admin', 'guard' => 'web', 'tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-b']));
     }
 
     /**

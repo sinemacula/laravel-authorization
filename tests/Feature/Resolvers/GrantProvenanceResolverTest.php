@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder;
 use SineMacula\Laravel\Authorization\Evaluation\GrantProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -209,6 +210,124 @@ final class GrantProvenanceResolverTest extends TestCase
             ],
             $recorder->evidenceFor(Decision::allow(DecisionStage::ALLOW, [new StatementReference('own', 0, $own->id), new StatementReference('shared', 0, $shared->id)]))->grants,
         );
+    }
+
+    /**
+     * An explained check reads the policies as an everyday check does: an
+     * attachment naming half a tenant, and any attachment of a policy naming
+     * half a tenant, counts in every scope for its denies alone, the grantee's
+     * own and a role's alike, unless an attachment that holds, of a policy
+     * naming no half tenant, reaches the policy too.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAttachmentNamingHalfATenantIsExplainedForItsDeniesAlone(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-1']);
+        $role  = Role::create(['name' => 'editor']);
+        $names = ['whole', 'keyless', 'mixed', 'owned', 'role half', 'role owned', 'role both', 'own and role half'];
+        $made  = [];
+
+        $statements = [['effect' => 'allow', 'actions' => ['posts:read']], ['effect' => 'deny', 'actions' => ['posts:write']]];
+
+        foreach ($names as $name) {
+            $made[$name] = Policy::create(['name' => $name, 'document' => ['statements' => $statements]]);
+        }
+
+        $user->assignRole($role);
+        $user->attachPolicy($made['whole']);
+        $user->attachPolicy($made['mixed']);
+        $role->attachPolicy($made['role owned']);
+        $role->attachPolicy($made['role both']);
+        $user->attachPolicy($made['own and role half']);
+
+        $own  = ['authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1', 'include_subtree' => true];
+        $held = ['authorizable_type' => $role->getMorphClass(), 'authorizable_id' => $role->id, 'include_subtree' => true];
+
+        DB::table('authorizable_policies')->insert([
+            ['policy_id' => $made['keyless']->id, ...$own, 'tenant_type' => 'tenant', 'tenant_id' => null],
+            ['policy_id' => $made['mixed']->id, ...$own, 'tenant_type' => null, 'tenant_id' => 't-1'],
+            ['policy_id' => $made['owned']->id, ...$own, 'tenant_type' => 'tenant', 'tenant_id' => 't-2'],
+            ['policy_id' => $made['role half']->id, ...$held, 'tenant_type' => null, 'tenant_id' => 't-1'],
+            ['policy_id' => $made['own and role half']->id, ...$held, 'tenant_type' => null, 'tenant_id' => 't-1'],
+        ]);
+
+        // Read after the role's whole row, a half row of the same policy never
+        // takes away what the whole one gives.
+        DB::table('authorizable_policies')->insert(['policy_id' => $made['role both']->id, ...$held, 'tenant_type' => null, 'tenant_id' => 't-1']);
+        DB::table('policies')->whereIn('id', [$made['owned']->id, $made['role owned']->id])->update(['tenant_type' => 'tenant', 'tenant_id' => null]);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        $effects = [];
+
+        foreach (GrantProvenanceResolver::policiesOf($user, new EvidenceRecorder) as $policy) {
+            $effects[$policy->name] = \array_values(\array_map(static fn (Statement $statement): string => $statement->effect->value, $policy->statements));
+        }
+
+        \ksort($effects);
+
+        $denies = ['deny'];
+
+        $both = ['allow', 'deny'];
+
+        self::assertSame([
+            'keyless'           => $denies,
+            'mixed'             => $both,
+            'own and role half' => $both,
+            'owned'             => $denies,
+            'role both'         => $both,
+            'role half'         => $denies,
+            'role owned'        => $denies,
+            'whole'             => $both,
+        ], $effects);
+    }
+
+    /**
+     * An attachment naming half a tenant only denies, so it is never where an
+     * allow came from: the evidence of an allow lists the grantee's whole
+     * attachment and the route through the role attaching the policy whole,
+     * never the grantee's half row, which would read as the platform's, nor the
+     * role attaching it by a half row.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAttachmentNamingHalfATenantIsNeverWhereAnAllowCameFrom(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $whole  = Role::create(['name' => 'whole']);
+        $half   = Role::create(['name' => 'half']);
+        $policy = Policy::create(['name' => 'p', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+
+        $tenant = StubTenant::query()->create(['id' => 'tenant-1', 'name' => 'tenant-1']);
+
+        $user->attachPolicy($policy, tenant: $tenant);
+        $user->assignRole($whole);
+        $user->assignRole($half);
+        $whole->attachPolicy($policy);
+
+        $own  = ['policy_id' => $policy->id, 'authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1'];
+        $held = ['policy_id' => $policy->id, 'authorizable_type' => $half->getMorphClass(), 'authorizable_id' => $half->id];
+
+        DB::table('authorizable_policies')->insert([
+            [...$own, 'include_subtree' => true, 'tenant_type' => null, 'tenant_id' => 'zzz'],
+            [...$held, 'include_subtree' => true, 'tenant_type' => 'tenant', 'tenant_id' => null],
+        ]);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        $recorder = new EvidenceRecorder;
+
+        TenantScope::within($tenant, null, static fn (): array => GrantProvenanceResolver::policiesOf($user, $recorder));
+
+        $grants = $recorder->evidenceFor(Decision::allow(DecisionStage::ALLOW, [new StatementReference('p', 0, $policy->id)]))->grants;
+        $shown  = \array_map(static fn (GrantProvenance $grant): array => [$grant->source, $grant->roles, $grant->tenant?->id], $grants);
+
+        self::assertEqualsCanonicalizing([[GrantSource::POLICY, [], 'tenant-1'], [GrantSource::ROLE_POLICY, ['whole'], null]], $shown);
     }
 
     /**

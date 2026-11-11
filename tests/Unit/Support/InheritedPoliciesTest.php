@@ -63,4 +63,16 @@ final class InheritedPoliciesTest extends TestCase
         self::assertSame(['role-1' => ['role-1', 'role-2']], $inherited->chains);
         self::assertSame(['role-2' => ['policy-1']], $inherited->byRole);
     }
+
+    /**
+     * The keys of the policies reached only through attachments whose denies
+     * alone count are none by default and kept as given.
+     *
+     * @return void
+     */
+    public function testThePoliciesWhoseDeniesAloneCountAreKept(): void
+    {
+        self::assertSame([], (new InheritedPolicies)->denyOnly);
+        self::assertSame(['policy-1'], (new InheritedPolicies(['policy-1', 'policy-2'], denyOnly: ['policy-1']))->denyOnly);
+    }
 }

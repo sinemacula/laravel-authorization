@@ -22,8 +22,11 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * A chain runs from a role up through its parents, as `RoleGraph` walks it for
  * a check: it ends at a role that is missing, or that the reviewed tenant does
  * not see in a review of what applies there (see `ReviewRun::sees()`), and a
- * role the tenant does not see holds nothing there itself. A chain that returns
- * to a role it has passed refuses the review with
+ * role the tenant does not see holds nothing there itself. A role naming half a
+ * tenant, a type without a key or a key without a type, which the package never
+ * writes, is seen in no review of what applies, at the platform or in a tenant,
+ * as the tenant scope shows it nowhere (see `TenantChain::whereNullTenant()`).
+ * A chain that returns to a role it has passed refuses the review with
  * `RoleHierarchyCycleException`, as a check refuses; the role service never
  * writes one. With the hierarchy disabled a chain is its role alone.
  *
@@ -136,8 +139,9 @@ final class RoleChains
 
     /**
      * Read the roles with the keys, keeping those the reviewed tenant sees,
-     * each by its key with its parent's key and its name, in one query on the
-     * write connection, outside every tenant scope.
+     * never one naming half a tenant in a review of what applies, each by its
+     * key with its parent's key and its name, in one query on the write
+     * connection, outside every tenant scope.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  list<string>  $keys
@@ -161,10 +165,12 @@ final class RoleChains
 
         foreach ($rows as $row) {
             /** @var array{role_key: int|string, parent_id: int|string|null, name: string, tenant_type: string|null, tenant_id: int|string|null} $columns */
-            $columns = (array) $row;
-            $owner   = $columns['tenant_type'] === null || $columns['tenant_id'] === null ? null : new Reference($columns['tenant_type'], (string) $columns['tenant_id']);
+            $columns     = (array) $row;
+            [$type, $id] = [$columns['tenant_type'], $columns['tenant_id']];
+            $owner       = $type === null || $id === null ? null : new Reference($type, (string) $id);
+            $isHidden    = ($type === null) !== ($id === null) ? $run->isApplicability() : !$run->sees($owner);
 
-            if (!$run->sees($owner)) {
+            if ($isHidden) {
                 continue;
             }
 

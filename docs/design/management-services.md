@@ -52,12 +52,17 @@ the subject resolver. The events themselves are described in [Events](events.md)
    through the role permission pivot, so guard parity is enforced, inside a savepoint that a concurrent duplicate rolls
    back alone.
 
-4. **Expiry.** Re-granting a grant that has expired re-arms it with the new expiry (`REARMED`). A different expiry on
-   a live grant is a change of its own (`EXPIRY_CHANGED`). A sync grants what is missing with the sync's expiry,
-   re-arms a listed grant that has expired with the same expiry, leaves a live grant as it is, and revokes what is not
-   listed. A sync given no expiry, as every identity trait sync is, re-arms a lapsed temporary grant as a permanent
-   one. A role's grants of permissions behave the same way through `RoleService::grantPermission()` and
-   `syncPermissions()`, which take the expiry before the actor.
+4. **Expiry.** Re-granting a grant that has expired re-arms it with the new expiry (`REARMED`). A different expiry on a
+   live grant is a change of its own (`EXPIRY_CHANGED`). A sync grants what is missing with the sync's expiry, re-arms a
+   listed grant that has expired with the same expiry, leaves a live grant as it is, and revokes what is not listed. A
+   role listed with its own reach (`Support\RoleReach::of($role, $includeSubtree)`) is compared with that reach: held
+   live with the other, its reach is changed in place, one write keeping its row and expiry, reported as `REACH_CHANGED`
+   with the granted event and in `SyncResult::$reachChanged`; listed with both reaches in a tenant, the sync is refused
+   with `InvalidArgumentException` before anything is written; a platform-wide sync writes every grant reaching
+   everywhere, so there both entries name the same reach and the sync goes ahead. A sync given no expiry, as every
+   identity trait sync is, re-arms a lapsed temporary grant as a permanent one. A role's grants of permissions behave
+   the same way through `RoleService::grantPermission()` and `syncPermissions()`, which take the expiry before the
+   actor.
 
 5. **One scope per grant.** A grant holds in one tenant or platform-wide (AUTHZ-5.1). The tenant that owns the
    target fixes it, and naming another tenant is refused with `GrantScopeMismatchException`; a platform target is
@@ -205,6 +210,19 @@ working: each forwards to the matching service method with no actor.
 
 ## Failure / Edge Cases
 
+- **A row naming half a tenant** (N130), which the services never write, holds in no scope a call can name. A removal in
+  every scope removes it as stored: `GrantService::revokeAll()`, `BoundaryService::removeAll()` and
+  `ResourcePolicyService::detachAll()`, which the grant pruner runs; and removing a policy's guardrail at the platform
+  removes its guardrail rows stored that way. Each decides such a row at platform scope, in its application, so an
+  acting context needs the platform authority for the action, never a tenant's, and is refused while one remains when
+  its authority is held only within a tenant. The row is removed as stored, found by the same read as the rest, counted,
+  and, once the removal commits, written to the log as malformed (`Support\TenantColumns::reportRemoved()`) rather than
+  reported by an event, which would name it the platform's or a tenant's, and the resolution cache is invalidated as
+  that event would (`OperationScope::invalidate()`); a row another writer removed first is neither counted nor written.
+  The pruner removes an expired one the same way. A role, permission or policy owned that way is never granted, attached
+  or linked to a role (`InvalidTenantColumnsException`); a link to one already stored is passed over when the guard of
+  the other record changes, as it applies nowhere. A delegated rewrite of a policy a boundary stored that way uses is
+  weighed at platform scope (`Administration\PolicyRewrite`), since the boundary caps everywhere.
 - **Raw relation writes bypass the services.** `$user->roles()->attach()`, `$role->permissions()->sync()` and their
   kin write the pivot directly: no transaction, no idempotency, no event and a stale resolution cache. They are
   unsupported for any change that must be audited.

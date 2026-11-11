@@ -13,6 +13,7 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\DependencyPins;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -360,6 +361,50 @@ final class OperationScopeTest extends TestCase
         self::assertIsString($tokens[0]);
         self::assertIsString($listened);
         self::assertNotSame($tokens[0], $listened);
+    }
+
+    /**
+     * Invalidating for events bumps the versions they would, at once and again
+     * once the write commits, without dispatching them; with no events it does
+     * nothing, so the cache's memo is kept.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testInvalidatingBumpsTheVersionsWithoutDispatching(): void
+    {
+        $store  = new VersionedStore($repository = new Repository(new ArrayStore), 'authorization');
+        $key    = $store->granteeKey(new Reference('user', 'user-1'));
+        $event  = new RoleAssigned(Operation::begin(), new Reference('user', 'user-1'), new Reference('role', 'role-1'), 'editor', GrantScope::platform(), null);
+        $tokens = [$store->tokens([$key])[$key] ?? null];
+        $cache  = new ResolutionCache($repository);
+
+        $heard = 0;
+
+        $this->app?->instance(ResolutionCache::class, $cache);
+
+        Event::listen(RoleAssigned::class, static function () use (&$heard): void {
+            $heard++;
+        });
+
+        OperationScope::run($event->operation, static function () use ($event, $store, $key, &$tokens): void {
+            OperationScope::invalidate($event);
+
+            $tokens[] = $store->tokens([$key])[$key] ?? null;
+        });
+
+        $tokens[] = $store->tokens([$key])[$key] ?? null;
+
+        self::assertCount(3, \array_unique(\array_map(static fn (mixed $token): string => \is_scalar($token) ? (string) $token : '', $tokens)));
+        self::assertSame(0, $heard);
+
+        $memo = $cache->rememberRoles(new StubIdentity(['id' => 'user-2']), static fn (): Resolution => new Resolution(['editor']));
+
+        OperationScope::invalidate();
+
+        self::assertSame($memo, $cache->rememberRoles(new StubIdentity(['id' => 'user-2']), static fn (): Resolution => new Resolution(['other'])));
+        self::assertSame($tokens[2], $store->tokens([$key])[$key] ?? null);
     }
 
     /**

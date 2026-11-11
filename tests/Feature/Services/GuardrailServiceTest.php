@@ -4,11 +4,14 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\Repository;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
@@ -24,6 +27,7 @@ use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
@@ -36,6 +40,7 @@ use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\RefusesThePackage;
+use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -168,6 +173,69 @@ final class GuardrailServiceTest extends TestCase
         self::assertSame([PackagePermissions::GUARDRAIL_MANAGE], $events[0]->operation->actions);
         self::assertTrue(self::refersTo($events[0]->scope->tenant, $tenant));
         self::assertTrue($events[0]->scope->includeSubtree);
+    }
+
+    /**
+     * A guardrail row naming half a tenant caps everywhere, so it is removed
+     * with the policy's guardrail on the platform, by an actor that may change
+     * the platform's guardrails: written to the log as malformed, never
+     * reported by an event naming it the platform's, the cache invalidated all
+     * the same. A removal from a tenant leaves it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARowNamingHalfATenantIsRemovedWithThePlatforms(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $actor  = ActingContext::for(self::manager());
+        $policy = self::rail('cap');
+        $logger = new RecordingLogger;
+
+        $this->app?->instance('log', $logger);
+
+        DB::table('guardrails')->insert([
+            ['policy_id' => $policy->id, 'tenant_type' => null, 'tenant_id' => 'tenant-a'],
+            ['policy_id' => $policy->id, 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => null],
+        ]);
+
+        Event::fake([GuardrailRemoved::class]);
+
+        $this->app?->instance(ResolutionCache::class, new ResolutionCache(new Repository(new ArrayStore)));
+
+        $capping = static fn (): int => \count((new GuardrailResolver)->guardrailsFor(null));
+
+        self::assertFalse(self::service()->remove($policy, $tenant, $actor));
+        self::assertSame(2, DB::table('guardrails')->count());
+        self::assertSame(1, $capping());
+        self::assertTrue(self::service()->remove($policy, null, $actor));
+        self::assertSame(0, DB::table('guardrails')->count());
+        self::assertSame(0, $capping());
+        self::assertSame([], self::dispatchedEvents(GuardrailRemoved::class));
+        self::assertEqualsCanonicalizing(
+            [
+                'Authorization: removed a guardrail naming half a tenant, malformed (tenant_type=null, tenant_id=tenant-a).',
+                "Authorization: removed a guardrail naming half a tenant, malformed (tenant_type={$tenant->getMorphClass()}, tenant_id=null).",
+            ],
+            \array_column($logger->records, 'message'),
+        );
+        self::assertEqualsCanonicalizing(
+            [
+                ['policy_id' => $policy->id, 'tenant_type' => null, 'tenant_id' => 'tenant-a'],
+                ['policy_id' => $policy->id, 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => null],
+            ],
+            \array_column($logger->records, 'context'),
+        );
+
+        self::service()->set($policy, null, $actor);
+
+        DB::table('guardrails')->insert(['policy_id' => $policy->id, 'tenant_type' => null, 'tenant_id' => 'tenant-a']);
+
+        self::assertTrue(self::service()->remove($policy, null, $actor));
+        self::assertSame(0, DB::table('guardrails')->count());
+        self::assertCount(1, self::dispatchedEvents(GuardrailRemoved::class));
+        self::assertFalse(self::service()->remove($policy, null, $actor));
     }
 
     /**

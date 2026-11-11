@@ -29,6 +29,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\PolicyPrincipals;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Sets and removes guardrails, on tenants and on the platform (AUTHZ-7.6).
@@ -146,6 +147,13 @@ final class GuardrailService
      * Remove the guardrail the policy is on the tenant, or on the platform when
      * the tenant is null, for the actor, and report whether the scope had it.
      *
+     * On the platform, which needs the actor to change the platform's
+     * guardrails, the policy's guardrail rows naming half a tenant are removed
+     * too: they cap everywhere, as the platform's do, and name no scope a
+     * removal could. Each is written to the log as malformed, rather than
+     * reported by an event, which would name it the platform's (see
+     * `TenantColumns`); the cache is invalidated all the same.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
@@ -169,13 +177,26 @@ final class GuardrailService
             // that is not stored is a guardrail nowhere.
             $stored = InlinePolicies::stored($policy->getKey());
 
-            if ($stored === null || !self::table($operation, $named)->remove(self::key($stored))) {
+            if ($stored === null) {
                 return false;
             }
 
-            OperationScope::dispatch(new GuardrailRemoved($operation, Reference::of($stored), PolicyDocument::nameOf($stored->getAttribute('name')), new GrantScope($named)));
+            $table     = self::table($operation, $named);
+            $removed   = $table->remove(self::key($stored));
+            $malformed = $named === null ? $table->removeMalformed(self::key($stored)) : [];
+            $event     = new GuardrailRemoved($operation, Reference::of($stored), PolicyDocument::nameOf($stored->getAttribute('name')), new GrantScope($named));
 
-            return true;
+            foreach ($malformed as $row) {
+                TenantColumns::reportRemoved('a guardrail', $row['tenant_type'], $row['tenant_id'], ['policy_id' => self::key($stored)]);
+            }
+
+            if ($removed) {
+                OperationScope::dispatch($event);
+            } elseif ($malformed !== []) {
+                OperationScope::invalidate($event);
+            }
+
+            return $removed || $malformed !== [];
         }, $actor);
     }
 

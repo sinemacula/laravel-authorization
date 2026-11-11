@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Administration;
 
+use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
@@ -23,6 +24,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Whether anything that caps or denies a subject could limit a permission
@@ -42,7 +44,11 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  *   grant's reach (see `GrantReach`): the policies attached to the subject's
  *   principal and identity, and to every role either holds and the roles above
  *   them, the policies attached to any resource, the boundaries of the
- *   principal and the identity, and the guardrails.
+ *   principal and the identity, and the guardrails; and, wherever they are,
+ *   those of them that restrict everywhere, naming half a tenant (see
+ *   `Support\TenantColumns`): a boundary or a guardrail stored that way, an
+ *   attachment of a policy or a resource policy stored that way, and an
+ *   attachment of a policy naming half a tenant.
  *
  * Exactly `authorization:guardrail.manage` is exempt from the guardrails, as
  * the guardrail stage exempts its check: no guardrail, one that cannot be read
@@ -206,9 +212,11 @@ final class PossessionLimits
         $roles = \array_keys(RoleGraph::reach(self::keys('authorizable_roles', 'role_id', $grantees, $reach)));
         $held  = [...$grantees, ...\array_map(static fn (string $key): Reference => new Reference((new $role)->getMorphClass(), $key), $roles)];
 
-        $denying  = [...self::keys('authorizable_policies', 'policy_id', $held, $reach), ...self::keys('resource_policies', 'policy_id', null, $reach)];
-        $bounding = self::keys('authorizable_boundaries', 'policy_id', $grantees, $reach);
-        $guarding = $isGuarded ? self::keys('guardrails', 'policy_id', null, $reach) : [];
+        $denied   = static fn (Builder $query, string $table): Builder => TenantColumns::whereDenyOnly($query, $table);
+        $half     = static fn (Builder $query, string $table): Builder => TenantColumns::whereHalf($query, $table . '.tenant_type', $table . '.tenant_id');
+        $denying  = [...self::keys('authorizable_policies', 'policy_id', $held, $reach, $denied), ...self::keys('resource_policies', 'policy_id', null, $reach, $denied)];
+        $bounding = self::keys('authorizable_boundaries', 'policy_id', $grantees, $reach, $half);
+        $guarding = $isGuarded ? self::keys('guardrails', 'policy_id', null, $reach, $half) : [];
         $policies = self::hydrated([...$denying, ...$bounding, ...$guarding]);
 
         return [self::pick($policies, $denying), self::pick($policies, $bounding), self::pick($policies, $guarding)];
@@ -216,11 +224,12 @@ final class PossessionLimits
 
     /**
      * Return the distinct keys in the column of the rows of the table held in a
-     * tenant of the reach, or platform-wide: the rows the grantees hold, or
-     * every row for no grantees, in one query. Every row for no grantees, the
-     * resource policies and the guardrails of the reach, is read only when
-     * there are no more than `authorization.administration.max_impact`, and
-     * inside a delegated operation locked and pinned (see
+     * tenant of the reach, or platform-wide, or among the rows the given
+     * callback says hold everywhere: the rows the grantees hold, or every row
+     * for no grantees, in one query. Every row for no grantees, the resource
+     * policies and the guardrails of the reach, is read only when there are no
+     * more than `authorization.administration.max_impact`, and inside a
+     * delegated operation locked and pinned (see
      * `DependencyPins::keysWithin()`), so one added meanwhile is noticed before
      * the write; more throws, so the permission is limited.
      *
@@ -228,19 +237,20 @@ final class PossessionLimits
      * @param  string  $column
      * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>|null  $grantees
      * @param  \SineMacula\Laravel\Authorization\Administration\GrantReach  $reach
+     * @param  (\Closure(\Illuminate\Contracts\Database\Query\Builder, string): mixed)|null  $everywhere
      * @return list<string>
      *
      * @throws \OverflowException
      * @throws \LogicException
      */
-    private static function keys(string $table, string $column, ?array $grantees, GrantReach $reach): array
+    private static function keys(string $table, string $column, ?array $grantees, GrantReach $reach, ?\Closure $everywhere = null): array
     {
         if ($grantees === []) {
             return [];
         }
 
         $name  = TableNames::get($table);
-        $query = $reach->constrain(AuthorizationConnection::connection()->table($name)->useWritePdo(), $name);
+        $query = $reach->constrain(AuthorizationConnection::connection()->table($name)->useWritePdo(), $name, $everywhere);
 
         if ($grantees === null) {
             $keys = DependencyPins::keysWithin($query, $column, AffectedHolders::limit());

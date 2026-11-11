@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\RecordOwner;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
 
@@ -46,7 +47,8 @@ final class GrantScopes
     /**
      * Return the scope a grant of the target holds in: the tenant named, else
      * the tenant that owns it, else null for platform-wide. A target one tenant
-     * owns cannot be granted outside that tenant and the tenants below it.
+     * owns cannot be granted outside that tenant and the tenants below it, and
+     * one naming half a tenant nowhere (see `assertGrantableIn()`).
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  \Illuminate\Database\Eloquent\Model  $target
@@ -54,6 +56,7 @@ final class GrantScopes
      * @return \SineMacula\Laravel\Authorization\Support\Reference|null
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
      */
     public static function of(GrantTarget $kind, Model $target, ?Reference $named): ?Reference
     {
@@ -90,7 +93,9 @@ final class GrantScopes
 
     /**
      * Refuse a target one tenant owns in any scope but that tenant and the
-     * tenants below it.
+     * tenants below it, and a target naming half a tenant, which the package
+     * never writes, in every scope: it is neither the platform's nor any
+     * tenant's, so it is never granted as though the platform owned it.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  \Illuminate\Database\Eloquent\Model  $target
@@ -98,9 +103,12 @@ final class GrantScopes
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
      */
     public static function assertGrantableIn(GrantTarget $kind, Model $target, ?Reference $scope): void
     {
+        RecordOwner::assertWhole($target, $kind->value, 'grant');
+
         $owner = Reference::tenantOf($target);
 
         if ($owner === null || TenantChain::isWithin($scope, $owner)) {
