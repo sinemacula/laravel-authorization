@@ -649,6 +649,87 @@ $user->assignRole('billing', tenant: $organisation, includeSubtree: false); // t
 Authorization::treeChanged($account);
 ```
 
+Every row of a subtree is typed, so tenants of different types sharing an id are never confused. A tree whose source
+keeps ids alone, with tenants of more than one type, projects them onto typed rows in SQL, joining whatever records each
+tenant's type, and never types every tenant below with the type of the one asked about, nor looks tenants up one at a
+time. A row without both columns is never guessed. Where the package nests the subtree in SQL, the database reports the
+missing column; an access review nests it too, and a row it reads in PHP without both throws an
+`UnexpectedValueException` naming the tree, either stopping the review (`authorization:review` reports the exception's
+class). The reach of a delegated grant (`includeSubtree` through `actor:`) reads the rows in PHP and throws the same,
+but the administration rules reading it catch it and fail closed, with neither the exception nor a log entry: the rank
+rule, when enabled, answers `administration.rank_uncomparable`; the possession route counts every permission as limited,
+so it proves none (`administration.unprovable`); and a role's resource policies count as unreadable, so the role's
+grant, or a new parent, is `administration.unprovable`. The kit below catches such a tree before it reaches either.
+
+**Testing a tree.** `SineMacula\Laravel\Authorization\Testing\Concerns\TenantTreeContract` checks a tree against this
+contract. Use it in a test case for the tree, seed the tree's own storage, and give the tree and the shape seeded, each
+tenant with its parent, or null for one at the top:
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Testing\Concerns\TenantTreeContract;
+
+final class OrganisationTreeTest extends TestCase
+{
+    use TenantTreeContract;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        foreach ($this->tenantTreeNodes() as [$tenant, $parent]) {
+            TenantNode::create([
+                'type'        => $tenant->type,
+                'id'          => $tenant->id,
+                'parent_type' => $parent?->type,
+                'parent_id'   => $parent?->id,
+            ]);
+        }
+    }
+
+    protected function tenantTree(): TenantTree
+    {
+        return new OrganisationTree;
+    }
+
+    protected function tenantTreeNodes(): array
+    {
+        return [
+            [new Reference('organisation', '1'), null],
+            [new Reference('team', '1'), new Reference('organisation', '1')],
+            [new Reference('team', '7'), new Reference('team', '1')],
+            [new Reference('organisation', '7'), null],
+        ];
+    }
+
+    protected function hasMixedTenantTypes(): bool
+    {
+        return true;
+    }
+}
+```
+
+Each check is a test of its own (`testTenantTree...`), run for every tenant of the fixture: its ancestors are its parent
+chain, nearest first; `isWithin()` holds for the tenant and those below it alone, and never, either way, for a tenant
+outside the fixture; and its subtree is a query on the package's connection, whose every row carries a `tenant_type` and
+a `tenant_id`, and whose pairs, compared as strings, are exactly the tenant and those below it, read alone, nested in a
+query as the grant scope query nests it, and inside the tenant scope of another tenant. A pair returned more than once
+passes, since every reader asks only whether a pair exists. A failure names the tenant and the pairs missing or extra.
+
+A tree claiming mixed types (`hasMixedTenantTypes()`) needs a fixture on which confusing them fails, and the kit fails
+any other: one tenant must have a tenant of another type below it, so a subtree typing every tenant with its root's type
+misses it, and, below it or itself, a tenant sharing its id with one of another type outside it, so a subtree matching
+tenants by id alone finds one too many. The fixture above does both: `team` 7 below `organisation` 1, and `organisation`
+7 outside it.
+
+Three hooks are protected, for a test case to override: `tenantTreeConnection()` names another connection than the
+package's (null for the application's default); `hasMixedTenantTypes()` claims mixed types; and `tenantTreeOutsider()`
+returns the tenant outside the fixture that the checks ask the tree about. By default that tenant has the first tenant's
+type and an id shaped as the fixture's are, so integer or UUID key columns can hold it: the largest id plus one when
+every id is digits, a new UUID when every id is a UUID, else `outside`. A tree whose keys take another shape overrides
+it with one its storage can hold.
+
 The trait methods (`assignRole()`, `givePermission()`, `attachPolicy()`, `$role->givePermission()` and the others) go
 through the same services. Without `actor:` they are trusted; given `actor:`, they pass it on, so the change is decided
 as that administrator (see [Trusted surfaces](#delegated-administration)). A raw relation write such as
@@ -4626,6 +4707,14 @@ shows as `declared by acme/tenants as ..., but overridden later`, and from an in
 it, `but an instance is bound over it`; a declaration naming no closure is shown beside whatever is bound as
 unverified. A declaration is data alone: nothing is loaded or built to read it.
 
+**Resetting between units of work.** Everything the package keeps for one request or job is bound with `scoped()`, so
+the queue worker and Octane forget it with the rest of the scoped state. A long-running command doing several units of
+work in one process, which must not forget what Laravel or another package keeps scoped (the command's context, the
+callbacks deferred with `defer()`), calls `Support\RequestState::forget($app)` between them instead. It forgets exactly
+the scoped instances held under the package's own names (its class names, `authorization` and the `authorization.`
+keys), whatever the package binds now or later, so the caller keeps no list of its own; the package's state after boot
+is kept. `RequestState::abstracts($app)` lists what it would forget. Both are part of the package's stable API.
+
 #### The diagnostic boot
 
 A refused configuration stops the boot, so on its own every command would fail before `authorization:check` could say
@@ -4923,6 +5012,9 @@ requirement, so to test one give it a session and bind a checker of your own:
 $this->app->instance(AuthenticationRequirementChecker::class, new MetRequirementChecker);
 $this->actingAsSubject(new Subject($user, $user, session: 'session-1'));
 ```
+
+`SineMacula\Laravel\Authorization\Testing\Concerns\TenantTreeContract` checks a tenant tree of your own against the
+contract the package reads it by (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)).
 
 ### Design notes
 

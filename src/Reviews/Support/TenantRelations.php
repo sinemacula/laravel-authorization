@@ -214,12 +214,17 @@ final class TenantRelations
 
     /**
      * Return the keys of those of the tenants the ancestor's subtree selects,
-     * in one query.
+     * in one query, keyed by themselves. The subtree is nested in that query,
+     * which selects both its columns, so the database reports one the subtree
+     * lacks; a row read without both still throws, naming the tree, rather than
+     * guess the type or read a key as some other tenant's. Nothing in the
+     * review catches either, so the review stops with it, and
+     * `authorization:review` reports the exception's class.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $ancestor
      * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $tenants
-     * @return array<string, true>
+     * @return array<string, string>
      *
      * @throws \UnexpectedValueException
      */
@@ -238,10 +243,20 @@ final class TenantRelations
         $found = [];
 
         foreach ($rows as $row) {
-            /** @var array{tenant_type: int|string, tenant_id: int|string} $columns */
             $columns = (array) $row;
+            $type    = $columns['tenant_type'] ?? null;
+            $id      = $columns['tenant_id']   ?? null;
 
-            $found[self::key(new Reference((string) $columns['tenant_type'], (string) $columns['tenant_id']))] = true;
+            if ((!\is_string($type) && !\is_int($type)) || (!\is_string($id) && !\is_int($id))) {
+                $message = 'The subtree of the tenant tree ' . $tree::class . ' returned a row without both a tenant_type and a tenant_id: '
+                    . 'a subtree must select both columns, typed, for every tenant.';
+
+                throw new \UnexpectedValueException($message);
+            }
+
+            $key = self::key(new Reference((string) $type, (string) $id));
+
+            $found[$key] = $key;
         }
 
         return $found;

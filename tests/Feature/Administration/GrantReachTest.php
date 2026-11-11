@@ -118,6 +118,52 @@ final class GrantReachTest extends TestCase
     }
 
     /**
+     * A subtree row whose tenant's type and key are integers is read as their
+     * string forms, as the grant tables store them.
+     *
+     * @return void
+     */
+    public function testAnIntegerTypeAndKeyInASubtreeRowAreReadAsTheirStrings(): void
+    {
+        $this->app?->instance(TenantTree::class, self::tree(static fn (): Builder => DB::query()->selectRaw('7 as tenant_type, 5 as tenant_id')));
+        $this->rows(['7' => ['parent', '5', '6'], 'tenant' => ['5']]);
+
+        self::assertSame(['', '7:5', '7:parent'], self::reached(new GrantScope(new Reference('7', 'parent'))));
+    }
+
+    /**
+     * A subtree row without its tenant's type or key, or with either null, is
+     * refused, naming the tree, rather than read as a tenant of a type guessed
+     * or with no key.
+     *
+     * @return void
+     */
+    public function testASubtreeRowWithoutItsTypeOrKeyIsRefused(): void
+    {
+        $subtrees = [
+            static fn (): Builder => DB::query()->selectRaw('\'child\' as tenant_id'),
+            static fn (): Builder => DB::query()->selectRaw('\'tenant\' as tenant_type'),
+            static fn (): Builder => DB::query()->selectRaw('null as tenant_type, \'child\' as tenant_id'),
+            static fn (): Builder => DB::query()->selectRaw('\'tenant\' as tenant_type, null as tenant_id'),
+        ];
+
+        foreach ($subtrees as $subtree) {
+            $tree = self::tree($subtree);
+
+            $this->app?->instance(TenantTree::class, $tree);
+
+            try {
+                GrantReach::of(new GrantScope(new Reference('tenant', 'parent')));
+
+                self::fail('A subtree row without its type or key was read.');
+            } catch (\UnexpectedValueException $exception) {
+                self::assertSame('The subtree of the tenant tree ' . $tree::class . ' returned a row without both a tenant_type and a tenant_id: '
+                    . 'a subtree must select both columns, typed, for every tenant.', $exception->getMessage());
+            }
+        }
+    }
+
+    /**
      * Return a tree with no ancestors whose subtree query the callback builds.
      *
      * @param  \Closure(\SineMacula\Laravel\Authorization\Support\Reference): \Illuminate\Contracts\Database\Query\Builder  $subtree
@@ -180,7 +226,7 @@ final class GrantReachTest extends TestCase
      * Store a guardrail row platform-wide and one in each tenant, keyed by its
      * type.
      *
-     * @param  array<string, list<string>>  $tenants
+     * @param  array<array-key, list<string>>  $tenants
      * @return void
      */
     private function rows(array $tenants): void

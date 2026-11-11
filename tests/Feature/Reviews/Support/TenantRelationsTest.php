@@ -6,6 +6,8 @@ namespace Tests\Feature\Reviews\Support;
 
 use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\Query\Builder as QueryBuilder;
+use Illuminate\Database\Query\Processors\Processor;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
@@ -244,6 +246,58 @@ final class TenantRelationsTest extends TestCase
     }
 
     /**
+     * A subtree row read without its tenant's type or key is refused, naming
+     * the tree, rather than read as a tenant of a type guessed or with no key.
+     *
+     * @return void
+     */
+    public function testASubtreeRowWithoutItsTypeOrKeyIsRefused(): void
+    {
+        $this->tree();
+
+        foreach (['tenant_type', 'tenant_id'] as $column) {
+            $dropping = static fn (array $row): array => \array_diff_key($row, [$column => true]);
+
+            $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static fn (Reference $tenant): Builder => self::closureSubtree($tenant, $dropping)));
+
+            try {
+                (new TenantRelations)->settle([self::scope('team1', false)], [self::scope('acct1')]);
+
+                self::fail('A subtree row without its ' . $column . ' was read.');
+            } catch (\UnexpectedValueException $exception) {
+                self::assertSame('The subtree of the tenant tree ' . SubtreeQueryTree::class . ' returned a row without both a tenant_type and a tenant_id: '
+                    . 'a subtree must select both columns, typed, for every tenant.', $exception->getMessage());
+            }
+        }
+    }
+
+    /**
+     * A subtree row read with its tenant's type and key as integers is read as
+     * their strings, so the tenant it names is found within the ancestor.
+     *
+     * @return void
+     */
+    public function testASubtreeRowOfIntegersIsReadAsItsStrings(): void
+    {
+        [$parent, $child] = [new Reference('7', '4'), new Reference('7', '5')];
+
+        ClosureTenantTree::add($parent);
+        ClosureTenantTree::add($child, $parent);
+
+        $integers = static fn (array $row): array => \array_map(\intval(...), $row);
+
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static fn (Reference $tenant): Builder => self::closureSubtree($tenant, $integers)));
+
+        [$grant, $attachment] = [new GrantScope($child, null, false), new GrantScope($parent)];
+
+        $meets = new TenantRelations;
+
+        $meets->settle([$grant], [$attachment]);
+
+        self::assertTrue($meets->canHoldTogether($grant, $attachment));
+    }
+
+    /**
      * Bind a closure-table tree that counts what it is asked, and return it.
      *
      * @return \Tests\Fixtures\QueryScoping\CountingTenantTree
@@ -297,6 +351,53 @@ final class TenantRelationsTest extends TestCase
             static fn (GrantRow $row): string => $row->grantee->id,
             GrantRows::all($meets->constrain(GrantRows::of(GrantTarget::ROLE), $table, $attachment), 'role'),
         );
+    }
+
+    /**
+     * Return the subtree of the tenant in the closure table, on a query whose
+     * rows come back as the callback rewrites them, as a tree's subtree read
+     * through it does.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @param  \Closure(array<array-key, mixed>): array<array-key, mixed>  $rewrite
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private static function closureSubtree(Reference $tenant, \Closure $rewrite): QueryBuilder
+    {
+        $connection = DB::connection();
+
+        $processor = new class ($rewrite) extends Processor {
+            /**
+             * Create a processor rewriting every row.
+             *
+             * @param  \Closure(array<array-key, mixed>): array<array-key, mixed>  $rewrite
+             */
+            public function __construct(
+
+                /** Rewrites a row. */
+                private readonly \Closure $rewrite,
+            ) {}
+
+            /**
+             * Return the rows, rewritten.
+             *
+             * @param  \Illuminate\Database\Query\Builder  $query
+             * @param  mixed  $results
+             * @return list<object>
+             */
+            #[\Override]
+            public function processSelect(QueryBuilder $query, mixed $results): array
+            {
+                /** @var list<object> $results */
+                return \array_map(fn (object $row): object => (object) ($this->rewrite)((array) $row), $results);
+            }
+        };
+
+        return (new QueryBuilder($connection, $connection->getQueryGrammar(), $processor))
+            ->from(ClosureTenantTree::TABLE)
+            ->select(['descendant_type as tenant_type', 'descendant_id as tenant_id'])
+            ->where('ancestor_type', $tenant->type)
+            ->where('ancestor_id', $tenant->id);
     }
 
     /**

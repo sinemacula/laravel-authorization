@@ -64,6 +64,27 @@ interface TenantTree
      * `outside`. A tree kept on the connection of both the scoped models and
      * the package's tables serves both.
      *
+     * Every row carries both columns, typed, mixed types included: ids that
+     * could clash across types are told apart by their type. A tree whose
+     * source keeps ids alone projects them onto typed rows in SQL (joining the
+     * registry of its tenants, say), never typing every tenant with the type of
+     * the one asked about, nor looking tenants up one by one. A row without
+     * both is never guessed. Where the package nests the query in SQL, the
+     * database reports the missing column. An access review nests it too, so
+     * there the database reports it, and a row read in PHP without both throws
+     * an `UnexpectedValueException` naming the tree; either stops the review,
+     * and `authorization:review` reports the exception's class. The reach of a
+     * delegated grant reads the rows in PHP, and a row without both throws the
+     * same, but the administration rules reading the reach catch it and fail
+     * closed, with neither the exception nor a log entry: the rank rule, when
+     * enabled, answers `administration.rank_uncomparable`; the possession route
+     * counts every permission as limited, so it proves none
+     * (`administration.unprovable`); and a role's resource policies count as
+     * unreadable, so the role's grant, or a new parent, is
+     * `administration.unprovable`. The trait
+     * `Testing\Concerns\TenantTreeContract` checks an implementation against
+     * this contract.
+     *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @return \Illuminate\Contracts\Database\Query\Builder
      */
