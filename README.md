@@ -627,6 +627,37 @@ an external id) is still named by its key. A sibling package, or the application
 the tenant, a `Reference` made from it, or its morph type and key, never the other identifier. A non-Eloquent tenant
 returns from `getKey()` the value its rows are to be keyed by, and keeps it for the tenant's life.
 
+**A row naming half a tenant.** A row is the platform's only when both `tenant_type` and `tenant_id` are null, and a
+tenant's when both name it. The package never writes one without the other, and refuses to save a role, permission or
+policy that way (`InvalidTenantColumnsException`). A row changed past it to name half a tenant, a type without a key or
+a key without a type, is neither the platform's nor any tenant's, and fails closed both ways:
+
+- **What grants applies nowhere.** A role grant, permission grant, policy attachment, a role's policy attachment, the
+  allows of a resource policy, and the ownership of a role or permission stored that way grant nothing, at the
+  platform, in any tenant or below one; a role or permission owned that way is seen in no tenant, nor at the platform.
+- **What restricts applies everywhere.** A boundary or guardrail stored that way caps, and the denies of a policy
+  attachment, a role's policy attachment or a resource policy stored that way deny, at the platform, in every tenant
+  and below every tenant, as a platform row does.
+- **An attachment that both allows and denies is split.** Its allows apply nowhere and its denies everywhere. An
+  attachment of a policy naming half a tenant is read the same way, whatever scope the attachment names.
+
+This holds in a check, a bulk check, `permissionsFor()` and query scoping alike, cold or from the resolution cache. A
+check reads such rows through queries of their own, each a range of an index, so with none it does no more work than it
+would without them; the `2026_11_11_000001_add_half_tenant_indexes` migration adds the `tenant_id` indexes of
+`guardrails`, `resource_policies` and `policies` these reads use. An explanation never names such a row as the
+platform's or as where an allow came from. A role, permission or policy owned that way is never granted, attached or
+linked to a role anywhere (`InvalidTenantColumnsException`); a link to one already stored applies nowhere, so it never
+keeps the guard of a role or permission from changing. A rewrite of a policy that a boundary stored that way uses is
+decided at platform scope, since the boundary caps everywhere. Such a row is removed by a removal in every scope:
+`revokeAll()`, `BoundaryService::removeAll()` and `ResourcePolicyService::detachAll()`, which `authorization:prune`
+runs, and, for a guardrail, removing its policy's guardrail at the platform. Each decides it at platform scope, in its
+application, so an acting context needs the platform authority for the action, never a tenant's; it is removed as
+stored, counted, and, once the removal commits, written to the log as malformed rather than reported by an event, and
+the cache forgets it. A row another writer removed first is neither counted nor written. An expired one is pruned the
+same way. `authorization:list-roles` and `authorization:list-permissions` show such an owner as
+`malformed (tenant_type=…, tenant_id=…)`, a policy's guardrail refusal counts such guardrails as malformed, and an
+[access review](#access-reviews) lists such a row as `malformed`.
+
 Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class
 implementing `SineMacula\Laravel\Authorization\Contracts\TenantTree` as `tenant_tree` in `config/authorization.php`,
 answering a tenant's ancestors, whether one tenant is within another, and a tenant's subtree as a query. The subtree
@@ -1227,9 +1258,10 @@ the call commits, only when it changed something, with the policy, its name, the
 `AuthorizationEvent`, and the change takes effect on the next check in every worker. A policy in use as a guardrail can
 be neither edited nor deleted: either is refused with `GuardrailException`, whose `getReason()` is `in_use` and whose
 `getTenants()` lists every scope it caps, the platform first as null, until each guardrail is removed through the
-service, and the table's foreign key refuses a delete made past the model. A guardrail's statements are named in the
-decision, the trace and `explain()` as any policy's are, at the `deny` stage for its denies and the `guardrail` stage
-for its allows.
+service, and the table's foreign key refuses a delete made past the model. A guardrail row naming half a tenant is in no
+scope: the refusal counts it as malformed, and removing the policy's guardrail at the platform removes it too. A
+guardrail's statements are named in the decision, the trace and `explain()` as any policy's are, at the `deny` stage for
+its denies and the `guardrail` stage for its allows.
 
 The guardrails that apply are read in one query, apart from the policies, so a custom `PolicyResolver` never drops
 them, and are cached with the rest of the resolution: once warm, a check reads none.
@@ -1490,11 +1522,14 @@ Each is prefixed with `authorization:`. A sync, `revokeAll()`, `removeAll()` and
 make under its own action (there is no blanket action), and every change is decided before any is written, so a batch is
 atomic: one refusal leaves nothing written and dispatches no change event, and no change is decided on authority an
 earlier one would have handed out. `revokeAll()` removes the grantee's boundaries too, so it decides
-`authorization:boundary.remove` for each. A sync decides a grant of each listed row the grantee does not hold live, the
-row kept unchanged for each it does hold live, and a revocation of each it drops; it judges which rows are live at one
-instant and re-arms as of the same instant, so a row decided as kept unchanged is never re-armed, even when it expires
-before it is written. A grant, an attachment or a set is decided whether or not it changes anything; a revocation by
-name decides each held row of the name, or, when none is held, the row the lookup ranks first.
+`authorization:boundary.remove` for each. A row naming half a tenant is decided at platform scope, in its application,
+since it is neither the platform's nor any tenant's and what restricts of it holds everywhere: an actor whose authority
+is held only within a tenant is refused while the grantee or record has one. A sync decides a grant of each listed row
+the grantee does not hold live, the row kept unchanged for each it does hold live, and a revocation of each it drops; it
+judges which rows are live at one instant and re-arms as of the same instant, so a row decided as kept unchanged is
+never re-armed, even when it expires before it is written. A grant, an attachment or a set is decided whether or not it
+changes anything; a revocation by name decides each held row of the name, or, when none is held, the row the lookup
+ranks first.
 
 A delegated call that finds nothing to change is still decided, on the change it was asked for: a revocation, detach or
 removal of what the grantee does not hold, a sync of what it already holds live, and `revokeAll()`, `removeAll()` or
@@ -3255,15 +3290,15 @@ by reference or given as a resolved `Subject`, or `unknown` when its record is g
 
 A grant or attachment row that names half a tenant (a type without a key, or the reverse), which the package never
 writes, is listed as damaged, never as a clean platform origin: its `grant_state` is `malformed` and its `origin_scope`
-shows the tenant columns as stored, the missing half null. It appears exactly where a check reads it today (a check
-reads a key without a type at the platform, by its missing type alone, and a type without a key nowhere), and a type
-without a key is also listed in a review of everywhere, which needs platform-wide admission, never in one rooted
-within a tenant, since it cannot be shown to lie there. A route resting on such a row is `malformed` too. Checks
-themselves still read these rows as before.
+shows the tenant columns as stored, the missing half null. A check applies what grants of such a row nowhere and what
+restricts of it everywhere (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), so
+it is never a placed grant of a review of what applies; a review of everywhere, which needs platform-wide admission,
+lists it all the same, and no review rooted within a tenant does, since it cannot be shown to lie there. A route
+resting on such a row is `malformed` too, and reaches a holder only through a row that holds everywhere.
 
 | Stored tenant    | `appliesIn()` (any tenant, or the platform) | `rootedWithin()` (any tenant) | `everywhere()` |
 |------------------|---------------------------------------------|-------------------------------|----------------|
-| Key without type | Listed, read at the platform                | Not listed                    | Listed         |
+| Key without type | Not listed                                  | Not listed                    | Listed         |
 | Type without key | Not listed                                  | Not listed                    | Listed         |
 
 Holders, holdings, expiries and an actor's grants each follow their scope selection.
@@ -3689,7 +3724,8 @@ reaches its subtree, or a platform-wide one. The principal's own grants count, a
 as they do for a check, so a person's grants never count for a machine; a grant held by another principal of the same
 identity never counts. A `Subject` is taken as it is, and any other object becomes one as the subject resolver's
 `forUser()` makes it. Given an application, only the grants that hold in it count, those made for every application
-included; without one, a grant counts whichever application it holds in. The answer is:
+included; without one, a grant counts whichever application it holds in. A grant row naming half a tenant applies
+nowhere, so it never counts. The answer is:
 
 - `GrantPresence::PRESENT` when such a grant is found;
 - `GrantPresence::ABSENT` when none is found and none could have been missed;

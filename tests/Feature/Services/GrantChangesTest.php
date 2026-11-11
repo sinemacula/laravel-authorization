@@ -6,9 +6,11 @@ namespace Tests\Feature\Services;
 
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
@@ -27,6 +29,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\ApiGuardedUser;
+use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\VanishedPolicy;
 use Tests\TestCase;
@@ -158,8 +161,9 @@ final class GrantChangesTest extends TestCase
         BoundaryService::instance()?->set($user, $cap, $tenant);
         self::grants()->grantRole(StubIdentity::create(['id' => 'user-2']), Role::create(['name' => 'other']));
 
-        $changes = GrantChanges::everything(Reference::of($user));
+        [$changes, $grants, $boundaries] = GrantChanges::everything(Reference::of($user));
 
+        self::assertSame([[], []], [$grants, $boundaries]);
         self::assertSame(
             [PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE],
             \array_map(static fn (OperationResource $change): string => $change->action, $changes),
@@ -168,7 +172,99 @@ final class GrantChangesTest extends TestCase
         self::assertNull($changes[1]->tenant);
         self::assertEquals(Reference::of($tenant), $changes[3]->tenant);
         self::assertSame('cap', $changes[3]->attributes()['policy']);
-        self::assertSame([], GrantChanges::everything(new Reference('user', 'nobody')));
+        self::assertSame([[], [], []], GrantChanges::everything(new Reference('user', 'nobody')));
+    }
+
+    /**
+     * The rows naming half a tenant are never among everything a grantee holds
+     * in a scope: each is its own revocation, or boundary removal, decided at
+     * platform scope in its application; revoking them removes them alone,
+     * writes each to the log as malformed and counts them, boundaries included,
+     * the cache invalidated as their events would, none dispatched.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRowsNamingHalfATenantAreDecidedAtPlatformScopeAndRevokedApart(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $grantee = Reference::of($user);
+        $logger  = new RecordingLogger;
+        $half    = ['authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1', 'tenant_type' => null, 'tenant_id' => 'tenant-a'];
+        $edit    = Permission::create(['name' => 'posts:edit']);
+
+        $this->app?->instance('log', $logger);
+
+        self::grants()->grantPermission($user, Permission::create(['name' => 'posts:read']));
+
+        DB::table('authorizable_permissions')->insert(['permission_id' => $edit->id, ...$half, 'application' => 'web']);
+        $deny = Policy::create(['name' => 'deny', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:read']]]]]);
+
+        DB::table('authorizable_policies')->insert(['policy_id' => $deny->id, ...$half]);
+        $cap = Policy::create(['name' => 'cap', 'document' => ['statements' => []]]);
+
+        DB::table('authorizable_boundaries')->insert(['policy_id' => $cap->id, ...$half, 'tenant_type' => 'stub_tenant', 'tenant_id' => null]);
+
+        [$changes, $grants, $boundaries] = GrantChanges::everything($grantee);
+
+        $malformed = GrantChanges::malformed($grantee, $grants, $boundaries);
+
+        self::assertCount(1, $changes);
+        $actions = \array_map(static fn (OperationResource $change): string => $change->action, $malformed);
+        $scopes  = \array_map(static fn (OperationResource $change): ?GrantScope => $change->change?->scope, $malformed);
+
+        self::assertSame([PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE], $actions);
+        self::assertEquals([new GrantScope(null, 'web'), GrantScope::platform(), GrantScope::platform()], $scopes);
+        self::assertSame([null, null, null], \array_map(static fn (OperationResource $change): ?Reference => $change->tenant, $malformed));
+        $policies = static fn (): array => \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $user->getPolicies());
+
+        self::assertSame(['deny'], $policies());
+
+        Event::fake([PermissionRevoked::class, BoundaryRemoved::class]);
+
+        $revoke = static fn (Operation $operation): int => GrantChanges::revokeMalformed($grantee, $operation, $grants, $boundaries);
+
+        self::assertSame(3, OperationScope::run(Operation::begin(), $revoke));
+        self::assertSame(1, DB::table('authorizable_permissions')->where('authorizable_id', 'user-1')->count());
+        self::assertSame(0, DB::table('authorizable_boundaries')->count());
+        self::assertSame([], $policies());
+
+        [, $left, $leftBoundaries] = GrantChanges::everything($grantee);
+
+        self::assertSame([[], []], [$left, $leftBoundaries]);
+
+        // Rows no longer there are neither counted nor written to the log.
+        self::assertSame(0, OperationScope::run(Operation::begin(), $revoke));
+        Event::assertNotDispatched(PermissionRevoked::class);
+        Event::assertNotDispatched(BoundaryRemoved::class);
+        self::assertSame(
+            [
+                'Authorization: removed a permission grant naming half a tenant, malformed (tenant_type=null, tenant_id=tenant-a).',
+                'Authorization: removed a policy grant naming half a tenant, malformed (tenant_type=null, tenant_id=tenant-a).',
+                'Authorization: removed a boundary naming half a tenant, malformed (tenant_type=stub_tenant, tenant_id=null).',
+            ],
+            \array_column($logger->records, 'message'),
+        );
+        self::assertSame(
+            [
+                ['grantee' => "{$grantee->type}:user-1", 'target_id' => $edit->id, 'tenant_type' => null, 'tenant_id' => 'tenant-a'],
+                ['grantee' => "{$grantee->type}:user-1", 'target_id' => $deny->id, 'tenant_type' => null, 'tenant_id' => 'tenant-a'],
+                ['grantee' => "{$grantee->type}:user-1", 'policy_id' => $cap->id, 'tenant_type' => 'stub_tenant', 'tenant_id' => null],
+            ],
+            \array_column($logger->records, 'context'),
+        );
+
+        // Revoking everything as trusted work removes them the same way, found
+        // by the same reads as the rest, before the rest.
+        DB::table('authorizable_permissions')->insert(['permission_id' => $edit->id, ...$half]);
+
+        [$events, $removed] = OperationScope::run(Operation::begin(), static fn (Operation $operation): array => GrantChanges::revokeEverywhere($grantee, $operation));
+
+        self::assertSame([PermissionRevoked::class], \array_map(\get_class(...), $events));
+        self::assertSame(1, $removed);
+        self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', 'user-1')->count());
+        self::assertCount(4, $logger->records);
     }
 
     /**
@@ -194,7 +290,7 @@ final class GrantChangesTest extends TestCase
         self::grants()->grantPermission($user, Permission::create(['name' => 'posts:edit']));
         BoundaryService::instance()?->set($user, $cap, $tenant);
 
-        $decided = GrantChanges::everything($grantee);
+        [$decided] = GrantChanges::everything($grantee);
 
         self::grants()->grantPermission($user, Permission::create(['name' => 'posts:read']), tenant: $tenant);
 
@@ -207,7 +303,7 @@ final class GrantChangesTest extends TestCase
         $gone = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $grantee, Permission::create(['name' => 'posts:delete']), GrantScope::platform());
 
         try {
-            $decided = [...GrantChanges::everything($grantee), $gone];
+            $decided = [...GrantChanges::everything($grantee)[0], $gone];
 
             OperationScope::run($operation, static fn (Operation $operation): array => GrantChanges::revokeDecided($grantee, $operation, $decided));
 
@@ -220,10 +316,11 @@ final class GrantChangesTest extends TestCase
 
         BoundaryService::instance()?->set($user, $cap);
 
-        $everything = OperationScope::run($operation, static fn (Operation $operation): array => GrantChanges::revokeEverywhere($grantee, $operation));
+        [$everything, $removed] = OperationScope::run($operation, static fn (Operation $operation): array => GrantChanges::revokeEverywhere($grantee, $operation));
 
         self::assertSame([PermissionRevoked::class, BoundaryRemoved::class], \array_map(\get_class(...), $everything));
-        self::assertSame([], GrantChanges::everything($grantee));
+        self::assertSame(0, $removed);
+        self::assertSame([[], [], []], GrantChanges::everything($grantee));
     }
 
     /**

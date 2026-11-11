@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\RecordOwner;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleParity;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * Row-lifecycle observer for the `Role` model.
@@ -191,12 +192,15 @@ final class RoleObserver
     }
 
     /**
-     * Refuse a parent the role cannot sit under, and, when the role's guard
-     * changes, a child or permission it no longer suits.
+     * Refuse a parent the role cannot sit under, one naming half a tenant
+     * included when the parent changes, and, when the role's guard changes, a
+     * child or permission it no longer suits, passing over one naming half a
+     * tenant, which applies nowhere.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
      *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\ParentGuardMismatchException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException
@@ -208,8 +212,11 @@ final class RoleObserver
         $query     = $roleClass::query()->withoutGlobalScope(TenantScope::class);
         $parent    = $role->parent_id === null || !$role->isDirty(['parent_id', 'guard']) ? null : (clone $query)->find($role->parent_id);
 
+        // The parent is linked only when it changes; when only the guard does,
+        // a parent naming half a tenant applies nowhere and is passed over, as
+        // are such children and permissions below.
         if ($parent instanceof Role) {
-            RoleParity::assertUnder($role, $parent);
+            RoleParity::assertUnder($role, $parent, $role->isDirty('parent_id'));
         }
 
         if (!$role->exists || !$role->isDirty('guard')) {
@@ -217,7 +224,7 @@ final class RoleObserver
         }
 
         foreach ($query->where('parent_id', $role->id)->get() as $child) {
-            RoleParity::assertUnder($child, $role);
+            RoleParity::assertUnder($child, $role, false);
         }
 
         // Every permission the role carries, an expired grant included, since a
@@ -229,7 +236,7 @@ final class RoleObserver
         $carried = GrantTarget::PERMISSION->find($permissions);
 
         foreach ($carried as $permission) {
-            RoleParity::assertCarries($role, $permission);
+            RoleParity::assertCarries($role, $permission, false);
         }
     }
 
@@ -268,7 +275,7 @@ final class RoleObserver
             ->when($role->exists, static fn (Builder $query) => $query->whereKeyNot($role->getKey()))
             ->when(
                 $isTenantOwned,
-                static fn (Builder $query) => $query->whereNull('tenant_type')->where('is_system', true),
+                static fn (Builder $query) => TenantChain::whereNullTenant($query, 'tenant_type', 'tenant_id')->where('is_system', true),
                 static fn (Builder $query) => $query->whereNotNull('tenant_type'),
             )
             ->when($guard !== null, static fn (Builder $query) => $query->where(static fn (Builder $inner) => $inner->where('guard', $guard)->orWhereNull('guard')))

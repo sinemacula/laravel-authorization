@@ -74,7 +74,8 @@ final class GrantRootsTest extends TestCase
 
     /**
      * A row naming a tenant's type without its key, or its key without its
-     * type, cannot be read.
+     * type, cannot be read, and applies nowhere, in no tenant nor at the
+     * platform.
      *
      * @return void
      */
@@ -96,6 +97,8 @@ final class GrantRootsTest extends TestCase
 
             self::assertSame(GrantScopeStatus::UNKNOWN, (new GrantRoots([Reference::of($user)]))->against($within), $half);
             self::assertSame(GrantScopeStatus::UNKNOWN, (new GrantRoots([Reference::of($user)]))->against(null), $half);
+            self::assertFalse((new GrantRoots([Reference::of($user)]))->appliesIn(new TenantChain), $half);
+            self::assertFalse((new GrantRoots([Reference::of($user)]))->appliesIn(new TenantChain([new Reference('tenant', 'a')])), $half);
         }
     }
 

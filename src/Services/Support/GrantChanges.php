@@ -13,7 +13,9 @@ use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Reads the grant tables for the grant service: the writer of a grantee's rows
@@ -21,6 +23,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * operation resources, so each can be decided before any is written; and
  * revokes everything a grantee holds, every row for trusted work, exactly the
  * rows decided for an acting context.
+ *
+ * @phpstan-type MalformedGrant array{target_id: string, tenant_type: string|null, tenant_id: string|null, application: string|null}
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -140,54 +144,135 @@ final class GrantChanges
     /**
      * Return the revocation of every role, permission and policy the grantee
      * holds, and the removal of each of its permission boundaries, in every
-     * scope, each to be decided before any is written.
+     * scope, each to be decided before any is written; and, read by the same
+     * queries, the rows naming half a tenant, which the package never writes:
+     * each grant as its kind, what it grants and its row, and each boundary as
+     * its row (see `malformed()`).
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
-     * @return list<\SineMacula\Laravel\Authorization\Administration\OperationResource>
+     * @return array{
+     *     list<\SineMacula\Laravel\Authorization\Administration\OperationResource>,
+     *     list<array{\SineMacula\Laravel\Authorization\Enums\GrantTarget, \Illuminate\Database\Eloquent\Model, MalformedGrant}>,
+     *     list<array{policy_id: string, tenant_type: string|null, tenant_id: string|null}>
+     * }
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      */
     public static function everything(Reference $grantee): array
     {
-        $changes = [];
+        $changes   = [];
+        $malformed = [];
 
         foreach (GrantTarget::cases() as $kind) {
-            $grants = self::table($kind, $grantee, null, GrantScope::platform())->grantsInEveryScope();
-            $models = [];
-
-            foreach ($kind->find(\array_column($grants, 0)) as $model) {
-                $models[self::key($model)] = $model;
-            }
+            [$grants, $half] = self::table($kind, $grantee, null, GrantScope::platform())->grantsInEveryScope();
+            $models          = self::keyed($kind, [...\array_column($grants, 0), ...\array_column($half, 'target_id')]);
 
             foreach ($grants as [$id, $scope]) {
                 $changes[] = OperationResource::revoke($kind->revokeAction(), $grantee, $models[$id], $scope);
             }
+
+            foreach ($half as $row) {
+                $malformed[] = [$kind, $models[$row['target_id']], $row];
+            }
         }
 
-        return [...$changes, ...self::boundaries($grantee)];
+        [$boundaries, $halfBoundaries] = (new BoundaryTable(AuthorizationConnection::connection(), TableNames::get('authorizable_boundaries'), $grantee))->everywhere();
+
+        return [[...$changes, ...BoundaryService::removals($grantee, $boundaries)], $malformed, $halfBoundaries];
+    }
+
+    /**
+     * Return the revocation of each row naming half a tenant given, and the
+     * removal of each boundary stored that way, each decided at platform scope,
+     * a grant in the row's application: such a row is neither the platform's
+     * nor any tenant's, and what restricts of it holds everywhere (see
+     * `Support\TenantColumns`), so only platform authority covers it.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  list<array{\SineMacula\Laravel\Authorization\Enums\GrantTarget, \Illuminate\Database\Eloquent\Model, MalformedGrant}>  $grants
+     * @param  list<array{policy_id: string, tenant_type: string|null, tenant_id: string|null}>  $boundaries
+     * @return list<\SineMacula\Laravel\Authorization\Administration\OperationResource>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
+     */
+    public static function malformed(Reference $grantee, array $grants, array $boundaries): array
+    {
+        $changes = [];
+
+        foreach ($grants as [$kind, $target, $row]) {
+            $changes[] = OperationResource::revoke($kind->revokeAction(), $grantee, $target, new GrantScope(null, $row['application']));
+        }
+
+        return [...$changes, ...BoundaryService::malformedRemovals($grantee, $boundaries)];
+    }
+
+    /**
+     * Revoke each row naming half a tenant given, as stored, and remove each
+     * boundary stored that way, inside the caller's operation, writing each
+     * removed to the log as malformed once the operation commits, since no
+     * event can say where it held, and invalidating the cache as their events
+     * would; and return how many were removed: a row no longer there is passed
+     * over.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  list<array{\SineMacula\Laravel\Authorization\Enums\GrantTarget, \Illuminate\Database\Eloquent\Model, MalformedGrant}>  $grants
+     * @param  list<array{policy_id: string, tenant_type: string|null, tenant_id: string|null}>  $boundaries
+     * @return int
+     */
+    public static function revokeMalformed(Reference $grantee, Operation $operation, array $grants, array $boundaries): int
+    {
+        $events = [];
+
+        foreach ($grants as [$kind, $target, $row]) {
+            if (self::table($kind, $grantee, $operation->actor, GrantScope::platform())->revokeMalformed($row) !== 1) {
+                continue;
+            }
+
+            $context = ['grantee' => "{$grantee->type}:{$grantee->id}", 'target_id' => $row['target_id']];
+
+            TenantColumns::reportRemoved("a {$kind->value} grant", $row['tenant_type'], $row['tenant_id'], $context);
+
+            $events[] = $kind->revokedEvent($operation, $grantee, $target, new GrantScope(null, $row['application']));
+        }
+
+        OperationScope::invalidate(...$events);
+
+        return \count($events) + BoundaryService::removeMalformed($grantee, $operation, $boundaries);
     }
 
     /**
      * Revoke every row the grantee holds, of every kind and in every scope, and
      * remove its boundaries, inside the caller's trusted operation, and return
      * a revoked, detached or removed event for each, in its scope: what is done
-     * for a grantee that was deleted, with nothing decided.
+     * for a deleted grantee, with nothing decided; with how many rows naming
+     * half a tenant were removed, found by the same reads, each as
+     * `revokeMalformed()` removes it, before the rest.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
-     * @return list<\SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent>
+     * @return array{list<\SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent>, int}
      */
     public static function revokeEverywhere(Reference $grantee, Operation $operation): array
     {
-        $events = [];
+        $read      = [];
+        $malformed = [];
 
         foreach (GrantTarget::cases() as $kind) {
-            $table  = self::table($kind, $grantee, $operation->actor, GrantScope::platform());
-            $grants = $table->grantsInEveryScope();
-            $models = [];
+            $table           = self::table($kind, $grantee, $operation->actor, GrantScope::platform());
+            [$grants, $half] = $table->grantsInEveryScope();
+            $models          = self::keyed($kind, [...\array_column($grants, 0), ...\array_column($half, 'target_id')]);
+            $read[]          = [$kind, $table, $grants, $models];
 
-            foreach ($kind->find(\array_column($grants, 0)) as $model) {
-                $models[self::key($model)] = $model;
+            foreach ($half as $row) {
+                $malformed[] = [$kind, $models[$row['target_id']], $row];
             }
+        }
 
+        $removed = self::revokeMalformed($grantee, $operation, $malformed, []);
+        $events  = [];
+
+        foreach ($read as [$kind, $table, $grants, $models]) {
             $table->revokeInEveryScope();
 
             foreach ($grants as [$id, $scope]) {
@@ -195,7 +280,9 @@ final class GrantChanges
             }
         }
 
-        return [...$events, ...BoundaryService::removeEverywhere($grantee, $operation)];
+        [$boundaries, $halfBoundaries] = BoundaryService::removeEverywhere($grantee, $operation);
+
+        return [[...$events, ...$boundaries], $removed + $halfBoundaries];
     }
 
     /**
@@ -284,18 +371,21 @@ final class GrantChanges
     }
 
     /**
-     * Return the removal of each of the grantee's permission boundaries, in
-     * every scope.
+     * Return the roles, permissions or policies with the given keys, by key,
+     * reading none for no keys.
      *
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
-     * @return list<\SineMacula\Laravel\Authorization\Administration\OperationResource>
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  list<string>  $ids
+     * @return array<string, \Illuminate\Database\Eloquent\Model>
      */
-    private static function boundaries(Reference $grantee): array
+    private static function keyed(GrantTarget $kind, array $ids): array
     {
-        $table = TableNames::get('authorizable_boundaries');
+        $models = [];
 
-        return BoundaryService::removals($grantee, (new BoundaryTable(AuthorizationConnection::connection(), $table, $grantee))->everywhere());
+        foreach ($ids === [] ? [] : $kind->find($ids) as $model) {
+            $models[self::key($model)] = $model;
+        }
+
+        return $models;
     }
 }

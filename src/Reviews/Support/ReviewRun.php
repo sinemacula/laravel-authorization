@@ -32,14 +32,15 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * loaded.
  *
  * A row that names half a tenant, a tenant type without a key or a key without
- * a type, which the package never writes (N99), is listed exactly where a check
- * reads it: a key without a type at the platform, by its missing type alone,
- * and a type without a key nowhere. A review of everywhere, which needs
- * platform-wide admission, lists a type without a key too; a review rooted
- * within a tenant never does, since it cannot be shown to lie within the tenant
- * and a scoped review never discloses another tenant's holders (N96). Either is
- * marked `malformed`, its origin scope as stored (see `GrantRow` and
- * `Enums\GrantState`).
+ * a type, which the package never writes (N99), is neither the platform's nor
+ * any tenant's (see `TenantChain::whereNullTenant()`): a check applies what
+ * grants of it nowhere and what restricts of it everywhere (N130, see
+ * `Support\TenantColumns`), so it is never a placed grant and no review of what
+ * applies lists it. A review of everywhere, which needs platform-wide
+ * admission, lists it all the same; a review rooted within a tenant never does,
+ * since it cannot be shown to lie within the tenant and a scoped review never
+ * discloses another tenant's holders (N96). Either is marked `malformed`, its
+ * origin scope as stored (see `GrantRow` and `Enums\GrantState`).
  *
  * A role's policy attachment reaches a holder of the role only where both the
  * role's grant and the attachment hold, as `RolePolicies` reads them in a

@@ -212,7 +212,7 @@ final class GrantTableTest extends TestCase
 
         self::assertSame(1, $admin->revoke([$role->id]));
         self::assertSame(0, $admin->revoke([$role->id]));
-        self::assertEquals([[$role->id, new GrantScope]], self::table()->grantsInEveryScope());
+        self::assertEquals([[[$role->id, new GrantScope]], []], self::table()->grantsInEveryScope());
         self::assertEqualsCanonicalizing([null], DB::table('authorizable_roles')->pluck('application')->all());
 
         $mobile->grant($role->id, null);
@@ -362,6 +362,78 @@ final class GrantTableTest extends TestCase
         self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)->outcome);
         self::assertSame(2, DB::table('authorizable_roles')->where('expires_at', '2026-07-01 13:00:00')->count());
         self::assertSame(1, DB::table('authorizable_roles')->whereNull('expires_at')->whereNull('tenant_type')->whereNull('application')->count());
+    }
+
+    /**
+     * A row naming half a tenant, a key without a type or a type without a key,
+     * is not the platform-wide grant: granting writes the platform-wide row
+     * beside it, and revoking at the platform leaves it as it is.
+     *
+     * @return void
+     */
+    public function testARowNamingHalfATenantIsNotThePlatformWideGrant(): void
+    {
+        $role = self::role();
+
+        self::insertRow($role->id, ['tenant_type' => null, 'tenant_id' => 'tenant-a']);
+        self::insertRow($role->id, ['tenant_type' => 'stub_tenant', 'tenant_id' => null]);
+
+        self::assertSame([], self::table()->held());
+        self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)->outcome);
+        self::assertSame([$role->id], self::table()->held());
+
+        self::table()->revoke([$role->id]);
+
+        self::assertSame(2, DB::table('authorizable_roles')->count());
+        self::assertSame([], self::table()->held());
+    }
+
+    /**
+     * A row naming half a tenant holds in no scope, so it is left out of the
+     * grants in every scope and read apart, by the same query, with its tenant
+     * columns as stored and its application; revoking one removes it alone, as
+     * stored, once, and another grantee's is left.
+     *
+     * @return void
+     */
+    public function testRowsNamingHalfATenantAreReadAndRevokedApart(): void
+    {
+        $role  = self::role();
+        $other = self::role('other');
+
+        self::insertRow($role->id, ['tenant_type' => null, 'tenant_id' => 'tenant-a', 'application' => 'web']);
+        self::insertRow($other->id, ['tenant_type' => null, 'tenant_id' => 'tenant-a', 'application' => 'web']);
+        self::insertRow($role->id, ['tenant_type' => 'stub_tenant', 'tenant_id' => null]);
+        self::insertRow($role->id, ['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
+        self::insertRow($role->id, ['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a', 'application' => 'web']);
+        self::table()->grant($role->id, null);
+
+        DB::table('authorizable_roles')->insert(['role_id' => $role->id, 'authorizable_type' => 'stub_identity', 'authorizable_id' => 'user-2', 'tenant_id' => 'tenant-a']);
+
+        [$grants, $malformed] = self::table()->grantsInEveryScope();
+
+        $tenant = new Reference('stub_tenant', 'tenant-a');
+
+        $whole = [[$role->id, new GrantScope($tenant, null, true)], [$role->id, new GrantScope($tenant, 'web', true)], [$role->id, new GrantScope]];
+
+        self::assertEqualsCanonicalizing($whole, $grants);
+        self::assertEqualsCanonicalizing(
+            [
+                ['target_id' => $role->id, 'tenant_type' => null, 'tenant_id' => 'tenant-a', 'application' => 'web'],
+                ['target_id' => $other->id, 'tenant_type' => null, 'tenant_id' => 'tenant-a', 'application' => 'web'],
+                ['target_id' => $role->id, 'tenant_type' => 'stub_tenant', 'tenant_id' => null, 'application' => null],
+            ],
+            $malformed,
+        );
+
+        foreach ($malformed as $row) {
+            self::assertSame(1, self::table()->revokeMalformed($row));
+            self::assertSame(0, self::table()->revokeMalformed($row));
+        }
+
+        self::assertSame([], self::table()->grantsInEveryScope()[1]);
+        self::assertSame(4, DB::table('authorizable_roles')->count());
+        self::assertSame(0, self::table()->revokeMalformed(['target_id' => $role->id, 'tenant_type' => null, 'tenant_id' => 'tenant-a', 'application' => null]));
     }
 
     /**
@@ -667,7 +739,7 @@ final class GrantTableTest extends TestCase
         self::table(tenant: self::tenant(), includeSubtree: false)->grant($second->id, null);
         self::table('user-2')->grant($first->id, null);
 
-        $grants = self::table()->grantsInEveryScope();
+        [$grants] = self::table()->grantsInEveryScope();
 
         \usort($grants, static fn (array $left, array $right): int => $left[0] <=> $right[0]);
 
@@ -679,7 +751,7 @@ final class GrantTableTest extends TestCase
 
         self::table()->revokeInEveryScope();
 
-        self::assertSame([], self::table()->grantsInEveryScope());
+        self::assertSame([[], []], self::table()->grantsInEveryScope());
         self::assertSame([$first->id], self::table('user-2')->held());
     }
 
@@ -942,7 +1014,7 @@ final class GrantTableTest extends TestCase
      */
     private static function sortedGrants(): array
     {
-        $grants = self::table()->grantsInEveryScope();
+        [$grants] = self::table()->grantsInEveryScope();
 
         \usort($grants, static fn (array $left, array $right): int => (string) $left[1]->application <=> (string) $right[1]->application);
 

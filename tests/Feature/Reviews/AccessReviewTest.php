@@ -191,17 +191,18 @@ final class AccessReviewTest extends TestCase
     }
 
     /**
-     * A grant naming half a tenant is listed exactly where a check reads it, a
-     * key without a type at the platform and so in every tenant, a type without
-     * a key nowhere; both are listed in a review of everywhere and neither in
-     * one rooted within a tenant, by holders, holdings, expiries and an actor's
-     * grants alike, each marked malformed, its origin scope as stored.
+     * A grant naming half a tenant is listed exactly where a check reads it,
+     * which is nowhere, a key without a type as a type without a key: neither
+     * is listed in a review of what applies, at the platform or in a tenant,
+     * nor in one rooted within a tenant, and both are listed in a review of
+     * everywhere, by holders, holdings, expiries and an actor's grants alike,
+     * each marked malformed, its origin scope as stored.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testAGrantNamingHalfATenantIsListedWhereACheckReadsIt(): void
+    public function testAGrantNamingHalfATenantIsListedOnlyInAReviewOfEverywhere(): void
     {
         $this->tree();
 
@@ -221,9 +222,10 @@ final class AccessReviewTest extends TestCase
 
         $expected = [
             [ReviewScope::everywhere(), [$noType, $noKey]],
-            [ReviewScope::appliesIn(null, ApplicationSelector::none()), [$noType]],
-            [ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none()), [$noType]],
-            [ReviewScope::appliesIn(self::tenant('team1'), ApplicationSelector::any()), [$noType]],
+            [ReviewScope::appliesIn(null, ApplicationSelector::none()), []],
+            [ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none()), []],
+            [ReviewScope::appliesIn(self::tenant('acct2'), ApplicationSelector::none()), []],
+            [ReviewScope::appliesIn(self::tenant('team1'), ApplicationSelector::any()), []],
             [ReviewScope::rootedWithin(self::tenant('org1')), []],
             [ReviewScope::rootedWithin(self::tenant('acct1')), []],
             [ReviewScope::rootedWithin(self::tenant('acct2')), []],
@@ -252,8 +254,9 @@ final class AccessReviewTest extends TestCase
     /**
      * A route resting on a role's policy attachment naming half a tenant is
      * marked malformed, its supporting row as stored: one with a key and no
-     * type reaches a holder anywhere, as a check reads it at the platform; one
-     * with a type and no key reaches only a holder of a platform-wide grant.
+     * type, as one with a type and no key, reaches only a holder of a
+     * platform-wide grant, never one holding the role in a tenant, since a
+     * check reads neither half anywhere.
      *
      * @return void
      *
@@ -279,10 +282,7 @@ final class AccessReviewTest extends TestCase
         DB::table('authorizable_policies')->where('policy_id', $noType->getKey())->update(['tenant_type' => null]);
         DB::table('authorizable_policies')->where('policy_id', $noKey->getKey())->update(['tenant_id' => null]);
 
-        self::assertEqualsCanonicalizing([
-            ['elsewhere', 'malformed', ['type' => null, 'id' => 'acct1']],
-            ['platform', 'malformed', ['type' => null, 'id' => 'acct1']],
-        ], $holders($noType));
+        self::assertSame([['platform', 'malformed', ['type' => null, 'id' => 'acct1']]], $holders($noType));
         self::assertSame([['platform', 'malformed', ['type' => 'tenant', 'id' => null]]], $holders($noKey));
     }
 

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Database\ComposedExpression;
+use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Query\RecordAttachments;
 use SineMacula\Laravel\Authorization\Query\Refusal;
@@ -110,6 +111,8 @@ final class RecordAttachmentsTest extends TestCase
             $byPolicy[$read->name] = ScopedDocument::query()->whereRaw(new ComposedExpression($condition))->pluck('code')->all();
         }
 
+        // With no attachment naming half a tenant, each policy is read with the
+        // one condition.
         self::assertSame([], $screen->refusals());
         self::assertCount(2, $attached);
         $name = $policy->getAttribute('name');
@@ -117,6 +120,119 @@ final class RecordAttachmentsTest extends TestCase
         self::assertSame(['abc'], $byPolicy[\is_string($name) ? $name : '']);
         self::assertCount(2, TenantScope::within(new Reference('teams', '6'), null, static fn (): array => $attachments->inScope('posts:view', $screen, false)));
         self::assertCount(3, TenantScope::within(new Reference('teams', '5'), null, static fn (): array => $attachments->inScope('posts:view', $screen, false)));
+    }
+
+    /**
+     * A policy attached to a record by a row naming half a tenant has its
+     * denies of the action read with the condition a row meets when such a row
+     * attaches it to its record, its allows only with the scope's own; a policy
+     * that only denies is read once, with a condition holding either way; a
+     * policy naming half a tenant is read once, its denies alone, with the
+     * condition a row meets when it is attached to its record in any tenant;
+     * and a policy that only allows, or whose denies name another action, has
+     * no condition of its denies.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAttachmentsNamingHalfATenantDenyOnTheirRecordsInEveryScope(): void
+    {
+        $keys = [];
+
+        foreach (['half', 'other tenant', 'platform', 'owned elsewhere', 'allow only', 'deny half', 'deny platform', 'other deny'] as $title) {
+            $keys[$title] = (string) ScopedPost::query()->create(['title' => $title])->getKey(); // @phpstan-ignore cast.string
+        }
+
+        $both    = [['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => ['stub_identity:reader']], ['effect' => 'deny', 'actions' => ['posts:view']]];
+        $mixed   = self::attachToResource([ScopedPost::class, $keys['platform']], $both);
+        $denying = self::attachToResource([ScopedPost::class, $keys['deny platform']], [$both[1]]);
+        $other   = self::attachToResource([ScopedPost::class, $keys['other deny']], [$both[0], ['effect' => 'deny', 'actions' => ['posts:delete']]]);
+        $owned   = self::storedPolicy('owned', $both);
+        $allows  = self::storedPolicy('allows', [$both[0]]);
+        $type    = (new ScopedPost)->getMorphClass();
+        $teams   = ['tenant_type' => 'teams', 'tenant_id' => '5'];
+        $attach  = static fn (Model $policy, string $title, array $tenant): bool => DB::table('resource_policies')->insert([
+            'policy_id'     => $policy->getKey(),
+            'resource_type' => $type,
+            'resource_id'   => $keys[$title],
+            ...$tenant,
+        ]);
+
+        $attach($mixed, 'half', ['tenant_type' => null, 'tenant_id' => '5']);
+        $attach($mixed, 'other tenant', $teams);
+        $attach($denying, 'deny half', ['tenant_type' => 'teams', 'tenant_id' => null]);
+        $attach($other, 'half', ['tenant_type' => null, 'tenant_id' => '5']);
+        $attach($owned, 'owned elsewhere', $teams);
+        $attach($allows, 'allow only', ['tenant_type' => 'teams', 'tenant_id' => null]);
+
+        DB::table('policies')->where('id', $owned->getKey())->update(['tenant_type' => 'teams', 'tenant_id' => null]);
+
+        [$attachments, $screen] = $this->reader(new ScopedPost);
+
+        $attached = TenantScope::within(new Reference('teams', '6'), null, static fn (): array => $attachments->inScope('posts:view', $screen, false));
+        $read     = [];
+
+        foreach ($attached as [$policy, $condition, $isDenyOnly]) {
+            $effects = \array_values(\array_map(static fn (Statement $statement): string => $statement->effect->value, $policy->statements));
+            $read[]  = [$policy->name, $effects, $isDenyOnly, ScopedPost::query()->whereRaw(new ComposedExpression($condition))->orderBy('id')->pluck('title')->all()];
+        }
+
+        \usort($read, static fn (array $left, array $right): int => [$left[0], $left[2]] <=> [$right[0], $right[2]]);
+
+        $name = static fn (Model $policy): string => (string) $policy->getAttribute('name'); // @phpstan-ignore cast.string
+
+        $expected = [
+            ['allows', ['allow'], false, []],
+            [$name($mixed), ['allow', 'deny'], false, ['platform']],
+            [$name($mixed), ['deny'], true, ['half']],
+            [$name($denying), ['deny'], false, ['deny half', 'deny platform']],
+            [$name($other), ['allow', 'deny'], false, ['other deny']],
+            ['owned', ['deny'], true, ['owned elsewhere']],
+        ];
+
+        \usort($expected, static fn (array $left, array $right): int => [$left[0], $left[2]] <=> [$right[0], $right[2]]);
+
+        self::assertSame([], $screen->refusals());
+        self::assertSame($expected, $read);
+    }
+
+    /**
+     * A policy that allows the action and denies only another one is read with
+     * the one condition, its allows counting, and no condition of its denies,
+     * whether it is attached in the scope or by a row naming half a tenant too.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyDenyingAnotherActionIsReadOnce(): void
+    {
+        $key    = (string) ScopedPost::query()->create(['title' => 'record'])->getKey(); // @phpstan-ignore cast.string
+        $policy = self::attachToResource([ScopedPost::class, $key], [
+            ['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => ['stub_identity:reader']],
+            ['effect' => 'deny', 'actions' => ['posts:delete']],
+        ]);
+
+        [$attachments, $screen] = $this->reader(new ScopedPost);
+
+        $attached = $attachments->inScope('posts:view', $screen, false);
+
+        self::assertCount(1, $attached);
+        self::assertSame($policy->getKey(), $attached[0][0]->id);
+        self::assertFalse($attached[0][2]);
+
+        $type = (new ScopedPost)->getMorphClass();
+
+        DB::table('resource_policies')->insert(['policy_id' => $policy->getKey(), 'resource_type' => $type, 'resource_id' => $key, 'tenant_type' => null, 'tenant_id' => '5']);
+
+        [$again, $screen] = $this->reader(new ScopedPost);
+
+        $attached = $again->inScope('posts:view', $screen, false);
+
+        self::assertCount(1, $attached);
+        self::assertFalse($attached[0][2]);
+        self::assertSame(['record'], ScopedPost::query()->whereRaw(new ComposedExpression($attached[0][1]))->pluck('title')->all());
     }
 
     /**

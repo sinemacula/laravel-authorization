@@ -79,6 +79,36 @@ final class GuardrailResolverTest extends TestCase
     }
 
     /**
+     * A guardrail naming half a tenant, a key without a type or a type without
+     * a key, which the package never writes, caps everywhere, as the platform's
+     * do: at the platform, in every tenant and below it, and on a resource of a
+     * tenant decided outside it.
+     *
+     * @return void
+     */
+    public function testAGuardrailNamingHalfATenantAppliesEverywhere(): void
+    {
+        [$org, $account, $team, $sibling] = self::tree();
+
+        self::rail('in-account', $account);
+
+        $keyless  = self::rail('keyless');
+        $typeless = self::rail('typeless');
+
+        DB::table('guardrails')->where('policy_id', $keyless->id)->update(['tenant_type' => $org->getMorphClass()]);
+        DB::table('guardrails')->where('policy_id', $typeless->id)->update(['tenant_id' => 'org']);
+
+        $half = ['keyless', 'typeless'];
+
+        self::assertSame($half, self::names());
+        self::assertSame($half, self::names($org));
+        self::assertSame(['in-account', ...$half], self::names($account));
+        self::assertSame(['in-account', ...$half], self::names($team));
+        self::assertSame($half, self::names($sibling));
+        self::assertSame(['in-account', ...$half], self::sorted((new GuardrailResolver)->guardrailsFor(ResourceReference::record('posts', '1', Reference::of($account)))));
+    }
+
+    /**
      * A check on a resource of a tenant reads that tenant's guardrails, also
      * when it is decided at platform scope or in another tenant; a resource
      * with no tenant, or none at all, reads the guardrails of the scope the

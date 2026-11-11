@@ -248,7 +248,8 @@ final class SyncPermissionsCommandTest extends TestCase
 
     /**
      * Tenant-owned permissions are neither read nor changed, even when one
-     * shares a declared permission's name or no enum declares it.
+     * shares a declared permission's name or no enum declares it; nor is one
+     * naming half a tenant, which is not the platform's.
      *
      * @return void
      */
@@ -256,13 +257,18 @@ final class SyncPermissionsCommandTest extends TestCase
     {
         $shared     = Permission::create(['name' => 'posts:create', 'description' => 'Tenant posts', 'tenant_type' => 'tenant', 'tenant_id' => 't1']);
         $undeclared = Permission::create(['name' => 'tenant:only', 'tenant_type' => 'tenant', 'tenant_id' => 't1']);
+        $half       = Permission::create(['name' => 'half:only', 'tenant_type' => 'tenant', 'tenant_id' => 't1']);
+
+        DB::table('permissions')->where('id', $half->getKey())->update(['tenant_type' => null]);
 
         self::assertSame(0, Artisan::call(self::COMMAND, ['--prune' => true]));
 
         $output = Artisan::output();
 
         self::assertStringNotContainsString('tenant:only', $output);
+        self::assertStringNotContainsString('half:only', $output);
         self::assertStringContainsString('add: ' . (4 + self::packageCount()) . ', update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.', $output);
+        self::assertTrue(DB::table('permissions')->where('id', $half->getKey())->exists());
 
         $tenantRows = Permission::query()->withoutGlobalScope(TenantScope::class)->whereNotNull('tenant_type');
 

@@ -16,7 +16,12 @@ use SineMacula\Laravel\Authorization\Database\ComposedExpression;
  * (AUTHZ-5.3).
  *
  * An empty chain is the platform: no tenant, so only platform-wide records and
- * grants count (AUTHZ-5.7).
+ * grants count (AUTHZ-5.7). A row is the platform's only when both its tenant
+ * columns are null (see `whereNullTenant()`): a row naming half a tenant, a
+ * type without a key or a key without a type, which the package never writes,
+ * is neither the platform's nor any tenant's, so no chain reads it, and as a
+ * grant or an owner it applies nowhere; what restricts of it applies everywhere
+ * instead, read through `TenantColumns` (N130).
  *
  * A chain may stand just below its tenant: a grant made in the tenant then
  * counts only when it reaches the tenants below it, as an ancestor's does, so
@@ -110,8 +115,28 @@ final readonly class TenantChain
     }
 
     /**
+     * Limit the query to the rows of the platform: those whose tenant columns
+     * are both null. A row naming half a tenant is never the platform's, so it
+     * is left out, as every tenant's chain leaves it out too.
+     *
+     * @template TQuery of \Illuminate\Contracts\Database\Query\Builder
+     *
+     * @param  TQuery  $query
+     * @param  string  $typeColumn
+     * @param  string  $idColumn
+     * @return TQuery
+     */
+    public static function whereNullTenant(Builder $query, string $typeColumn, string $idColumn): Builder
+    {
+        $query->whereNull($typeColumn)->whereNull($idColumn);
+
+        return $query;
+    }
+
+    /**
      * Limit the query to the records the chain's tenant sees: the platform's,
-     * and those of the tenant and its ancestors.
+     * and those of the tenant and its ancestors; a record naming half a tenant
+     * is seen by none.
      *
      * @template TQuery of \Illuminate\Contracts\Database\Query\Builder
      *
@@ -123,7 +148,7 @@ final readonly class TenantChain
     public function owners(Builder $query, string $typeColumn, string $idColumn): Builder
     {
         $query->where(function (Builder $query) use ($typeColumn, $idColumn): void {
-            $query->whereNull($typeColumn);
+            self::whereNullTenant($query, $typeColumn, $idColumn);
 
             foreach ($this->tenants as $tenant) {
                 $query->orWhere(static function (Builder $query) use ($typeColumn, $idColumn, $tenant): void {
@@ -139,7 +164,9 @@ final readonly class TenantChain
      * Limit a grant query to the grants that hold in the chain's tenant:
      * platform-wide grants, the tenant's own, and its ancestors' that reach the
      * tenants below them; for a chain standing just below its tenant, the
-     * tenant's own only when they reach below it too.
+     * tenant's own only when they reach below it too. A grant naming half a
+     * tenant holds in none; a reader of what restricts adds such rows through
+     * `TenantColumns::restricting()` or `attachments()`.
      *
      * @template TQuery of \Illuminate\Contracts\Database\Query\Builder
      *
@@ -150,7 +177,7 @@ final readonly class TenantChain
     public function grants(Builder $query, string $table): Builder
     {
         $query->where(function (Builder $query) use ($table): void {
-            $query->whereNull($table . '.tenant_type');
+            self::whereNullTenant($query, $table . '.tenant_type', $table . '.tenant_id');
 
             foreach ($this->tenants as $depth => $tenant) {
                 $own = $depth === 0 && !$this->isBelow;

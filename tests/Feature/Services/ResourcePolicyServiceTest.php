@@ -25,7 +25,9 @@ use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
 use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -39,6 +41,7 @@ use Tests\Concerns\InterleavesWrites;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
+use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -668,6 +671,107 @@ final class ResourcePolicyServiceTest extends TestCase
         self::assertSame(['tenant-a', 'tenant-a1'], DB::table('resource_policies')->orderBy('tenant_id')->pluck('tenant_id')->all());
         self::assertSame(1, self::service()->detach($policy, 'posts', $child));
         self::assertSame(['tenant-a'], DB::table('resource_policies')->pluck('tenant_id')->all());
+    }
+
+    /**
+     * Detaching everything from a record detaches an attachment naming half a
+     * tenant too, as stored: its denies hold everywhere, so it needs platform
+     * authority to detach a resource policy, never a scope it names half of. An
+     * actor holding that authority only in a tenant is refused while one
+     * remains, and detaches the record's attachment in its tenant once it is
+     * gone; it is counted, written to the log as malformed, and reported by no
+     * event, and the cache forgets it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDetachingEverythingNeedsPlatformAuthorityForARowNamingHalfATenant(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $logger = new RecordingLogger;
+        $local  = StubIdentity::create(['id' => 'local-admin']);
+        $grants = GrantService::instance();
+
+        self::assertInstanceOf(GrantService::class, $grants);
+
+        $grants->grantRole($local, Role::query()->firstOrCreate(['name' => 'administration-rank-0'], ['rank' => 0]), tenant: $tenant);
+        $grants->grantPermission($local, Permission::query()->firstOrCreate(['name' => 'authorization:*']), tenant: $tenant);
+
+        $this->app?->instance('log', $logger);
+
+        $policy = self::sharing();
+        $half   = self::sharing('half');
+        $row    = ['policy_id' => $half->id, 'resource_type' => 'posts', 'resource_id' => '7', 'tenant_type' => null, 'tenant_id' => 'tenant-a'];
+
+        self::service()->attach($policy, ['posts', 7], $tenant);
+        DB::table('resource_policies')->insert($row);
+
+        $resolver = new ResourcePolicyResolver;
+        $read     = static fn (): int => \count($resolver->policiesFor(ResourceReference::record('posts', '7')));
+
+        self::assertSame(1, $read());
+        $asLocal = static fn (): int => TenantScope::within($tenant, null, static fn (): int => self::service()->detachAll(['posts', 7], ActingContext::for($local)));
+
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, $asLocal);
+
+        Event::fake([PolicyDetached::class]);
+
+        self::assertSame(2, self::service()->detachAll(['posts', 7], self::administrator()));
+        self::assertSame(0, DB::table('resource_policies')->count());
+        self::assertSame(0, $read());
+        $detached = self::dispatchedEvents(PolicyDetached::class);
+        $message  = 'Authorization: removed a resource policy attachment naming half a tenant, malformed (tenant_type=null, tenant_id=tenant-a).';
+
+        self::assertSame(['tenant-a'], \array_map(static fn (PolicyDetached $event): ?string => $event->scope->tenant?->id, $detached));
+        self::assertSame([$message], \array_column($logger->records, 'message'));
+        self::assertSame([['resource' => 'posts:7', 'policy_id' => $half->id, 'tenant_type' => null, 'tenant_id' => 'tenant-a']], \array_column($logger->records, 'context'));
+
+        self::service()->attach($policy, ['posts', 7], $tenant);
+
+        self::assertSame(1, $asLocal());
+
+        DB::table('resource_policies')->insert([...$row, 'tenant_type' => 'stub_tenant', 'tenant_id' => null]);
+
+        self::assertSame(1, $read());
+        self::assertSame(1, self::service()->detachAll(['posts', 7]));
+        self::assertSame(0, $read());
+        self::assertSame(0, DB::table('resource_policies')->count());
+    }
+
+    /**
+     * An attachment naming half a tenant another writer detached after it was
+     * read is neither counted nor written to the log as detached.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAttachmentNamingHalfATenantGoneBeforeItsDetachmentIsNotLogged(): void
+    {
+        $logger = new RecordingLogger;
+        $half   = self::sharing('half');
+
+        DB::table('resource_policies')->insert(['policy_id' => $half->id, 'resource_type' => 'posts', 'resource_id' => '7', 'tenant_type' => null, 'tenant_id' => 'tenant-a']);
+
+        $this->app?->instance('log', $logger);
+
+        $isGone = false;
+
+        // Another writer detaches it once the attachments have been read.
+        DB::listen(static function (QueryExecuted $query) use (&$isGone): void {
+            if ($isGone || !\str_starts_with($query->sql, 'select') || !\str_contains($query->sql, 'resource_policies')) {
+                return;
+            }
+
+            $isGone = true;
+
+            DB::table('resource_policies')->delete();
+        });
+
+        self::assertSame(0, self::service()->detachAll(['posts', 7]));
+        self::assertTrue($isGone);
+        self::assertSame([], $logger->records);
     }
 
     /**

@@ -14,10 +14,12 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -346,6 +348,108 @@ final class GrantResolverTest extends TestCase
             [$store->rolePoliciesKey(), $store->roleKey($role->id), $store->policyKey($own->id), $store->policyKey($shared->id), $store->policyKey($roles->id)],
             $keys,
         );
+    }
+
+    /**
+     * An attachment naming half a tenant, a key without a type or a type
+     * without a key, and any attachment of a policy naming half a tenant, is
+     * read in every scope for its denies alone, the grantee's own and a role's
+     * alike: such a policy resolves with its deny statements alone, unless an
+     * attachment that holds, of a policy that names no half tenant, reaches it
+     * too; and such an attachment is never a route.
+     *
+     * @return void
+     */
+    public function testAnAttachmentNamingHalfATenantResolvesToItsDeniesAlone(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-1']);
+        $role  = Role::create(['name' => 'editor']);
+        $names = ['whole', 'keyless', 'mixed', 'owned', 'role half', 'role owned'];
+        $made  = [];
+
+        $statements = [['effect' => 'allow', 'actions' => ['posts:read']], ['effect' => 'deny', 'actions' => ['posts:write']]];
+
+        foreach ($names as $name) {
+            $made[$name] = Policy::create(['name' => $name, 'document' => ['statements' => $statements]]);
+        }
+
+        $user->assignRole($role);
+        $user->attachPolicy($made['whole']);
+        $user->attachPolicy($made['mixed']);
+        $role->attachPolicy($made['role owned']);
+
+        $own  = ['authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1', 'include_subtree' => true];
+        $held = ['authorizable_type' => $role->getMorphClass(), 'authorizable_id' => $role->id, 'include_subtree' => true];
+
+        DB::table('authorizable_policies')->insert([
+            ['policy_id' => $made['keyless']->id, ...$own, 'tenant_type' => 'tenant', 'tenant_id' => null],
+            ['policy_id' => $made['mixed']->id, ...$own, 'tenant_type' => null, 'tenant_id' => 't-1'],
+            ['policy_id' => $made['owned']->id, ...$own, 'tenant_type' => 'tenant', 'tenant_id' => 't-2'],
+            ['policy_id' => $made['role half']->id, ...$held, 'tenant_type' => null, 'tenant_id' => 't-1'],
+        ]);
+        DB::table('policies')->whereIn('id', [$made['owned']->id, $made['role owned']->id])->update(['tenant_type' => 'tenant', 'tenant_id' => null]);
+
+        $resolution = GrantResolver::policies($user->policies(), new ResolutionPins(null, true), $user->roles());
+        $effects    = [];
+
+        // A deny keeps the position it holds in its document.
+        foreach ($resolution->value as $policy) {
+            $effects[$policy->name] = \array_map(static fn (Statement $statement): string => $statement->effect->value, $policy->statements);
+        }
+
+        \ksort($effects);
+
+        $denies = [1 => 'deny'];
+
+        $both = ['allow', 'deny'];
+
+        self::assertSame(['keyless' => $denies, 'mixed' => $both, 'owned' => $denies, 'role half' => $denies, 'role owned' => $denies, 'whole' => $both], $effects);
+
+        $routed = $resolution->routes?->names() ?? [];
+
+        self::assertContains($made['whole']->id, $routed);
+        self::assertNotContains($made['keyless']->id, $routed);
+        self::assertNotContains($made['role half']->id, $routed);
+        self::assertEqualsCanonicalizing(
+            [$made['keyless']->id, $made['mixed']->id, $made['owned']->id],
+            GrantResolver::deniedEverywhere($user->policies(), ['policy_id'])->pluck('policy_id')->all(),
+        );
+    }
+
+    /**
+     * An attachment naming half a tenant counts for its denies alone in its own
+     * application only: one made for an application is read neither with no
+     * application nor in another, and is read, its denies alone, in its own.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAttachmentNamingHalfATenantCountsInItsApplicationAlone(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $policy = Policy::create(['name' => 'mobile only', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:write']]]]]);
+
+        DB::table('authorizable_policies')->insert([
+            'policy_id'         => $policy->id,
+            'authorizable_type' => $user->getMorphClass(),
+            'authorizable_id'   => 'user-1',
+            'include_subtree'   => true,
+            'tenant_type'       => null,
+            'tenant_id'         => 't-1',
+            'application'       => 'mobile',
+        ]);
+
+        $denied   = static fn (): array => GrantResolver::deniedEverywhere($user->policies(), ['policy_id'])->pluck('policy_id')->all();
+        $named    = static fn (EvaluationPolicy $read): string => $read->name;
+        $resolved = static fn (): array => \array_map($named, GrantResolver::policies($user->policies(), new ResolutionPins)->value);
+
+        self::assertSame([], $denied());
+        self::assertSame([], $resolved());
+        self::assertSame([], TenantScope::within(null, 'web', $denied));
+        self::assertSame([], TenantScope::within(null, 'web', $resolved));
+        self::assertSame([$policy->id], TenantScope::within(null, 'mobile', $denied));
+        self::assertSame(['mobile only'], TenantScope::within(null, 'mobile', $resolved));
     }
 
     /**

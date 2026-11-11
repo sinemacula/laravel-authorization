@@ -23,6 +23,7 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Enums\WideningReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
@@ -50,6 +51,7 @@ use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
@@ -73,6 +75,7 @@ use Tests\Concerns\WidensGrants;
 use Tests\Feature\Stubs\ApiGuardedUser;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomRole;
+use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubTenant;
@@ -1640,6 +1643,122 @@ final class GrantServiceTest extends TestCase
             [PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE],
             self::actionsDecided(),
         );
+    }
+
+    /**
+     * Revoking everything revokes a grant naming half a tenant too, as stored:
+     * it is decided at platform scope in the row's application, needing the
+     * actor's platform authority for the action, never a scope it names half
+     * of. An actor holding that authority only in a tenant is refused while one
+     * remains; it is counted, written to the log as malformed, reported by no
+     * event, trusted or decided alike, and the cache forgets a deny it held.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingEverythingNeedsPlatformAuthorityForARowNamingHalfATenant(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $user   = self::user();
+        $local  = StubIdentity::create(['id' => 'local-admin']);
+        $logger = new RecordingLogger;
+        $read   = Permission::query()->create(['name' => 'posts:read']);
+        $allow  = Policy::create(['name' => 'allow', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:list']]]]]);
+        $deny   = Policy::create(['name' => 'deny', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:read']]]]]);
+        $half   = ['authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1', 'tenant_type' => null, 'tenant_id' => 'tenant-a'];
+
+        self::service()->grantRole($local, Role::query()->firstOrCreate(['name' => 'administration-rank-0'], ['rank' => 0]), tenant: $tenant);
+        self::service()->grantPermission($local, Permission::query()->firstOrCreate(['name' => 'authorization:*']), tenant: $tenant);
+        self::service()->grantPermission($user, $read);
+        self::service()->grantRole($user, self::role('editor'), tenant: $tenant);
+
+        DB::table('authorizable_policies')->insert(['policy_id' => $allow->id, ...$half]);
+        DB::table('authorizable_roles')->insert(['role_id' => self::role('half')->id, ...$half, 'application' => 'web']);
+
+        $this->app?->instance('log', $logger);
+
+        $asLocal = static fn (): int => TenantScope::within($tenant, null, static fn (): int => self::service()->revokeAll($user, ActingContext::for($local)));
+        $denied  = static fn (): bool => \in_array('deny', \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $user->getPolicies()), true);
+
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, $asLocal);
+
+        Event::fake([RoleRevoked::class, PermissionRevoked::class, PolicyDetached::class]);
+
+        self::assertSame(4, self::service()->revokeAll($user, self::administrator()));
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+        self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', 'user-1')->count());
+        self::assertSame([], self::dispatchedEvents(PolicyDetached::class));
+        self::assertCount(1, self::dispatchedEvents(RoleRevoked::class));
+        self::assertEqualsCanonicalizing(
+            [
+                'Authorization: removed a policy grant naming half a tenant, malformed (tenant_type=null, tenant_id=tenant-a).',
+                'Authorization: removed a role grant naming half a tenant, malformed (tenant_type=null, tenant_id=tenant-a).',
+            ],
+            \array_column($logger->records, 'message'),
+        );
+
+        self::service()->grantRole($user, Role::query()->where('name', 'editor')->firstOrFail(), tenant: $tenant);
+
+        self::assertSame(1, $asLocal());
+
+        DB::table('authorizable_policies')->insert(['policy_id' => $deny->id, ...$half, 'tenant_type' => 'stub_tenant', 'tenant_id' => null]);
+
+        self::assertTrue($denied());
+        self::assertSame(1, self::service()->revokeAll($user));
+        self::assertFalse($denied());
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+    }
+
+    /**
+     * A grant naming half a tenant is written to the log as removed only once
+     * the removal commits: revoking everything inside a transaction that rolls
+     * back leaves the row and writes nothing; a row another writer removed
+     * first is neither counted nor written.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARemovalOfARowNamingHalfATenantIsLoggedOnlyOnceMade(): void
+    {
+        $user   = self::user();
+        $logger = new RecordingLogger;
+        $row    = ['role_id' => self::role('half')->id, 'authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1'];
+
+        DB::table('authorizable_roles')->insert([...$row, 'tenant_type' => null, 'tenant_id' => 'tenant-a']);
+
+        $this->app?->instance('log', $logger);
+
+        try {
+            DB::transaction(static function () use ($user): never {
+                self::service()->revokeAll($user);
+
+                throw new \RuntimeException('rolled back');
+            });
+        } catch (\RuntimeException) {
+            // The revocation was rolled back.
+        }
+
+        self::assertSame(1, DB::table('authorizable_roles')->count());
+        self::assertSame([], $logger->records);
+
+        $isGone = false;
+
+        // Another writer removes the row once it has been read.
+        DB::listen(static function (QueryExecuted $query) use (&$isGone): void {
+            if ($isGone || !\str_starts_with($query->sql, 'select') || !\str_contains($query->sql, 'authorizable_roles')) {
+                return;
+            }
+
+            $isGone = true;
+
+            DB::table('authorizable_roles')->delete();
+        });
+
+        self::assertSame(0, self::service()->revokeAll($user));
+        self::assertTrue($isGone);
+        self::assertSame([], $logger->records);
     }
 
     /**

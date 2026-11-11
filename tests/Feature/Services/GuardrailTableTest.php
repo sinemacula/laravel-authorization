@@ -140,6 +140,57 @@ final class GuardrailTableTest extends TestCase
     }
 
     /**
+     * A guardrail naming half a tenant, a key without a type or a type without
+     * a key, is not the platform's: setting the policy at the platform writes a
+     * row beside it, and removing it there leaves it as it is.
+     *
+     * @return void
+     */
+    public function testAGuardrailNamingHalfATenantIsNotThePlatforms(): void
+    {
+        $policy = self::policy('cap');
+
+        DB::table('guardrails')->insert([
+            ['policy_id' => $policy, 'tenant_type' => null, 'tenant_id' => 'tenant-a'],
+            ['policy_id' => $policy, 'tenant_type' => 'stub_tenant', 'tenant_id' => null],
+        ]);
+
+        self::assertFalse(self::table(null)->remove($policy));
+        self::assertSame(GrantOutcome::GRANTED, self::table(null)->set($policy));
+        self::assertTrue(self::table(null)->remove($policy));
+        self::assertSame(2, DB::table('guardrails')->count());
+    }
+
+    /**
+     * The policy's guardrail rows naming half a tenant are removed on their
+     * own, as stored, each returned with its tenant columns; the platform's, a
+     * tenant's and another policy's are left.
+     *
+     * @return void
+     */
+    public function testRemovesThePolicysRowsNamingHalfATenant(): void
+    {
+        $policy = self::policy('cap');
+        $other  = self::policy('other');
+
+        DB::table('guardrails')->insert([
+            ['policy_id' => $policy, 'tenant_type' => null, 'tenant_id' => 'tenant-a'],
+            ['policy_id' => $policy, 'tenant_type' => 'stub_tenant', 'tenant_id' => null],
+            ['policy_id' => $policy, 'tenant_type' => null, 'tenant_id' => null],
+            ['policy_id' => $policy, 'tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a'],
+            ['policy_id' => $other, 'tenant_type' => null, 'tenant_id' => 'tenant-a'],
+        ]);
+
+        self::assertEqualsCanonicalizing(
+            [['tenant_type' => null, 'tenant_id' => 'tenant-a'], ['tenant_type' => 'stub_tenant', 'tenant_id' => null]],
+            self::table(new Reference('stub_tenant', 'tenant-b'))->removeMalformed($policy),
+        );
+        self::assertSame([], self::table(null)->removeMalformed($policy));
+        self::assertSame(3, DB::table('guardrails')->count());
+        self::assertSame(1, DB::table('guardrails')->where('policy_id', $other)->count());
+    }
+
+    /**
      * The unique key folds nulls, so the same policy is refused a second
      * platform-wide row even though its tenant columns are null.
      *
