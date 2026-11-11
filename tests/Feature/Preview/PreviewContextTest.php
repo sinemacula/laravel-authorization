@@ -7,6 +7,7 @@ namespace Tests\Feature\Preview;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -20,10 +21,13 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\CredentialScopesSource;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
@@ -106,6 +110,170 @@ final class PreviewContextTest extends TestCase
         self::assertSame('admin', $preview->currentSubject()->application);
         self::assertSame('api', $preview->currentSubject()->guard);
         self::assertNull($preview->currentSubject()->session);
+    }
+
+    /**
+     * A resolved `Subject` previewed keeps its credential's scopes and its
+     * platform marker, losing only its session, so its credential still caps
+     * what the preview allows; the source is not asked about scopes it says.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testAResolvedSubjectKeepsItsScopesAndItsMarker(): void
+    {
+        // The previewer's own session carries no cap; the target's credential
+        // is said on its subject.
+        $source = new CredentialScopesSource(['session:session-1' => null]);
+
+        $this->app?->instance(SessionPolicySource::class, $source);
+
+        $caller  = self::previewer();
+        $target  = self::target('target', ['posts:read', 'posts:edit']);
+        $preview = $this->signIn($caller)->previewFor(new Subject($target, $target, null, null, 'web', 'their-session', CredentialScopes::of(['posts:read']), true));
+
+        self::assertSame([], self::askedAbout($source, $target));
+        self::assertSame(['posts:read'], $preview->currentSubject()?->scopes?->scopes());
+        self::assertTrue($preview->currentSubject()->platform);
+        self::assertNull($preview->currentSubject()->session);
+        self::assertTrue($preview->can('posts:read'));
+        self::assertSame(DecisionReason::SESSION_POLICY, $preview->check('posts:edit')->reason);
+    }
+
+    /**
+     * A target naming a session but saying nothing of its scopes is capped by
+     * that session's credential, which the source is asked about before the
+     * session goes: the scopes it carries cap the preview, a session the source
+     * cannot resolve allows nothing, and one carrying no cap leaves the preview
+     * uncapped.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testATargetInASessionIsPreviewedWithItsCredentialsScopes(): void
+    {
+        $source = new CredentialScopesSource(['session:session-1' => null, 'session:capped' => ['posts:read'], 'session:free' => null]);
+
+        $this->app?->instance(SessionPolicySource::class, $source);
+
+        $manager = $this->signIn(self::previewer());
+        $target  = self::target('target', ['posts:read', 'posts:edit']);
+        $capped  = $manager->previewFor(new Subject($target, $target, null, null, 'web', 'capped'));
+
+        $asked = self::askedAbout($source, $target);
+
+        self::assertCount(1, $asked);
+        self::assertSame('capped', $asked[0]->session);
+        self::assertSame(['posts:read'], $capped->currentSubject()?->scopes?->scopes());
+        self::assertNull($capped->currentSubject()->session);
+        self::assertTrue($capped->can('posts:read'));
+        self::assertSame(DecisionReason::SESSION_POLICY, $capped->check('posts:edit')->reason);
+
+        $unknown = $manager->previewFor(new Subject($target, $target, null, null, 'web', 'unknown'));
+
+        self::assertSame([], $unknown->currentSubject()?->scopes?->scopes());
+        self::assertSame(DecisionReason::SESSION_POLICY, $unknown->check('posts:read')->reason);
+
+        $free = $manager->previewFor(new Subject($target, $target, null, null, 'web', 'free'));
+
+        self::assertFalse($free->currentSubject()?->scopes?->isCapped() ?? true);
+        self::assertTrue($free->can('posts:read'));
+        self::assertTrue($free->can('posts:edit'));
+    }
+
+    /**
+     * A target with no session whose guard's caller is its own record names
+     * that caller's credential, so the preview is capped by it, while a target
+     * naming no credential, a model, a guard whose caller is another model or a
+     * guard not configured, is previewed saying nothing, without the source
+     * being asked.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testATargetOnItsGuardIsPreviewedWithItsCredentialsScopes(): void
+    {
+        $source = new CredentialScopesSource(['session:session-1' => null, 'guard:web' => ['posts:read']]);
+
+        $this->app?->instance(SessionPolicySource::class, $source);
+
+        $manager = $this->signIn(self::previewer());
+        $target  = self::target('target', ['posts:read', 'posts:edit']);
+        $other   = self::target('other', ['posts:edit']);
+
+        $this->actingAs(AuthenticatableIdentity::query()->findOrFail('target'), 'web');
+
+        $guarded = $manager->previewFor(new Subject($target, $target, guard: 'web'));
+
+        self::assertCount(1, self::askedAbout($source, $target));
+        self::assertSame(['posts:read'], $guarded->currentSubject()?->scopes?->scopes());
+        self::assertSame(DecisionReason::SESSION_POLICY, $guarded->check('posts:edit')->reason);
+
+        $source->calls = [];
+
+        self::assertNull($manager->previewFor(new Subject($other, $other, guard: 'web'))->currentSubject()?->scopes);
+        self::assertNull($manager->previewFor(new Subject($target, $target, guard: 'unconfigured'))->currentSubject()?->scopes);
+        self::assertNull($manager->previewFor($other)->currentSubject()?->scopes);
+        self::assertSame([], self::askedAbout($source, $target));
+        self::assertSame([], self::askedAbout($source, $other));
+    }
+
+    /**
+     * A target on the platform, given no scope, is previewed on the platform,
+     * on its application, whatever tenant the request is in, and any other
+     * target in the request's scope; a scope given is the preview's, and places
+     * a target on the platform in its tenant.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testATargetOnThePlatformIsPreviewedThereByDefault(): void
+    {
+        $caller = self::previewer();
+        $target = self::target();
+        $tenant = StubTenant::query()->create(['id' => 'theirs', 'name' => 'theirs']);
+
+        $target->givePermission(self::permission('posts:edit'), null, $tenant);
+
+        $manager    = $this->signIn($caller, 'session-1', $tenant);
+        $onPlatform = new Subject($target, $target, null, 'admin', platform: true);
+        $context    = PreviewContext::of($manager, $onPlatform);
+
+        self::assertNull($context->scope->tenant);
+        self::assertSame('admin', $context->scope->application);
+        self::assertSame('theirs', PreviewContext::of($manager, new Subject($target, $target))->scope->tenant?->id);
+        self::assertFalse($manager->previewFor($onPlatform)->can('posts:edit'));
+        self::assertTrue($manager->previewFor($onPlatform)->can('posts:read'));
+        self::assertTrue($manager->previewFor(new Subject($target, $target))->can('posts:edit'));
+        self::assertTrue($manager->previewFor($onPlatform, AuthorizationScope::tenant($tenant))->can('posts:edit'));
+        self::assertSame([$tenant->getMorphClass(), 'theirs'], TenantScope::currentTenant());
+    }
+
+    /**
+     * A model target, given no scope, is previewed in the scope in place even
+     * when the previewer is on the platform and so names the model with the
+     * marker, while a `Subject` given carrying the marker is previewed on the
+     * platform there.
+     *
+     * @return void
+     */
+    public function testAModelTargetIsPreviewedInTheScopeInPlace(): void
+    {
+        $caller   = self::previewer();
+        $target   = self::target();
+        $tenant   = StubTenant::query()->create(['id' => 'theirs', 'name' => 'theirs']);
+        $admitter = $this->signIn($caller)->for(new Subject($caller, $caller, null, null, 'web', 'session-1', platform: true));
+
+        $scopes = AuthorizationScope::tenant($tenant)->within(static fn (): array => [
+            PreviewContext::of($admitter, $target)->scope->tenant?->id,
+            PreviewContext::of($admitter, new Subject($target, $target, platform: true))->scope->tenant,
+        ]);
+
+        self::assertSame(['theirs', null], $scopes);
     }
 
     /**
@@ -443,5 +611,18 @@ final class PreviewContextTest extends TestCase
             self::assertSame(DecisionReason::NO_MATCH, $exception->getReason());
             self::assertFalse($exception->getDecision()?->isAllowed());
         }
+    }
+
+    /**
+     * Return the subjects about the model the source was asked about, leaving
+     * out those about the previewer, whose admission asks it too.
+     *
+     * @param  \Tests\Feature\Stubs\CredentialScopesSource  $source
+     * @param  object  $model
+     * @return list<\SineMacula\Laravel\Authorization\Subject>
+     */
+    private static function askedAbout(CredentialScopesSource $source, object $model): array
+    {
+        return \array_values(\array_filter($source->calls, static fn (Subject $subject): bool => $subject->subject === $model));
     }
 }

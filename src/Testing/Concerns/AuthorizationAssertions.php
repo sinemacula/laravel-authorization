@@ -150,12 +150,13 @@ trait AuthorizationAssertions
     /**
      * Swap the subject resolver for the duration of the test so that every
      * check without a named subject is about the supplied subject, in its
-     * tenant and application, and make the subject's identity, or its principal
-     * when it has none, the user Laravel's Gate hands over. `Gate::allows()`,
-     * `@can` and `can:` then decide about the subject, as the facade does.
-     * `Gate::forUser()` with the subject's principal or identity decides about
-     * the subject too; any other user is decided about in that same tenant and
-     * application.
+     * tenant and application, or on the platform for a subject on it, and make
+     * the subject's identity, or its principal when it has none, the user
+     * Laravel's Gate hands over. `Gate::allows()`, `@can` and `can:` then
+     * decide about the subject, as the facade does. `Gate::forUser()` with the
+     * subject's principal or identity decides about the subject too; any other
+     * user is decided about in that same tenant and application, and on the
+     * platform for a subject on it.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @return void

@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\StubIdentity;
@@ -178,6 +179,33 @@ final class AuthorizationScopeTest extends TestCase
         self::assertSame('session-1', $subject->session);
         self::assertNull(AuthorizationScope::platform()->subjectIn(new Subject($user))->tenant);
         self::assertNull($scope->subjectIn(null));
+    }
+
+    /**
+     * The subject in the scope keeps its credential's scopes, an empty list
+     * apart from null, and its platform marker in the platform's scope, while a
+     * tenant's scope places a subject on the platform in its tenant, and the
+     * platform's never marks a subject that was not on it.
+     *
+     * @return void
+     */
+    public function testTheSubjectInTheScopeKeepsItsScopesAndItsMarkerOnThePlatform(): void
+    {
+        $user     = new StubIdentity;
+        $platform = AuthorizationScope::platform('admin');
+        $tenant   = AuthorizationScope::tenant(new Reference('accounts', '7'));
+        $scopes   = CredentialScopes::of(['posts:read']);
+        $marked   = new Subject($user, $user, null, 'web', 'api', 'session-1', $scopes, true);
+
+        self::assertSame($scopes, $platform->subjectIn($marked)->scopes);
+        self::assertTrue($platform->subjectIn($marked)->platform);
+        self::assertSame('admin', $platform->subjectIn($marked)->application);
+        self::assertSame($scopes, $tenant->subjectIn($marked)->scopes);
+        self::assertFalse($tenant->subjectIn($marked)->platform);
+        self::assertSame($tenant->tenant, $tenant->subjectIn($marked)->tenant);
+        self::assertSame([], $platform->subjectIn(new Subject($user, scopes: CredentialScopes::of([])))->scopes?->scopes());
+        self::assertNull($platform->subjectIn(new Subject($user))->scopes);
+        self::assertFalse($platform->subjectIn(new Subject($user))->platform);
     }
 
     /**

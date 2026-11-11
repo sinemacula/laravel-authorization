@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\UnresolvedSubjectException;
 use SineMacula\Laravel\Authorization\Resolvers\ReferenceSubjectResolver;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use Tests\Feature\Stubs\FailingSubjectResolver;
 use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\PlainIdentity;
@@ -123,6 +124,28 @@ final class ReferenceSubjectResolverTest extends TestCase
             self::assertSame('web', $subject->guard, $reference);
             self::assertNull($subject->session, $reference);
         }
+    }
+
+    /**
+     * The credential's scopes and the platform marker the subject resolver
+     * gives are dropped with its session, so the command names where the
+     * subject is decided, and no credential caps it.
+     *
+     * @return void
+     */
+    public function testTheScopesAndThePlatformMarkerAreDropped(): void
+    {
+        $principal = StubIdentity::create(['id' => 'principal-9']);
+        $person    = StubSecondIdentity::create(['id' => 'person-9']);
+
+        $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, $person, null, CredentialScopes::of(['posts:read']), true));
+
+        $subject = $this->resolver()->resolve(StubSecondIdentity::class . ':person-9');
+
+        self::assertSame($principal, $subject->subject);
+        self::assertNull($subject->scopes);
+        self::assertFalse($subject->platform);
+        self::assertNull($subject->session);
     }
 
     /**

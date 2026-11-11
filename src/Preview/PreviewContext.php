@@ -4,9 +4,14 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Preview;
 
+use Illuminate\Container\Container;
+use Illuminate\Contracts\Auth\Factory as AuthFactory;
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -15,6 +20,7 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -24,11 +30,20 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * The previewer is the real caller, the subject the manager `previewFor()` was
  * called on decides about, its session kept, never inferred later from the
  * target, the authenticated user or a listener. The target is the subject
- * previewed, with no session: a resolved `Subject` keeps its principal and its
- * identity but loses its session, and a model is named as `for()` names it, so
- * no authentication requirement made of the target is ever met, whatever the
- * previewer has proved. The scope is the tenant and application the target is
- * evaluated in, given, or the request's when the preview was built.
+ * previewed, with no session: a resolved `Subject` keeps its principal, its
+ * identity, what its credential carries and its platform marker but loses its
+ * session, and a model is named as `for()` names it, so no authentication
+ * requirement made of the target is ever met, whatever the previewer has
+ * proved, while what its credential carries still caps its checks. A target
+ * that says nothing of its credential's scopes but names a credential, a
+ * session or a guard whose caller is its own model, has them asked of the
+ * session policy source before the session goes, and the answer kept on it as
+ * said (N126): null as no cap, and a list as those scopes, an empty one for a
+ * credential the source cannot establish, so the preview then allows nothing.
+ * The scope is the tenant and application the target is evaluated in, given,
+ * or, when none is, the platform for a `Subject` given carrying the platform
+ * marker (N120), and the request's when the preview was built for any other
+ * target, a model included, whatever marker it carries.
  *
  * Every use of the preview (`run()`), each check, each batch, each listing and
  * each compile of a query scoped through it, is admitted afresh (see
@@ -92,22 +107,30 @@ final readonly class PreviewContext
 
     /**
      * Return the preview of the target, a resolved `Subject` or a model, by the
-     * previewer, admitted through the previewer's manager, in the scope. The
-     * target loses any session; a model is named in the previewer's request, as
-     * `for()` names it. A previewer that names no record, a guest included, is
-     * refused as `subject_unresolved` before anything is decided, and a target
-     * that names no record is refused with `InvalidPreviewException`, since no
-     * preview event could name either.
+     * previewer, admitted through the previewer's manager, in the scope, or,
+     * for none, on the platform, on the target's application, for a `Subject`
+     * given carrying the platform marker (N120), and the request's tenant and
+     * application, captured now, for any other target, a model included. The
+     * target loses any session, and keeps its platform marker and what its
+     * credential carries, asked of the session policy source before the session
+     * goes when the target says nothing of it but names a credential, so a
+     * preview is capped as the target's checks are, and allows nothing when the
+     * source cannot establish the credential; a model is named in the
+     * previewer's request, as `for()` names it. A previewer that names no
+     * record, a guest included, is refused as `subject_unresolved` before
+     * anything is decided, and a target that names no record is refused with
+     * `InvalidPreviewException`, since no preview event could name either.
      *
      * @param  \SineMacula\Laravel\Authorization\AuthorizationManager  $admitter
      * @param  object  $target
-     * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
+     * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope|null  $scope
      * @return self
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
      */
-    public static function of(AuthorizationManager $admitter, object $target, AuthorizationScope $scope): self
+    public static function of(AuthorizationManager $admitter, object $target, ?AuthorizationScope $scope = null): self
     {
         $previewer = $admitter->currentSubject();
         $reference = DecisionProvenance::of($previewer)->subject ?? throw self::unresolved();
@@ -117,7 +140,9 @@ final readonly class PreviewContext
         // A copy of its own, with no session, so the previewer's subject is
         // never taken for the target, even when it previews itself.
         $named   = $target instanceof Subject ? $target : $previewer->withSubject($target);
-        $subject = new Subject($named->subject, $named->identity, $named->tenant, $named->application, $named->guard);
+        $scopes  = self::credentialScopes($named);
+        $subject = new Subject($named->subject, $named->identity, $named->tenant, $named->application, $named->guard, scopes: $scopes, platform: $named->platform);
+        $scope ??= $target instanceof Subject && $target->platform ? AuthorizationScope::platform($target->application) : AuthorizationScope::current();
 
         $about     = DecisionProvenance::of($subject);
         $previewed = $about->subject ?? throw InvalidPreviewException::unidentified();
@@ -186,6 +211,66 @@ final readonly class PreviewContext
         if ($own?->type !== $asked?->type || $own?->id !== $asked?->id || $this->scope->application !== $scope->application) {
             throw InvalidPreviewException::rescoped();
         }
+    }
+
+    /**
+     * Return what the target's credential carries, kept on the copy that loses
+     * its session (N126): what the target says, or, when it says nothing and
+     * names a credential, the bound session policy source's answer about the
+     * target with its session still on it, null as no cap and a list as those
+     * scopes, an empty one for a credential the source cannot establish; and
+     * nothing said for a target naming no credential, which the source is not
+     * asked about.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $named
+     * @return \SineMacula\Laravel\Authorization\Support\CredentialScopes|null
+     */
+    private static function credentialScopes(Subject $named): ?CredentialScopes
+    {
+        if ($named->scopes !== null || !self::namesCredential($named)) {
+            return $named->scopes;
+        }
+
+        $scopes = Container::getInstance()->make(SessionPolicySource::class)->scopesFor($named);
+
+        return $scopes === null ? CredentialScopes::uncapped() : CredentialScopes::of($scopes);
+    }
+
+    /**
+     * Determine whether the target names a credential: a session, or a guard
+     * whose caller is the target's own model, the same instance or one with the
+     * same key.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $named
+     * @return bool
+     */
+    private static function namesCredential(Subject $named): bool
+    {
+        if ($named->session !== null) {
+            return true;
+        }
+
+        $caller = self::callerOf($named->guard);
+
+        return $caller instanceof Model && $named->subject instanceof Model ? $caller->is($named->subject) : $caller === $named->subject;
+    }
+
+    /**
+     * Return the caller signed in on the guard, or null for none, a guard not
+     * named or not configured included.
+     *
+     * @param  string|null  $guard
+     * @return object|null
+     */
+    private static function callerOf(?string $guard): ?object
+    {
+        $container = Container::getInstance();
+
+        if ($guard === null || $container->make(ConfigRepository::class)->get('auth.guards.' . $guard) === null) {
+            return null;
+        }
+
+        return $container->make(AuthFactory::class)->guard($guard)->user();
     }
 
     /**

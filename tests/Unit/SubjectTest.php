@@ -7,6 +7,7 @@ namespace Tests\Unit;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 
 /**
  * Unit tests for `Subject`, who a decision is about and where it is made.
@@ -36,6 +37,8 @@ final class SubjectTest extends TestCase
         self::assertNull($subject->application);
         self::assertNull($subject->guard);
         self::assertNull($subject->session);
+        self::assertNull($subject->scopes);
+        self::assertFalse($subject->platform);
     }
 
     /**
@@ -56,6 +59,85 @@ final class SubjectTest extends TestCase
         self::assertSame('admin', $subject->application);
         self::assertSame('web', $subject->guard);
         self::assertSame('session-1', $subject->session);
+        self::assertNull($subject->scopes);
+        self::assertFalse($subject->platform);
+    }
+
+    /**
+     * A subject keeps what it says its credential carries, no cap or the scopes
+     * given, apart from saying nothing, and its platform marker.
+     *
+     * @return void
+     */
+    public function testKeepsTheScopesAndThePlatformMarker(): void
+    {
+        $model    = new \stdClass;
+        $scopes   = CredentialScopes::of(['posts:read', 'posts:*']);
+        $uncapped = CredentialScopes::uncapped();
+
+        self::assertSame($scopes, (new Subject($model, scopes: $scopes))->scopes);
+        self::assertSame($uncapped, (new Subject($model, scopes: $uncapped))->scopes);
+        self::assertNull((new Subject($model, scopes: null))->scopes);
+        self::assertTrue((new Subject($model, null, null, 'admin', platform: true))->platform);
+        self::assertSame('admin', (new Subject($model, null, null, 'admin', platform: true))->application);
+    }
+
+    /**
+     * A subject on the platform that names a tenant is refused, since it cannot
+     * be both.
+     *
+     * @return void
+     */
+    public function testASubjectOnThePlatformInATenantIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('A subject on the platform names no tenant.');
+
+        new Subject(new \stdClass, null, new \stdClass, platform: true);
+    }
+
+    /**
+     * Another model keeps the platform marker, so the same request stays on the
+     * platform, and says nothing of the credential's scopes once it loses the
+     * session.
+     *
+     * @return void
+     */
+    public function testWithSubjectKeepsTheMarkerAndDropsTheScopes(): void
+    {
+        $model   = new \stdClass;
+        $request = new Subject($model, $model, null, 'admin', 'web', 'session-1', CredentialScopes::of(['posts:read']), true);
+        $other   = $request->withSubject(new \stdClass);
+        $same    = $request->withSubject($model);
+
+        self::assertTrue($other->platform);
+        self::assertNull($other->scopes);
+        self::assertNull($other->session);
+        self::assertTrue($same->platform);
+        self::assertNull($same->scopes);
+        self::assertNull($same->session);
+        self::assertSame('admin', $same->application);
+    }
+
+    /**
+     * A subject with no session deciding about another model says nothing of
+     * its scopes either, and one deciding about its own model is returned as it
+     * is, its scopes and marker included.
+     *
+     * @return void
+     */
+    public function testWithSubjectKeepsTheScopesOnlyWhenItReturnsItself(): void
+    {
+        $model   = new \stdClass;
+        $scopes  = CredentialScopes::of([]);
+        $request = new Subject($model, $model, scopes: $scopes, platform: true);
+        $other   = $request->withSubject(new \stdClass);
+
+        self::assertSame($request, $request->withSubject($model));
+        self::assertSame($scopes, $request->withSubject($model)->scopes);
+        self::assertNull($other->scopes);
+        self::assertTrue($other->platform);
+        self::assertFalse((new Subject($model, $model, new \stdClass))->withSubject(new \stdClass)->platform);
     }
 
     /**

@@ -8,7 +8,9 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
+use Tests\Feature\Stubs\CredentialScopesSource;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSessionPolicySource;
 
@@ -58,6 +60,23 @@ final class SessionCapResolverTest extends TestCase
         self::assertSame([], $resolver->capsFor(new Subject($user, $user))->caps);
         self::assertSame([['capped[1]', ['posts:read']]], $resolver->capsFor(new Subject($user, $user), [['posts:read']])->caps);
         self::assertSame([['credential', []]], (new SessionCapResolver(new StubSessionPolicySource([])))->capsFor(new Subject($user, $user))->caps);
+    }
+
+    /**
+     * A source reading the subject's own scopes is given them unchanged, so a
+     * subject carrying scopes is capped by their patterns, one carrying none by
+     * an empty cap, and one carrying no cap by nothing.
+     *
+     * @return void
+     */
+    public function testTheSubjectsOwnScopesReachTheSource(): void
+    {
+        $user     = new \stdClass;
+        $resolver = new SessionCapResolver(new CredentialScopesSource, new SessionScopes(['editor' => ['posts:*']]));
+
+        self::assertSame([['credential', ['posts:*', 'users:read']]], $resolver->capsFor(new Subject($user, $user, scopes: CredentialScopes::of(['editor', 'users:read'])))->caps);
+        self::assertSame([['credential', []]], $resolver->capsFor(new Subject($user, $user, scopes: CredentialScopes::of([])))->caps);
+        self::assertSame([], $resolver->capsFor(new Subject($user, $user))->caps);
     }
 
     /**

@@ -14,9 +14,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 /**
  * The scoped clones of the authorization manager: `for()` and `forUser()`,
  * which name the subject its checks are about, `for()` deciding in the tenant
- * and application a `Subject` names (N109), `forActor()`, which names an acting
- * subject decided in the scope in place, `previewFor()`, which previews another
- * subject as the caller, and `withPolicies()`, `capped()` and
+ * and application a `Subject` names (N109), or on the platform for a `Subject`
+ * it is given carrying the platform marker (N120), `forActor()`, which names an
+ * acting subject decided in the scope in place, `previewFor()`, which previews
+ * another subject as the caller, and `withPolicies()`, `capped()` and
  * `withoutSessionCaps()`, which change how they are decided. Each returns a
  * clone, so the manager it is called on is unchanged.
  *
@@ -43,7 +44,7 @@ trait BuildsScopedManagers
     /** @var bool Whether `for()` or `forUser()` named the subject; until one does, the bound resolver resolves it. */
     private bool $isSubjectNamed = false;
 
-    /** @var \SineMacula\Laravel\Authorization\Subject|null The `Subject` named through `for()`, whose tenant and application, read at each decision, its checks are decided in, or null to decide in the scope in place. */
+    /** @var \SineMacula\Laravel\Authorization\Subject|null The `Subject` named through `for()`, whose tenant, or the platform for one carrying the marker, and application, read at each decision, its checks are decided in, or null to decide in the scope in place. */
     private ?Subject $scopeSubject = null;
 
     /** @var \SineMacula\Laravel\Authorization\Preview\PreviewContext|null Who previews whom, and where, for a preview from `previewFor()`; null for any other manager. */
@@ -63,13 +64,19 @@ trait BuildsScopedManagers
      * the check throws (see `AuthorizationScope::within()`). That is the
      * decision `AuthorizationScope::within()` around `for()` of the subject in
      * that scope makes, so wrapping the call still gives the same result. A
-     * `Subject` naming neither, and any other model, which is named in the
-     * request's tenant, application and guard, are decided in the scope in
-     * place, as the resolver reports it; with no subject resolved, they have
-     * none. The subject's tenant is read when a check is decided, not here, so
-     * a tenant that cannot be read throws `InvalidTenantException` from the
-     * check, before anything is decided, as it did before the subject's scope
-     * was put in place.
+     * `Subject` carrying the platform marker (N120) is decided on the platform
+     * the same way, with no tenant, on its application, or on none, whatever
+     * tenant the request or an explicit `AuthorizationScope::within()` has put
+     * in place. A `Subject` naming none of them is decided in the scope in
+     * place. Any other model is named in the request's tenant, application,
+     * guard and platform marker, and is decided in the scope in place, whatever
+     * marker it carries: on the platform for a request whose subject is on the
+     * platform and names no tenant, while no other scope is in place, and in
+     * the tenant an explicit `AuthorizationScope::within()` puts in place; with
+     * no subject resolved, it has none. The subject's tenant is read when a
+     * check is decided, not here, so a tenant that cannot be read throws
+     * `InvalidTenantException` from the check, before anything is decided, as
+     * it did before the subject's scope was put in place.
      *
      * @param  object  $subject
      * @return self
@@ -94,9 +101,11 @@ trait BuildsScopedManagers
 
     /**
      * Return a scoped manager deciding about the acting subject in the tenant
-     * and application in place, whatever the subject names, as today's `for()`
-     * of a model does: what delegated administration and access reviews decide
-     * an actor's rights through, in the reach they put in place (see
+     * and application in place, whatever the subject names, its tenant, its
+     * application and its platform marker (N120) included, as `for()` of a
+     * model and `forUser()` do, and unlike `for()` of a `Subject`: what
+     * delegated administration and access reviews decide an actor's rights
+     * through, in the reach they put in place (see
      * `Administration\ActingContext`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
@@ -118,9 +127,14 @@ trait BuildsScopedManagers
     /**
      * Return a scoped manager deciding about the subject the resolver
      * translates the supplied user into: the user Laravel's Gate hands over,
-     * for example. A guest (no user) is no subject, so every check of the
-     * scoped manager denies as `subject_unresolved`, whoever the current
-     * request is about.
+     * for example, decided in the scope in place, as `for()` decides a model,
+     * whatever the subject names, its platform marker (N120) included: a
+     * request whose subject is on the platform and names no tenant is decided
+     * on the platform while no other scope is in place, and in the tenant an
+     * explicit `AuthorizationScope::within()` puts in place, as the Gate,
+     * `@can`, `can:` and application access, which decide through it, are. A
+     * guest (no user) is no subject, so every check of the scoped manager
+     * denies as `subject_unresolved`, whoever the current request is about.
      *
      * @param  object|null  $user
      * @return self
@@ -172,17 +186,19 @@ trait BuildsScopedManagers
      * principal and identity, and a model is named as `for()` names it, so no
      * authentication requirement made of it is met, whatever the caller has
      * proved. A null scope is the request's tenant and application, captured
-     * now. The caller must be allowed `authorization:subject.preview` on the
-     * preview resource naming the subject and the scope (see
-     * `Preview\PreviewResource`), decided as an ordinary check about the
-     * caller, with its own session, denies, boundaries, guardrails and caps:
-     * now, in the scope, and again at every use of the preview, each check,
-     * batch, listing and compile of a query scoped through it, in the scope and
-     * in every other scope one of its decisions is made in, a resource's own
-     * tenant, the tenants below it or the platform (see
-     * `Preview\PreviewAdmission`), so a revocation is seen at the next use. A
-     * refusal throws `AuthorizationException` before anything about the subject
-     * is decided there.
+     * now, or the platform, on the subject's application, for a `Subject` given
+     * carrying the platform marker (N120); a model is previewed in the
+     * request's tenant and application, whatever marker it carries. The caller
+     * must be allowed `authorization:subject.preview` on the preview resource
+     * naming the subject and the scope (see `Preview\PreviewResource`), decided
+     * as an ordinary check about the caller, with its own session, denies,
+     * boundaries, guardrails and caps: now, in the scope, and again at every
+     * use of the preview, each check, batch, listing and compile of a query
+     * scoped through it, in the scope and in every other scope one of its
+     * decisions is made in, a resource's own tenant, the tenants below it or
+     * the platform (see `Preview\PreviewAdmission`), so a revocation is seen at
+     * the next use. A refusal throws `AuthorizationException` before anything
+     * about the subject is decided there.
      *
      * `check()`, `can()`, `cannot()`, `any()`, `all()`, `authorize()`,
      * `explain()`, `checkMany()`, `canEach()`, `filterAuthorized()`,
@@ -206,7 +222,7 @@ trait BuildsScopedManagers
         $this->refuseOnPreview('previewFor');
         $this->refuseAlteredPipeline();
 
-        $context = PreviewContext::of($this->scopedTo($this->currentSubject()), $subject, $scope ?? AuthorizationScope::current());
+        $context = PreviewContext::of($this->scopedTo($this->currentSubject()), $subject, $scope);
 
         // Admitted now, as a use deciding nothing about the target.
         $context->run(static fn (): null => null);
@@ -292,9 +308,10 @@ trait BuildsScopedManagers
 
     /**
      * Run the callback, a decision about this manager's subject, in the scope
-     * of the `Subject` `for()` named, read now, with the request's restored
-     * afterwards, even when it throws, or as it is when the subject names no
-     * tenant and no application.
+     * of the `Subject` `for()` named, its tenant, or the platform for one
+     * carrying the marker, read now, with the request's restored afterwards,
+     * even when it throws, or as it is when the subject names no tenant and no
+     * application and is not on the platform.
      *
      * @template TResult
      *
@@ -312,7 +329,8 @@ trait BuildsScopedManagers
 
     /**
      * Return the scope a `Subject` names, its tenant, or the platform for none,
-     * and its application, or null when it names neither.
+     * and its application, or null when it names neither and is not on the
+     * platform.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @return \SineMacula\Laravel\Authorization\Support\AuthorizationScope|null
@@ -322,7 +340,7 @@ trait BuildsScopedManagers
     private static function scopeOf(Subject $subject): ?AuthorizationScope
     {
         if ($subject->tenant === null) {
-            return $subject->application === null ? null : AuthorizationScope::platform($subject->application);
+            return $subject->platform || $subject->application !== null ? AuthorizationScope::platform($subject->application) : null;
         }
 
         return AuthorizationScope::tenant(new Reference(...TenantScope::extractTenantPair($subject->tenant)), $subject->application);

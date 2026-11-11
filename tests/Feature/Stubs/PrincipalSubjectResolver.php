@@ -6,6 +6,7 @@ namespace Tests\Feature\Stubs;
 
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 
 /**
  * A subject resolver for an application with principals: every user it is
@@ -29,6 +30,8 @@ final readonly class PrincipalSubjectResolver implements SubjectResolver
      * @param  object  $principal
      * @param  object|null  $identity
      * @param  object|null  $tenant
+     * @param  \SineMacula\Laravel\Authorization\Support\CredentialScopes|null  $scopes
+     * @param  bool  $platform
      */
     public function __construct(
 
@@ -40,6 +43,12 @@ final readonly class PrincipalSubjectResolver implements SubjectResolver
 
         /** The tenant of the request, or null for none. */
         private ?object $tenant = null,
+
+        /** What the request's credential carries, or null to say nothing. */
+        private ?CredentialScopes $scopes = null,
+
+        /** Whether the request acts on the platform. */
+        private bool $platform = false,
     ) {}
 
     /**
@@ -55,7 +64,8 @@ final readonly class PrincipalSubjectResolver implements SubjectResolver
 
     /**
      * Return the principal, with its identity, in the request's tenant, on the
-     * `web` application and guard, with a session, whichever user is given.
+     * `web` application and guard, with a session, the credential's scopes and
+     * the platform marker, whichever user is given.
      *
      * @param  object  $user
      * @return \SineMacula\Laravel\Authorization\Subject
@@ -63,6 +73,6 @@ final readonly class PrincipalSubjectResolver implements SubjectResolver
     #[\Override]
     public function forUser(object $user): Subject
     {
-        return new Subject($this->principal, $this->identity, $this->tenant, 'web', 'web', self::SESSION);
+        return new Subject($this->principal, $this->identity, $this->tenant, 'web', 'web', self::SESSION, $this->scopes, $this->platform);
     }
 }

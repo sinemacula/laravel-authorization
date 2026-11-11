@@ -137,15 +137,24 @@ final readonly class AuthorizationScope
     }
 
     /**
-     * Return the subject in this scope: its identity, guard and session kept,
-     * with this scope's tenant and application, or null for a guest.
+     * Return the subject in this scope: its identity, guard, session and
+     * credential's scopes kept, with this scope's tenant and application, or
+     * null for a guest. A subject on the platform keeps its marker in the
+     * platform's scope, and loses it in a tenant's, where this scope places it,
+     * as it places a subject naming another tenant.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @return ($subject is null ? null : \SineMacula\Laravel\Authorization\Subject)
      */
     public function subjectIn(?Subject $subject): ?Subject
     {
-        return $subject === null ? null : new Subject($subject->subject, $subject->identity, $this->tenant, $this->application, $subject->guard, $subject->session);
+        if ($subject === null) {
+            return null;
+        }
+
+        $platform = $subject->platform && $this->tenant === null;
+
+        return new Subject($subject->subject, $subject->identity, $this->tenant, $this->application, $subject->guard, $subject->session, $subject->scopes, $platform);
     }
 
     /**

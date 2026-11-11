@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
@@ -256,6 +257,40 @@ final class AuthorizationAssertionsTest extends TestCase
         self::assertSame($other, $translated->subject);
         self::assertSame($tenant, $translated->tenant);
         self::assertSame('admin', $translated->application);
+    }
+
+    /**
+     * Acting as a subject on the platform decides every check on the platform
+     * while no other scope is in place, the user the Gate hands over translated
+     * by `forUser()` included, and any other user it hands over keeps the
+     * marker; an explicit tenant scope decides them in that tenant.
+     *
+     * @return void
+     */
+    public function testActingAsASubjectOnThePlatformDecidesThere(): void
+    {
+        $tenant = StubTenant::create(['id' => 'tenant-p', 'name' => 'Tenant P']);
+        $user   = StubIdentity::create(['id' => '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a']);
+        $scope  = AuthorizationScope::tenant($tenant);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make('config');
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        (new AuthorizationServiceProvider($this->container()))->boot();
+
+        Permission::create(['name' => 'posts:create', 'guard' => 'web']);
+        $user->givePermission('posts:create', null, $tenant);
+
+        $this->actingAsSubject(new Subject($user, $user, platform: true));
+
+        self::assertTrue(Authorization::currentSubject()?->platform === true);
+        self::assertTrue(Authorization::forUser(new \stdClass)->currentSubject()?->platform === true);
+        self::assertFalse(Authorization::can('posts:create'));
+        self::assertFalse(Authorization::forUser($user)->can('posts:create'));
+        self::assertFalse(Gate::forUser($user)->allows('posts:create'));
+        self::assertTrue($scope->within(static fn (): bool => Authorization::forUser($user)->can('posts:create')));
+        self::assertTrue($scope->within(static fn (): bool => Gate::forUser($user)->allows('posts:create')));
     }
 
     /**

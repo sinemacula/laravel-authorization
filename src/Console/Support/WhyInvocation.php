@@ -106,8 +106,12 @@ final readonly class WhyInvocation
      * Explain the check about the subject, in the scope, on the trusted path:
      * with the scope's tenant and application in place, both as the ambient
      * grant scope and as the subject's (N71), and restored afterwards, even
-     * when the check throws. The subject keeps its principal, identity and
-     * guard, and has no session, whatever the resolver gave it.
+     * when the check throws. The subject keeps its principal, identity, guard
+     * and platform marker, and has no session and says nothing of its
+     * credential's scopes, whatever the resolver gave it, since it is no
+     * request's credential. A subject on the platform stays there when no
+     * tenant is given, and is placed in the tenant given otherwise, as any
+     * subject is.
      *
      * @param  \SineMacula\Laravel\Authorization\AuthorizationManager  $authorization
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
@@ -115,7 +119,7 @@ final readonly class WhyInvocation
      */
     public function explain(AuthorizationManager $authorization, Subject $subject): Explanation
     {
-        $scoped = $this->scope->subjectIn(new Subject($subject->subject, $subject->identity, guard: $subject->guard));
+        $scoped = $this->scope->subjectIn(new Subject($subject->subject, $subject->identity, guard: $subject->guard, platform: $subject->platform));
 
         return $this->scope->within(fn (): Explanation => $authorization->for($scoped)->explain($this->action, $this->resource, $this->input));
     }
