@@ -180,7 +180,9 @@ final class TenantRelationsTest extends TestCase
      * A grant query is limited to the grants that meet the attachment: the
      * platform's, the attachment's tenant's, one reaching below a tenant of the
      * attachment's chain, and, for an attachment reaching below, one in its
-     * subtree; an attachment at the platform meets every grant.
+     * subtree; an attachment at the platform meets every grant. A grant naming
+     * half a tenant is not the platform's, so it meets no attachment naming a
+     * tenant.
      *
      * @return void
      *
@@ -190,7 +192,25 @@ final class TenantRelationsTest extends TestCase
     {
         $this->seedGrants();
 
-        $meets = new TenantRelations;
+        $role  = self::role('halved');
+        $table = GrantTarget::ROLE->table();
+
+        self::grants()->grantRole(new Reference('u', 'no-type'), $role, tenant: self::tenant('acct1'));
+        self::grants()->grantRole(new Reference('u', 'no-key'), $role, tenant: self::tenant('acct1'));
+
+        DB::table($table)->where('authorizable_id', 'no-type')->update(['tenant_type' => null]);
+        DB::table($table)->where('authorizable_id', 'no-key')->update(['tenant_id' => null]);
+
+        $meets  = new TenantRelations;
+        $halves = ['no-type', 'no-key'];
+
+        foreach (['acct1', 'team1', 'org1', 'acct2'] as $tenant) {
+            self::assertSame([], \array_values(\array_intersect(self::meeting($meets, self::scope($tenant)), $halves)), $tenant);
+        }
+
+        self::assertEqualsCanonicalizing($halves, \array_values(\array_intersect(self::meeting($meets, self::scope(null)), $halves)));
+
+        DB::table($table)->whereIn('authorizable_id', $halves)->delete();
 
         self::assertEqualsCanonicalizing(['platform', 'org1', 'acct1', 'team1'], self::meeting($meets, self::scope('acct1')));
         self::assertEqualsCanonicalizing(['platform', 'org1', 'acct1'], self::meeting($meets, self::scope('acct1', false)));

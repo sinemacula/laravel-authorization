@@ -151,7 +151,7 @@ final class CheckConfigurationCommandTest extends TestCase
 
         self::assertSame(0, $code);
         self::assertSame(
-            ['Settings', 'Seams', 'Grant hooks, in the order they run; the chain stops at the first refusal', 'Connection', 'Integrations', self::PASSED],
+            ['Settings', 'Tables', 'Seams', 'Grant hooks, in the order they run; the chain stops at the first refusal', 'Connection', 'Integrations', self::PASSED],
             $headings,
         );
         self::assertSame('Settings', $lines[0], 'No issue is listed before the settings.');
@@ -160,6 +160,67 @@ final class CheckConfigurationCommandTest extends TestCase
         self::assertContains('[seam PolicyStore] not bound; none', $lines);
         self::assertContains('[seam SubjectResolver] package default; SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver; scoped', $lines);
         self::assertContains('[connection database] testing; chosen by database.default; driver ' . (\is_string($driver) ? $driver : '') . '; not connected to', $lines);
+    }
+
+    /**
+     * The prefix is reported as a setting and in the tables' section, with the
+     * name each table takes: a default name with the prefix before it, one set
+     * explicitly as written; the JSON holds the same.
+     *
+     * @return void
+     */
+    public function testReportsThePrefixAndTheNameEachTableTakes(): void
+    {
+        [, $default] = self::text();
+
+        self::assertContains('[setting authorization.tables.prefix] ok; empty', $default);
+        self::assertContains('[table prefix] none', $default);
+        self::assertContains('[table roles] roles; the default, with the prefix', $default);
+
+        \config(['authorization.tables.prefix' => 'app_', 'authorization.tables.roles' => 'authz_roles']);
+
+        [$code, $lines] = self::text();
+        [, $json]       = self::report();
+
+        self::assertSame(0, $code);
+        self::assertContains('[setting authorization.tables.prefix] ok; app_', $lines);
+        self::assertSame(
+            ['[table prefix] app_', '[table roles] authz_roles; set explicitly, so used as written', '[table permissions] app_permissions; the default, with the prefix'],
+            \array_slice(self::starting($lines, '[table '), 0, 3),
+        );
+        self::assertCount(13, self::starting($lines, '[table '));
+        /** @var array{prefix: string|null, names: list<array<string, mixed>>} $tables */
+        $tables = $json['tables'];
+
+        self::assertSame('app_', $tables['prefix']);
+        self::assertSame(
+            [['key' => 'roles', 'name' => 'authz_roles', 'explicit' => true], ['key' => 'permissions', 'name' => 'app_permissions', 'explicit' => false]],
+            \array_slice($tables['names'], 0, 2),
+        );
+    }
+
+    /**
+     * A refused prefix is listed as an issue, each name left at its default as
+     * skipped, and neither the prefix nor those names is shown.
+     *
+     * @return void
+     */
+    public function testARefusedPrefixIsReportedWithTheNamesItHides(): void
+    {
+        \config(['authorization.tables.prefix' => 'App-']);
+
+        [$code, $lines] = self::text();
+
+        $issues = self::issueLines($lines);
+
+        self::assertSame(1, $code);
+        $expected = 'empty, or a lower-case letter, then lower-case letters, digits and underscores, of at most 16 characters';
+
+        self::assertSame("[setting authorization.tables.prefix] invalid value; expected {$expected}; found string", $issues[0]);
+        self::assertContains('[setting authorization.tables.roles] skipped; it depends on authorization.tables.prefix, which was refused', $issues);
+        self::assertContains('[setting authorization.tables.prefix] refused; value not shown (string)', $lines);
+        self::assertContains('[table prefix] not known, as the setting was refused', $lines);
+        self::assertContains('[table roles] not known, as its setting or the prefix was refused; the default, with the prefix', $lines);
     }
 
     /**
@@ -239,7 +300,7 @@ final class CheckConfigurationCommandTest extends TestCase
 
         $json = self::decoded($tester->getDisplay());
 
-        self::assertSame(['version', 'status', 'settings', 'seams', 'grant_hooks', 'connection', 'integrations', 'issues'], \array_keys($json));
+        self::assertSame(['version', 'status', 'settings', 'tables', 'seams', 'grant_hooks', 'connection', 'integrations', 'issues'], \array_keys($json));
         self::assertSame(1, $json['version']);
         self::assertSame('passed', $json['status']);
         self::assertSame(['path', 'known', 'set', 'value', 'redacted', 'type', 'source', 'status'], \array_keys(self::listed($json, 'settings')[0]));

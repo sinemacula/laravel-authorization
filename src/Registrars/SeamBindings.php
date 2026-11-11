@@ -10,6 +10,7 @@ use Illuminate\Foundation\Application as FoundationApplication;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Diagnostics\BindingRegistry;
 use SineMacula\Laravel\Authorization\Diagnostics\ContainerState;
+use SineMacula\Laravel\Authorization\Diagnostics\CurrentBinding;
 use SineMacula\Laravel\Authorization\Diagnostics\SeamRecord;
 use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
 use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
@@ -58,7 +59,11 @@ use SineMacula\Laravel\Authorization\Support\ClassName;
  * Before binding a contract, what was bound to it already is recorded, with the
  * closure bound and the key it forwards to, in the registry the configuration
  * report reads (see `Diagnostics\BindingRegistry`), so the report can tell the
- * package's binding from one made before it registered and one made after.
+ * package's binding from one made before it registered and one made after. A
+ * contract still bound to the closure the package recorded as it registered
+ * before keeps that closure when the package registers again, and it is
+ * recorded as the package's own, with what was bound before it, so the report
+ * and the provider's `isPackageDefault()` still take it for the package's.
  *
  * Handed the steps the package leaves to the application's boot (see
  * `PendingRegistration`), as the service provider hands them, the registrar
@@ -205,7 +210,7 @@ final readonly class SeamBindings
      */
     public function bindSharedIf(string $contract, \Closure $concrete, string $builds): void
     {
-        $this->record(new SeamRecord($contract, $concrete, null, $builds, null, false, ...$this->earlier($contract)));
+        $this->record(new SeamRecord($contract, $this->own($contract)->binding ?? $concrete, null, $builds, null, false, ...$this->earlier($contract)));
 
         $this->app->singletonIf($contract, $concrete);
     }
@@ -295,10 +300,13 @@ final readonly class SeamBindings
      * through a closure this class declares, not the provider, so a sibling
      * package reading the binding table leaves it to the application's choice,
      * as it left the class bound at once; it resolves the default until the
-     * step runs. A contract with no default, the policy store's, is left as it
-     * is until the step runs, unbound when nothing was bound to it, so nothing
-     * resolves it to a class that is not there, and a boot that refuses leaves
-     * it so.
+     * step runs. The record keeps the name the configuration gives, so the
+     * report and the provider's `isPackageDefault()` take the closure for the
+     * class configured, never the default, while the step is still to run and
+     * once a refused boot dropped it. A contract with no default, the policy
+     * store's, is left as it is until the step runs, unbound when nothing was
+     * bound to it, so nothing resolves it to a class that is not there, and a
+     * boot that refuses leaves it so.
      *
      * The step binds only when the contract is bound as it was when the package
      * registered, so a binding made after the package registered stands, as it
@@ -330,9 +338,9 @@ final readonly class SeamBindings
 
         $earlier = $this->earlier($contract);
         $target  = self::DEFAULT_BINDING_PREFIX . $contract;
-        $chosen  = static fn (Application $app): mixed => $app->make($target);
+        $chosen  = $this->own($contract)->binding ?? static fn (Application $app): mixed => $app->make($target);
 
-        $this->record(new SeamRecord($contract, $chosen, $target, $default, $key, false, ...$earlier));
+        $this->record(new SeamRecord($contract, $chosen, $target, $default, $key, false, ...$earlier, named: $named));
 
         if ($default !== null) {
             $this->app->scoped($target, $build($default));
@@ -538,7 +546,7 @@ final readonly class SeamBindings
         // for the package's default and replaces it.
         $binding = $configured
             ? static fn (Application $app): mixed => $app->make($default)
-            : ($this->resolving)($default);
+            : $this->own($contract)->binding ?? ($this->resolving)($default);
 
         $record = new SeamRecord($contract, $binding, $default, \is_string($concrete) ? $concrete : $builds, $configKey, $configured, ...$earlier);
 
@@ -574,11 +582,21 @@ final readonly class SeamBindings
      * provider that provides it, each null when there is none. Nothing is
      * built.
      *
+     * The package's own binding is no earlier binding: when the package
+     * registers again, over a contract still bound as it bound it before, what
+     * was bound before it first bound the contract is returned.
+     *
      * @param  class-string  $contract
      * @return array{earlier: (\Closure(mixed ...): mixed)|null, earlierInstance: object|null, earlierAlias: string|null, deferredProvider: string|null}
      */
     private function earlier(string $contract): array
     {
+        $own = $this->own($contract);
+
+        if ($own !== null) {
+            return ['earlier' => $own->earlier, 'earlierInstance' => $own->earlierInstance, 'earlierAlias' => $own->earlierAlias, 'deferredProvider' => $own->deferredProvider];
+        }
+
         $deferred = $this->app instanceof FoundationApplication ? $this->app->getDeferredServices()[$contract] ?? null : null;
 
         return [
@@ -587,6 +605,24 @@ final readonly class SeamBindings
             'earlierAlias'     => ContainerState::alias($this->app, $contract),
             'deferredProvider' => \is_string($deferred) ? $deferred : null,
         ];
+    }
+
+    /**
+     * Return the record of the contract the package kept as it registered
+     * before, when what supplies the contract is still the closure it recorded,
+     * as it is when the package registers again and nothing replaced its
+     * binding, or null. Registering again binds the contract only when nothing
+     * is bound to it yet, so that closure stands, and is recorded again as the
+     * package's own. Nothing is built.
+     *
+     * @param  class-string  $contract
+     * @return \SineMacula\Laravel\Authorization\Diagnostics\SeamRecord|null
+     */
+    private function own(string $contract): ?SeamRecord
+    {
+        $record = BindingRegistry::of($this->app)->get($contract);
+
+        return $record !== null && CurrentBinding::of($this->app, $contract)->supplier() === $record->binding ? $record : null;
     }
 
     /**

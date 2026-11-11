@@ -61,8 +61,10 @@ final class PermissionObserver
             return;
         }
 
+        // A role naming half a tenant applies nowhere, so it is passed over:
+        // nothing is linked here.
         foreach ($permission->roles()->withoutGlobalScope(TenantScope::class)->get() as $role) {
-            RoleParity::assertCarries($role, $permission);
+            RoleParity::assertCarries($role, $permission, false);
         }
     }
 

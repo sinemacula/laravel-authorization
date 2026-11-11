@@ -10,6 +10,8 @@ use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * The permission boundary one grantee has in one scope, read and written by the
@@ -122,38 +124,67 @@ final readonly class BoundaryTable
 
     /**
      * Remove the grantee's boundaries in every scope, and return the key of
-     * each policy with the scope it held in, for the events of the removal.
+     * each policy with the scope it held in, for the events of the removal;
+     * and, apart, each boundary naming half a tenant, which holds in no scope,
+     * as stored, among those its own removal found (see `removeMalformed()`),
+     * removed before the rest.
      *
-     * @return list<array{string, \SineMacula\Laravel\Authorization\Support\GrantScope}>
+     * @return array{list<array{string, \SineMacula\Laravel\Authorization\Support\GrantScope}>, list<array{policy_id: string, tenant_type: string|null, tenant_id: string|null}>}
      */
     public function removeEverywhere(): array
     {
-        $removed = $this->everywhere();
+        [$removed, $malformed] = $this->everywhere();
+
+        $malformed = \array_values(\array_filter($malformed, fn (array $row): bool => $this->removeMalformed($row) === 1));
 
         $this->grantee()->delete();
 
-        return $removed;
+        return [$removed, $malformed];
     }
 
     /**
      * Read the grantee's boundaries in every scope, under a row lock, as the
      * key of each policy with the scope it holds in, so a removal can be
-     * decided before anything is removed.
+     * decided before anything is removed; and, read in the same query, each
+     * boundary naming half a tenant, which the package never writes and which
+     * holds in no scope, as the key of its policy and its tenant columns as
+     * stored.
      *
-     * @return list<array{string, \SineMacula\Laravel\Authorization\Support\GrantScope}>
+     * @return array{list<array{string, \SineMacula\Laravel\Authorization\Support\GrantScope}>, list<array{policy_id: string, tenant_type: string|null, tenant_id: string|null}>}
      */
     public function everywhere(): array
     {
         $boundaries = [];
+        $malformed  = [];
 
         foreach ($this->grantee()->lockForUpdate()->get(['policy_id', 'tenant_type', 'tenant_id', 'include_subtree']) as $row) {
             /** @var array{policy_id: int|string, tenant_type: string|null, tenant_id: string|null, include_subtree: bool|int|string} $columns */
-            $columns      = (array) $row;
+            $columns = (array) $row;
+
+            if (TenantColumns::isHalf($columns['tenant_type'], $columns['tenant_id'])) {
+                $malformed[] = ['policy_id' => (string) $columns['policy_id'], 'tenant_type' => $columns['tenant_type'], 'tenant_id' => $columns['tenant_id']];
+
+                continue;
+            }
+
             $tenant       = $columns['tenant_type'] === null ? null : new Reference($columns['tenant_type'], (string) $columns['tenant_id']);
             $boundaries[] = [(string) $columns['policy_id'], new GrantScope($tenant, null, (bool) $columns['include_subtree'] || $tenant === null)];
         }
 
-        return $boundaries;
+        return [$boundaries, $malformed];
+    }
+
+    /**
+     * Remove the grantee's boundary naming half a tenant, matched as stored, by
+     * its policy's key and tenant columns, and return how many rows were
+     * removed: none when it is no longer there.
+     *
+     * @param  array{policy_id: string, tenant_type: string|null, tenant_id: string|null}  $row
+     * @return int
+     */
+    public function removeMalformed(array $row): int
+    {
+        return $this->grantee()->where('policy_id', $row['policy_id'])->where('tenant_type', $row['tenant_type'])->where('tenant_id', $row['tenant_id'])->delete();
     }
 
     /**
@@ -238,7 +269,7 @@ final readonly class BoundaryTable
     private function inScope(): Builder
     {
         if ($this->tenant === null) {
-            return $this->grantee()->whereNull('tenant_type')->whereNull('tenant_id');
+            return TenantChain::whereNullTenant($this->grantee(), 'tenant_type', 'tenant_id');
         }
 
         return $this->grantee()->where('tenant_type', $this->tenant->type)->where('tenant_id', $this->tenant->id);

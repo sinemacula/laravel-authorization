@@ -26,6 +26,7 @@ declare(strict_types = 1);
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\ExactReferences;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
@@ -38,10 +39,8 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        /** @var string $usage */
-        $usage = config('authorization.tables.grant_usage', 'grant_usage');
-        /** @var string $coverage */
-        $coverage = config('authorization.tables.usage_coverage', 'usage_coverage');
+        $usage    = TableNames::get('grant_usage');
+        $coverage = TableNames::get('usage_coverage');
 
         $schema = Schema::connection($this->getConnection());
         $guard  = new MigrationCollisionGuard($schema);
@@ -97,10 +96,8 @@ return new class extends Migration {
      */
     public function down(): void
     {
-        /** @var string $usage */
-        $usage = config('authorization.tables.grant_usage', 'grant_usage');
-        /** @var string $coverage */
-        $coverage = config('authorization.tables.usage_coverage', 'usage_coverage');
+        $usage    = TableNames::get('grant_usage');
+        $coverage = TableNames::get('usage_coverage');
 
         $schema = Schema::connection($this->getConnection());
 

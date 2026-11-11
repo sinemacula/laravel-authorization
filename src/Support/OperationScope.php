@@ -268,17 +268,49 @@ final class OperationScope
      */
     public static function dispatch(AuthorizationEvent ...$events): void
     {
-        /** @var list<\SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent> $events */
+        self::send(\array_values($events), true);
+    }
+
+    /**
+     * Invalidate the resolution cache as `dispatch()` does for the events,
+     * without dispatching them: for the removal of a row naming half a tenant,
+     * which no event can describe, as it is neither the platform's nor any
+     * tenant's, so its removal is written to the log instead (see
+     * `TenantColumns::reportRemoved()`). With no events it does nothing.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent  ...$events
+     * @return void
+     */
+    public static function invalidate(AuthorizationEvent ...$events): void
+    {
+        if ($events === []) {
+            return;
+        }
+
+        self::send(\array_values($events), false);
+    }
+
+    /**
+     * Invalidate the resolution cache for the events, again once the package
+     * connection's transaction commits, or straight away when it has none open,
+     * and then, when asked, dispatch them.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent>  $events
+     * @param  bool  $isDispatched
+     * @return void
+     */
+    private static function send(array $events, bool $isDispatched): void
+    {
         $connection = AuthorizationConnection::connection();
         $cache      = ResolutionCache::instance();
         $keys       = $cache?->versionKeys($events) ?? [];
 
         $cache?->invalidate($keys);
 
-        $send = static function () use ($cache, $keys, $events): void {
+        $send = static function () use ($cache, $keys, $events, $isDispatched): void {
             $cache?->invalidateQuietly($keys);
 
-            foreach ($events as $event) {
+            foreach ($isDispatched ? $events : [] as $event) {
                 Event::dispatch($event);
             }
         };

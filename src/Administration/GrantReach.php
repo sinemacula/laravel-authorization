@@ -82,15 +82,20 @@ final readonly class GrantReach
 
     /**
      * Limit a query of the table to its rows held in a tenant of the reach, and
-     * its platform-wide rows; a reach of every tenant leaves it alone.
+     * its platform-wide rows, never one naming half a tenant (see
+     * `TenantChain::whereNullTenant()`), unless it is among the rows the given
+     * callback adds, which hold everywhere: what restricts, naming half a
+     * tenant, does (see `Support\TenantColumns`). A reach of every tenant
+     * leaves it alone.
      *
      * @template TQuery of \Illuminate\Contracts\Database\Query\Builder
      *
      * @param  TQuery  $query
      * @param  string  $table
+     * @param  (\Closure(\Illuminate\Contracts\Database\Query\Builder, string): mixed)|null  $everywhere
      * @return TQuery
      */
-    public function constrain(Builder $query, string $table): Builder
+    public function constrain(Builder $query, string $table, ?\Closure $everywhere = null): Builder
     {
         $tenants = $this->tenants;
 
@@ -98,12 +103,18 @@ final readonly class GrantReach
             return $query;
         }
 
-        $query->where(static function (Builder $query) use ($table, $tenants): void {
-            $query->whereNull($table . '.tenant_type');
+        $query->where(static function (Builder $query) use ($table, $tenants, $everywhere): void {
+            TenantChain::whereNullTenant($query, $table . '.tenant_type', $table . '.tenant_id');
 
             foreach ($tenants as [$type, $ids]) {
                 $query->orWhere(static fn (Builder $row): Builder => $row->where($table . '.tenant_type', $type)->whereIn($table . '.tenant_id', $ids));
             }
+
+            if ($everywhere === null) {
+                return;
+            }
+
+            $query->orWhere(static fn (Builder $row): mixed => $everywhere($row, $table));
         });
 
         return $query;

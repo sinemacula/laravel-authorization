@@ -48,6 +48,25 @@ final class PolicyTest extends TestCase
     }
 
     /**
+     * A policy's denies are its deny statements alone, each at the position it
+     * holds in the document, with its name, version, key and resource; a policy
+     * without a deny keeps no statement.
+     *
+     * @return void
+     */
+    public function testItsDeniesAreItsDenyStatementsInPlace(): void
+    {
+        $allow  = new Statement(effect: PolicyEffect::ALLOW, actions: ['posts:read']);
+        $deny   = new Statement(effect: PolicyEffect::DENY, actions: ['posts:delete']);
+        $policy = new Policy('mixed', [$allow, $deny, $allow, $deny], 1, 'policy-1', 'posts:7');
+        $denies = $policy->denies();
+
+        self::assertSame([1 => $deny, 3 => $deny], $denies->statements);
+        self::assertSame(['mixed', 1, 'policy-1', 'posts:7'], [$denies->name, $denies->version, $denies->id, $denies->resource]);
+        self::assertSame([], (new Policy('allows', [$allow]))->denies()->statements);
+    }
+
+    /**
      * Accepts an explicit version 1, the only version this package knows.
      *
      * @return void

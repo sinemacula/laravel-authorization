@@ -14,10 +14,11 @@ use Illuminate\Contracts\Container\Container;
  * What Laravel offers no public way to read, the instances it holds, whether it
  * resolved the abstract (its public `resolved()` also counts an instance held),
  * the abstracts it scopes and the extenders still pending, is read in the
- * container's own scope, as `AuthorizationServiceProvider::isPackageDefault()`
- * reads the instances. Nothing here calls `make()`, `rebinding()`, `refresh()`,
- * `extend()` or `isShared()`, any of which may build or autoload what it is
- * asked about.
+ * container's own scope. The configuration report and
+ * `AuthorizationServiceProvider::isPackageDefault()`, which answers as the
+ * report does, read the instances held through it. Nothing here calls `make()`,
+ * `rebinding()`, `refresh()`, `extend()` or `isShared()`, any of which may
+ * build or autoload what it is asked about.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

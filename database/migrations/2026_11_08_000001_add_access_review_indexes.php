@@ -45,14 +45,15 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Builder;
 use Illuminate\Support\Facades\Schema;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 
 return new class extends Migration {
-    /** @var list<array{string, string, string}> The grant tables, each by its config key, default name and target column. */
+    /** @var array<string, string> The grant tables, each by its config key, with its target column. */
     private const array GRANTS = [
-        ['authorizable_roles', 'authorizable_roles', 'role_id'],
-        ['authorizable_permissions', 'authorizable_permissions', 'permission_id'],
-        ['authorizable_policies', 'authorizable_policies', 'policy_id'],
+        'authorizable_roles'       => 'role_id',
+        'authorizable_permissions' => 'permission_id',
+        'authorizable_policies'    => 'policy_id',
     ];
 
     /**
@@ -178,11 +179,8 @@ return new class extends Migration {
     {
         $tables = [];
 
-        foreach (self::GRANTS as [$key, $default, $target]) {
-            /** @var string $table */
-            $table = config('authorization.tables.' . $key, $default);
-
-            $tables[$table] = $target;
+        foreach (self::GRANTS as $key => $target) {
+            $tables[TableNames::get($key)] = $target;
         }
 
         return $tables;
@@ -195,7 +193,6 @@ return new class extends Migration {
      */
     private static function edgesTable(): string
     {
-        /** @var string */
-        return config('authorization.tables.role_permissions', 'role_permissions');
+        return TableNames::get('role_permissions');
     }
 };

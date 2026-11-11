@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
+
 /**
  * Immutable policy value object.
  *
@@ -79,6 +81,21 @@ final readonly class Policy
     public function withResource(?string $resource): self
     {
         return new self($this->name, $this->statements, $this->version, $this->id, $resource);
+    }
+
+    /**
+     * Return the policy with its deny statements alone, at the positions they
+     * hold in its document: what counts of a policy whose allows apply nowhere,
+     * as an attachment naming half a tenant, or a deny attached in a tenant a
+     * check is decided outside of.
+     *
+     * @return self
+     */
+    public function denies(): self
+    {
+        $denies = \array_filter($this->statements, static fn (Statement $statement): bool => $statement->effect === PolicyEffect::DENY);
+
+        return new self($this->name, $denies, $this->version, $this->id, $this->resource);
     }
 
     /**

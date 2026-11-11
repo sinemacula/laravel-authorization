@@ -296,7 +296,8 @@ final class NarrowingTest extends TestCase
      * Setting a boundary narrows where the grantee has none in the scope, or
      * where it replaces one there with the same policy or one that can only
      * narrow it, reaching no fewer tenants; a wider document, a narrower reach,
-     * or a boundary in another scope left alone, may widen.
+     * or a boundary in another scope left alone, may widen. A boundary naming
+     * half a tenant is in no scope, the platform's included.
      *
      * @return void
      *
@@ -332,6 +333,11 @@ final class NarrowingTest extends TestCase
         self::assertTrue($set($narrow, new GrantScope($tenant, null, false)));
         self::assertTrue($set($narrow));
         self::assertFalse($set($wide));
+
+        DB::table('authorizable_boundaries')->update(['tenant_type' => null]);
+
+        self::assertTrue($set($other, GrantScope::platform()));
+        self::assertTrue($set($other));
     }
 
     /**

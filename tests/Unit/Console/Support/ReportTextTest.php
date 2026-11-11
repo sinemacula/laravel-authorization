@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigurationReport;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Diagnostics\Settings\SettingRow;
+use SineMacula\Laravel\Authorization\Diagnostics\TableReader;
 
 /**
  * Unit tests for the configuration report as `authorization:check` prints it as
@@ -93,6 +94,45 @@ final class ReportTextTest extends TestCase
     }
 
     /**
+     * The tables are told after the settings: the prefix, none when it is
+     * empty, then each table's name and whether it was set explicitly or is the
+     * default with the prefix, a prefix or name the report withheld told as not
+     * known; an empty prefix the settings show is told as empty.
+     *
+     * @return void
+     */
+    public function testTheTablesAreToldWithThePrefix(): void
+    {
+        $lines = ReportText::lines(self::report(tables: ['prefix' => 'app_', 'names' => [
+            ['key' => 'roles', 'name' => 'app_roles', 'explicit' => false],
+            ['key' => 'permissions', 'name' => 'authz<p>', 'explicit' => true],
+            ['key' => 'policies', 'name' => null, 'explicit' => true],
+        ]]));
+        $empty   = ReportText::lines(self::report(tables: ['prefix' => '', 'names' => [['key' => 'roles', 'name' => 'roles', 'explicit' => false]]]));
+        $refused = ReportText::lines(self::report(tables: ['prefix' => null, 'names' => [['key' => 'roles', 'name' => null, 'explicit' => false]]]));
+
+        self::assertSame([
+            '',
+            '<comment>Tables</comment>',
+            '[table prefix] app_',
+            '[table roles] app_roles; the default, with the prefix',
+            '[table permissions] authz\<p\>; set explicitly, so used as written',
+            '[table policies] not known, as its setting or the prefix was refused; set explicitly, so used as written',
+            '',
+            '<comment>Seams</comment>',
+        ], \array_slice($lines, 2, 8));
+        self::assertSame(['[table prefix] none', '[table roles] roles; the default, with the prefix'], \array_slice($empty, 4, 2));
+        self::assertSame(
+            ['[table prefix] not known, as the setting was refused', '[table roles] not known, as its setting or the prefix was refused; the default, with the prefix'],
+            \array_slice($refused, 4, 2),
+        );
+        self::assertSame(
+            '[setting authorization.tables.prefix] ok; empty',
+            ReportText::lines(self::report(settings: [new SettingRow('authorization.tables.prefix', true, true, [''], 'string', 'ok')]))[2],
+        );
+    }
+
+    /**
      * The grant hooks are told in the order they run: a listed hook by its
      * class, or its type when its value is not shown, then the bound hook,
      * noting that the package's own runs no hook of its own.
@@ -115,8 +155,8 @@ final class ReportTextTest extends TestCase
             '[grant hook 1] App\Hook; listed in authorization.grant_hooks',
             '[grant hook 2] value not shown (int); listed in authorization.grant_hooks',
             '[grant hook 3] Package\Hooks; bound to the contract, package default; runs no hook of its own',
-        ], \array_slice($lines, 5, 4));
-        self::assertSame('[grant hook 1] supplied by custom code (app/Hook.php:4); class decided at first use; bound to the contract, later binding', $later[6]);
+        ], \array_slice($lines, 8, 4));
+        self::assertSame('[grant hook 1] supplied by custom code (app/Hook.php:4); class decided at first use; bound to the contract, later binding', $later[9]);
     }
 
     /**
@@ -142,12 +182,12 @@ final class ReportTextTest extends TestCase
             '[connection database] audit; chosen by authorization.connection; driver pgsql; not connected to',
             '[connection cache] shared; chosen by authorization.cache.store; driver unknown',
             '[connection queue] jobs; chosen by queue.default; driver redis; queue usage',
-        ], \array_slice($lines, 8, 3));
+        ], \array_slice($lines, 11, 3));
         self::assertSame([
             '[connection database] none',
             '[connection cache] none (entries are kept for the request or job alone)',
             '[connection queue] sync; chosen by queue.default; driver sync; queue the default',
-        ], \array_slice($none, 8, 3));
+        ], \array_slice($none, 11, 3));
     }
 
     /**
@@ -169,7 +209,7 @@ final class ReportTextTest extends TestCase
             '[connection database] value not shown; chosen by authorization.connection; driver value not shown; not connected to',
             '[connection cache] none (entries are kept for the request or job alone)',
             '[connection queue] jobs; chosen by authorization.usage.connection; driver sqs; queue value not shown',
-        ], \array_slice($lines, 8, 3));
+        ], \array_slice($lines, 11, 3));
     }
 
     /**
@@ -190,7 +230,7 @@ final class ReportTextTest extends TestCase
             '[integration gate] not registered (authorization.gate.enabled is on, but the hook is not in place)',
             '[integration blade_directives] partly registered',
             '[integration middleware.role] other (App\\\<Role\>)',
-        ], \array_slice($lines, 13, 3));
+        ], \array_slice($lines, 16, 3));
     }
 
     /**
@@ -225,10 +265,17 @@ final class ReportTextTest extends TestCase
      * @param  array<string, mixed>  $connection
      * @param  list<array{name: string, state: string, detail: string|null}>  $integrations
      * @param  list<\SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue>  $issues
+     * @param  array{prefix: string|null, names: list<array{key: string, name: string|null, explicit: bool}>}  $tables
      * @return \SineMacula\Laravel\Authorization\Diagnostics\ConfigurationReport
      */
-    private static function report(array $settings = [], array $grantHooks = [], array $connection = [], array $integrations = [], array $issues = []): ConfigurationReport
-    {
-        return new ConfigurationReport($settings, [], $grantHooks, $connection, $integrations, $issues);
+    private static function report(
+        array $settings = [],
+        array $grantHooks = [],
+        array $connection = [],
+        array $integrations = [],
+        array $issues = [],
+        array $tables = TableReader::UNREAD,
+    ): ConfigurationReport {
+        return new ConfigurationReport($settings, [], $grantHooks, $connection, $integrations, $issues, $tables);
     }
 }

@@ -9,6 +9,7 @@ use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Config\TableConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Diagnostics\BootChecks;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
@@ -62,8 +63,8 @@ final class InspectorTest extends TestCase
 
     /**
      * The report of the application the suite boots passes, in the versioned
-     * shape, with every setting, every seam, the grant hooks, the connection
-     * and the integrations.
+     * shape, with every setting, the name each table takes, every seam, the
+     * grant hooks, the connection and the integrations.
      *
      * @return void
      */
@@ -73,11 +74,14 @@ final class InspectorTest extends TestCase
         $shape  = $report->toArray();
 
         self::assertSame(ReportStatus::PASSED, $report->status);
-        self::assertSame(['version', 'status', 'settings', 'seams', 'grant_hooks', 'connection', 'integrations', 'issues'], \array_keys($shape));
+        self::assertSame(['version', 'status', 'settings', 'tables', 'seams', 'grant_hooks', 'connection', 'integrations', 'issues'], \array_keys($shape));
         self::assertSame(1, $shape['version']);
         self::assertSame('passed', $shape['status']);
         self::assertSame([], $shape['issues']);
         self::assertSame(\array_keys(SettingCatalogue::SETTINGS), \array_map(static fn (SettingRow $row): string => $row->path, $report->settings));
+        self::assertSame($report->tables, $shape['tables']);
+        self::assertSame('', $report->tables['prefix']);
+        self::assertSame(\array_keys(TableConfigValidator::LENGTHS), \array_column($report->tables['names'], 'name'));
         $contracts = \array_map(static fn (SeamRow $row): string => $row->contract, $report->seams);
 
         self::assertSame(Inspector::SEAMS, \array_slice($contracts, 0, \count(Inspector::SEAMS)));

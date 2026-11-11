@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Resolvers;
 
 use Illuminate\Contracts\Database\Query\Builder;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
@@ -12,6 +13,7 @@ use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Resolves the guardrails that apply to a check (AUTHZ-7.6).
@@ -23,20 +25,25 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * tenant outside the scope and the check is decided at platform scope (see
  * `ResourceScope`), so a tenant's guardrails always cap a check on its
  * resources; else it is the tenant the check is decided in. With no tenant,
- * only the platform's apply (AUTHZ-5.7). Every one that applies is intersected
- * at the guardrail stage. The authorization manager never asks for the
- * guardrails of a check of `authorization:guardrail.manage`, which is exempt
- * from them, so no guardrail ever keeps an actor from changing the guardrails.
+ * only the platform's apply (AUTHZ-5.7). A guardrail naming half a tenant, a
+ * type without a key or a key without a type, which the package never writes,
+ * applies everywhere, as the platform's do, since what restricts fails closed
+ * (see `Support\TenantColumns`). Every one that applies is intersected at the
+ * guardrail stage. The authorization manager never asks for the guardrails of a
+ * check of `authorization:guardrail.manage`, which is exempt from them, so no
+ * guardrail ever keeps an actor from changing the guardrails.
  *
  * The guardrails and their documents are read in one query, on the write
- * connection, through the resolution cache: kept for the request or job, and in
- * the persistent store when one is configured, so a warm check reads none, and
- * a check reads them once however many guardrails apply. A policy set as a
- * guardrail on more than one tenant of the chain is read once. The
- * authorization manager reads through the instance the service provider gives
- * it. A document that cannot be read is written to the log channel and its
- * exception thrown, so it denies every check in its scope rather than lifting
- * the cap.
+ * connection, those naming half a tenant through two more united with it, each
+ * a range of an index, so the scope's guardrails are read as they would be
+ * without them (see `TenantColumns::unionHalf()`), through the resolution
+ * cache: kept for the request or job, and in the persistent store when one is
+ * configured, so a warm check reads none, and a check reads them once however
+ * many guardrails apply. A policy set as a guardrail on more than one tenant of
+ * the chain is read once. The authorization manager reads through the instance
+ * the service provider gives it. A document that cannot be read is written to
+ * the log channel and its exception thrown, so it denies every check in its
+ * scope rather than lifting the cap.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -84,14 +91,15 @@ final readonly class GuardrailResolver
         $table = TableNames::get('guardrails');
 
         $model = new $class;
-        $rows  = $class::query()->withoutGlobalScopes()->useWritePdo()
+        $read  = static fn (): EloquentBuilder => $class::query()->withoutGlobalScopes()
             ->join($table, $table . '.policy_id', '=', $model->getQualifiedKeyName())
-            ->where(static function (Builder $query) use ($table): void {
-                TenantScope::currentChain()->owners($query, $table . '.tenant_type', $table . '.tenant_id');
-            })
-            ->select($model->qualifyColumn('*'))
-            ->get()
-            ->getDictionary();
+            ->select($model->qualifyColumn('*'));
+
+        $query = $read()->useWritePdo()->where(static function (Builder $query) use ($table): void {
+            TenantScope::currentChain()->owners($query, $table . '.tenant_type', $table . '.tenant_id');
+        });
+
+        $rows = TenantColumns::unionHalf($query, $read, $table . '.tenant_type', $table . '.tenant_id')->get()->getDictionary();
 
         $guardrails = [];
 

@@ -27,7 +27,10 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * grant of the role and the role's attachment of the policy each hold in the
  * current tenant (and through a tenant above it only when that grant reaches
  * its subtree) and application, and neither has expired, so a policy attached
- * to a role in one tenant applies only where the role is held there too.
+ * to a role in one tenant applies only where the role is held there too. An
+ * attachment naming half a tenant, and any attachment of a policy naming half a
+ * tenant, counts for its denies alone wherever the role is held (see
+ * `TenantColumns::attachments()`).
  *
  * The resolution first asks, in the query that reads the identity's own
  * attachments, whether any role holds a policy in the current scope, having
@@ -113,7 +116,7 @@ final class RolePolicies
         /** @var list<string> $keys */
         $keys    = \array_keys($held->getDictionary());
         $reach   = RoleGraph::reach($keys);
-        $columns = ['policy_id', 'expires_at'];
+        $columns = ['policy_id', 'expires_at', 'tenant_type', 'tenant_id'];
 
         $pins->roles(\array_keys($reach));
 
@@ -126,35 +129,39 @@ final class RolePolicies
         $type   = $roles->getRelated()->getMorphClass();
         $rows   = self::attachments($type, $within ?? self::afresh($roles, $keys), $pins->isRouting() ? [...$columns, 'authorizable_id'] : $columns);
         $grants = $rows === [] ? [] : $held->map(static fn (Model $role): mixed => self::grantExpiry($role))->all();
+        $placed = \array_values(\array_filter($rows, static fn (array $row): bool => !TenantColumns::isHalf($row['tenant_type'] ?? null, $row['tenant_id'] ?? null)));
+        $found  = \array_values(\array_filter(\array_column($rows, 'policy_id'), \is_string(...)));
 
         return new InheritedPolicies(
-            \array_values(\array_filter(\array_column($rows, 'policy_id'), \is_string(...))),
+            $found,
             GrantExpiry::nearest(GrantExpiry::nearest(null, \array_column($rows, 'expires_at')), $grants),
             $within !== null,
             $chains,
-            $pins->isRouting() ? self::byRole($rows) : [],
+            $pins->isRouting() ? self::byRole($placed) : [],
+            \array_values(\array_diff($found, \array_filter(\array_column($placed, 'policy_id'), \is_string(...)))),
         );
     }
 
     /**
      * Return the attachments of policies to the roles with the given keys that
-     * hold in the current scope, each as the policy's key and the key of the
-     * role it is attached to, in one query on the write connection, as
-     * `heldThrough()` reads them: the attachments an explained check tells
-     * apart by the role that holds them.
+     * hold in the current scope, each as the policy's key, the key of the role
+     * it is attached to and whether it names a whole scope, so its allows count
+     * too, in one query on the write connection, as `heldThrough()` reads them:
+     * the attachments an explained check tells apart by the role that holds
+     * them.
      *
      * @param  string  $type
      * @param  list<string>  $keys
-     * @return list<array{policy_id: string, role_id: string}>
+     * @return list<array{policy_id: string, role_id: string, is_whole: bool}>
      */
     public static function attachedTo(string $type, array $keys): array
     {
-        /** @var list<array{policy_id: string, authorizable_id: string}> $attached */
-        $attached = self::attachments($type, $keys, ['policy_id', 'authorizable_id']);
+        /** @var list<array{policy_id: string, authorizable_id: string, tenant_type: string|null, tenant_id: string|null}> $attached */
+        $attached = self::attachments($type, $keys, ['policy_id', 'authorizable_id', 'tenant_type', 'tenant_id']);
         $rows     = [];
 
         foreach ($attached as $row) {
-            $rows[] = ['policy_id' => $row['policy_id'], 'role_id' => $row['authorizable_id']];
+            $rows[] = ['policy_id' => $row['policy_id'], 'role_id' => $row['authorizable_id'], 'is_whole' => !TenantColumns::isHalf($row['tenant_type'], $row['tenant_id'])];
         }
 
         return $rows;
@@ -250,8 +257,9 @@ final class RolePolicies
     /**
      * Query the attachments table for the rows that hold in the current tenant
      * and application and have not expired, as a grantee's relation reads them,
-     * leaving out an attachment of an inline policy to a role it does not
-     * belong to.
+     * with those whose denies alone count in every scope (see
+     * `TenantColumns::attachments()`), leaving out an attachment of an inline
+     * policy to a role it does not belong to.
      *
      * @param  string  $table
      * @return \Illuminate\Database\Query\Builder
@@ -259,7 +267,7 @@ final class RolePolicies
     private static function scoped(string $table): Builder
     {
         $query = AuthorizationConnection::connection()->table($table)->where(static function (Builder $query) use ($table): void {
-            TenantScope::currentChain()->grants($query, $table);
+            TenantColumns::attachments(TenantScope::currentChain(), $query, $table);
             GrantApplications::only($query, $table, TenantScope::currentApplication());
         });
 

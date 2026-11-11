@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * Sync the platform's permission catalogue from the configured enums and
@@ -132,11 +133,7 @@ final class SyncPermissionsCommand extends Command
         /** @var \SineMacula\Laravel\Authorization\Console\Support\PermissionDiff */
         return OperationScope::run(Operation::begin($actor), function () use ($definitions, $builder, $model): PermissionDiff {
             /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $rows */
-            $rows = $model->newQueryWithoutScope(TenantScope::class)
-                ->whereNull('tenant_type')
-                ->whereNull('tenant_id')
-                ->get()
-                ->all();
+            $rows = TenantChain::whereNullTenant($model->newQueryWithoutScope(TenantScope::class), 'tenant_type', 'tenant_id')->get()->all();
 
             $diff = $builder->build($definitions, $rows);
 
