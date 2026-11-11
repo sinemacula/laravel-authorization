@@ -12,6 +12,7 @@ use Illuminate\Support\Collection;
 use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Concerns\BuildsScopedManagers;
+use SineMacula\Laravel\Authorization\Concerns\ForgetsDecisions;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
@@ -77,7 +78,9 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
  *
  * Every operation refuses while the package is not healthy (see
  * `PackageState`), before the subject is resolved or a decision read, the state
- * handed to the manager as it is built and kept by each scoped clone.
+ * handed to the manager as it is built and kept by each scoped clone; what the
+ * `ForgetsDecisions` trait forgets, `forgetLastDecision()` and
+ * `forgetDecisionsFor()` (N112), is no decision, and never refuses.
  *
  * @SuppressWarnings("php:S1144")
  *
@@ -86,7 +89,7 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
  */
 final class AuthorizationManager
 {
-    use BuildsScopedManagers, HasContainerInstance;
+    use BuildsScopedManagers, ForgetsDecisions, HasContainerInstance;
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline Decides each check, with the policy override and the caps of this scope. */
     private DecisionPipeline $pipeline;
@@ -415,7 +418,10 @@ final class AuthorizationManager
      * `check()` would, stops the batch there, the checks before it recorded.
      * Every check is refused with `InvalidCheckArgumentException`, before any
      * is decided, when one is not a `CheckInput`. On a preview, the preview is
-     * admitted once for the batch, before any check is decided.
+     * admitted once for the batch, before any check is decided. Once the
+     * decisions are forgotten part way (see `forgetDecisionsFor()`), the rest
+     * of a batch about the request's subject is about the subject the resolver
+     * gives afresh, while a manager from `for()` or `forUser()` keeps its own.
      *
      * @template TKey of array-key
      *
@@ -435,7 +441,7 @@ final class AuthorizationManager
             return $this->preview->run(fn (?Subject $target): array => $this->batch()->decide($target, $checks));
         }
 
-        return $this->inSubjectScope(fn (): array => $this->batch()->decide($this->currentSubject(), $checks));
+        return $this->inSubjectScope(fn (): array => $this->batch()->decide($this->currentSubject(), $checks, !$this->isSubjectNamed));
     }
 
     /**
@@ -541,7 +547,8 @@ final class AuthorizationManager
      * evaluation.
      *
      * Returns null when the process has not yet produced a decision or when the
-     * store was explicitly cleared between requests in a long-running worker. A
+     * store was explicitly cleared, between requests in a long-running worker
+     * or by `forgetDecisionsFor()` once a proof or the session changed. A
      * decision that read an authentication requirement is returned only in the
      * session of the request that recorded it, as the subject resolver gives
      * it, whichever subject the decision was about (one named with `for()`
@@ -600,17 +607,6 @@ final class AuthorizationManager
         $explain = fn (?Subject $target): Decision => $this->batch(isExplaining: true)->decideOne($target, $check);
 
         return ($this->preview === null ? $this->inSubjectScope(fn (): Decision => $explain($this->currentSubject())) : $this->preview->run($explain))->explain();
-    }
-
-    /**
-     * Clear the recorded last decision. Long-running workers call this between
-     * requests so a stale decision does not leak across the request boundary.
-     *
-     * @return void
-     */
-    public function forgetLastDecision(): void
-    {
-        $this->lastDecisionStore->forget();
     }
 
     /**

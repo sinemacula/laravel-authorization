@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Administration;
 
 use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionMemory;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -23,17 +24,20 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * What could limit a right across a reach is read once per decision for each
  * right, reach and scope in place (see `limited()`), so a change that weighs
  * the same right for every role, permission or policy it hands out reads its
- * limits once.
+ * limits once, until the decisions are forgotten (see `DecisionMemory`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
  */
-final readonly class FurtherChecks
+final class FurtherChecks
 {
-    /** @var \ArrayObject<string, bool> Whether each right was found limited, keyed by the right, the reach and the scope in place. */
-    private \ArrayObject $limits;
+    /** @var array<string, bool> Whether each right was found limited, keyed by the right, the reach and the scope in place. */
+    private array $limits = [];
+
+    /** @var int|null The generation of the decisions the limits were found in (see `DecisionMemory`), or null before any is. */
+    private ?int $generation = null;
 
     /**
      * Create the further checks of one decision.
@@ -46,19 +50,17 @@ final readonly class FurtherChecks
     public function __construct(
 
         /** The acting subject the decision is about. */
-        public Subject $subject,
+        public readonly Subject $subject,
 
         /** Decides a further check of the subject in the scope in place. */
-        private \Closure $decide,
+        private readonly \Closure $decide,
 
         /** Gathers the sources of a further check of the subject, on no resource, in the scope in place, or null when a document cannot be read. */
-        private \Closure $sources,
+        private readonly \Closure $sources,
 
         /** The tenant the check is made from; null for the platform. */
-        public ?Reference $from = null,
-    ) {
-        $this->limits = self::noLimits();
-    }
+        public readonly ?Reference $from = null,
+    ) {}
 
     /**
      * Decide the action for the subject on the resource, or on none, in the
@@ -89,7 +91,8 @@ final readonly class FurtherChecks
     /**
      * Return whether the right named by the key is limited across its reach,
      * working it out through the callback the first time the key is asked and
-     * remembering it for the rest of this decision.
+     * remembering it for the rest of this decision, or until the decisions are
+     * forgotten (see `DecisionMemory`), when it is worked out again.
      *
      * @param  string  $key
      * @param  \Closure(): bool  $limit
@@ -97,7 +100,15 @@ final readonly class FurtherChecks
      */
     public function limited(string $key, \Closure $limit): bool
     {
-        $known = $this->limits->offsetExists($key) ? $this->limits->offsetGet($key) : null;
+        $generation = DecisionMemory::current()->generation();
+
+        // Found before the decisions were forgotten, worked out again.
+        if ($generation !== $this->generation) {
+            $this->limits     = [];
+            $this->generation = $generation;
+        }
+
+        $known = $this->limits[$key] ?? null;
 
         if ($known !== null) {
             return $known;
@@ -105,18 +116,8 @@ final readonly class FurtherChecks
 
         $isLimited = $limit();
 
-        $this->limits->offsetSet($key, $isLimited);
+        $this->limits[$key] = $isLimited;
 
         return $isLimited;
-    }
-
-    /**
-     * Return an empty record of what was found limited.
-     *
-     * @return \ArrayObject<string, bool>
-     */
-    private static function noLimits(): \ArrayObject
-    {
-        return new \ArrayObject;
     }
 }

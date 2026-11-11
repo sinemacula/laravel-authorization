@@ -2365,6 +2365,40 @@ and that instant, and `isFreshFor($session)` says whether it may be reused in a 
 `decide()`, the Blade directives and `permissionsFor()` decide afresh every time, and the resolution cache holds
 grants and policies, never decisions.
 
+#### Forgetting decisions
+
+The last decision, and what the resolution cache, the tenant scope and a running batch of checks hold for the request
+or job, outlive a change to the proofs or the session they were read under. A suite package or the application calls
+`Authorization::forgetDecisionsFor($session, $identity)` once a proof is recorded or revoked (a step-up met, a factor
+removed), a session signs in or out, or the tenant is switched inside the request or job, and the rest of it decides
+afresh:
+
+```php
+// A step-up was just recorded for the signed-in session.
+Authorization::forgetDecisionsFor($request->session()->getId(), $request->user());
+
+Authorization::lastDecision();          // null
+Authorization::can('reports:export');   // decided afresh, the new proof read
+```
+
+It clears the last decision, its provenance and the session it was recorded in, empties the resolution cache's
+in-memory tier, in every scope, without touching the persistent store or bumping a version key (no grant changed, so
+other workers keep what they hold), and drops the tenant and application resolved for the request, so the next check
+reads the subject, its session and its tenant from the subject resolver again. A scope put in place with
+`TenantScope::within()` or an `AuthorizationScope` stays as you set it until it ends, and a manager from `for()` or
+`forUser()` keeps its subject and decides afresh about it, a `Subject` given to `for()` in its own tenant even when that
+is the request's. A batch of checks still running reads ahead again from its next chunk: a batch about the request's
+subject asks the subject resolver for it again, with its session, its credential's scopes and its tenant, so the checks
+still to come, and `lastDecision()` after them, follow the change. A preview admits its previewer again at its next
+decision. The session caps are read from the session policy source at every check, so there is nothing of them to
+forget.
+
+The session and the identity name what changed, for the reader of your code: in this version everything is forgotten,
+for every session and every identity, whatever they are, null included. A decision already returned and an event
+already dispatched are observations of what was decided then, and are never retracted. Forgetting is not a decision, so
+a manager never refuses it, even while the package refuses its configuration. `forgetLastDecision()` clears the last
+decision alone, as a long-running worker does between requests.
+
 #### Under the suite
 
 With `sinemacula/laravel-iam`, the checker is bound to `laravel-mfa`'s requirement check, and the `mfa` namespace comes
@@ -2507,6 +2541,8 @@ or about the subject of the scoped manager it is called on:
 | `explain($action, $resource, $context)`           | Decides the action in explain mode and returns its `Explanation` (see [Explanations](#explanations))                      |
 | `lastDecision()`                                  | Returns the latest decision of the request or job, whichever manager made it                                              |
 | `lastDecisionProvenance()`                        | Returns who the latest decision was about, who previewed it and where it was made, or null whenever `lastDecision()` is   |
+| `forgetLastDecision()`                            | Clears the latest decision of the request or job                                                                          |
+| `forgetDecisionsFor($session, $identity)`         | Forgets everything the request or job remembers towards its decisions (see [Forgetting](#forgetting-decisions))           |
 | `permissionsFor($subject, $scope, $context)`      | Lists the actions of the permission catalogue the subject may take in the scope                                           |
 | `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's scope, or a `Subject` in its own scope          |
 | `forUser($user)`                                  | Returns a scoped manager deciding about the subject the resolver translates the user into                                 |

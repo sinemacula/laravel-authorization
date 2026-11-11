@@ -340,10 +340,25 @@ final readonly class ResolutionCache
      * provider and the tenant scope call this whenever the held tenant is
      * replaced or forgotten.
      *
+     * Given `$isForgettingDecisions`, the tenant was forgotten with everything
+     * else the request or job remembers towards its decisions (N112, see
+     * `Evaluation\DecisionMemory`): every entry is dropped, in every scope, and
+     * so are those set aside for a scope left or for a callback run in another
+     * (see `batch()`), which are never put back, and the tenant tree's answers,
+     * so what the request or job resolved is read afresh, from the store while
+     * its versions hold, else from the database. The store is not touched and
+     * no version key is bumped: nothing was written, so what other workers hold
+     * stays valid.
+     *
+     * @param  bool  $isForgettingDecisions
      * @return void
      */
-    public function tenantChanged(): void
+    public function tenantChanged(bool $isForgettingDecisions = false): void
     {
+        if ($isForgettingDecisions) {
+            $this->memo->flush();
+        }
+
         $this->memo->scopeChanged();
     }
 

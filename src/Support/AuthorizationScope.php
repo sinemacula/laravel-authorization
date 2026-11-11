@@ -31,7 +31,9 @@ use SineMacula\Laravel\Authorization\Subject;
  * throws. What the resolution cache holds for the request's scope is kept
  * meanwhile and is back with it, unless a write dropped it, and a scope that is
  * already in place, such as `current()`, is not applied again, so listing in it
- * costs what checking in it costs.
+ * costs what checking in it costs, but is held in place all the same, so the
+ * decisions of the request being forgotten while it runs (N112) never move it
+ * into the tenant the request resolves afresh.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -117,7 +119,8 @@ final readonly class AuthorizationScope
      * Run the callback with this scope's tenant and application in place of the
      * request's, which are restored afterwards, even when it throws, with what
      * the resolution cache held for them. A scope already in place runs the
-     * callback as it is.
+     * callback in it as it is, held there should the decisions of the request
+     * be forgotten meanwhile (see `TenantScope::pinned()`).
      *
      * @template TResult
      *
@@ -127,7 +130,7 @@ final readonly class AuthorizationScope
     public function within(\Closure $callback): mixed
     {
         if ($this->isInPlace()) {
-            return $callback();
+            return TenantScope::pinned($callback);
         }
 
         $enter = fn (): mixed => TenantScope::within($this->tenant, $this->application, $callback);
