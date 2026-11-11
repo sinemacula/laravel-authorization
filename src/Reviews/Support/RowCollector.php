@@ -181,6 +181,32 @@ final class RowCollector
     }
 
     /**
+     * Keep only the rows collected that the narrowing keeps, as it returns
+     * them: given every row collected, in the order collected, it returns the
+     * rows to keep, each by its index among them, replaced as it gives it, so a
+     * row kept keeps its sort key and its place, and the limit and the
+     * truncation count the rows kept.
+     *
+     * @param  \Closure(list<\SineMacula\Laravel\Authorization\Reviews\ReviewRow>): array<int, \SineMacula\Laravel\Authorization\Reviews\ReviewRow>  $narrowing
+     * @return void
+     */
+    public function narrow(\Closure $narrowing): void
+    {
+        $kept    = $narrowing(\array_map(static fn (array $entry): ReviewRow => $entry['row'], $this->entries));
+        $entries = [];
+
+        foreach ($this->entries as $index => $entry) {
+            if (!isset($kept[$index])) {
+                continue;
+            }
+
+            $entries[] = ['key' => $entry['key'], 'row' => $kept[$index]];
+        }
+
+        $this->entries = $entries;
+    }
+
+    /**
      * Return the part of a sort key that orders a route among the routes of one
      * stored row: the first role of its chain and how many roles the chain runs
      * through, none for no chain, then the key of each row it rests on.

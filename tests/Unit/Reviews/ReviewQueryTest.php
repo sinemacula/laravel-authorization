@@ -242,6 +242,62 @@ final class ReviewQueryTest extends TestCase
     }
 
     /**
+     * A review of holdings is narrowed to one literal action, every other part
+     * of it kept, a new query each time; the action survives a new limit, and
+     * an unfiltered review names none.
+     *
+     * @return void
+     */
+    public function testAReviewOfHoldingsIsNarrowedToOneAction(): void
+    {
+        $subject  = new Subject(new Reference('user', 'u'), null);
+        $scope    = ReviewScope::everywhere();
+        $holdings = ReviewQuery::holdings($subject, $scope)->withLimit(5);
+        $filtered = $holdings->forAction('posts:edit');
+
+        self::assertNull($holdings->action);
+        self::assertNotSame($holdings, $filtered);
+        self::assertSame(
+            ['posts:edit', ReviewKind::HOLDINGS, $scope, 5, $subject],
+            [$filtered->action, $filtered->kind, $filtered->scope, $filtered->limit, $filtered->subject],
+        );
+        self::assertSame('posts:edit', $filtered->withLimit(2)->action);
+        self::assertSame('audit.read-all_2', $filtered->forAction('audit.read-all_2')->action);
+        self::assertSame('i', ReviewQuery::holdings(new Reference('user', 'i'), $scope)->forAction('a')->identity?->id);
+    }
+
+    /**
+     * Only a review of holdings takes an action, and only a literal catalogue
+     * action name: no wildcard, no other glob character, no space, nothing
+     * empty or over the name's length.
+     *
+     * @return void
+     */
+    public function testAnActionIsLiteralAndOnlyForHoldings(): void
+    {
+        $holdings = ReviewQuery::holdings(new Reference('user', 'u'), ReviewScope::everywhere());
+        $refused  = static function (\Closure $build): bool {
+            try {
+                $build();
+            } catch (\InvalidArgumentException) {
+                return true;
+            }
+
+            return false;
+        };
+
+        foreach (['', '*', 'posts:*', 'posts:?', 'posts:[a]', 'posts edit', \str_repeat('a', 192)] as $action) {
+            self::assertTrue($refused(static fn (): ReviewQuery => $holdings->forAction($action)), $action);
+        }
+
+        self::assertFalse($refused(static fn (): ReviewQuery => $holdings->forAction(\str_repeat('a', 191))));
+        self::assertTrue($refused(static fn (): ReviewQuery => ReviewQuery::grantedBy(new Reference('user', '1'), ReviewScope::everywhere())->forAction('posts:edit')));
+        $holders = ReviewQuery::holders(new Reference((new Role)->getMorphClass(), 'r'), ReviewScope::everywhere());
+
+        self::assertTrue($refused(static fn (): ReviewQuery => $holders->forAction('posts:edit')));
+    }
+
+    /**
      * Return the config key the callback is refused under for an invalid
      * configured limit, or null when it is not refused.
      *

@@ -36,4 +36,18 @@ final class PageReadTest extends TestCase
         self::assertSame([[], $next, false, $at], [$page->rows, $page->next, $page->isComplete, $page->at]);
         self::assertNull((new PageRead([], null, true, $at))->next);
     }
+
+    /**
+     * It covers more than the stored grants unless a review filtered by an
+     * action says it covers only them.
+     *
+     * @return void
+     */
+    public function testItSaysWhetherItCoversOnlyTheStoredGrants(): void
+    {
+        $at = new CarbonImmutable('2030-01-01 00:00:00', 'UTC');
+
+        self::assertFalse((new PageRead([], null, true, $at))->isStoredInventoryOnly);
+        self::assertTrue((new PageRead([], null, true, $at, true))->isStoredInventoryOnly);
+    }
 }

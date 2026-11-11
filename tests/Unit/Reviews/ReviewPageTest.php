@@ -47,6 +47,20 @@ final class ReviewPageTest extends TestCase
     }
 
     /**
+     * Only a page of a review filtered by an action says its rows cover only
+     * the stored grants.
+     *
+     * @return void
+     */
+    public function testItSaysWhetherItCoversOnlyTheStoredGrants(): void
+    {
+        $at = new CarbonImmutable('2030-01-01 00:00:00', 'UTC');
+
+        self::assertFalse((new ReviewPage([], null, $at, true))->isStoredInventoryOnly);
+        self::assertTrue((new ReviewPage([], null, $at, true, true))->isStoredInventoryOnly);
+    }
+
+    /**
      * Return a row with the key.
      *
      * @param  string  $key

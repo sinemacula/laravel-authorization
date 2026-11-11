@@ -313,6 +313,72 @@ final class ReviewRunTest extends TestCase
     }
 
     /**
+     * Where a role's grant and its policy attachment hold together is the
+     * narrower of their reaches, never the wider: the other's when either is
+     * the platform's, below their one tenant only when both reach below it, the
+     * one lying below the other's subtree, and the application either names;
+     * read from the run's chain in a review of what applies in a tenant, asking
+     * the tree nothing more, and from the attachment's chain in any other,
+     * asking the tree no more once the attachment is settled.
+     *
+     * @return void
+     */
+    public function testAGrantAndAnAttachmentOverlapInTheNarrowerReach(): void
+    {
+        $this->tree();
+
+        $counting = new CountingTenantTree(new ClosureTenantTree);
+
+        $this->app?->instance(TenantTree::class, $counting);
+
+        $scope = static fn (?string $tenant, ?string $application = null, bool $isSubtree = true): GrantScope => new GrantScope(
+            $tenant === null ? null : self::tenant($tenant),
+            $application,
+            $isSubtree,
+        );
+        $shown = static fn (GrantScope $overlap): array => [$overlap->tenant?->id, $overlap->application, $overlap->includeSubtree];
+
+        $everywhere = ReviewRun::of(ReviewScope::everywhere());
+        $applying   = ReviewRun::of(ReviewScope::appliesIn(self::tenant('team1'), ApplicationSelector::any()));
+
+        foreach ([$everywhere, $applying] as $run) {
+            $before = [$counting->withinAsked, $counting->ancestorsRead];
+
+            self::assertSame([null, null, true], $shown($run->overlap($scope(null), $scope(null))));
+            self::assertSame(['acct1', null, false], $shown($run->overlap($scope(null), $scope('acct1', null, false))));
+            self::assertSame(['org1', 'web', true], $shown($run->overlap($scope('org1', 'web'), $scope(null))));
+            self::assertSame(['org1', 'web', true], $shown($run->overlap($scope('org1'), $scope('org1', 'web'))));
+            self::assertSame(['org1', null, false], $shown($run->overlap($scope('org1'), $scope('org1', null, false))));
+            self::assertSame(['org1', null, false], $shown($run->overlap($scope('org1', null, false), $scope('org1'))));
+            self::assertSame(['acct1', 'web', false], $shown($run->overlap($scope('org1', 'web'), $scope('acct1', null, false))));
+            self::assertSame(['team1', 'web', true], $shown($run->overlap($scope('team1'), $scope('org1', 'web'))));
+            self::assertSame(['team1', null, false], $shown($run->overlap($scope('org1'), $scope('team1', null, false))));
+
+            if ($run !== $applying) {
+                continue;
+            }
+
+            self::assertSame($before, [$counting->withinAsked, $counting->ancestorsRead]);
+        }
+
+        $settled = ReviewRun::of(ReviewScope::everywhere());
+        $stored  = static fn (string $target, string $grantee, string $tenant, string $source): GrantRow => GrantRow::from(
+            (object) ['target_id' => $target, 'grantee_type' => 'u', 'grantee_id' => $grantee, 'tenant_type' => 'tenant', 'tenant_id' => $tenant, 'include_subtree' => true],
+            $source,
+        );
+        $grant  = $stored('r', 'a', 'team1', 'role');
+        $attach = $stored('p', 'r', 'acct1', 'policy');
+
+        $settled->settle([$grant], ['r' => [$attach]]);
+
+        $asked = [$counting->withinAsked, $counting->ancestorsRead];
+
+        self::assertSame(['team1', null, true], $shown($settled->overlap($scope('team1'), $scope('acct1'))));
+        self::assertSame(['acct1', null, true], $shown($settled->overlap($scope('org1'), $scope('acct1'))));
+        self::assertSame($asked, [$counting->withinAsked, $counting->ancestorsRead]);
+    }
+
+    /**
      * A grant naming half a tenant is selected exactly where a check reads it:
      * a key without a type at the platform, so wherever what applies is read,
      * and a type without a key nowhere; a review of everywhere selects a type

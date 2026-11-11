@@ -36,6 +36,11 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  * their roles is settled in a fixed number of queries (see
  * `ReviewRun::settle()`), never one for each tenant a grant is held in.
  *
+ * A review filtered by an action keeps only the routes whose permission or
+ * policy gives it (see `ActionRoutes`), each with what gives it, before the
+ * routes are sorted and cut to a page, the definitions read in a fixed number
+ * of queries more.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -44,8 +49,10 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 final class HoldingRoutes
 {
     /**
-     * Collect the rows of what the query's subject holds, and return whether
-     * every grantee it reads was known.
+     * Collect the rows of what the query's subject holds, only those giving its
+     * action when it names one (see `ActionRoutes`), kept before the rows are
+     * sorted and cut to a page, and return whether every grantee it reads was
+     * known, which an empty page still says.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
@@ -62,6 +69,10 @@ final class HoldingRoutes
         self::throughRoles($run, $rows, $subject, $grantees, $via);
         self::direct($run, $rows, GrantTarget::PERMISSION, $subject, $grantees, $via);
         self::direct($run, $rows, GrantTarget::POLICY, $subject, $grantees, $via);
+
+        if ($query->action !== null) {
+            ActionRoutes::narrow($run, $query->action, $rows);
+        }
 
         return $isComplete;
     }

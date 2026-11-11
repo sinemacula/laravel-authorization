@@ -69,13 +69,14 @@ still left out.
    values, never a name, email, description, document or value. Its shape is `version: 1`: `row_key`, `subject`,
    `grantee`, `target`, `source_kind`, `source_key`, `origin_scope`, `via_identity`, `role_path`, `supporting_grants`,
    `created_at`, `updated_at`, `expires_at`, `route_expires_at`, `granted_by`, `grant_state`, `subject_state` and
-   `usage` (invariant 27). A
-   stored row's key is built from the columns that make it unique (target, grantee, tenant and application; role and
-   permission for an edge), each part length-prefixed so no two lists of parts share one. A subject is `inactive` when
-   it, or the identity of a resolved subject, reports itself inactive or is deleted softly, `unknown` when its record
-   is gone or its type names no model, read one query for each morph type among the rows returned; a resolved subject
-   is weighed as given, its principal and identity models included. `isComplete` says only whether an identity's
-   principals could all be listed, and is true for every other review.
+   `usage` (invariant 27), then `action_evidence` on the rows of a review of holdings filtered by an action, and only
+   there (invariant 28); every other review's rows keep this shape. A stored row's key is built from the columns that
+   make it unique (target, grantee, tenant and application; role and permission for an edge), each part length-prefixed
+   so no two lists of parts share one. A subject is `inactive` when it, or the identity of a resolved subject, reports
+   itself inactive or is deleted softly, `unknown` when its record is gone or its type names no model, read one query
+   for each morph type among the rows returned; a resolved subject is weighed as given, its principal and identity
+   models included. `isComplete` says only whether an identity's principals could all be listed, and is true for every
+   other review.
 
    A grant or attachment row that names half a tenant (a type without a key, or a key without a type), which the
    package never writes, is listed and marked as damaged (N99), never presented as a clean platform origin: its
@@ -177,17 +178,18 @@ still left out.
     string part base64-encoded so any bytes survive) and an HMAC-SHA256 signature, keyed by a key derived from `app.key`
     for cursors alone, over the payload, the schema version with it, and over what the cursor is bound to: the query's
     kind, scope selection, tenant, application selector and name, target, subject (its principal and identity, and which
-    mode), window, actor and `directOnly`, and the reviewer (its principal and impersonator) or the trusted path, each
-    part length-prefixed. A sort key holds a fixed number of parts however deep the hierarchy runs (invariant 8), each a
-    reference, scope value or stored row's key of at most 191 characters a part, so a cursor stays a few kilobytes, well
-    under the 16384 characters read. A cursor is read only once its signature verifies, in constant time, for the query
-    and reviewer it is presented with, and only in the one text that encodes it: each part must be exactly the
-    canonical, unpadded base64url of its bytes, so a line break, padding, the standard alphabet or spare bits that are
-    not zero are refused even where they decode to the same bytes. Anything else, a changed byte, another query, scope,
-    reviewer or path, another schema version, a payload of another shape or no cursor at all, is refused with
-    `InvalidReviewCursorException`, whose one message says nothing of why. The cursor discloses nothing a page did not:
-    the parts of its sort key are references and scope values its last row shows. The limit is not bound. No key refuses
-    to sign or read one (`MissingAppKeyException`); a review that fits on its first page issues none.
+    mode), window, actor and `directOnly`, the action of a review of holdings filtered by one, and the reviewer (its
+    principal and impersonator) or the trusted path, each part length-prefixed. A sort key holds a fixed number of parts
+    however deep the hierarchy runs (invariant 8), each a reference, scope value or stored row's key of at most 191
+    characters a part, so a cursor stays a few kilobytes, well under the 16384 characters read. A cursor is read only
+    once its signature verifies, in constant time, for the query and reviewer it is presented with, and only in the one
+    text that encodes it: each part must be exactly the canonical, unpadded base64url of its bytes, so a line break,
+    padding, the standard alphabet or spare bits that are not zero are refused even where they decode to the same bytes.
+    Anything else, a changed byte, another query, scope, reviewer or path, another schema version, a payload of another
+    shape or no cursor at all, is refused with `InvalidReviewCursorException`, whose one message says nothing of why.
+    The cursor discloses nothing a page did not: the parts of its sort key are references and scope values its last row
+    shows. The limit is not bound. No key refuses to sign or read one (`MissingAppKeyException`); a review that fits on
+    its first page issues none.
 
 17. **Readmission and the frozen instant: a live scan.** Every page is admitted again before anything, its cursor
     included, is read, and a stream or an export is admitted before each chunk, so a right revoked, a step-up no longer
@@ -203,21 +205,22 @@ still left out.
     budget measures it against what was held before the stream began). `export()`
     writes versioned JSON Lines (`Reviews\Support\JsonLinesExport`) to a writable stream, each line written whole, or
     to a callback: a header (`record` `header`, `version`, the `query` kind, the `scope`, `reviewed_at`,
-    `scan_started_at`, `consistency` `live`), one line a row (`record` `row` and the row's shape), and a footer
+    `scan_started_at`, `consistency` `live`, then, only for a review of holdings filtered by an action, the `action`
+    and `stored_inventory_only` `true`, invariant 28), one line a row (`record` `row` and the row's shape), and a footer
     (`record` `footer`, `version`, `rows`, `scan_ended_at`, `complete`). Each line is encoded with its keys in a fixed
     order, slashes and Unicode unescaped, the line and paragraph separators escaped, invalid UTF-8 refused rather than
     replaced, so the output is UTF-8 and the same bytes for the same rows at the same instants. Exporting needs both
     `authorization:review.read` and `authorization:review.export`, decided together before the header and again before
     every chunk; nothing is written before admission, and an export refused or failing part way has no footer.
 
-19. **The console (`Console\ReviewCommand`).** `authorization:review` exports a review on the trusted path, as
-    scheduled system work. Its scope options mirror `authorization:why` (`--tenant`, with `--rooted-within` and
-    `--everywhere` beside it, at most one, and `--application` `none`, `any` or a name), with `--from` and `--until`,
-    `--actor` and `--direct-only` taken by their own queries alone; a holdings subject is resolved by the console
+19. **The console (`Console\ReviewCommand`).** `authorization:review` exports a review on the trusted path, as scheduled
+    system work. Its scope options mirror `authorization:why` (`--tenant`, with `--rooted-within` and `--everywhere`
+    beside it, at most one, and `--application` `none`, `any` or a name), with `--from` and `--until`, `--actor`,
+    `--direct-only` and `--action` taken by their own queries alone; a holdings subject is resolved by the console
     subject resolver. It writes nothing but the JSON Lines to the standard output, or to `--output`, created only when
     it does not exist unless `--force` is given, and exits as `authorization:why` does: 0 written, 2 for an invalid
-    invocation, 1 when the review fails. Its errors name the argument or option alone, never a value given: a subject
-    or tenant that is malformed, names no model or no saved row, or cannot be resolved included
+    invocation, 1 when the review fails. Its errors name the argument or option alone, never a value given: a subject or
+    tenant that is malformed, names no model or no saved row, or cannot be resolved included
     (`UnresolvedSubjectException::namingOnly()`).
 
 20. **Indexes and what a page reads (N95).** A new migration, `2026_11_08_000001_add_access_review_indexes`, adds
@@ -320,6 +323,32 @@ still left out.
     taken to run two intervals past its end, covers the whole window; `unknown` otherwise, while tracking is off, and
     for a row whose source cannot report. A null `last_observed_at` is never proof of non-use. The row keeps `version:
     1`, since the package is unreleased.
+
+28. **Where a subject holds an action (N110).** `ReviewQuery::holdings()->forAction($action)` narrows a review of
+    holdings to the routes whose target gives one action, named literally (an authorization name with no `*`; any other
+    review refuses it). `Reviews\Support\ActionRoutes` keeps them from the routes collected, before they are sorted and
+    cut to a page, so a page holds its limit of matching rows in the review's one order, reading the permissions'
+    names and the policies' documents on the write connection a chunk of keys at a time, never once a route. A
+    permission route, direct, through a role or one above it, or through the identity, gives the action when its name
+    covers it under the held-permission rules (`Support\HeldPermissions`: case-sensitive, a held `*` pattern covering,
+    never SQL `LIKE`); a policy route gives it when a statement names it as the policy matcher reads it
+    (`Reviews\Support\ActionStatements`), an allow naming `principals` passed over as it applies only on a resource; a
+    role route gives nothing by itself. Each kept row carries `action_evidence` (`Reviews\ActionEvidence`): the
+    `action`, the `evidence` (`permission` or `policy_statement`), the `effect` (`allow` when a statement allows it or
+    for a permission, `deny` when the statements naming it only deny, so a deny-only policy is deny evidence and never
+    authority, null for a policy whose document cannot be read), the permission's `guard`, `complete` (false only for
+    such an unreadable document, its route kept, never dropped), `has_deny`, `has_conditions`,
+    `has_resource_patterns` and `has_requirements` (reported, never evaluated), and the compact `reach`: its `kind`
+    (`node`, `subtree` or `platform`, `Reviews\Enums\ReachKind`) beside the origin scope's tenant, application and
+    subtree flag, never expanded into tenants. A policy through a role reaches where the role's grant and the
+    attachment hold together (`ReviewRun::overlap()`); when either names half a tenant, the route stays `malformed`
+    and `reach` shows that row's tenant columns as stored, still limited to the application either row names. The row's
+    `origin_scope` stays the grant's as stored. The cursor binds the action. Policies from a dynamic `PolicyStore`
+    and resource policies lie outside the stored grants, so a filtered review's result and pages say
+    `isStoredInventoryOnly` and its export header carries `action` and `stored_inventory_only` `true`; an unfiltered
+    review says false and its header keeps its shape. It never authorises: no condition, deny or cap is evaluated, no
+    last decision is recorded and no event dispatched; `check()` decides the operation. The row keeps `version: 1`,
+    since the package is unreleased.
 
 ## Success Path
 
@@ -424,6 +453,9 @@ tracking covered the whole window and `unknown` where it did not.
   coverage and pruning.
 - `Reviews\Support\ReviewUsage`, `Reviews\RowUsage`, `Reviews\Enums\UsageStatus`, `StoredRows::unused()` -- the
   `usage` field and the unused review.
+- `Reviews\Support\ActionRoutes`, `Reviews\Support\ActionStatements`, `Reviews\ActionEvidence`,
+  `Reviews\Enums\EvidenceKind`, `Reviews\Enums\ReachKind`, `ReviewQuery::forAction()`, `RowCollector::narrow()` --
+  where a subject holds an action, and the `action_evidence` field.
 
 ## Authoritative Tests
 
@@ -483,10 +515,15 @@ tracking covered the whole window and `unknown` where it did not.
   stored with, a role's routes kept once, kept beside the entry and never read from one kept without them.
 - `Performance\GrantUsageBudgetTest` -- a tracked cold check reads what an untracked one does, a subject with a
   separate identity included, and warm tracked checks read nothing and keep within the single-check budget.
+- `Reviews\Support\ActionRoutesTest` (Feature), `ActionStatementsTest`, `ActionEvidenceTest` (Unit) -- every route a
+  permission or policy gives the action by, held names matched case-sensitively, deny-only and unreadable policies,
+  identity mode, compact reach, a role's policy reaching the overlap, half-named rows, a page of its limit of
+  matching rows in bounded queries, and nothing decided or dispatched.
 
 ## Change Triggers
 
-- A change to the row shape or the sort key bumps `ReviewRow::VERSION`, which refuses every cursor issued before it.
+- A change to the row shape or the sort key bumps `ReviewRow::VERSION`, which refuses every cursor issued before it;
+  while the package is unreleased, an optional key added to the row (`usage`, `action_evidence`) keeps `version: 1`.
 - A snapshot export, or a CSV adapter (N97), would be a mode or sink of its own beside the live JSON Lines.
 - A new path that decides without acting on the decision (an introspection or a dry run) must keep its pipeline
   untracked, as previews, explanations, listings, scoped queries and reviews are.
