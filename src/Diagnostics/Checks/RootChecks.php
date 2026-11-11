@@ -13,15 +13,16 @@ use SineMacula\Laravel\Authorization\Config\NamedEntryConfigValidator;
 use SineMacula\Laravel\Authorization\Config\RequirementCheckerConfigValidator;
 use SineMacula\Laravel\Authorization\Config\SeamConfigValidator;
 use SineMacula\Laravel\Authorization\Config\TableConfigValidator;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Diagnostics\IssueCollector;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 
 /**
  * The structural checks of the settings at the top of the configuration: the
- * connection, the tables, the default guard, the log channel, the models, the
- * permission enums and providers, the seams, the application access map and the
- * grant hooks, each setting and each entry on its own.
+ * connection, the table prefix and names, the default guard, the log channel,
+ * the models, the permission enums and providers, the seams, the application
+ * access map and the grant hooks, each setting and each entry on its own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -77,14 +78,15 @@ final readonly class RootChecks
     }
 
     /**
-     * Check each table's name, then that no two tables share a name among the
-     * names that passed.
+     * Check the prefix and each table's name, then that no two tables share a
+     * name among the names that passed. A name left at its default is checked
+     * with the prefix before it, and is skipped when the prefix was refused.
      *
      * @return void
      */
     private function tables(): void
     {
-        $keys  = \array_keys(TableConfigValidator::LENGTHS);
+        $keys  = TableConfigValidator::keys();
         $block = $this->collector->block(TableConfigValidator::KEY, $this->given('tables', []), $keys);
 
         if ($block === null) {
@@ -93,14 +95,30 @@ final readonly class RootChecks
             return;
         }
 
-        $names = [];
-        $named = [];
+        $path   = TableConfigValidator::KEY . '.' . TableNames::PREFIX;
+        $given  = ConfigBlock::entry($block, TableNames::PREFIX, '');
+        $prefix = \is_string($given) ? $given : '';
+        $names  = [];
+        $named  = [];
 
-        // Each check refuses under the table's own path, so the block's path is
-        // recorded only for a failure the checks did not foresee.
-        foreach ($keys as $key) {
-            $this->collector->verify(TableConfigValidator::KEY, static function () use ($key, $block, &$names): void {
-                $names[$key] = TableConfigValidator::name($key, ConfigBlock::entry($block, $key, $key));
+        $isPrefixAccepted = $this->collector->verify($path, static function () use ($given): void {
+            TableConfigValidator::prefix($given);
+        });
+
+        // Each check refuses under the table's own path, or the prefix's, so
+        // the block's path is recorded only for a failure the checks did not
+        // foresee.
+        foreach (\array_keys(TableConfigValidator::LENGTHS) as $key) {
+            $name = ConfigBlock::entry($block, $key, $key);
+
+            if (!$isPrefixAccepted && TableNames::isDefault($key, $name)) {
+                $this->collector->skip(TableConfigValidator::KEY . ".{$key}", $path);
+
+                continue;
+            }
+
+            $this->collector->verify(TableConfigValidator::KEY, static function () use ($key, $name, $prefix, &$names): void {
+                $names[$key] = TableConfigValidator::effective($key, $name, $prefix);
             });
         }
 

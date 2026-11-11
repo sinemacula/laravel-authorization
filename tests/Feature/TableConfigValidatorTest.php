@@ -80,7 +80,7 @@ final class TableConfigValidatorTest extends TestCase
         $roles = 'authorization.tables.roles';
         $plain = 'is not a plain identifier: a letter or an underscore, then letters, digits and underscores, with no schema.';
         $long  = \str_repeat('r', 40);
-        $keys  = \implode(', ', \array_keys(TableConfigValidator::LENGTHS));
+        $keys  = \implode(', ', TableConfigValidator::keys());
         $over  = 'is longer than 39 characters, which leaves no room for the names of its indexes and keys.';
 
         yield 'null' => [null, 'authorization.tables', 'expected an array, got \'null\' (null).'];
@@ -229,6 +229,143 @@ final class TableConfigValidatorTest extends TestCase
             ['authorization.tables.permissions', 'duplicate', 'a name no other table has', 'string'],
             self::refusedSetting(static fn () => TableConfigValidator::distinct('permissions', 'ROLES', ['roles' => 'roles'])),
         );
+    }
+
+    /**
+     * The block may set the prefix beside the twelve tables, and a prefix that
+     * is empty, or a lower-case letter, then lower-case letters, digits and
+     * underscores, of at most 16 characters, is accepted.
+     *
+     * @return void
+     */
+    public function testAPlainPrefixIsAccepted(): void
+    {
+        TableConfigValidator::validate(['prefix' => '']);
+        TableConfigValidator::validate(['prefix' => 'app_']);
+        TableConfigValidator::validate(['prefix' => 'a1_b']);
+        TableConfigValidator::validate(['prefix' => \str_repeat('p', 16)]);
+
+        self::assertSame(16, TableConfigValidator::PREFIX_LENGTH);
+        self::assertSame(['prefix', ...\array_keys(TableConfigValidator::LENGTHS)], TableConfigValidator::keys());
+        self::assertSame('', TableConfigValidator::prefix(''));
+        self::assertSame('app_', TableConfigValidator::prefix('app_'));
+    }
+
+    /**
+     * Return each prefix refused, with the code and why.
+     *
+     * @return iterable<string, array{mixed, string, string}>
+     */
+    public static function refusedPrefixes(): iterable
+    {
+        $shape = 'is not a lower-case letter, then lower-case letters, digits and underscores.';
+        $long  = \str_repeat('p', 17);
+
+        yield 'null' => [null, 'invalid_type', 'expected a table name prefix, got \'null\' (null).'];
+        yield 'an int' => [5, 'invalid_type', 'expected a table name prefix, got 5 (int).'];
+        yield 'a list' => [['app_'], 'invalid_type', 'expected a table name prefix, got \'array\' (array).'];
+        yield 'an upper-case letter' => ['App_', 'invalid_value', "prefix 'App_' {$shape}"];
+        yield 'a leading digit' => ['1app_', 'invalid_value', "prefix '1app_' {$shape}"];
+        yield 'a leading underscore' => ['_app', 'invalid_value', "prefix '_app' {$shape}"];
+        yield 'a hyphen' => ['app-', 'invalid_value', "prefix 'app-' {$shape}"];
+        yield 'a dot' => ['auth.', 'invalid_value', "prefix 'auth.' {$shape}"];
+        yield 'a trailing newline' => ["app\n", 'invalid_value', "prefix 'app\n' {$shape}"];
+        yield 'over 16 characters' => [$long, 'out_of_range', "prefix '{$long}' is longer than 16 characters."];
+    }
+
+    /**
+     * A prefix that is not a string, empty or a lower-case identifier fragment
+     * of at most 16 characters is refused under its own path, structured.
+     *
+     * @param  mixed  $prefix
+     * @param  string  $code
+     * @param  string  $reason
+     * @return void
+     */
+    #[DataProvider('refusedPrefixes')]
+    public function testAMalformedPrefixIsRefused(mixed $prefix, string $code, string $reason): void
+    {
+        $expected = 'empty, or a lower-case letter, then lower-case letters, digits and underscores, of at most 16 characters';
+
+        self::assertSame(
+            ['authorization.tables.prefix', $code, $expected, \get_debug_type($prefix)],
+            self::refusedSetting(static fn () => TableConfigValidator::validate(['prefix' => $prefix])),
+        );
+
+        try {
+            TableConfigValidator::prefix($prefix);
+
+            self::fail('The prefix was accepted.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame($reason, $exception->getReason());
+        }
+    }
+
+    /**
+     * The prefix is put before every name left at its default, the key's own,
+     * and before no name set explicitly, which is checked as it is written.
+     *
+     * @return void
+     */
+    public function testThePrefixIsPutBeforeTheDefaultNamesAlone(): void
+    {
+        self::assertSame('app_roles', TableConfigValidator::effective('roles', 'roles', 'app_'));
+        self::assertSame('authz_roles', TableConfigValidator::effective('roles', 'authz_roles', 'app_'));
+        self::assertSame('roles', TableConfigValidator::effective('roles', 'roles', ''));
+        self::assertSame(
+            ['authorization.tables.roles', 'invalid_type', 'a plain identifier of at most 39 characters', 'null'],
+            self::refusedSetting(static fn () => TableConfigValidator::effective('roles', null, 'app_')),
+        );
+        self::assertSame(
+            ['authorization.tables.permissions', 'out_of_range', 'a plain identifier of at most 39 characters', 'string'],
+            self::refusedSetting(static fn () => TableConfigValidator::validate(['prefix' => 'app_', 'permissions' => \str_repeat('p', 40)])),
+        );
+        self::assertSame(
+            ['authorization.tables.permissions', 'duplicate', 'a name no other table has', 'string'],
+            self::refusedSetting(static fn () => TableConfigValidator::validate(['prefix' => 'x_', 'roles' => 'x_permissions'])),
+        );
+        self::assertSame(
+            ['authorization.tables.policies', 'duplicate', 'a name no other table has', 'string'],
+            self::refusedSetting(static fn () => TableConfigValidator::validate(['prefix' => 'x_', 'roles' => 'X_Policies', 'policies' => 'policies'])),
+        );
+
+        TableConfigValidator::validate(['prefix' => 'app_', 'roles' => 'roles', 'permissions' => 'permissions', 'policies' => 'app_policies2']);
+    }
+
+    /**
+     * Each default name with the prefix before it is bounded as an explicit
+     * name is: the longest that fits is accepted, and one character more is
+     * refused under the prefix's path, as the prefix made it too long. The
+     * longest prefix allowed fits every default.
+     *
+     * @return void
+     */
+    public function testAPrefixPushingADefaultPastItsBoundIsRefused(): void
+    {
+        foreach (TableConfigValidator::LENGTHS as $key => $length) {
+            $room   = $length - \strlen($key);
+            $fits   = \str_repeat('p', $room);
+            $over   = $fits . 'p';
+            $reason = "prefix '{$over}' makes authorization.tables.{$key} '{$over}{$key}', longer than {$length} characters, which leaves no room for the names of its "
+                . 'indexes and keys.';
+
+            self::assertGreaterThan(TableConfigValidator::PREFIX_LENGTH, $room, $key);
+            self::assertSame($fits . $key, TableConfigValidator::prefixed($key, $fits));
+            self::assertSame(
+                ['authorization.tables.prefix', 'out_of_range', "a prefix of at most {$length} characters less the length of '{$key}'", 'string'],
+                self::refusedSetting(static fn () => TableConfigValidator::prefixed($key, $over)),
+            );
+
+            try {
+                TableConfigValidator::effective($key, $key, $over);
+
+                self::fail("A prefix pushing {$key} past its bound was accepted.");
+            } catch (InvalidAuthorizationConfigException $exception) {
+                self::assertSame($reason, $exception->getReason());
+            }
+        }
+
+        self::assertSame('unknown_key', self::refusedSetting(static fn () => TableConfigValidator::prefixed('rols', 'app_'))[1]);
     }
 
     /**

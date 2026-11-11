@@ -9,11 +9,11 @@ namespace SineMacula\Laravel\Authorization\Diagnostics\Settings;
  * of value it holds, which decides whether the report may show it.
  *
  * Only values of these kinds are shown, and only when the value has the shape
- * its kind expects: class names, table names, switches, whole numbers, the
- * names of a guard, a connection, a cache store, a queue or a log channel, and
- * permission names. A setting of any other kind, `opaque`, such as the context
- * keys, the session scopes or the cache prefix, is shown by its type alone, as
- * is every setting the package does not define.
+ * its kind expects: class names, table names and their prefix, switches, whole
+ * numbers, the names of a guard, a connection, a cache store, a queue or a log
+ * channel, and permission names. A setting of any other kind, `opaque`, such as
+ * the context keys, the session scopes or the cache prefix, is shown by its
+ * type alone, as is every setting the package does not define.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,6 +33,9 @@ final class SettingCatalogue
 
     /** @var string A table's name. */
     public const string TABLE = 'table';
+
+    /** @var string The prefix of the tables' default names, empty or not. */
+    public const string TABLE_PREFIX = 'table_prefix';
 
     /** @var string A switch, true or false. */
     public const string SWITCH = 'boolean';
@@ -58,6 +61,7 @@ final class SettingCatalogue
         'authorization.models.permission'               => self::CLASS_NAME,
         'authorization.models.policy'                   => self::CLASS_NAME,
         'authorization.connection'                      => self::NAME,
+        'authorization.tables.prefix'                   => self::TABLE_PREFIX,
         'authorization.tables.roles'                    => self::TABLE,
         'authorization.tables.permissions'              => self::TABLE,
         'authorization.tables.policies'                 => self::TABLE,

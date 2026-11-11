@@ -208,6 +208,15 @@ The tables live on the application's default connection. To keep them on another
 tables use, set `AUTHORIZATION_DB_CONNECTION` (or `connection` in `config/authorization.php`) before migrating: the
 migrations create the tables there, and the models read and write there.
 
+To keep the package's tables apart from your own, set a prefix before migrating, with `AUTHORIZATION_TABLE_PREFIX` (or
+`tables.prefix`): `app_` makes `roles` `app_roles`, and so on for every table. The prefix is put before every table
+name left at its default, and before no name you set yourself (`AUTHORIZATION_TABLE_ROLES` and the like, or the
+`tables` block), which is used as you write it. Whether you set a name is told by its value alone, since a merged or
+cached configuration no longer says where a value came from: a name that differs from the table's own is yours, while
+one set to the table's own name, `roles` for the `roles` table, is the default and takes the prefix. The migrations
+create the tables under the names the prefix makes, and the models, the services and `Config\TableNames::get()` read
+them there, so changing the prefix after migrating points the package at tables that do not exist.
+
 Every check that does not name its subject is about the subject the subject resolver returns. The shipped resolver,
 `AuthGuardSubjectResolver`, returns the user Laravel authenticated on its default guard, with no tenant and the guard's
 name as the application, so `Authorization::can()`, the package's middleware and the Blade directives decide about the
@@ -356,6 +365,11 @@ is a boot for `authorization:check`, which reports every issue while the package
 - Each table name is a plain identifier (a letter or an underscore, then letters, digits and underscores) with no
   schema before it, short enough that every index and key name the migrations build from it fits in 63 characters,
   PostgreSQL's limit (from 33 to 51 characters, depending on the table), and the twelve names are distinct.
+- `tables.prefix` is empty, or a lower-case letter, then lower-case letters, digits and underscores, of at most 16
+  characters; null is refused. Each name it makes is checked as a name you set is: within its table's bound, which the
+  longest prefix allowed keeps every default within, and distinct from the others, so a name you set that the prefix
+  gives another table is refused as a duplicate. A prefix that pushed a default past its bound would be refused under
+  `authorization.tables.prefix`.
 - `defaults.guard` names a guard in `auth.guards`, `log_channel` a channel in `logging.channels`, and
   `usage.connection`, when set, a connection in `queue.connections`. `connection` names a connection in
   `database.connections`, or, when it is null or empty, `database.default` must. Each is read from the configuration as
@@ -374,19 +388,21 @@ than read as one that leaves the setting out. A setting read on every check is r
 comparisons, so the checks add next to nothing to a request.
 
 The names are checked after boot for their type only. A table name, a model class or `defaults.guard` that is not a
-string, or is empty, is refused with the same exception, and so is a `connection` or `cache.store` that is neither null
-nor a string, or a `cache.store` that is empty (null, and for `connection` an empty string, mean the default). Whether
-the name exists is checked only at boot, so one changed after boot to a name that does not exist is used as it is, never
-swapped for the default: a table fails with the database's own error and a model class with PHP's when they are used, a
-connection or a cache store with Laravel's own `InvalidArgumentException` from the database or cache manager, and a
-lookup by name under a guard that does not exist finds only the roles and permissions that name no guard. The log
-channel is checked at boot only, by design: a warning is written from inside error handling, and writing one never stops
-a check, so a channel changed after boot to one that does not exist is written to as the default channel.
+string, or is empty, is refused with the same exception, and so is a `tables.prefix` that is not a string, a
+`connection` or `cache.store` that is neither null nor a string, or a `cache.store` that is empty (null, and for
+`connection` an empty string, mean the default). Whether the name exists is checked only at boot, so one changed after
+boot to a name that does not exist is used as it is, never swapped for the default: a table fails with the database's
+own error and a model class with PHP's when they are used, a connection or a cache store with Laravel's own
+`InvalidArgumentException` from the database or cache manager, and a lookup by name under a guard that does not exist
+finds only the roles and permissions that name no guard. The log channel is checked at boot only, by design: a warning
+is written from inside error handling, and writing one never stops a check, so a channel changed after boot to one that
+does not exist is written to as the default channel.
 
 A suite package that reads these names reads them the way the package does, through `Config\TableNames::get('roles')`,
 `Config\ModelClasses::get('role')` and `Config\DefaultGuard::get()`, each taking an optional configuration repository.
-A name the configuration leaves out is the package's own; one that is not a non-empty string is refused as above. The
-three are part of the package's stable API.
+A name the configuration leaves out is the package's own; one that is not a non-empty string is refused as above. A
+table's name is the one the package reads, with `tables.prefix` before it when it is left at its default
+(`Config\TableNames::prefix()` reads the prefix alone). The three are part of the package's stable API.
 
 `authorization:check` lists every issue at once rather than stopping at the first: those the boot found, when the
 application booted for it, and otherwise those these checks find again on the configuration as it stands, except the
@@ -4540,6 +4556,9 @@ It reports:
   an unknown key, is shown by its type alone (`string`, `array(3)`). Whether a set value came from the file or the
   environment is not known once the configuration is merged or cached, so it is `unknown`, and `default` for a
   setting left out.
+- **Tables**: the prefix of the tables' default names, and the name each table takes, the one the package reads and
+  the migrations create: the name you set, as written, or the table's own with the prefix before it, and whether you
+  set it. A prefix or name that is refused, and a default name while the prefix is refused, is not shown.
 - **Seams**: for each contract the package binds or reads, where its binding came from (`package_default`, `configured`,
   `earlier_binding`, `later_binding`, `declared`, `deferred`, `deferred_loaded`, `alias`, `external_binding` or
   `unbound`), the class it builds when that is known without building it, how long what it builds lives (of the key a
@@ -4570,8 +4589,8 @@ Building the report builds no seam, store, catalogue or provider, resolves nothi
 connects to nothing and runs no query, so it is safe before the migrations have run, and the connection shows
 `connectivity: not_tested`.
 
-**The text.** The default format prints one line per issue first, then a section each for the settings, the seams,
-the grant hooks, the connection and the integrations, each line `[subject] state`, and a last line, `Every check
+**The text.** The default format prints one line per issue first, then a section each for the settings, the tables, the
+seams, the grant hooks, the connection and the integrations, each line `[subject] state`, and a last line, `Every check
 passed.`, `A check failed.` or `The check could not be completed.`:
 
 ```text
@@ -4581,6 +4600,11 @@ Settings
 [setting authorization.models.role] ok; SineMacula\Laravel\Authorization\Models\Role
 [setting authorization.cache.prefix] ok; value not shown (string)
 [setting authorization.models.rol] refused; unknown key; value not shown (string)
+
+Tables
+[table prefix] app_
+[table roles] app_roles; the default, with the prefix
+[table permissions] identity_permissions; set explicitly, so used as written
 
 Seams
 [seam SubjectResolver] package default; SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver; scoped
@@ -4603,8 +4627,8 @@ Integrations
 A check failed.
 ```
 
-(Lines are shortened here, `...` standing for what a line goes on to say; the report lists every setting, seam and
-integration.) Every name is printed with its console markup and control characters escaped.
+(Lines are shortened here, `...` standing for what a line goes on to say; the report lists every setting, table, seam
+and integration.) Every name is printed with its console markup and control characters escaped.
 
 **The JSON.** `--format=json` prints the report's versioned JSON alone on the standard output, with no prose or
 styling. Its keys are stable; version 1 is:
@@ -4618,6 +4642,10 @@ styling. Its keys are stable; version 1 is:
          "type": "string", "source": "default | unknown",
          "status": "ok | refused | skipped | unchecked | checked_at_boot | failed_at_boot | not_run"}
     ],
+    "tables": {
+        "prefix": "... | null",
+        "names": [{"key": "roles", "name": "... | null", "explicit": false}]
+    },
     "seams": [
         {"contract": "...", "origin": "package_default", "class": "... | null", "classes": ["..."],
          "decides": "... | null", "factory": "file:line | null",
@@ -4657,7 +4685,9 @@ deferred provider not loaded yet, and `deferred_provider_at_registration` the on
 package registered, loaded since or not. `declaration` is null when no sibling package declared the seam; its `state`
 is `instance_over_it` while the declared closure is bound but an instance handed to the container supplies the
 contract. Each part of `connection` is null when the connection could not be read, and `redacted` lists the fields
-of a part withheld as they are not names. `exception` names the class alone of what a check that could not be
+of a part withheld as they are not names. `tables.prefix` is empty when no prefix is set, and null, as is a table's
+`name`, when it is not shown; `explicit` is true for a name set to something other than the table's own. `exception`
+names the class alone of what a check that could not be
 completed threw.
 
 **Exit codes.**

@@ -182,7 +182,7 @@ final class ConfigValidatorTest extends TestCase
         $allowed = [
             ''                => ConfigValidator::KEYS,
             'models'          => \array_keys(ConfigValidator::MODELS),
-            'tables'          => \array_keys(TableConfigValidator::LENGTHS),
+            'tables'          => TableConfigValidator::keys(),
             'defaults'        => NamedEntryConfigValidator::DEFAULTS,
             'gate'            => SwitchConfigValidator::KEYS,
             'hierarchy'       => SwitchConfigValidator::KEYS,
