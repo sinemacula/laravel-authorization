@@ -116,11 +116,12 @@ final class TenantRelations
 
     /**
      * Limit a grant query to the rows of the table that meet the attachment's
-     * scope in some tenant: a platform-wide grant; a grant in the attachment's
-     * tenant; one reaching below a tenant of the attachment's chain; and, for
-     * an attachment reaching below its tenant, one in its subtree, nested
-     * whole, or, for a tree whose subtree cannot be nested, any grant, which
-     * `canHoldTogether()` then weighs.
+     * scope in some tenant: a platform-wide grant, never one naming half a
+     * tenant, which meets no attachment naming a tenant; a grant in the
+     * attachment's tenant; one reaching below a tenant of the attachment's
+     * chain; and, for an attachment reaching below its tenant, one in its
+     * subtree, nested whole, or, for a tree whose subtree cannot be nested, any
+     * grant, which `canHoldTogether()` then weighs.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $table
@@ -143,7 +144,7 @@ final class TenantRelations
         $reaching = static fn (Builder $any): Builder => self::among($any, $table, $above);
 
         return $query->where(static function (Builder $meet) use ($table, $tenant, $reaching, $below): void {
-            $meet->whereNull($table . self::TENANT_TYPE)
+            TenantChain::whereNullTenant($meet, $table . self::TENANT_TYPE, $table . self::TENANT_ID)
                 ->orWhere(static fn (Builder $same): Builder => $same->where($table . self::TENANT_TYPE, $tenant->type)->where($table . self::TENANT_ID, $tenant->id))
                 ->orWhere(static fn (Builder $above): Builder => $above->where($table . '.include_subtree', true)->where($reaching))
                 ->orWhere(static function (Builder $row) use ($table, $below): void {

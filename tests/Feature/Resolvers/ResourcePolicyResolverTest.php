@@ -469,6 +469,63 @@ final class ResourcePolicyResolverTest extends TestCase
     }
 
     /**
+     * An attachment naming half a tenant, a key without a type or a type
+     * without a key, and any attachment of a policy naming half a tenant, is
+     * read in every scope for its denies alone, by a check on one record, on
+     * many, and among the policies attached to records: unless an attachment
+     * that holds reaches the policy too, its allows apply nowhere.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAttachmentNamingHalfATenantIsReadForItsDeniesAloneEverywhere(): void
+    {
+        $statements = [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']], ['sid' => 'no-delete', 'effect' => 'deny', 'actions' => ['posts:delete']]];
+        $made       = [];
+
+        foreach (['mixed', 'both', 'owned'] as $name) {
+            $made[$name] = Policy::create(['name' => $name, 'document' => ['statements' => $statements]]);
+        }
+
+        $made['allows'] = self::sharing('allows');
+        $record         = ['resource_type' => 'posts', 'resource_id' => '7', 'include_subtree' => true];
+
+        self::service()->attach($made['both'], 'posts');
+
+        DB::table('resource_policies')->insert([
+            ['policy_id' => $made['mixed']->id, ...$record, 'tenant_type' => null, 'tenant_id' => 't-9'],
+            ['policy_id' => $made['both']->id, ...$record, 'tenant_type' => 'teams', 'tenant_id' => null],
+            ['policy_id' => $made['owned']->id, ...$record, 'tenant_type' => 'teams', 'tenant_id' => '5'],
+            ['policy_id' => $made['allows']->id, ...$record, 'tenant_type' => 'teams', 'tenant_id' => null],
+        ]);
+        DB::table('policies')->where('id', $made['owned']->id)->update(['tenant_type' => null, 'tenant_id' => '5']);
+
+        $resolver = new ResourcePolicyResolver;
+        $placed   = static fn (EvaluationPolicy $policy): array => [$policy->resource, \array_keys($policy->statements)];
+        $shown    = static fn (array $policies): array => \array_map($placed, self::byName(\array_values($policies)));
+        // A policy whose allows count through the type's attachment is named
+        // after it, never after a row naming half a tenant.
+        $expected = ['allows' => ['posts:7', []], 'both' => ['posts:*', [0, 1]], 'mixed' => ['posts:7', [1]], 'owned' => ['posts:7', [1]]];
+
+        foreach ([null, new Reference('teams', '6')] as $tenant) {
+            $one     = TenantScope::within($tenant, null, static fn (): array => $resolver->policiesFor(ResourceReference::record('posts', '7')));
+            $records = ['seven' => ResourceReference::record('posts', '7'), 'eight' => ResourceReference::record('posts', '8')];
+            $many    = TenantScope::within($tenant, null, static fn (): array => $resolver->policiesForMany($records));
+
+            self::assertSame($expected, $shown($one));
+            self::assertSame($expected, $shown($many['seven']));
+            self::assertSame(['both' => ['posts:*', [0, 1]]], $shown($many['eight']));
+        }
+
+        $named = static fn (EvaluationPolicy $policy): string => $policy->name . ' ' . \implode(',', \array_keys($policy->statements));
+        $read  = static fn (string $action): array => \array_map($named, $resolver->recordPoliciesFor('posts', $action, 10) ?? []);
+
+        self::assertEqualsCanonicalizing(['allows 0', 'both 0,1', 'mixed 0,1'], $read('posts:read'));
+        self::assertEqualsCanonicalizing(['both 0,1', 'mixed 0,1', 'owned 1'], $read('posts:delete'));
+    }
+
+    /**
      * The attached policies are read a page at a time, on the write connection,
      * and none after one more than the limit has been found, or after four
      * times the limit have been scanned whatever their actions: either is
@@ -576,8 +633,9 @@ final class ResourcePolicyResolverTest extends TestCase
     }
 
     /**
-     * A record named more than once is read for once, its key bound once in the
-     * query, and each resource naming it reads its policies.
+     * A record named more than once is read for once, its key bound once in
+     * each of the queries the read unites, and each resource naming it reads
+     * its policies.
      *
      * @return void
      *
@@ -609,7 +667,10 @@ final class ResourcePolicyResolverTest extends TestCase
         self::assertSame(['record@posts:seven'], $named($many['a']));
         self::assertSame(['record@posts:seven'], $named($many['b']));
         self::assertSame([], $many['c']);
-        self::assertSame([1, 1], [\count(\array_keys($bindings, 'seven', true)), \count(\array_keys($bindings, 'eight', true))]);
+        // Each key is bound once in each of the five queries the read unites:
+        // the scope's attachments, then the two halves of the attachments and
+        // of the policies naming half a tenant.
+        self::assertSame([5, 5], [\count(\array_keys($bindings, 'seven', true)), \count(\array_keys($bindings, 'eight', true))]);
     }
 
     /**

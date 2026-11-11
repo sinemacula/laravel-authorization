@@ -12,6 +12,8 @@ use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * The rows one grantee holds in one grant table within one scope, read and
@@ -243,23 +245,55 @@ final readonly class GrantTable extends ExpiringGrants
     /**
      * Return every grant the grantee holds, in any scope, as its granted key
      * and the scope it holds in (its tenant, null for platform-wide, and its
-     * reach), for the revocation of everything a deleted grantee held.
+     * reach), for the revocation of everything a deleted grantee held; and,
+     * read in the same query, each row naming half a tenant, which the package
+     * never writes and which holds in no scope, as its granted key, its tenant
+     * columns as stored and its application.
      *
-     * @return list<array{0: string, 1: \SineMacula\Laravel\Authorization\Support\GrantScope}>
+     * @return array{
+     *     list<array{0: string, 1: \SineMacula\Laravel\Authorization\Support\GrantScope}>,
+     *     list<array{target_id: string, tenant_type: string|null, tenant_id: string|null, application: string|null}>
+     * }
      */
     public function grantsInEveryScope(): array
     {
-        $grants = [];
+        $grants    = [];
+        $malformed = [];
 
         foreach ($this->grantee()->get([$this->column . self::AS_TARGET, 'tenant_type', 'tenant_id', 'include_subtree', 'application']) as $row) {
             /** @var array{target_id: string, tenant_type: string|null, tenant_id: string|null, include_subtree: bool|int|string, application: string|null} $columns */
-            $columns  = (array) $row;
-            $type     = $columns['tenant_type'];
+            $columns = (array) $row;
+            $type    = $columns['tenant_type'];
+
+            if (TenantColumns::isHalf($type, $columns['tenant_id'])) {
+                $malformed[] = ['target_id' => $columns['target_id'], 'tenant_type' => $type, 'tenant_id' => $columns['tenant_id'], 'application' => $columns['application']];
+
+                continue;
+            }
+
             $tenant   = $type === null ? null : new Reference($type, (string) $columns['tenant_id']);
             $grants[] = [$columns['target_id'], new GrantScope($tenant, $columns['application'], (bool) $columns['include_subtree'])];
         }
 
-        return $grants;
+        return [$grants, $malformed];
+    }
+
+    /**
+     * Delete the grantee's row naming half a tenant, matched as stored, by its
+     * granted key, tenant columns and application, and return how many rows
+     * were deleted: none when it is no longer there.
+     *
+     * @param  array{target_id: string, tenant_type: string|null, tenant_id: string|null, application: string|null}  $row
+     * @return int
+     */
+    public function revokeMalformed(array $row): int
+    {
+        return $this->grantee()
+            ->where($this->column, $row['target_id'])
+            ->where('tenant_type', $row['tenant_type'])
+            ->where('tenant_id', $row['tenant_id'])
+            ->where('application', $row['application'])
+            ->delete();
     }
 
     /**
@@ -380,7 +414,7 @@ final readonly class GrantTable extends ExpiringGrants
         $query = $this->application === null ? $this->grantee()->whereNull('application') : $this->grantee()->where('application', $this->application);
 
         if ($this->tenant === null) {
-            return $query->whereNull('tenant_type')->whereNull('tenant_id');
+            return TenantChain::whereNullTenant($query, 'tenant_type', 'tenant_id');
         }
 
         return $query->where('tenant_type', $this->tenant->type)->where('tenant_id', $this->tenant->id);

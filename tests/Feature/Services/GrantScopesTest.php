@@ -8,9 +8,12 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\CatchesRefusals;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -27,6 +30,8 @@ use Tests\TestCase;
 #[CoversClass(GrantScopes::class)]
 final class GrantScopesTest extends TestCase
 {
+    use CatchesRefusals;
+
     /**
      * A tenant named as a model or a reference becomes its reference, and none
      * stays none.
@@ -105,6 +110,36 @@ final class GrantScopesTest extends TestCase
         } catch (GrantScopeMismatchException $exception) {
             self::assertNull($exception->getScope());
             self::assertSame('owned-2', $exception->getName());
+        }
+    }
+
+    /**
+     * A target naming half a tenant, a key without a type or a type without a
+     * key, is grantable nowhere, at the platform or in any tenant, nor its
+     * owner's scope taken as the platform, naming the column it lacks.
+     *
+     * @return void
+     */
+    public function testATargetNamingHalfATenantIsGrantableNowhere(): void
+    {
+        $tenant = new Reference('stub_tenant', 'tenant-a');
+        $halves = [
+            'tenant_type' => new Policy(['name' => 'no-type', 'tenant_id' => 'tenant-a']),
+            'tenant_id'   => new Policy(['name' => 'no-key', 'tenant_type' => 'stub_tenant']),
+        ];
+
+        foreach ($halves as $missing => $policy) {
+            $refusals = [
+                self::refusalOf(static fn () => GrantScopes::assertGrantableIn(GrantTarget::POLICY, $policy, null)),
+                self::refusalOf(static fn () => GrantScopes::assertGrantableIn(GrantTarget::POLICY, $policy, $tenant)),
+                self::refusalOf(static fn (): ?Reference => GrantScopes::of(GrantTarget::POLICY, $policy, null)),
+            ];
+
+            foreach ($refusals as $refusal) {
+                self::assertInstanceOf(InvalidTenantColumnsException::class, $refusal);
+                self::assertSame((new InvalidTenantColumnsException('policy', $missing, 'grant'))->getMessage(), $refusal->getMessage());
+                self::assertStringStartsWith("Cannot grant policy with inconsistent tenant columns — '{$missing}' is required", $refusal->getMessage());
+            }
         }
     }
 

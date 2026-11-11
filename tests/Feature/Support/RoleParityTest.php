@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Exceptions\GranteeGuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\ParentGuardMismatchException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -53,6 +54,61 @@ final class RoleParityTest extends TestCase
         RoleParity::assertCarries(self::role('agnostic'), self::permission('posts:api', 'api'));
 
         $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * A role never carries, nor sits under, a record naming half a tenant, a
+     * key without a type or a type without a key, nor does a role naming half a
+     * tenant carry or sit under any: such a record is neither the platform's
+     * nor any tenant's, so it is never linked as though the platform owned it.
+     *
+     * @return void
+     */
+    public function testARecordNamingHalfATenantIsNeverLinked(): void
+    {
+        $shapes = ['tenant_type' => ['tenant_type' => null, 'tenant_id' => 'tenant-a'], 'tenant_id' => ['tenant_type' => 'stub_tenant', 'tenant_id' => null]];
+
+        foreach ($shapes as $missing => $half) {
+            $links = [
+                'permission' => static fn () => RoleParity::assertCarries(self::role('editor'), self::permission('posts:read', null, $half)),
+                'role'       => static fn () => RoleParity::assertCarries(self::role('editor', null, $half), self::permission('posts:read')),
+                'parent'     => static fn () => RoleParity::assertUnder(self::role('editor'), self::role('parent', null, $half)),
+                'child'      => static fn () => RoleParity::assertUnder(self::role('editor', null, $half), self::role('parent')),
+            ];
+
+            foreach ($links as $link => $assert) {
+                try {
+                    $assert();
+
+                    self::fail("A {$link} naming half a tenant was linked.");
+                } catch (InvalidTenantColumnsException $exception) {
+                    $kind = ['permission' => 'permission', 'parent' => 'parent role'][$link] ?? 'role';
+
+                    self::assertStringStartsWith("Cannot link {$kind} with inconsistent tenant columns — '{$missing}' is required", $exception->getMessage(), $link);
+                }
+            }
+        }
+    }
+
+    /**
+     * A link already stored with a record naming half a tenant applies nowhere,
+     * so checking it when a guard changes passes it over, whatever the guards;
+     * a link of whole records is checked as ever.
+     *
+     * @return void
+     */
+    public function testAStoredLinkWithARecordNamingHalfATenantIsPassedOver(): void
+    {
+        $half = ['tenant_type' => 'stub_tenant', 'tenant_id' => null];
+
+        RoleParity::assertCarries(self::role('editor', 'web'), self::permission('posts:read', 'api', $half), false);
+        RoleParity::assertCarries(self::role('author', 'web', $half), self::permission('posts:edit', 'api'), false);
+        RoleParity::assertUnder(self::role('viewer', 'web'), self::role('parent', 'api', $half), false);
+        RoleParity::assertUnder(self::role('child', 'web', $half), self::role('top', 'api'), false);
+
+        $this->expectException(GuardMismatchException::class);
+
+        RoleParity::assertCarries(self::role('other', 'web'), self::permission('posts:list', 'api'), false);
     }
 
     /**
@@ -154,7 +210,7 @@ final class RoleParityTest extends TestCase
      *
      * @param  string  $name
      * @param  string|null  $guard
-     * @param  array<string, string>  $owner
+     * @param  array<string, string|null>  $owner
      * @return \SineMacula\Laravel\Authorization\Models\Role
      */
     private static function role(string $name, ?string $guard = null, array $owner = []): Role
@@ -167,7 +223,7 @@ final class RoleParityTest extends TestCase
      *
      * @param  string  $name
      * @param  string|null  $guard
-     * @param  array<string, string>  $owner
+     * @param  array<string, string|null>  $owner
      * @return \SineMacula\Laravel\Authorization\Models\Permission
      */
     private static function permission(string $name, ?string $guard = null, array $owner = []): Permission

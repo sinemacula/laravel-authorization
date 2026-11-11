@@ -7,19 +7,26 @@ namespace SineMacula\Laravel\Authorization\Resolvers;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\GrantApplications;
+use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 use SineMacula\Laravel\Authorization\Support\GrantExpiry;
 use SineMacula\Laravel\Authorization\Support\InheritedPolicies;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 use SineMacula\Laravel\Authorization\Support\RolePolicies;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 use SineMacula\Laravel\Authorization\Usage\RouteSources;
 
 /**
@@ -155,6 +162,13 @@ final class GrantResolver
      * might apply. The evaluator orders the policies, by name, then stored key,
      * then document, wherever they came from.
      *
+     * An attachment naming half a tenant, and any attachment of a policy naming
+     * half a tenant, counts in every scope for its denies alone (see
+     * `TenantColumns`), read in the same query (see `deniedEverywhere()`): a
+     * policy reached only through such attachments, or naming half a tenant
+     * itself, is hydrated with its deny statements alone, and its allows apply
+     * nowhere.
+     *
      * A policy whose document cannot be read is written to the log channel and
      * its exception thrown, so it denies every check for its holder rather than
      * being skipped.
@@ -186,13 +200,16 @@ final class GrantResolver
 
         /** @var array<string, \SineMacula\Laravel\Authorization\Models\Policy> $fresh */
         $fresh    = $keys === [] ? [] : $grants->getRelated()->newQuery()->useWritePdo()->whereKey($keys)->get()->getDictionary();
+        $whole    = self::wholeKeys($own, $inherited);
         $policies = [];
 
         foreach (self::inOrder($keys, $fresh) as $policy) {
-            $policies[] = self::hydrate($policy);
+            $hydrated   = self::hydrate($policy);
+            $policies[] = isset($whole[$hydrated->id]) && !TenantColumns::isDenyOnly(null, null, $policy) ? $hydrated : $hydrated->denies();
         }
 
-        $routes = $pins->isRouting() ? RouteSources::policies($grants->getParent(), $own, $held, $inherited) : null;
+        $placed = \array_filter($own, static fn (array $row): bool => !TenantColumns::isHalf($row['tenant_type'], $row['tenant_id']));
+        $routes = $pins->isRouting() ? RouteSources::policies($grants->getParent(), $placed, $held, $inherited) : null;
 
         return new Resolution($policies, GrantExpiry::nearest($inherited->expiresIn, \array_column($own, 'expires_at')), $inherited->stable, $routes);
     }
@@ -226,6 +243,62 @@ final class GrantResolver
     }
 
     /**
+     * Return a query for the grantee's own attachments whose denies alone count
+     * in every scope, with the given columns: those naming half a tenant, and
+     * those of a policy naming half a tenant, which hold whatever scope they
+     * name (see `TenantColumns::whereDenyOnly()`), for the grantee's
+     * application, unexpired, an inline policy only to the grantee it belongs
+     * to; the explained check reads them too.
+     *
+     * @param  PolicyGrants  $grants
+     * @param  list<string>  $columns
+     * @return \Illuminate\Database\Query\Builder
+     *
+     * @internal
+     */
+    public static function deniedEverywhere(MorphToMany $grants, array $columns): Builder
+    {
+        $table = $grants->getTable();
+        $query = AuthorizationConnection::connection()->table($table)
+            ->where($table . '.authorizable_type', $grants->getMorphClass())
+            ->where($table . '.authorizable_id', Reference::of($grants->getParent())->id);
+
+        GrantApplications::only($query, $table, TenantScope::currentApplication());
+        TenantColumns::whereDenyOnly($query, $table);
+
+        return LiveGrants::only(InlinePolicies::attachedToTheirGrantee($query, $table), $table)
+            ->select(\array_map(static fn (string $column): string => $table . '.' . $column, $columns));
+    }
+
+    /**
+     * Return the keys of the policies reached through an attachment whose
+     * allows count too: one of the grantee's own that names no half tenant, or
+     * one through a role that does not count for its denies alone.
+     *
+     * @param  array<int, array{policy_id: string, tenant_type: string|null, tenant_id: string|null}>  $own
+     * @param  \SineMacula\Laravel\Authorization\Support\InheritedPolicies  $inherited
+     * @return array<string, true>
+     */
+    private static function wholeKeys(array $own, InheritedPolicies $inherited): array
+    {
+        $whole = [];
+
+        foreach ($own as $row) {
+            if (TenantColumns::isHalf($row['tenant_type'], $row['tenant_id'])) {
+                continue;
+            }
+
+            $whole[$row['policy_id']] = true;
+        }
+
+        foreach (\array_diff($inherited->keys, $inherited->denyOnly) as $key) {
+            $whole[$key] = true;
+        }
+
+        return $whole;
+    }
+
+    /**
      * Return the held roles read afresh, with their hierarchy as it is now, for
      * a resolution whose hierarchy moved while it ran.
      *
@@ -244,25 +317,28 @@ final class GrantResolver
      * the write connection, and, given the relation onto its roles, whether any
      * role holds a policy in the current scope, in the same query. An
      * attachment of an inline policy that belongs to another grantee is left
-     * out. While grant usage is tracked, each is read with where it was made
-     * and its creation too.
+     * out. Each is read with its tenant columns, and, while grant usage is
+     * tracked, with where else it was made and its creation too. The
+     * attachments whose denies alone count in every scope are read in the same
+     * query (see `deniedEverywhere()`).
      *
      * @param  PolicyGrants  $grants
      * @param  RoleGrants|null  $roles
      * @param  bool  $isRouting
-     * @return array{0: array<int, array{policy_id: string, authorizable_type: string, expires_at: string|null}>, 1: bool}
+     * @return array{0: array<int, array{policy_id: string, authorizable_type: string, expires_at: string|null, tenant_type: string|null, tenant_id: string|null}>, 1: bool}
      */
     private static function attached(MorphToMany $grants, ?MorphToMany $roles, bool $isRouting = false): array
     {
-        $columns = $isRouting ? ['policy_id', 'authorizable_type', 'expires_at', ...RouteSources::SCOPE, 'created_at'] : ['policy_id', 'authorizable_type', 'expires_at'];
+        $columns = ['policy_id', 'authorizable_type', 'expires_at', ...RouteSources::SCOPE, ...($isRouting ? ['created_at'] : [])];
         $query   = InlinePolicies::attachedToTheirGrantee((clone $grants->getQuery())->toBase(), $grants->getTable())
-            ->select(\array_map($grants->qualifyPivotColumn(...), $columns));
+            ->select(\array_map($grants->qualifyPivotColumn(...), $columns))
+            ->unionAll(self::deniedEverywhere($grants, $columns));
 
         if ($roles !== null) {
             $query->unionAll(RolePolicies::probe($roles, $columns));
         }
 
-        /** @var list<array{policy_id: string, authorizable_type: string, expires_at: string|null}> $rows */
+        /** @var list<array{policy_id: string, authorizable_type: string, expires_at: string|null, tenant_type: string|null, tenant_id: string|null}> $rows */
         $rows = $query->useWritePdo()->get()->map(static fn (object $row): array => (array) $row)->all();
         $role = $roles?->getRelated()->getMorphClass();
         $own  = \array_filter($rows, static fn (array $row): bool => $row['authorizable_type'] !== $role);

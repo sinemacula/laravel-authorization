@@ -170,6 +170,61 @@ final class TenantChainTest extends TestCase
     }
 
     /**
+     * A row is the platform's only when both its tenant columns are null: one
+     * naming half a tenant, a key without a type or a type without a key, is
+     * neither the platform's nor any tenant's, so no chain sees a record it
+     * owns, and no grant it holds reaches any tenant, whether it reaches below
+     * or not.
+     *
+     * @return void
+     */
+    public function testARowNamingHalfATenantIsNeitherThePlatformsNorAnyTenants(): void
+    {
+        [$account, $org, $group] = self::tenants();
+        $tree                    = self::tree($account, $org, $group);
+        $role                    = Role::query()->create(['name' => 'editor']);
+
+        foreach (['platform' => null, 'account' => $account, 'no-type' => $account, 'no-key' => $account, 'org-no-type' => $org] as $name => $owner) {
+            Role::query()->withoutGlobalScope(TenantScope::class)->create(['name' => $name, ...self::owner($owner)]);
+
+            foreach ([true, false] as $subtree) {
+                DB::table('authorizable_roles')->insert([
+                    'role_id'           => $role->id,
+                    'authorizable_type' => 'stub_identity',
+                    'authorizable_id'   => $name . ($subtree ? '' : '-node'),
+                    'tenant_type'       => $owner?->type,
+                    'tenant_id'         => $owner?->id,
+                    'include_subtree'   => $subtree,
+                ]);
+            }
+        }
+
+        foreach (['roles' => 'name', 'authorizable_roles' => 'authorizable_id'] as $table => $column) {
+            DB::table($table)->where($column, 'like', '%no-type%')->update(['tenant_type' => null]);
+            DB::table($table)->where($column, 'like', 'no-key%')->update(['tenant_id' => null]);
+        }
+
+        $platform = self::roles();
+
+        self::assertSame($platform, TenantChain::whereNullTenant($platform, 'roles.tenant_type', 'roles.tenant_id'));
+        self::assertEqualsCanonicalizing(['editor', 'platform'], self::names($platform));
+        self::assertEqualsCanonicalizing(['editor', 'platform'], self::names((new TenantChain)->owners(self::roles(), 'roles.tenant_type', 'roles.tenant_id')));
+        $seen = static fn (?Reference $tenant): array => self::names(
+            TenantChain::of($tenant, $tree)->owners(self::roles()->where('name', '!=', 'editor'), 'roles.tenant_type', 'roles.tenant_id'),
+        );
+
+        self::assertEqualsCanonicalizing(['platform', 'account'], $seen($account));
+        self::assertSame(['platform'], $seen($org));
+
+        $held = static fn (TenantChain $chain): array => $chain->grants(DB::table('authorizable_roles'), 'authorizable_roles')->pluck('authorizable_id')->all();
+
+        self::assertEqualsCanonicalizing(['platform', 'platform-node'], $held(new TenantChain));
+        self::assertEqualsCanonicalizing(['platform', 'platform-node', 'account', 'account-node'], $held(TenantChain::of($account, $tree)));
+        self::assertEqualsCanonicalizing(['platform', 'platform-node', 'account'], $held(TenantChain::of($account, $tree, true)));
+        self::assertEqualsCanonicalizing(['platform', 'platform-node'], $held(TenantChain::of($org, $tree)));
+    }
+
+    /**
      * Records are ordered nearest owner first: the tenant's, each ancestor's in
      * turn, then the platform's; the platform's chain leaves the order alone.
      *

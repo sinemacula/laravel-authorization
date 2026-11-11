@@ -12,12 +12,14 @@ use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
+use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Reads the policies attached to records of the model's type that hold in the
@@ -28,9 +30,12 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * reads attachments with (`TenantChain::grants()`,
  * `GrantApplications::only()`), so it is the resolver's own predicate on the
  * row; and the key one an attachment can name, at most 191 bytes, not `*` (as
- * `ResourcePolicyResolver` stores no other). Every value of that predicate is
- * inlined as the dialect writes a bound value (`InlinedQuery`), never through
- * the connection's escaping.
+ * `ResourcePolicyResolver` stores no other). A policy whose denies count on the
+ * type's records in every scope, as the resolver reads them (N130, see
+ * `inScope()`), is compiled with what attaches it so; with no such policy, each
+ * policy is compiled once, with the scope's own predicate alone. Every value of
+ * that predicate is inlined as the dialect writes a bound value
+ * (`InlinedQuery`), never through the connection's escaping.
  *
  * The key's text is compared with the attachment's under the attachment
  * column's own collation, as the resolver's comparison with that text is: byte
@@ -64,7 +69,7 @@ final class RecordAttachments
     /** @var string The column holding an attached record's key. */
     private const string KEY_COLUMN = 'resource_id';
 
-    /** @var array<string, list<\SineMacula\Laravel\Authorization\Evaluation\Policy>|null> The policies read in each scope, null for more than allowed, by the scope's chain and application. */
+    /** @var array<string, array{list<\SineMacula\Laravel\Authorization\Evaluation\Policy>|null, array<string, bool>}> The policies read in each scope, null for more than allowed, with those whose denies count everywhere, by the scope's chain and application. */
     private array $read = [];
 
     /**
@@ -96,6 +101,16 @@ final class RecordAttachments
      * to the row's record, and whether only its denies count, keeping a refusal
      * when the attachments cannot be compiled.
      *
+     * A policy whose denies count on records of the type in every scope (see
+     * `ResourcePolicyResolver::recordPoliciesFor()`) is read so: a policy
+     * naming half a tenant, its denies alone, with the condition a row meets
+     * when it is attached to the row's record in any tenant; a policy attached
+     * to records by a row naming half a tenant, as any other, and, when it
+     * denies the action, with its denies alone, with the condition a row meets
+     * when such a row attaches it to the row's record, in one condition with
+     * the scope's own when the policy only denies. Every other policy is read
+     * with the one condition, as it would be with no such row.
+     *
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Query\StatementScreen  $screen
      * @param  bool  $isDenyOnly
@@ -107,7 +122,7 @@ final class RecordAttachments
         $application = TenantScope::currentApplication();
 
         try {
-            $policies = $this->policiesIn($chain, $application, $action);
+            [$policies, $everywhere] = $this->policiesIn($chain, $application, $action);
         } catch (InvalidPolicyDocumentException) {
             $screen->refuse(new Refusal(RefusalReason::INVALID_POLICY, null, null, null, 'a policy attached to a record cannot be read'));
 
@@ -123,8 +138,12 @@ final class RecordAttachments
         $attached = [];
 
         foreach ($policies as $policy) {
-            $exists     = $this->existsFor($policy, $keyText, $chain, $application) ?? $this->refuseInline($screen);
-            $attached[] = [$policy, Conditions::all([$exists, $this->storable()]), $isDenyOnly];
+            $isHalf = $everywhere[$policy->id] ?? null;
+
+            foreach ($this->tenantsOf($policy, $action, $chain, $isHalf) as $index => $tenants) {
+                $exists     = $this->existsFor($policy, $keyText, $application, $tenants) ?? $this->refuseInline($screen);
+                $attached[] = [$index === 0 ? $policy : $policy->denies(), Conditions::all([$exists, $this->storable()]), $isDenyOnly || $isHalf === true || $index > 0];
+            }
         }
 
         return $attached;
@@ -132,24 +151,63 @@ final class RecordAttachments
 
     /**
      * Return the policies attached to records of the type in the scope that
-     * name the action, or null for more than allowed, read once for each scope.
+     * name the action, or null for more than allowed, with whether each policy
+     * whose denies count on them in every scope names half a tenant itself,
+     * read once for each scope.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\TenantChain  $chain
      * @param  string|null  $application
      * @param  string  $action
-     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>|null
+     * @return array{list<\SineMacula\Laravel\Authorization\Evaluation\Policy>|null, array<string, bool>}
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
-    private function policiesIn(TenantChain $chain, ?string $application, string $action): ?array
+    private function policiesIn(TenantChain $chain, ?string $application, string $action): array
     {
         $key = \serialize([$application, $chain->isBelow, $chain->tenants]);
 
         if (!\array_key_exists($key, $this->read)) {
-            $this->read[$key] = $this->resolver->recordPoliciesFor($this->shape->type, $action, $this->limit);
+            $everywhere       = [];
+            $policies         = $this->resolver->recordPoliciesFor($this->shape->type, $action, $this->limit, $everywhere);
+            $this->read[$key] = [$policies, $everywhere];
         }
 
         return $this->read[$key];
+    }
+
+    /**
+     * Return the tenants of the attachments each condition of the policy reads,
+     * each a callback limiting a query of the attachments, read under the
+     * alias: the scope's own, then, for a policy attached to records by a row
+     * naming half a tenant and denying the action, those rows; in one condition
+     * when the policy only denies. A policy naming half a tenant itself counts
+     * for its denies in every tenant (see `inScope()`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Support\TenantChain  $chain
+     * @param  bool|null  $isHalf
+     * @return list<\Closure(\Illuminate\Contracts\Database\Query\Builder, string): mixed>
+     */
+    private function tenantsOf(Policy $policy, string $action, TenantChain $chain, ?bool $isHalf): array
+    {
+        $own = static fn (Builder $query, string $alias): Builder => $chain->grants($query, $alias);
+
+        if ($isHalf !== false) {
+            return [$isHalf === null ? $own : static fn (Builder $query): Builder => $query];
+        }
+
+        $denies       = $policy->denies()->statements;
+        $isDenying    = \array_filter($denies, static fn (Statement $deny): bool => $deny->coversAction($action)) !== [];
+        $isOnlyDenies = \count($denies) === \count($policy->statements);
+        $either       = static fn (Builder $query, string $alias): Builder => TenantColumns::restricting($chain, $query, $alias);
+        $halfTenant   = static fn (Builder $query, string $alias): Builder => TenantColumns::whereHalf($query, $alias . '.tenant_type', $alias . '.tenant_id');
+
+        return match (true) {
+            !$isDenying   => [$own],
+            $isOnlyDenies => [$either],
+            default       => [$own, $halfTenant],
+        };
     }
 
     /**
@@ -201,17 +259,17 @@ final class RecordAttachments
 
     /**
      * Return the condition a row meets when the policy is attached to its
-     * record in the scope: the resolver's predicate, written by its builders,
-     * with every value inlined as the dialect writes it bound; or null when a
-     * value cannot be.
+     * record by an attachment of the tenants given, in the application: the
+     * resolver's predicate, written by its builders, with every value inlined
+     * as the dialect writes it bound; or null when a value cannot be.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
      * @param  string  $keyText
-     * @param  \SineMacula\Laravel\Authorization\Support\TenantChain  $chain
      * @param  string|null  $application
+     * @param  \Closure(\Illuminate\Contracts\Database\Query\Builder, string): mixed  $tenants
      * @return string|null
      */
-    private function existsFor(Policy $policy, string $keyText, TenantChain $chain, ?string $application): ?string
+    private function existsFor(Policy $policy, string $keyText, ?string $application, \Closure $tenants): ?string
     {
         /** @var \Illuminate\Database\Connection $connection */
         $connection = $this->shape->connection;
@@ -223,8 +281,8 @@ final class RecordAttachments
             ->where("{$alias}.resource_type", $this->shape->type)
             ->where("{$alias}.policy_id", $policy->id)
             ->whereRaw(new ComposedExpression($keyText))
-            ->where(static function (Builder $query) use ($chain, $application, $alias): void {
-                $chain->grants($query, $alias);
+            ->where(static function (Builder $query) use ($tenants, $application, $alias): void {
+                $tenants($query, $alias);
                 GrantApplications::only($query, $alias, $application);
             });
 

@@ -6,9 +6,11 @@ namespace Tests\Feature\Administration;
 
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Administration\PolicyRewrite;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
@@ -18,14 +20,21 @@ use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\AssertsDelegatedRefusals;
+use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubTenant;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -40,6 +49,8 @@ use Tests\TestCase;
 #[CoversClass(PolicyRewrite::class)]
 final class PolicyRewriteTest extends TestCase
 {
+    use ActsAsTenant, AssertsDelegatedRefusals, ScopesQueries;
+
     /** @var array<string, mixed> An allow of reading posts. */
     private const array READ = ['effect' => 'allow', 'actions' => ['posts:read']];
 
@@ -158,6 +169,73 @@ final class PolicyRewriteTest extends TestCase
         DB::table('policies')->where('id', $policy->getKey())->delete();
 
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $this->refusal($policy, [self::DENY]));
+    }
+
+    /**
+     * A boundary naming half a tenant, a type without a key or a key without a
+     * type, caps its grantee everywhere, so a widening rewrite of its policy is
+     * weighed at platform scope: an actor administering one tenant and below,
+     * holding there all the rewrite needs, is refused it, and the cap holds at
+     * the platform and in another tenant. With the boundary naming the whole
+     * tenant, the same rewrite is made, as it changes access only there.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARewriteOfAPolicyAHalfBoundaryUsesIsWeighedAtPlatformScope(): void
+    {
+        [$parent, $child, $other] = \array_map(self::createTenant(...), ['parent', 'child', 'other']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent)));
+
+        $user  = StubIdentity::query()->create(['id' => 'user-1']);
+        $admin = StubIdentity::query()->create(['id' => 'tenant-admin']);
+        $type  = (new StubTenant)->getMorphClass();
+
+        foreach (['posts:read', 'posts:delete'] as $name) {
+            self::grants()->grantPermission($user, Permission::query()->firstOrCreate(['name' => $name]));
+        }
+
+        self::grants()->grantRole($admin, Role::query()->create(['name' => 'rank-1', 'rank' => 1]));
+
+        foreach ([PackagePermissions::POLICY_UPDATE, PackagePermissions::ADMINISTRATION_UNBOUNDED, 'posts:read', 'posts:delete'] as $name) {
+            self::grants()->grantPermission($admin, Permission::query()->firstOrCreate(['name' => $name]), tenant: $parent);
+        }
+
+        $document = ['statements' => [self::READ, ['effect' => 'allow', 'actions' => ['posts:delete']]]];
+        $rows     = ['type without a key' => [$type, null], 'key without a type' => [null, 'parent'], 'whole tenant' => [$type, 'parent']];
+
+        foreach ($rows as $name => [$tenantType, $tenantId]) {
+            $bound = Policy::create(['name' => "cap {$name}", ...self::ownedBy($parent), 'document' => ['statements' => [self::READ]]]);
+
+            DB::table('authorizable_boundaries')->delete();
+            DB::table('authorizable_boundaries')->insert([
+                'policy_id'         => $bound->getKey(),
+                'authorizable_type' => $user->getMorphClass(),
+                'authorizable_id'   => 'user-1',
+                'tenant_type'       => $tenantType,
+                'tenant_id'         => $tenantId,
+            ]);
+
+            $actor   = ActingContext::for($admin);
+            $rewrite = static fn (): mixed => PolicyService::instance()?->rewrite($bound, $document, $actor);
+            $within  = static fn (): mixed => TenantScope::within(Reference::of($parent), null, $rewrite);
+
+            if ($tenantId === 'parent' && $tenantType !== null) {
+                $within();
+
+                self::assertTrue($this->resolveRequest($user, $other)->can('posts:delete'), $name);
+
+                continue;
+            }
+
+            self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_SCOPE, $within);
+
+            foreach ([null, $parent, $other] as $tenant) {
+                self::assertFalse($this->resolveRequest($user, $tenant)->can('posts:delete'), $name);
+            }
+        }
     }
 
     /**

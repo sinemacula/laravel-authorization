@@ -110,4 +110,27 @@ final class GuardrailExceptionTest extends TestCase
         self::assertSame([null, $tenant], $exception->getTenants());
         self::assertNull($exception->getActor());
     }
+
+    /**
+     * Guardrail rows naming half a tenant are counted as malformed, never named
+     * as the platform or a tenant, and said to be removed with the policy's
+     * guardrail on the platform; they are among no scope of the refusal.
+     *
+     * @return void
+     */
+    public function testInUseCountsTheMalformedRows(): void
+    {
+        $tenant    = new Reference('stub_tenant', 'tenant-a');
+        $exception = GuardrailException::inUse('rail', [$tenant], 'editing', 2);
+
+        self::assertSame(
+            'Policy \'rail\' is a guardrail on stub_tenant:tenant-a, 2 malformed row(s) naming half a tenant; remove each guardrail through the guardrail '
+            . 'service (a malformed row is removed with the policy\'s guardrail on the platform) before editing the policy.',
+            $exception->getMessage(),
+        );
+        self::assertSame([$tenant], $exception->getTenants());
+        $alone = GuardrailException::inUse('rail', [], 'deleting', 1);
+
+        self::assertStringStartsWith('Policy \'rail\' is a guardrail on 1 malformed row(s) naming half a tenant; ', $alone->getMessage());
+    }
 }

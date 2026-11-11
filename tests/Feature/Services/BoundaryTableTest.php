@@ -162,6 +162,73 @@ final class BoundaryTableTest extends TestCase
     }
 
     /**
+     * A boundary naming half a tenant, a key without a type or a type without a
+     * key, is not the platform's: setting one at the platform writes a row
+     * beside it, and removing it there leaves it as it is.
+     *
+     * @return void
+     */
+    public function testABoundaryNamingHalfATenantIsNotThePlatforms(): void
+    {
+        $policy = self::policy('cap');
+        $row    = ['policy_id' => $policy, 'authorizable_type' => 'user', 'authorizable_id' => 'user-1', 'include_subtree' => true];
+
+        DB::table('authorizable_boundaries')->insert([[...$row, 'tenant_type' => null, 'tenant_id' => 'tenant-a'], [...$row, 'tenant_type' => 'stub_tenant', 'tenant_id' => null]]);
+
+        self::assertNull(self::table(null)->remove());
+        self::assertSame([GrantOutcome::GRANTED, null], self::table(null)->set($policy));
+        self::assertEquals([$policy, new GrantScope(null, null, true)], self::table(null)->remove());
+        self::assertSame(2, DB::table('authorizable_boundaries')->count());
+    }
+
+    /**
+     * A boundary naming half a tenant holds in no scope, so it is left out of
+     * the boundaries read everywhere and read apart, by the same query, with
+     * its tenant columns as stored; removing one removes it alone, as stored,
+     * once, and removing everywhere removes them first, returning them apart.
+     *
+     * @return void
+     */
+    public function testBoundariesNamingHalfATenantAreReadAndRemovedApart(): void
+    {
+        $policy = self::policy('cap');
+        $other  = self::policy('other');
+        $row    = ['policy_id' => $policy, 'authorizable_type' => 'user', 'authorizable_id' => 'user-1', 'include_subtree' => true];
+        $half   = [[...$row, 'tenant_type' => null, 'tenant_id' => 'tenant-a'], [...$row, 'tenant_type' => 'stub_tenant', 'tenant_id' => null]];
+
+        DB::table('authorizable_boundaries')->insert($half);
+        DB::table('authorizable_boundaries')->insert([...$row, 'authorizable_id' => 'user-2', 'tenant_type' => null, 'tenant_id' => 'tenant-a']);
+        DB::table('authorizable_boundaries')->insert([...$row, 'tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
+        self::table(null)->set($policy);
+
+        $malformed = [['policy_id' => $policy, 'tenant_type' => null, 'tenant_id' => 'tenant-a'], ['policy_id' => $policy, 'tenant_type' => 'stub_tenant', 'tenant_id' => null]];
+
+        [$boundaries, $read] = self::table(null)->everywhere();
+
+        $whole = [[$policy, new GrantScope(null, null, true)], [$policy, new GrantScope(new Reference('stub_tenant', 'tenant-a'), null, true)]];
+
+        self::assertEqualsCanonicalizing($whole, $boundaries);
+        self::assertEqualsCanonicalizing($malformed, $read);
+        self::assertSame(0, self::table(null)->removeMalformed(['policy_id' => $other, 'tenant_type' => null, 'tenant_id' => 'tenant-a']));
+
+        foreach ($malformed as $boundary) {
+            self::assertSame(1, self::table(null)->removeMalformed($boundary));
+            self::assertSame(0, self::table(null)->removeMalformed($boundary));
+        }
+
+        self::assertSame([], self::table(null)->everywhere()[1]);
+        self::assertSame(3, DB::table('authorizable_boundaries')->count());
+
+        DB::table('authorizable_boundaries')->insert($half);
+
+        [$removed, $removedHalf] = self::table(null)->removeEverywhere();
+
+        self::assertEqualsCanonicalizing($whole, $removed);
+        self::assertEqualsCanonicalizing($malformed, $removedHalf);
+        self::assertSame(['user-2'], DB::table('authorizable_boundaries')->pluck('authorizable_id')->all());
+    }
+
+    /**
      * Removing everywhere removes every scope's boundary of the grantee alone,
      * reporting each with its scope and its reach.
      *
@@ -179,7 +246,9 @@ final class BoundaryTableTest extends TestCase
         self::table(null)->set($policy);
         (new BoundaryTable(AuthorizationConnection::connection(), 'authorizable_boundaries', new Reference('user', 'user-2')))->set($policy);
 
-        $removed = self::table(null)->removeEverywhere();
+        [$removed, $malformed] = self::table(null)->removeEverywhere();
+
+        self::assertSame([], $malformed);
 
         \usort($removed, static fn (array $left, array $right): int => \strcmp((string) $left[1]->tenant?->id, (string) $right[1]->tenant?->id));
 
@@ -189,7 +258,7 @@ final class BoundaryTableTest extends TestCase
             [$policy, new GrantScope($reaching, null, true)],
         ], $removed);
         self::assertSame(['user-2'], DB::table('authorizable_boundaries')->pluck('authorizable_id')->all());
-        self::assertSame([], self::table(null)->removeEverywhere());
+        self::assertSame([[], []], self::table(null)->removeEverywhere());
     }
 
     /**
@@ -247,12 +316,12 @@ final class BoundaryTableTest extends TestCase
         $tenant = new Reference('stub_tenant', 'tenant-a');
 
         self::assertNull(self::table($tenant)->held());
-        self::assertSame([], self::table(null)->everywhere());
+        self::assertSame([[], []], self::table(null)->everywhere());
 
         self::table($tenant, false)->set($policy);
         self::table(null)->set($policy);
 
-        $everywhere = self::table(null)->everywhere();
+        [$everywhere] = self::table(null)->everywhere();
 
         \usort($everywhere, static fn (array $left, array $right): int => \strcmp((string) $left[1]->tenant?->id, (string) $right[1]->tenant?->id));
 

@@ -96,7 +96,8 @@ final class AuthorityRowsTest extends TestCase
     /**
      * The guardrails locked are the platform's and those of every tenant of the
      * chains named, read afresh and pinned, so a moved tenant is noticed; no
-     * tenant named locks none, and the platform alone locks the platform's.
+     * tenant named locks none, and the platform alone locks the platform's,
+     * never a guardrail naming half a tenant.
      *
      * @return void
      *
@@ -113,6 +114,12 @@ final class AuthorityRowsTest extends TestCase
 
         DB::table('guardrails')->insert(['policy_id' => $rail->getKey(), 'tenant_type' => 'stub_tenant', 'tenant_id' => 'parent']);
 
+        foreach ([[null, 'parent'], ['stub_tenant', null]] as $index => [$type, $id]) {
+            $half = Policy::query()->create(['name' => 'half-' . $index, 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['*']]]]]);
+
+            DB::table('guardrails')->insert(['policy_id' => $half->getKey(), 'tenant_type' => $type, 'tenant_id' => $id]);
+        }
+
         $locks = $this->recordRowLocks();
         $pins  = self::pins();
 
@@ -127,6 +134,7 @@ final class AuthorityRowsTest extends TestCase
         AuthorityRows::in(self::pins(), DependencyPhase::TARGET)->tenants(null)->lock();
 
         self::assertSame(['guardrails', []], $locks[2] ?? null);
+        self::assertCount(3, $locks);
 
         $tree->put($child, null);
 
