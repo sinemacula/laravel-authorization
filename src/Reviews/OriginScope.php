@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Reviews;
 
+use SineMacula\Laravel\Authorization\Reviews\Enums\ReachKind;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -77,6 +78,23 @@ final readonly class OriginScope
     public function isMalformed(): bool
     {
         return ($this->tenantType === null) !== ($this->tenantId === null);
+    }
+
+    /**
+     * Return how far the row reaches: the platform when it names no tenant
+     * column at all, else its tenant and those below it when it reaches below,
+     * else its tenant alone. A row naming half a tenant reads by the half it
+     * names, its `malformed` state saying it is damaged.
+     *
+     * @return \SineMacula\Laravel\Authorization\Reviews\Enums\ReachKind
+     */
+    public function reach(): ReachKind
+    {
+        return match (true) {
+            $this->tenantType === null && $this->tenantId === null => ReachKind::PLATFORM,
+            $this->includeSubtree                                  => ReachKind::SUBTREE,
+            default                                                => ReachKind::NODE,
+        };
     }
 
     /**

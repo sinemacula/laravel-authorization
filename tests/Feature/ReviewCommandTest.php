@@ -28,8 +28,9 @@ use Tests\TestCase;
  * Feature tests for the `authorization:review` Artisan command (AUTHZ-11.6,
  * N97): an access review exported as JSON Lines on the trusted path, to the
  * standard output alone or to a file that exists only with `--force`, for every
- * query and scope option, exiting 0 when written, 2 for an invalid invocation
- * and 1 when the review fails, its errors on the standard error.
+ * query and scope option, a subject's holdings narrowed to an action among
+ * them, exiting 0 when written, 2 for an invalid invocation and 1 when the
+ * review fails, its errors on the standard error.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -176,6 +177,49 @@ final class ReviewCommandTest extends TestCase
     }
 
     /**
+     * A saved subject's holdings narrowed by `--action` are exported as the
+     * trusted export of the review filtered by the action writes them: its
+     * header names the action and says the rows cover the stored grants alone,
+     * and only the routes giving the action are rows, each with its evidence.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheHoldingsOfAnActionAreExported(): void
+    {
+        Carbon::setTestNow('2026-11-08 12:00:00');
+
+        $ann  = StubIdentity::query()->create(['id' => 'ann']);
+        $role = self::role('auditor');
+
+        self::grants()->grantPermission($ann, self::permission('audit:read'));
+        self::grants()->grantPermission($ann, self::permission('posts:read'));
+        self::grants()->grantRole($ann, $role);
+        $role->givePermissionTo(self::permission('audit:*'));
+
+        $parameters = ['query' => 'holdings', 'reference' => StubIdentity::class . ':ann', '--everywhere' => true];
+        $query      = ReviewQuery::holdings(self::subjectOf($ann), ReviewScope::everywhere());
+
+        [$code, $output, $errors] = $this->review([...$parameters, '--action' => 'audit:read']);
+
+        self::assertSame([0, ''], [$code, $errors]);
+        self::assertSame(self::exported($query->forAction('audit:read')), $output);
+
+        $lines = self::lines($output);
+
+        self::assertSame(['audit:read', true], [$lines[0]['action'] ?? null, $lines[0]['stored_inventory_only'] ?? null]);
+        self::assertSame(['header', 'row', 'row', 'footer'], \array_column($lines, 'record'));
+        self::assertSame(['audit:read', 'audit:read'], \array_column(\array_column(\array_slice($lines, 1, 2), 'action_evidence'), 'action'));
+
+        [, $unfiltered] = $this->review($parameters);
+
+        self::assertSame(self::exported($query), $unfiltered);
+        self::assertArrayNotHasKey('action', self::lines($unfiltered)[0]);
+        self::assertCount(6, self::lines($unfiltered));
+    }
+
+    /**
      * The export is written to the file named, the standard output left empty;
      * a file that exists is refused unless `--force` is given, and then
      * overwritten; and a file that cannot be opened is refused.
@@ -230,6 +274,8 @@ final class ReviewCommandTest extends TestCase
      */
     public function testAnInvalidInvocationExitsTwo(): void
     {
+        StubIdentity::query()->create(['id' => 'ann']);
+
         $refusals = [
             [['query' => 'holders', '--secret' => 'sentinel-value'], 'The "--secret" option does not exist.'],
             [[], 'Not enough arguments (missing: "query").'],
@@ -248,6 +294,11 @@ final class ReviewCommandTest extends TestCase
             [['query' => 'holdings', 'reference' => StubIdentity::class . ':sentinel-value'], 'The reference names no saved row.'],
             [['query' => 'holders', 'reference' => 'role:x', '--tenant' => StubIdentity::class . ':sentinel-value'], 'The --tenant option names no saved row.'],
             [['query' => 'holders', 'reference' => 'role:x', '--rooted-within' => StubIdentity::class . ':sentinel-value'], 'The --rooted-within option names no saved row.'],
+            [['query' => 'holders', 'reference' => 'role:x', '--action' => 'sentinel-value'], 'The --action option is taken by the holdings query alone.'],
+            [
+                ['query' => 'holdings', 'reference' => StubIdentity::class . ':ann', '--action' => 'sentinel-value:*'],
+                'The --action option must be one action\'s name, with no wildcard (e.g. audit:read).',
+            ],
         ];
 
         foreach ($refusals as [$parameters, $message]) {
@@ -266,6 +317,11 @@ final class ReviewCommandTest extends TestCase
 
         self::assertSame(2, $kernel->handle($line, $out));
         self::assertStringContainsString('The --tenant option must be given a value.', $out->fetch());
+
+        $out = new BufferedOutput;
+
+        self::assertSame(2, $kernel->handle(new ArgvInput(['artisan', 'authorization:review', 'holdings', StubIdentity::class . ':ann', '--action']), $out));
+        self::assertStringContainsString('The --action option must be given a value.', $out->fetch());
 
         foreach ([['holders', 'role:x'], ['unused', '--everywhere']] as $arguments) {
             $out = new BufferedOutput;

@@ -16,7 +16,9 @@ use Symfony\Component\Console\Output\OutputInterface;
  * Export an access review as JSON Lines (AUTHZ-11.6, N96, N97): who holds a
  * role, permission or policy, what a saved subject holds, what expires within a
  * window, what an actor last granted, or which grants show no observed use
- * since an instant (N94), in the scope the options name.
+ * since an instant (N94), in the scope the options name; a subject's holdings
+ * narrowed with `--action` to the routes giving one action, where the subject
+ * holds it, never whether a check allows it.
  *
  * The review runs on the trusted path (`AccessReview::trustedExport()`), as
  * scheduled system work, never as whoever is signed in to the console: the
@@ -33,11 +35,11 @@ use Symfony\Component\Console\Output\OutputInterface;
  *
  * Exits 0 when the export is written; 2 for an invalid invocation (an unknown
  * option, a missing argument, an option given without its value or one the
- * query does not take, a reference, tenant, window or subject that cannot be
- * read or resolved, or an output file that exists or cannot be opened); and 1
- * when the review fails, after which the export has no footer. Errors go to the
- * standard error, name no value given, and are escaped as `authorization:why`
- * escapes its own.
+ * query does not take, a reference, tenant, window, action or subject that
+ * cannot be read or resolved, or an output file that exists or cannot be
+ * opened); and 1 when the review fails, after which the export has no footer.
+ * Errors go to the standard error, name no value given, and are escaped as
+ * `authorization:why` escapes its own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -50,7 +52,7 @@ final class ReviewCommand extends Command
     public const string NAME = 'authorization:review';
 
     /** @var list<string> The options that take a value, refused when given without one. */
-    private const array VALUED = ['tenant', 'rooted-within', 'application', 'from', 'until', 'actor', 'since', 'output'];
+    private const array VALUED = ['tenant', 'rooted-within', 'application', 'action', 'from', 'until', 'actor', 'since', 'output'];
 
     /** @var string The console command signature. */
     protected $signature = self::NAME . <<<'EOD'
@@ -61,6 +63,7 @@ final class ReviewCommand extends Command
                                     {--rooted-within= : Review the grants made in the tenant or below it, as morphType:key}
                                     {--everywhere : Review every stored grant}
                                     {--application= : none, any, or an application's name; none for a tenant or the platform when omitted, any otherwise}
+                                    {--action= : For holdings, only the routes whose permission or policy gives the action, named literally}
                                     {--from= : For expiring, the start of the window, inclusive}
                                     {--until= : For expiring, the end of the window, exclusive}
                                     {--actor= : For granted_by, the actor as morphType:key}

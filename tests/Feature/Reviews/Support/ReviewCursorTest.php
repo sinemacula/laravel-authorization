@@ -192,7 +192,9 @@ final class ReviewCursorTest extends TestCase
     /**
      * Every part of what a cursor is bound to counts on its own: a cursor
      * issued for a query is refused for one that differs from it in that part
-     * alone, and read for the query itself.
+     * alone, and read for the query itself; the action a review of holdings is
+     * filtered by counts too, so a cursor of an unfiltered review, or of
+     * another action, is refused for it, and the reverse.
      *
      * @return void
      *
@@ -233,6 +235,11 @@ final class ReviewCursorTest extends TestCase
             'window end'      => [$expiring($from, $until), $expiring($from, $until->addSecond())],
             'actor key'       => [$actor('u', 'a'), $actor('u', 'b')],
             'actor type'      => [$actor('u', 'a'), $actor('v', 'a')],
+            'action'          => [$holdings(new Reference('u', 'a'))->forAction('posts:edit'), $holdings(new Reference('u', 'a'))->forAction('posts:read')],
+            'action case'     => [$holdings(new Reference('u', 'a'))->forAction('posts:edit'), $holdings(new Reference('u', 'a'))->forAction('posts:Edit')],
+            'filtered'        => [$holdings(new Reference('u', 'a'))->forAction('posts:edit'), $holdings(new Reference('u', 'a'))],
+            'unfiltered'      => [$holdings(new Reference('u', 'a')), $holdings(new Reference('u', 'a'))->forAction('posts:edit')],
+            'action subject'  => [$holdings(new Reference('u', 'a'))->forAction('posts:edit'), $holdings(new Reference('u', 'b'))->forAction('posts:edit')],
         ];
 
         foreach ($pairs as $part => [$query, $other]) {

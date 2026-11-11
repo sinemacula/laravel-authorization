@@ -24,9 +24,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * nothing a page did not. The signature is an HMAC-SHA256, keyed from the
  * application key, of the payload, the schema version included, and of what the
  * cursor is bound to: the query (its kind, target or subject, scope selection,
- * tenant, application selector, window, actor and whether it lists direct
- * grants alone) and the reviewer (its principal and any impersonator) or the
- * trusted path.
+ * tenant, application selector, window, actor, whether it lists direct grants
+ * alone, and the action a review of holdings is filtered by) and the reviewer
+ * (its principal and any impersonator) or the trusted path.
  *
  * A sort key holds a fixed number of parts however deep the role hierarchy runs
  * (see `RowCollector`), each a morph type, a key, a scope value or a stored
@@ -153,9 +153,11 @@ final readonly class ReviewCursor
 
     /**
      * Return what a cursor is bound to: the query's kind, scope, application
-     * selector, target, subject, window, actor and reach, and the reviewer or
-     * the trusted path, each part length-prefixed so no two bindings share one;
-     * the row schema version is bound by the payload, which holds it.
+     * selector, target, subject, window, actor and reach, the action of a
+     * filtered review of holdings as one more part, and the reviewer or the
+     * trusted path, each part length-prefixed so no two bindings share one, an
+     * unfiltered review's binding as it was; the row schema version is bound by
+     * the payload, which holds it.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $reviewer
@@ -181,6 +183,7 @@ final readonly class ReviewCursor
             $query->until?->format(self::INSTANT),
             ...self::parts($query->actor),
             $query->isDirectOnly ? 'direct' : 'routes',
+            ...($query->action === null ? [] : [$query->action]),
             ...($reviewer === null ? ['trusted'] : ['reviewer', ...self::parts($reviewer->principal()), ...self::parts($reviewer->impersonator)]),
         ]);
     }
