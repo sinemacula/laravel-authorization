@@ -127,14 +127,15 @@ scope, the hook contract and its binding, and where the hook runs in a grant cal
 14. **Placement.** `Hooks\WideningPhase` is the one call point, for trusted and delegated grants alike and for
     break-glass (AUTHZ-11.7) to come. In `GrantService::grant()` and `sync()`, first in the work of
     `OperationScope::run()`: a non-locking preliminary proposal (the target, the scope, the reach, the expiry; a sync's
-    additions and re-arms, never a row held live), its classification, and one hook call with every widening grant,
-    before any lock and any write. The call then locks, rebuilds its grants, decides them, and hands them to
+    additions and re-arms, and the roles it holds live with the other reach than their entry's `RoleReach` names, with
+    the expiry each keeps, never another row held live), its classification, and one hook call with every widening
+    grant, before any lock and any write. The call then locks, rebuilds its grants, decides them, and hands them to
     `assertCovers()`, which classifies them again, after every other lock, with locking reads: the grantee's own rows
-    (`GrantTable::live()` and `liveRow()` under a row lock), and the evidence the hook was skipped or limited on, the
-    grants of the identity, the grantee and every listed principal that apply in the tenant, read table by table with
-    `GrantRoots::appliesUnderLock()`, never as a union, locked through `DependencyPins::lockCoverage()` as the last part
-    of the protocol (`DependencyPhase::COVERAGE`). A locking read sees the latest committed rows on MySQL whatever the
-    snapshot, and holds them until commit on PostgreSQL and MySQL, so a revocation committed after the hook phase is
+    (`GrantTable::liveRows()` and `liveRow()` under a row lock), and the evidence the hook was skipped or limited on,
+    the grants of the identity, the grantee and every listed principal that apply in the tenant, read table by table
+    with `GrantRoots::appliesUnderLock()`, never as a union, locked through `DependencyPins::lockCoverage()` as the last
+    part of the protocol (`DependencyPhase::COVERAGE`). A locking read sees the latest committed rows on MySQL whatever
+    the snapshot, and holds them until commit on PostgreSQL and MySQL, so a revocation committed after the hook phase is
     seen and one made later waits. A grant that now widens with no hook run for it throws
     `DependencyChangedException::widening()`. A delegated call is tried again by `ConflictRetries`; a trusted call is
     tried again for this conflict alone, up to the same `retries`, then refused as `administration.conflict`. The hook
@@ -256,8 +257,8 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
 - `Support\OperationScope::whileHookRuns()`, `isNested()`, `retriedInPlace()` and the trusted retry -- the recursion
   guard, nesting and retries inside the application's transaction.
 - `Support\GrantRoots::appliesUnderLock()`, `Administration\DependencyPins::lockCoverage()` and
-  `Services\Support\GrantTable::live()` and `liveRow()` under a lock -- the locking reads of the coverage check.
-- `Services\GrantService::grant()`, `sync()` and `plan()` -- the placement.
+  `Services\Support\GrantTable::liveRows()` and `liveRow()` under a lock -- the locking reads of the coverage check.
+- `Services\GrantService::grant()`, `sync()` and `plan()`, and `Services\Support\SyncPlan` -- the placement.
 - `Exceptions\GrantRefusedException`, `GrantHookRecursionException`, `NestedGrantException` and
   `UnresolvableRecipientException`; `Config\GrantHookConfigValidator`.
 

@@ -7,6 +7,9 @@ namespace Tests\Unit\Reviews;
 use Carbon\CarbonImmutable;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Reviews\ActionEvidence;
+use SineMacula\Laravel\Authorization\Reviews\Enums\EvidenceKind;
 use SineMacula\Laravel\Authorization\Reviews\Enums\GrantState;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState;
@@ -165,6 +168,29 @@ final class ReviewRowTest extends TestCase
         self::assertNull($row->usage);
         self::assertSame(UsageStatus::USED, $used->usage?->status);
         self::assertSame('2030-01-01T00:00:00Z', ReviewRow::instant($row->createdAt()));
+    }
+
+    /**
+     * A row is given what gives the action an action-filtered review asks
+     * about, shown last under `action_evidence`, and keeps it when given its
+     * subject's state and its use; a row without it has no such key at all.
+     *
+     * @return void
+     */
+    public function testTheRowIsGivenWhatGivesTheAction(): void
+    {
+        $row      = self::row();
+        $evidence = new ActionEvidence('posts:edit', EvidenceKind::PERMISSION, PolicyEffect::ALLOW, new OriginScope('tenant', 't1', null, true), 'web');
+        $given    = $row->withEvidence($evidence)->withUsage(RowUsage::unknown())->withSubjectState(SubjectState::ACTIVE);
+        $shape    = $given->toArray();
+
+        self::assertArrayNotHasKey('action_evidence', $row->toArray());
+        self::assertNull($row->evidence);
+        self::assertSame($evidence, $given->evidence);
+        self::assertSame('action_evidence', \array_key_last($shape));
+        self::assertSame($evidence->toArray(), $shape['action_evidence']);
+        self::assertSame(\array_diff_key($row->toArray(), ['subject_state' => true]), \array_diff_key($shape, ['subject_state' => true, 'action_evidence' => true]));
+        self::assertSame($evidence, $row->withSubjectState(SubjectState::ACTIVE)->withEvidence($evidence)->withUsage(RowUsage::unknown())->evidence);
     }
 
     /**
