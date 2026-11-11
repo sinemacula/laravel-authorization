@@ -4672,6 +4672,14 @@ shows as `declared by acme/tenants as ..., but overridden later`, and from an in
 it, `but an instance is bound over it`; a declaration naming no closure is shown beside whatever is bound as
 unverified. A declaration is data alone: nothing is loaded or built to read it.
 
+**Resetting between units of work.** Everything the package keeps for one request or job is bound with `scoped()`, so
+the queue worker and Octane forget it with the rest of the scoped state. A long-running command doing several units of
+work in one process, which must not forget what Laravel or another package keeps scoped (the command's context, the
+callbacks deferred with `defer()`), calls `Support\RequestState::forget($app)` between them instead. It forgets exactly
+the scoped instances held under the package's own names (its class names, `authorization` and the `authorization.`
+keys), whatever the package binds now or later, so the caller keeps no list of its own; the package's state after boot
+is kept. `RequestState::abstracts($app)` lists what it would forget. Both are part of the package's stable API.
+
 #### The diagnostic boot
 
 A refused configuration stops the boot, so on its own every command would fail before `authorization:check` could say

@@ -45,6 +45,12 @@ final class ContainerStateTest extends TestCase
         self::assertTrue(ContainerState::isShared($container, 'singleton'));
         self::assertFalse(ContainerState::isScoped($container, 'singleton'));
         self::assertTrue(ContainerState::isScoped($container, 'scoped'));
+        self::assertSame(['scoped'], ContainerState::scopedAbstracts($container));
+
+        $container->scoped(static fn (): \stdClass => new \stdClass);
+        $container->scoped('later', \stdClass::class);
+
+        self::assertSame(['scoped', 'later'], ContainerState::scopedAbstracts($container));
         self::assertSame($instance, ContainerState::instance($container, 'instance'));
         self::assertNull(ContainerState::instance($container, 'scalar'));
         self::assertNull(ContainerState::instance($container, 'singleton'));
@@ -117,5 +123,6 @@ final class ContainerStateTest extends TestCase
         self::assertSame([], ContainerState::extenders($container, 'a'));
         self::assertNull(ContainerState::alias($container, 'a'));
         self::assertFalse(ContainerState::wasResolved($container, 'a'));
+        self::assertSame([], ContainerState::scopedAbstracts($container));
     }
 }
