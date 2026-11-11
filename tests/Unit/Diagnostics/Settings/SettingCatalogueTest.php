@@ -42,6 +42,8 @@ final class SettingCatalogueTest extends TestCase
     public function testAnUnknownSettingIsOpaque(): void
     {
         self::assertSame(SettingCatalogue::CLASS_NAME, SettingCatalogue::kindOf('authorization.tenant_tree'));
+        self::assertSame(SettingCatalogue::TABLE_PREFIX, SettingCatalogue::kindOf('authorization.tables.prefix'));
+        self::assertSame('table_prefix', SettingCatalogue::TABLE_PREFIX);
         self::assertSame(SettingCatalogue::OPAQUE, SettingCatalogue::kindOf('authorization.password'));
     }
 

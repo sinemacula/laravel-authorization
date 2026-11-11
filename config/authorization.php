@@ -100,9 +100,23 @@ return [
     | characters (33 to 51, depending on the table), and the twelve names must
     | be distinct. A name left out is the key's own; null is refused.
     |
+    | `prefix` is put before the name of every table left at its default, so
+    | `app_` makes `roles` `app_roles`. A name is left at its default when it
+    | is the key's own, whether it is left out, left as the file has it, or
+    | set to the key's own name in the environment; a name that differs from
+    | the key's own is set explicitly, and is used as it is written, without
+    | the prefix. The prefix must be empty, or a lower-case letter, then
+    | lower-case letters, digits and underscores, of at most 16 characters,
+    | and every name it makes is checked as a name set explicitly is: within
+    | its table's bound, and distinct from the others. Null is refused. The
+    | migrations create the tables under the names the prefix makes, so set
+    | it before migrating; changing it later points the package at tables
+    | that do not exist.
+    |
     */
 
     'tables' => [
+        'prefix'                   => env('AUTHORIZATION_TABLE_PREFIX', ''),
         'roles'                    => env('AUTHORIZATION_TABLE_ROLES', 'roles'),
         'permissions'              => env('AUTHORIZATION_TABLE_PERMISSIONS', 'permissions'),
         'policies'                 => env('AUTHORIZATION_TABLE_POLICIES', 'policies'),

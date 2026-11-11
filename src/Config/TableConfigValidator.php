@@ -44,6 +44,15 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * bounds hold for a connection without one; a prefix shortens what is left for
  * the table's name by its own length.
  *
+ * The block's own `prefix` is put before the name of every table left at its
+ * default, the key's own (see `TableNames::isDefault()`), and before no name
+ * set explicitly. It must be a string, empty or a lower-case letter, then
+ * lower-case letters, digits and underscores, of at most `PREFIX_LENGTH`
+ * characters; null is refused. Each name it makes is checked against its
+ * table's bound, as a name set explicitly is, and refused under the prefix's
+ * path, as the prefix made it too long, and the names it makes must be distinct
+ * from the others.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -73,8 +82,20 @@ final class TableConfigValidator
         'usage_coverage'           => self::IDENTIFIER_LENGTH - 12,
     ];
 
+    /** @var int The most characters the prefix may have. */
+    public const int PREFIX_LENGTH = 16;
+
     /** @var string A plain SQL identifier. */
     private const string IDENTIFIER = '/\A[A-Za-z_][A-Za-z0-9_]*\z/';
+
+    /** @var string A prefix that is not empty: a lower-case letter, then lower-case letters, digits and underscores. */
+    private const string PREFIX_PATTERN = '/\A[a-z][a-z0-9_]*\z/';
+
+    /** @var string What a prefix that is not empty is, for a message. */
+    private const string PREFIX_SHAPE = 'a lower-case letter, then lower-case letters, digits and underscores.';
+
+    /** @var string What the prefix is expected to be. */
+    private const string PREFIX_EXPECTED = 'empty, or a lower-case letter, then lower-case letters, digits and underscores, of at most 16 characters';
 
     /** @var string What a plain SQL identifier is, for a message. */
     private const string IDENTIFIER_SHAPE = 'a letter or an underscore, then letters, digits and underscores, with no schema.';
@@ -89,12 +110,95 @@ final class TableConfigValidator
      */
     public static function validate(mixed $config): void
     {
-        $block = ConfigBlock::of(self::KEY, $config, \array_keys(self::LENGTHS));
-        $named = [];
+        $block  = ConfigBlock::of(self::KEY, $config, self::keys());
+        $prefix = self::prefix(ConfigBlock::entry($block, TableNames::PREFIX, ''));
+        $named  = [];
 
         foreach (\array_keys(self::LENGTHS) as $key) {
-            $named = self::distinct($key, self::name($key, ConfigBlock::entry($block, $key, $key)), $named);
+            $named = self::distinct($key, self::effective($key, ConfigBlock::entry($block, $key, $key), $prefix), $named);
         }
+    }
+
+    /**
+     * Return the keys the block may set: the prefix, then the twelve tables.
+     *
+     * @return list<string>
+     */
+    public static function keys(): array
+    {
+        return [TableNames::PREFIX, ...\array_keys(self::LENGTHS)];
+    }
+
+    /**
+     * Return the prefix, refusing one that is not a string, empty or a
+     * lower-case letter, then lower-case letters, digits and underscores, of at
+     * most `PREFIX_LENGTH` characters.
+     *
+     * @param  mixed  $prefix
+     * @return string
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function prefix(mixed $prefix): string
+    {
+        $path = self::KEY . '.' . TableNames::PREFIX;
+
+        if (!\is_string($prefix)) {
+            $reason = 'expected a table name prefix, got ' . ConfigValidator::describe($prefix) . '.';
+
+            throw new InvalidAuthorizationConfigException($path, $reason, IssueCode::INVALID_TYPE, self::PREFIX_EXPECTED, \get_debug_type($prefix));
+        }
+
+        [$issue, $reason] = match (true) {
+            $prefix === ''                                   => [null, ''],
+            \preg_match(self::PREFIX_PATTERN, $prefix) !== 1 => [IssueCode::INVALID_VALUE, "prefix '{$prefix}' is not " . self::PREFIX_SHAPE],
+            \strlen($prefix) > self::PREFIX_LENGTH           => [IssueCode::OUT_OF_RANGE, "prefix '{$prefix}' is longer than " . self::PREFIX_LENGTH . ' characters.'],
+            default                                          => [null, ''],
+        };
+
+        return $issue === null ? $prefix : throw new InvalidAuthorizationConfigException($path, $reason, $issue, self::PREFIX_EXPECTED, 'string');
+    }
+
+    /**
+     * Return the name the table under the key takes: the name set, checked as
+     * `name()` checks it, when it is set explicitly, else the key's own with
+     * the prefix before it, checked by `prefixed()`.
+     *
+     * @param  string  $key
+     * @param  mixed  $name
+     * @param  string  $prefix
+     * @return string
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function effective(string $key, mixed $name, string $prefix): string
+    {
+        return TableNames::isDefault($key, $name) ? self::prefixed($key, $prefix) : self::name($key, $name);
+    }
+
+    /**
+     * Return the key's own name with the prefix before it, refusing it under
+     * the prefix's path when it is longer than the table's bound.
+     *
+     * @param  string  $key
+     * @param  string  $prefix
+     * @return string
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    public static function prefixed(string $key, string $prefix): string
+    {
+        $length = self::LENGTHS[$key] ?? ConfigBlock::refuseUnknownKey(self::KEY, $key, \array_keys(self::LENGTHS));
+        $name   = $prefix . $key;
+
+        if (\strlen($name) <= $length) {
+            return $name;
+        }
+
+        $reason   = "prefix '{$prefix}' makes " . self::KEY . ".{$key} '{$name}', longer than {$length} characters, which leaves no room for the names of its indexes and keys.";
+        $expected = "a prefix of at most {$length} characters less the length of '{$key}'";
+
+        throw new InvalidAuthorizationConfigException(self::KEY . '.' . TableNames::PREFIX, $reason, IssueCode::OUT_OF_RANGE, $expected, 'string');
     }
 
     /**
