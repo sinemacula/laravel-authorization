@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization;
 
-use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Database\Eloquent\Model;
@@ -14,6 +13,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Concerns\BuildsScopedManagers;
 use SineMacula\Laravel\Authorization\Concerns\ForgetsDecisions;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Concerns\ListsPermissions;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
@@ -31,7 +31,6 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException;
 use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Query\AuthorizedQuery;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
@@ -39,10 +38,7 @@ use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\ActionList;
-use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
-use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
-use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
@@ -58,19 +54,22 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
  * `for()`, `forUser()`, `withPolicies()` or `capped()`, or on a preview from
  * `previewFor()` (AUTHZ-11.4), which decides about another subject as the
  * caller, and the actions a subject may take in a scope, `permissionsFor`
- * (AUTHZ-10.4), decided through the same path but recording nothing. `check()`
- * is the one decision entry point (D22) and `checkMany()` the one bulk entry
- * point, `check()` deciding as `checkMany()` decides a batch of one, so a check
- * is decided the same way however it is asked: every other form adapts one of
- * them, and they alone record each decision and report it (see `CheckBatch`).
- * The decision itself is made by the manager's `DecisionPipeline`, which admits
- * the check (the subject, resource and tenant stages) and gathers every source,
- * the session caps included; the policy evaluator runs the rest of the stages
- * in AUTHZ-7.1's order, the denies, the caps, the allows and the implicit deny,
- * each recorded in the decision's trace for audit consumers. A manager from
- * `for()` of a `Subject` naming a tenant or an application decides every check,
- * batch, explanation and query scope there (N109), with the request's scope
- * restored afterwards; `permissionsFor()` lists in the scope it is given.
+ * (AUTHZ-10.4), and the same with the requirements each read,
+ * `heldPermissionsFor` (see `ListsPermissions`), decided through the same path
+ * but recording nothing. `check()` is the one decision entry point (D22) and
+ * `checkMany()` the one bulk entry point, `check()` deciding as `checkMany()`
+ * decides a batch of one, so a check is decided the same way however it is
+ * asked: every other form adapts one of them, and they alone record each
+ * decision and report it (see `CheckBatch`). The decision itself is made by the
+ * manager's `DecisionPipeline`, which admits the check (the subject, resource
+ * and tenant stages) and gathers every source, the session caps included; the
+ * policy evaluator runs the rest of the stages in AUTHZ-7.1's order, the
+ * denies, the caps, the allows and the implicit deny, each recorded in the
+ * decision's trace for audit consumers. A manager from `for()` of a `Subject`
+ * naming a tenant or an application decides every check, batch, explanation and
+ * query scope there (N109), with the request's scope restored afterwards;
+ * `permissionsFor()` and `heldPermissionsFor()` list in the scope they are
+ * given.
  *
  * `scopedTo()` is called from the `BuildsScopedManagers` trait alone, which an
  * analysis of this file by itself does not see (hence php:S1144), and so is the
@@ -89,7 +88,7 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
  */
 final class AuthorizationManager
 {
-    use BuildsScopedManagers, ForgetsDecisions, HasContainerInstance;
+    use BuildsScopedManagers, ForgetsDecisions, HasContainerInstance, ListsPermissions;
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline Decides each check, with the policy override and the caps of this scope. */
     private DecisionPipeline $pipeline;
@@ -610,99 +609,6 @@ final class AuthorizationManager
     }
 
     /**
-     * Return the actions the subject may take in the scope (AUTHZ-10.4, N69),
-     * for a UI to show or hide its controls: every action the permission
-     * catalogue declares (the package's own permissions, the cases of the
-     * configured enums and the definitions of the configured providers), each
-     * name once, in the catalogue's order, whose `check()` on the scope's
-     * resource, with the context, would allow, in the scope, about the subject.
-     *
-     * A resolved `Subject` is taken as it is, its identity, guard and session
-     * kept; any other object is named as `for()` names it; and null is the
-     * subject this manager's checks are about, as `check()` takes it: the
-     * request's, or the one `for()` or `forUser()` named, so
-     * `forUser(null)->permissionsFor(null, ...)` lists a guest's actions, which
-     * are none. The scope's tenant and application are put in place of the
-     * request's, both as the subject's and as the scope of the grants that
-     * count, and the request's are restored once the actions are decided, even
-     * when deciding one throws, with what the resolution cache held for them
-     * (see `AuthorizationScope`). The scope given wins over the one a `Subject`
-     * named through `for()` would decide in, as it does inside
-     * `AuthorizationScope::within()`.
-     *
-     * The listing is exact: each action is decided through the one decision
-     * path `checkMany()` takes, over what the checks share read once, the
-     * resource's tenant and attributes among it, so its denies, conditions,
-     * boundaries, guardrails, caps and authentication requirements are weighed
-     * exactly as `check()` weighs them, never as the allows less the denies. An
-     * action whose check would be `insufficient_authentication` is not listed,
-     * and one whose check would throw makes the listing throw what it throws,
-     * so nothing is ever listed that the check would not allow. A listing for
-     * one resource can differ from a listing for none, and the action is still
-     * to be authorized when it is taken.
-     *
-     * Listing is introspection, not a check (N70): it records no last decision
-     * and dispatches no `DecisionEvaluated` and no `AuthorizationFailed`. The
-     * break-glass reporting of BL-70 is to define how it treats it. A catalogue
-     * that cannot be read, such as one declaring a name twice with different
-     * metadata, throws `InvalidPermissionCatalogueException`.
-     *
-     * On a preview from `previewFor()`, the subject is the preview's target,
-     * named by null alone: naming any subject, or a scope of another tenant or
-     * application than the preview's, throws `InvalidPreviewException`. The
-     * preview is admitted first, and every action it evaluates dispatches its
-     * `DecisionEvaluated`, naming both parties, while the last decision is left
-     * as the admission recorded it (N86).
-     *
-     * @param  object|null  $subject
-     * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
-     * @param  array<string, mixed>  $context
-     * @return list<string>
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPreviewException
-     *
-     * @phpstan-ignore throws.unusedType
-     */
-    public function permissionsFor(?object $subject, AuthorizationScope $scope, array $context = []): array
-    {
-        $this->state?->ensureHealthy();
-
-        $preview = $this->preview;
-
-        if ($subject !== null && $preview !== null) {
-            throw InvalidPreviewException::retargeted('permissionsFor');
-        }
-
-        $named = match (true) {
-            $subject === null           => $this->currentSubject(),
-            $subject instanceof Subject => $subject,
-            default                     => $this->for($subject)->currentSubject(),
-        };
-
-        $preview?->refuseOtherScope($scope);
-
-        /** @var \SineMacula\Laravel\Authorization\Support\PermissionCatalogue $catalogue */
-        $catalogue = Container::getInstance()->make(PermissionCatalogue::class);
-        $actions   = \array_unique(\array_map(static fn (PermissionDefinition $definition): string => $definition->name, $catalogue->definitions()));
-
-        $list = fn (?Subject $about): array => $scope->within(function () use ($about, $scope, $actions, $context, $preview): array {
-            // Every action is decided on the one reference, so the resource is
-            // told, and its attributes read, once for the listing.
-            $resource  = ResourceReferences::of($scope->resource);
-            $checks    = \array_map(static fn (string $action): CheckInput => new CheckInput($action, $resource, $context), $actions);
-            $decisions = $this->batch($preview !== null, false)->decide($about, $checks);
-
-            return \array_values(\array_filter($actions, static fn (int $key): bool => $decisions[$key]->isAllowed(), \ARRAY_FILTER_USE_KEY));
-        });
-
-        // A preview's target is already the subject of its scope, which is the
-        // listing's.
-        return $preview === null ? $list($scope->subjectIn($named)) : $preview->run($list);
-    }
-
-    /**
      * Report a change to the application's tenant tree at the tenant: it moved
      * under another parent, or was deleted (AUTHZ-12.8).
      *
@@ -749,11 +655,11 @@ final class AuthorizationManager
 
     /**
      * Return the batch that decides this manager's checks, through its
-     * pipeline, so `check()`, `checkMany()` and `permissionsFor()` take the one
-     * path, dispatching each decision's event and storing it as the last
-     * decision, or, for introspection, neither, or, for a preview's listing,
-     * dispatching alone; a preview's decisions name its previewer. The batch
-     * `explain()` decides through explains its check.
+     * pipeline, so `check()`, `checkMany()` and the listings take the one path,
+     * dispatching each decision's event and storing it as the last decision,
+     * or, for introspection, neither, or, for a preview's listing, dispatching
+     * alone; a preview's decisions name its previewer. The batch `explain()`
+     * decides through explains its check.
      *
      * While grant usage is tracked, an everyday check's batch decides through a
      * pipeline that notes the grant routes each decision used (N100); a

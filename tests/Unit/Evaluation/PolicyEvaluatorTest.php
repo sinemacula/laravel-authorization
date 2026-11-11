@@ -1413,6 +1413,34 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
+     * A decision names every part of every requirement it read, on a deny or an
+     * allow, met or not, once each, sorted; one that read none names none.
+     *
+     * @return void
+     */
+    public function testTheDecisionNamesTheRequirementsItRead(): void
+    {
+        $policy = self::policy('p', [
+            ['effect' => 'deny', 'actions' => ['posts:read'], 'conditions' => ['authentication_requirement' => ['authentication' => ['phishing_resistant' => []]]]],
+            self::requiringAllow(['multifactor' => [], 'assurance_level' => ['min' => 'high']]),
+            self::requiringAllow(self::MULTIFACTOR),
+        ]);
+
+        $user    = new \stdClass;
+        $subject = new Subject($user, $user, session: 'session-1');
+        $checker = new StubRequirementChecker(RequirementResult::met(), ['phishing_resistant' => RequirementResult::unmet(['phishing_resistant'])]);
+        $allowed = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, new CheckContext([], [], new RequirementCheck($checker, $subject)));
+        $refused = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(RequirementResult::unmet(['multifactor'])));
+        $open    = self::policy('p', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+
+        self::assertTrue($allowed->isAllowed());
+        self::assertSame(['assurance_level', 'multifactor', 'phishing_resistant'], $allowed->requirementsRead);
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $refused->reason);
+        self::assertSame(['assurance_level', 'multifactor', 'phishing_resistant'], $refused->requirementsRead);
+        self::assertSame([], (new PolicyEvaluator)->evaluate([$open], 'posts:read', null, self::requirementContext(RequirementResult::met()))->requirementsRead);
+    }
+
+    /**
      * A resource policy's allow applies to a subject its principals name, at
      * the allow stage, decided by the statement, which names the resource its
      * policy is attached to; it does not apply to a subject they do not name,

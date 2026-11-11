@@ -16,12 +16,12 @@ use Illuminate\Support\Facades\Facade;
  * change it: each returns a new scoped clone, which shares the lifecycle's
  * last-decision store, so `lastDecision()` reads the latest decision of any of
  * them. A preview from `previewFor()` never rebinds the facade, the Gate or the
- * guard: they stay the caller's. `permissionsFor()` takes a null subject as the
- * manager's checks take it: the request's subject on the facade, the named one
- * on a clone from `for()`, and a guest on `forUser(null)`.
- * `forgetDecisionsFor()` forgets everything the lifecycle remembers towards its
- * decisions, for the facade's manager and every clone alike, never changing the
- * subject a clone was scoped to.
+ * guard: they stay the caller's. `permissionsFor()` and `heldPermissionsFor()`
+ * take a null subject as the manager's checks take it: the request's subject on
+ * the facade, the named one on a clone from `for()`, and a guest on
+ * `forUser(null)`. `forgetDecisionsFor()` forgets everything the lifecycle
+ * remembers towards its decisions, for the facade's manager and every clone
+ * alike, never changing the subject a clone was scoped to.
  *
  * @phpcs:disable Generic.Files.LineLength.TooLong
  *
@@ -45,6 +45,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static void forgetDecisionsFor(string|null $session = null, object|null $identity = null)
  * @method static \SineMacula\Laravel\Authorization\Evaluation\Explanation explain(string $action, mixed $resource = null, array<string, mixed> $context = [])
  * @method static list<string> permissionsFor(object|null $subject, \SineMacula\Laravel\Authorization\Support\AuthorizationScope $scope, array<string, mixed> $context = [])
+ * @method static list<\SineMacula\Laravel\Authorization\Evaluation\HeldPermission> heldPermissionsFor(object|null $subject, \SineMacula\Laravel\Authorization\Support\AuthorizationScope $scope, array<string, mixed> $context = [])
  * @method static \SineMacula\Laravel\Authorization\Subject|null currentSubject()
  * @method static void treeChanged(\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|\SineMacula\Laravel\Authorization\Support\Reference $tenant)
  *

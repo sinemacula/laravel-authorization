@@ -108,7 +108,9 @@ final class ReviewAdmission
      * `administration.impersonating` when the reviewer is impersonated and
      * nothing allows that, else as `administration.scope` unless the reviewer's
      * right covers the review's whole reach; any other decision is returned as
-     * it is.
+     * it is. A decision weighed carries, allowed or refused, every
+     * authentication requirement its further checks read, and is reused no
+     * longer than any of them stays met.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
      * @param  string  $action
@@ -128,12 +130,13 @@ final class ReviewAdmission
             ?? AdministeredScope::refusalOf($action, $resource, $review->reach(), $checks, $review->scope->isAcrossApplications());
 
         if ($reason === null) {
-            return $decision->withStep(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED));
+            return $checks->carriedInto($decision->withStep(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED)));
         }
 
-        $step = new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, cap: $reason->value);
+        $step    = new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, cap: $reason->value);
+        $refusal = Decision::deny($reason, DecisionStage::ADMINISTRATION, [], [...$decision->trace, $step]);
 
-        return Decision::deny($reason, DecisionStage::ADMINISTRATION, [], [...$decision->trace, $step])->withFreshness($decision->freshness);
+        return $checks->carriedInto($refusal->withFreshness($decision->freshness, $decision->requirementsRead));
     }
 
     /**

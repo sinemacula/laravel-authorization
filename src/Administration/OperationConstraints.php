@@ -115,7 +115,9 @@ final class OperationConstraints
      * Weigh the constraints of the operation the check is about, when the
      * decision allowed an administration action on an operation resource of
      * that action, deciding any further check they need through the checks;
-     * return any other decision as it is.
+     * return any other decision as it is. A decision weighed carries, allowed
+     * or refused, every authentication requirement its further checks read, and
+     * is reused no longer than any of them stays met.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
      * @param  string  $action
@@ -132,12 +134,13 @@ final class OperationConstraints
         $reason = self::refusal($resource->source, $resource, $checks);
 
         if ($reason === null) {
-            return $decision->withStep(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED));
+            return $checks->carriedInto($decision->withStep(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED)));
         }
 
-        $step = new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, cap: $reason->value);
+        $step    = new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, cap: $reason->value);
+        $refusal = Decision::deny($reason, DecisionStage::ADMINISTRATION, [], [...$decision->trace, $step]);
 
-        return Decision::deny($reason, DecisionStage::ADMINISTRATION, [], [...$decision->trace, $step])->withFreshness($decision->freshness);
+        return $checks->carriedInto($refusal->withFreshness($decision->freshness, $decision->requirementsRead));
     }
 
     /**

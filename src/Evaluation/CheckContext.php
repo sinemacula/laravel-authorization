@@ -29,8 +29,8 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  * The reserved key `authentication` an authentication requirement tests is
  * never read as a path: the context judges each requirement through its
  * requirement check, for the check's subject and session, and records what the
- * decision may be reused for. A context built without one finds every
- * requirement unmet.
+ * decision may be reused for and the name of every part it read. A context
+ * built without one finds every requirement unmet.
  *
  * The check's subject answers whether a resource policy's `principals` name it
  * (see `PrincipalSelectors`); a context built without it is named by none, so
@@ -275,6 +275,17 @@ final class CheckContext
     public function requirementFreshness(): ?RequirementFreshness
     {
         return $this->requirements->freshness();
+    }
+
+    /**
+     * Return the name of each part of every authentication requirement read on
+     * the context, met or not, once each, sorted; none when it read none.
+     *
+     * @return list<string>
+     */
+    public function requirementsRead(): array
+    {
+        return $this->requirements->read();
     }
 
     /**
