@@ -10,12 +10,16 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Concerns\ListsPermissions;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\CheckBatch;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
+use SineMacula\Laravel\Authorization\Evaluation\HeldPermission;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -34,10 +38,11 @@ use Tests\TestCase;
  * catalogue, in its order, each once, for which a fresh `check()` in the same
  * scope (entered with `TenantScope::within()`), about the same subject, with
  * the same context, allows; when one of those checks throws, the listing throws
- * what it throws. The listing records nothing: the last decision is the one
- * recorded before it, and no decision event is dispatched. Each listing is made
- * with a cold cache and again with the cache it warmed, with and without a
- * persistent store.
+ * what it throws. `heldPermissionsFor()` lists the same actions, each with the
+ * requirements the fresh check's decision read, and throws alike (N129). Each
+ * listing records nothing: the last decision is the one recorded before it, and
+ * no decision event is dispatched. Each listing is made with a cold cache and
+ * again with the cache it warmed, with and without a persistent store.
  *
  * The scenarios are drawn from `AUTHZ_PARITY_SEED`, a random seed when it is
  * not set, and there are `AUTHZ_PARITY_RUNS` of them, 150 by default; a failure
@@ -52,6 +57,7 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationManager::class)]
 #[CoversClass(AuthorizationScope::class)]
 #[CoversClass(CheckBatch::class)]
+#[CoversTrait(ListsPermissions::class)]
 final class ParityPropertyTest extends TestCase
 {
     /** @var int The scenarios run when `AUTHZ_PARITY_RUNS` is not set. */
@@ -138,14 +144,14 @@ final class ParityPropertyTest extends TestCase
     /**
      * Return the actions of the catalogue, in its order, each once, that a
      * fresh `check()` in the scope, about the subject, with the context,
-     * allows, each with a cold cache; or what the first check that throws
-     * throws.
+     * allows, each with a cold cache, with the requirements its decision read;
+     * or what the first check that throws throws.
      *
      * @param  \Tests\Integration\PermissionsFor\ListingScenario  $scenario
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
      * @param  array<string, mixed>  $context
-     * @return list<string>|\Throwable
+     * @return list<array{string, list<string>}>|\Throwable
      */
     private function singly(ListingScenario $scenario, ?Subject $subject, AuthorizationScope $scope, array $context): array|\Throwable
     {
@@ -168,11 +174,13 @@ final class ParityPropertyTest extends TestCase
             $allowed = [];
 
             foreach ($actions as $action => $definition) {
-                if (!$this->isAllowed($manager, $definition, $scope, $context)) {
+                $decision = $this->decisionOf($manager, $definition, $scope, $context);
+
+                if (!$decision->isAllowed()) {
                     continue;
                 }
 
-                $allowed[] = $action;
+                $allowed[] = [$action, $decision->requirementsRead];
             }
         } catch (\Throwable $exception) {
             return $exception;
@@ -185,25 +193,25 @@ final class ParityPropertyTest extends TestCase
     }
 
     /**
-     * Determine whether a fresh `check()` of the action, in the scope, on its
-     * resource, with the context, allows, with a cold cache, throwing what the
+     * Return the decision of a fresh `check()` of the action, in the scope, on
+     * its resource, with the context, with a cold cache, throwing what the
      * check throws once the scope is left.
      *
      * @param  \SineMacula\Laravel\Authorization\AuthorizationManager  $manager
      * @param  \SineMacula\Laravel\Authorization\Support\PermissionDefinition  $definition
      * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
      * @param  array<string, mixed>  $context
-     * @return bool
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      *
      * @throws \Throwable
      */
-    private function isAllowed(AuthorizationManager $manager, PermissionDefinition $definition, AuthorizationScope $scope, array $context): bool
+    private function decisionOf(AuthorizationManager $manager, PermissionDefinition $definition, AuthorizationScope $scope, array $context): Decision
     {
         $this->forgetCache();
 
-        $outcome = TenantScope::within($scope->tenant, $scope->application, static function () use ($manager, $definition, $scope, $context): bool|\Throwable {
+        $outcome = TenantScope::within($scope->tenant, $scope->application, static function () use ($manager, $definition, $scope, $context): Decision|\Throwable {
             try {
-                return $manager->check($definition->name, $scope->resource, $context)->isAllowed();
+                return $manager->check($definition->name, $scope->resource, $context);
             } catch (\Throwable $exception) {
                 return $exception;
             }
@@ -214,14 +222,15 @@ final class ParityPropertyTest extends TestCase
 
     /**
      * Assert that `permissionsFor()` lists the actions a fresh `check()`
-     * allows, or throws what it threw, and records nothing, and return how many
-     * listings were compared.
+     * allows, and `heldPermissionsFor()` the same actions with the requirements
+     * each check read, or that both throw what it threw, and that neither
+     * records anything, and return how many listings were compared.
      *
      * @param  \Tests\Integration\PermissionsFor\ListingScenario  $scenario
      * @param  \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubIdentity|null  $named
      * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
      * @param  array<string, mixed>  $context
-     * @param  list<string>|\Throwable  $single
+     * @param  list<array{string, list<string>}>|\Throwable  $single
      * @param  string  $cache
      * @return int
      */
@@ -244,11 +253,11 @@ final class ParityPropertyTest extends TestCase
         });
 
         try {
-            $listed = $manager->permissionsFor($named, $scope, $context);
-            $thrown = null;
-        } catch (\Throwable $exception) {
-            $listed = null;
-            $thrown = $exception;
+            [$listed, $thrown]   = self::listing(static fn (): array => $manager->permissionsFor($named, $scope, $context));
+            [$held, $heldThrown] = self::listing(static fn (): array => \array_map(
+                static fn (HeldPermission $permission): array => [$permission->action, $permission->requirements],
+                $manager->heldPermissionsFor($named, $scope, $context),
+            ));
         } finally {
             $events->forget(DecisionEvaluated::class);
             $events->forget(AuthorizationFailed::class);
@@ -256,21 +265,40 @@ final class ParityPropertyTest extends TestCase
 
         $replay = "With a {$cache} cache.\n{$scenario->replay()}";
 
-        self::assertSame(0, $reported, "The listing dispatched a decision event.\n{$replay}");
-        self::assertSame($before, $manager->lastDecision(), "The listing recorded a decision.\n{$replay}");
+        self::assertSame(0, $reported, "A listing dispatched a decision event.\n{$replay}");
+        self::assertSame($before, $manager->lastDecision(), "A listing recorded a decision.\n{$replay}");
 
         if ($single instanceof \Throwable) {
-            self::assertNotNull($thrown, "The listing did not throw.\n{$replay}");
-            self::assertSame($single::class, $thrown::class, $replay);
-            self::assertSame($single->getMessage(), $thrown->getMessage(), $replay);
+            foreach ([$thrown, $heldThrown] as $failure) {
+                self::assertNotNull($failure, "A listing did not throw.\n{$replay}");
+                self::assertSame($single::class, $failure::class, $replay);
+                self::assertSame($single->getMessage(), $failure->getMessage(), $replay);
+            }
 
             return 0;
         }
 
         self::assertNull($thrown, "The listing threw: {$thrown?->getMessage()}\n{$replay}");
-        self::assertSame($single, $listed, "The listing differs from what check() allows.\n{$replay}");
+        self::assertNull($heldThrown, "The held listing threw: {$heldThrown?->getMessage()}\n{$replay}");
+        self::assertSame(\array_column($single, 0), $listed, "The listing differs from what check() allows.\n{$replay}");
+        self::assertSame($single, $held, "The held listing differs from what check() allows and read.\n{$replay}");
 
         return 1;
+    }
+
+    /**
+     * Return what the listing lists and null, or null and what it throws.
+     *
+     * @param  \Closure(): list<mixed>  $list
+     * @return array{list<mixed>|null, \Throwable|null}
+     */
+    private static function listing(\Closure $list): array
+    {
+        try {
+            return [$list(), null];
+        } catch (\Throwable $exception) {
+            return [null, $exception];
+        }
     }
 
     /**

@@ -356,6 +356,29 @@ final class CheckContextTest extends TestCase
     }
 
     /**
+     * A context names every part of every requirement read on it, once each,
+     * sorted, met or not, and none before any is read.
+     *
+     * @return void
+     */
+    public function testNamesEveryRequirementRead(): void
+    {
+        $user    = new \stdClass;
+        $context = new CheckContext([], [], new RequirementCheck(
+            new StubRequirementChecker(RequirementResult::met(), ['phishing_resistant' => RequirementResult::unmet(['phishing_resistant'])]),
+            new Subject($user, $user, session: 'session-1'),
+        ));
+
+        self::assertSame([], $context->requirementsRead());
+
+        $context->assessRequirement(new AuthenticationRequirement(['phishing_resistant' => null]));
+        $context->assessRequirement(new AuthenticationRequirement(['multifactor' => null, 'assurance_level' => null], 'high'));
+        $context->assessRequirement(new AuthenticationRequirement(['multifactor' => null]));
+
+        self::assertSame(['assurance_level', 'multifactor', 'phishing_resistant'], $context->requirementsRead());
+    }
+
+    /**
      * A context given the subject's selectors asks them whether a resource
      * policy's principals name the subject; one without names nobody.
      *

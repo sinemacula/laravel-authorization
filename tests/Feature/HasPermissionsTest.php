@@ -14,6 +14,7 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\HeldPermission;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
@@ -323,6 +324,44 @@ final class HasPermissionsTest extends TestCase
         self::assertSame(['posts:delete'], $user->permissionsFor($scope, ['flag' => 'on']));
         self::assertSame(['posts:create'], $user->permissionsFor(AuthorizationScope::platform(), ['flag' => 'off']));
         self::assertSame(Authorization::permissionsFor($user, $scope), $user->permissionsFor($scope));
+        self::assertNull(Authorization::lastDecision());
+    }
+
+    /**
+     * `heldPermissionsFor()` lists the model's actions in the scope, with the
+     * requirements each read, through the authorization manager, as the facade
+     * lists them for the model, named with no session, so a deny guarded by a
+     * requirement does not apply and the action it guards is conditional.
+     *
+     * @return void
+     */
+    public function testHeldPermissionsForListsThroughTheManager(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        $tenant = StubTenant::query()->create(['id' => 'held-tenant', 'name' => 'held-tenant']);
+        $user   = StubIdentity::create(['id' => 'held-delegate']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:create']));
+        $user->givePermission(Permission::create(['name' => 'posts:delete']), null, $tenant);
+
+        $statements = [
+            ['effect' => 'deny', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['input.flag' => 'on']]],
+            ['effect' => 'deny', 'actions' => ['posts:delete'], 'conditions' => ['authentication_requirement' => ['authentication' => ['multifactor' => []]]]],
+        ];
+
+        $user->attachPolicy(Policy::create(['name' => 'guarded', 'document' => ['statements' => $statements]]));
+
+        $scope = AuthorizationScope::tenant($tenant);
+        $entry = static fn (HeldPermission $permission): array => [$permission->action, $permission->requirements];
+        $held  = static fn (array $permissions): array => \array_map($entry, $permissions);
+
+        self::assertSame([['posts:create', []], ['posts:delete', ['multifactor']]], $held($user->heldPermissionsFor($scope, ['flag' => 'off'])));
+        self::assertSame([['posts:delete', ['multifactor']]], $held($user->heldPermissionsFor($scope, ['flag' => 'on'])));
+        self::assertSame([['posts:create', []]], $held($user->heldPermissionsFor(AuthorizationScope::platform(), ['flag' => 'off'])));
+        self::assertEquals(Authorization::heldPermissionsFor($user, $scope, ['flag' => 'off']), $user->heldPermissionsFor($scope, ['flag' => 'off']));
         self::assertNull(Authorization::lastDecision());
     }
 

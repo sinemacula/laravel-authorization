@@ -26,6 +26,11 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
  * states is put to the checker afresh, so no unmet or undecidable result is
  * ever reused. Build one for every check, as its context is.
  *
+ * Every requirement assessed is noted by the names of its parts, whatever the
+ * checker found and whatever the statement stating it, an allow or a deny, so
+ * the decision can tell which requirements could change its answer (see
+ * `Decision::$requirementsRead`).
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -35,6 +40,9 @@ final class RequirementCheck
 {
     /** @var bool Whether the check has read a requirement. */
     private bool $hasRead = false;
+
+    /** @var list<string> The name of each part of every requirement the check has read, met or not, in the order read, any of them repeated. */
+    private array $read = [];
 
     /** @var \DateTimeImmutable|null The earliest instant a met requirement the check read stops being met. */
     private ?\DateTimeImmutable $metUntil = null;
@@ -65,6 +73,7 @@ final class RequirementCheck
     public function assess(AuthenticationRequirement $requirement): MatchResult
     {
         $this->hasRead = true;
+        $this->read    = [...$this->read, ...$requirement->names()];
 
         $result = $this->resultOf($requirement);
 
@@ -86,6 +95,21 @@ final class RequirementCheck
     public function freshness(): ?RequirementFreshness
     {
         return $this->hasRead ? new RequirementFreshness($this->subject?->session, $this->metUntil) : null;
+    }
+
+    /**
+     * Return the name of each part of every requirement the check has read,
+     * met, unmet or undecidable, once each, sorted; none when it read none.
+     *
+     * @return list<string>
+     */
+    public function read(): array
+    {
+        $names = \array_unique($this->read);
+
+        \sort($names, \SORT_STRING);
+
+        return $names;
     }
 
     /**

@@ -18,7 +18,9 @@ use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\HeldPermission;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -29,11 +31,14 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\PreviewsSubjects;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Fixtures\BulkChecks\FailingTenantTree;
@@ -53,6 +58,8 @@ use Tests\TestCase;
 #[CoversClass(OperationConstraints::class)]
 final class OperationConstraintsTest extends TestCase
 {
+    use PreviewsSubjects;
+
     /** @var list<array{string, string|null, bool, array{string, string}|null}> Each further check asked: its action, the application, whether below, and the tenant in place. */
     private array $asked = [];
 
@@ -86,8 +93,8 @@ final class OperationConstraintsTest extends TestCase
      * and cannot be proved, such as detaching a denying policy from a role, is
      * refused as unprovable at the administration stage, its trace ending with
      * the refusing constraint by its code after every step the allow took, and
-     * its freshness kept; one that can only narrow passes, with one satisfied
-     * step.
+     * its freshness and the requirements it read kept; one that can only narrow
+     * passes, with one satisfied step.
      *
      * @return void
      *
@@ -97,7 +104,7 @@ final class OperationConstraintsTest extends TestCase
     {
         $step     = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, permission: PackagePermissions::PERMISSION_GRANT);
         $fresh    = new RequirementFreshness('session-1');
-        $allowed  = Decision::allow(DecisionStage::ALLOW, [], [$step])->withFreshness($fresh);
+        $allowed  = Decision::allow(DecisionStage::ALLOW, [], [$step])->withFreshness($fresh, ['multifactor']);
         $role     = Role::query()->create(['name' => 'editor']);
         $edit     = Permission::query()->create(['name' => 'posts:edit']);
         $checks   = $this->checks(self::user('admin'), self::unexpected(...));
@@ -111,6 +118,7 @@ final class OperationConstraintsTest extends TestCase
         self::assertSame([], $decision->statements);
         self::assertEquals([$step, new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::REFUSED, null, [], 'administration.unprovable')], $decision->trace);
         self::assertSame($fresh, $decision->freshness);
+        self::assertSame(['multifactor'], $decision->requirementsRead);
 
         $narrowed = OperationConstraints::weigh(Decision::allow(DecisionStage::ALLOW), PackagePermissions::PERMISSION_REVOKE, $revoke->toResourceReference(), $checks);
 
@@ -147,6 +155,74 @@ final class OperationConstraintsTest extends TestCase
         $allowing = $this->checks(self::senior('admin'), static fn (): Decision => $allowed);
 
         self::assertTrue(OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_REVOKE, $revoke, $allowing)->isAllowed());
+    }
+
+    /**
+     * The decision that leaves the stage carries every authentication
+     * requirement its further checks read, allowed or refused, beside its own,
+     * once each, sorted, and may be reused no longer than the earliest of them
+     * stays met.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheRequirementsFurtherChecksReadAreCarried(): void
+    {
+        $own     = new RequirementFreshness('session-1', new \DateTimeImmutable('2026-11-06 13:00:00'));
+        $noon    = new RequirementFreshness('session-1', new \DateTimeImmutable('2026-11-06 12:00:00'));
+        $allowed = Decision::allow(DecisionStage::ALLOW)->withFreshness($own, ['phishing_resistant']);
+        $revoke  = self::revoke(self::user('user'))->actedBy(new Reference('support', '9'))->toResourceReference();
+        $further = static fn (): Decision => Decision::allow(DecisionStage::ALLOW)->withFreshness($noon, ['multifactor']);
+        $refused = static fn (): Decision => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT)->withFreshness($noon, ['multifactor']);
+
+        $satisfied = OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_REVOKE, $revoke, $this->checks(self::senior('admin'), $further));
+        $refusal   = OperationConstraints::weigh($allowed, PackagePermissions::PERMISSION_REVOKE, $revoke, $this->checks(self::senior('admin'), $refused));
+
+        self::assertTrue($satisfied->isAllowed());
+        self::assertSame(['multifactor', 'phishing_resistant'], $satisfied->requirementsRead);
+        self::assertSame($noon, $satisfied->freshness);
+        self::assertSame(DecisionReason::ADMINISTRATION_IMPERSONATING, $refusal->reason);
+        self::assertSame(['multifactor', 'phishing_resistant'], $refusal->requirementsRead);
+        self::assertSame($noon, $refusal->freshness);
+    }
+
+    /**
+     * An authentication requirement the impersonated right needs is read by the
+     * stage, so it is part of the operation's decision: while it is met, the
+     * operation's action is listed as conditional on it, and its check may be
+     * reused no longer than the requirement stays met; while it is not, the
+     * action is not listed, and its check is refused as impersonating.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARequirementTheImpersonatedRightNeedsIsCarried(): void
+    {
+        $admin     = self::senior('admin');
+        $until     = new \DateTimeImmutable('+1 hour');
+        $operation = self::revoke(self::user('user'))->actedBy(new Reference('support', '9'));
+        $scope     = AuthorizationScope::current()->withResource($operation);
+
+        $admin->givePermission(Permission::query()->create(['name' => PackagePermissions::PERMISSION_REVOKE]));
+        self::attachStatements($admin, 'impersonated', [self::requiring(PackagePermissions::ADMINISTRATION_IMPERSONATED)]);
+
+        $manager = $this->signIn($admin, checker: new StubRequirementChecker(RequirementResult::met($until)));
+        $listed  = $manager->heldPermissionsFor(null, $scope);
+        $held    = \array_column(\array_map(static fn (HeldPermission $permission): array => [$permission->action, $permission->requirements], $listed), 1, 0);
+
+        self::assertSame(['multifactor'], $held[PackagePermissions::PERMISSION_REVOKE] ?? null);
+        self::assertTrue($manager->check(PackagePermissions::PERMISSION_REVOKE, $operation)->isAllowed());
+        self::assertSame(['multifactor'], $manager->lastDecision()?->requirementsRead);
+        self::assertEquals($until, $manager->lastDecision()->freshness?->metUntil);
+
+        $unmet = $this->signIn($admin, checker: new StubRequirementChecker(RequirementResult::unmet(['multifactor'])));
+        $check = $unmet->check(PackagePermissions::PERMISSION_REVOKE, $operation);
+
+        self::assertNotContains(PackagePermissions::PERMISSION_REVOKE, $unmet->permissionsFor(null, $scope));
+        self::assertSame(DecisionReason::ADMINISTRATION_IMPERSONATING, $check->reason);
+        self::assertSame(['multifactor'], $check->requirementsRead);
     }
 
     /**
