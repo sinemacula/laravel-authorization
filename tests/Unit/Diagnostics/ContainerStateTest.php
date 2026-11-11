@@ -46,6 +46,11 @@ final class ContainerStateTest extends TestCase
         self::assertFalse(ContainerState::isScoped($container, 'singleton'));
         self::assertTrue(ContainerState::isScoped($container, 'scoped'));
         self::assertSame(['scoped'], ContainerState::scopedAbstracts($container));
+
+        $container->scoped(static fn (): \stdClass => new \stdClass);
+        $container->scoped('later', \stdClass::class);
+
+        self::assertSame(['scoped', 'later'], ContainerState::scopedAbstracts($container));
         self::assertSame($instance, ContainerState::instance($container, 'instance'));
         self::assertNull(ContainerState::instance($container, 'scalar'));
         self::assertNull(ContainerState::instance($container, 'singleton'));

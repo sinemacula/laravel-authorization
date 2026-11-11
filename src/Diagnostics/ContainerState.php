@@ -113,7 +113,8 @@ final class ContainerState
     /**
      * Return the abstracts the container forgets between requests and jobs,
      * those bound with `scoped()`, in the order they were bound, or none for a
-     * container that is not Laravel's.
+     * container that is not Laravel's. A binding scoped by its closure alone,
+     * which Laravel records under the closure itself, is left out.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @return list<string>
@@ -124,10 +125,11 @@ final class ContainerState
             return [];
         }
 
-        /** @var \Closure(\Illuminate\Container\Container): list<string> $scoped */
         $scoped = \Closure::bind(static fn (BaseContainer $container): array => $container->scopedInstances, null, BaseContainer::class);
 
-        return $scoped($container);
+        // A binding scoped by its closure alone is recorded under the closure,
+        // which names no abstract.
+        return \array_values(\array_filter($scoped($container), \is_string(...)));
     }
 
     /**
