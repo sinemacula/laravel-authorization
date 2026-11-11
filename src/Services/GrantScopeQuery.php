@@ -190,10 +190,6 @@ final readonly class GrantScopeQuery
 
         return self::holding(static function (Builder $query, string $table) use ($chain): void {
             $chain->grants($query, $table);
-
-            $query->where(static function (Builder $whole) use ($table): void {
-                $whole->whereNotNull($table . '.tenant_type')->orWhereNull($table . '.tenant_id');
-            });
         }, $application);
     }
 
