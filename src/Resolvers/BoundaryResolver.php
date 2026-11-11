@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Resolves the permission boundaries of a grantee that apply to a check
@@ -24,7 +25,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * reaches down (AUTHZ-5.3). A tenant's boundary never replaces the platform's:
  * every one that applies is intersected at the boundary stage, so a check
  * passes only what each of them allows. With no tenant, only the platform-wide
- * one applies (AUTHZ-5.7).
+ * one applies (AUTHZ-5.7). A boundary naming half a tenant, a type without a
+ * key or a key without a type, which the package never writes, applies
+ * everywhere, as a platform-wide one does, since what restricts fails closed
+ * (see `Support\TenantColumns`).
  *
  * The boundaries of every saved model are read, whichever contracts it
  * implements, so a boundary set on a grantee always caps the checks about it,
@@ -90,7 +94,7 @@ final class BoundaryResolver
             ->where($table . '.authorizable_type', $grantee->type)
             ->where($table . '.authorizable_id', $grantee->id)
             ->where(static function (Builder $query) use ($table): void {
-                TenantScope::currentChain()->grants($query, $table);
+                TenantColumns::restricting(TenantScope::currentChain(), $query, $table);
             })
             ->select($model->qualifyColumn('*'))
             ->get()

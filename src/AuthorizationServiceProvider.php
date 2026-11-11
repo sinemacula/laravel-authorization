@@ -45,6 +45,7 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Diagnostics\GuardedBoot;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
+use SineMacula\Laravel\Authorization\Diagnostics\SeamClassifier;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
@@ -262,16 +263,30 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Determine whether the contract is bound to the package's own default,
-     * rather than to a binding an application or a sibling package made.
+     * Determine whether the contract holds the package's own default, rather
+     * than a binding an application or a sibling package made.
      *
      * A sibling that registers after the package uses this to replace the
      * package's default with its own adapter, while leaving standing a binding
-     * the application made before the sibling registered. An unbound contract,
-     * an instance and any binding the package did not make answer false, as
-     * does a contract the configuration names a class for, which is bound
-     * through a closure the package's registrar declares as soon as the package
-     * registers, the class itself as the application boots.
+     * the application made before the sibling registered, and a check run once
+     * the application booted uses it to tell whether the default is still in
+     * place. The answer is the configuration report's (see `SeamClassifier`):
+     * true exactly when `authorization:check` would show the seam's origin as
+     * the package's default, read from what the package recorded as it bound
+     * the seam, so the default answers true before it is resolved and after,
+     * whether an instance of it is held or not, as the context key catalogue's
+     * is once resolved. An unbound contract, an alias, a deferred provider, an
+     * instance handed to the container, a sibling's declared adapter and any
+     * binding made before the package registered or after answer false, as does
+     * a contract the configuration names a class for, from the moment the
+     * package registers, while the class itself is bound only as the
+     * application boots, and still once a refused boot, as a diagnostic boot
+     * refuses, dropped the step that binds it, leaving the default to resolve
+     * in its place. Nothing is built.
+     *
+     * An instance handed over the context key catalogue after it was resolved,
+     * which Laravel holds as it holds the one it built, cannot be told from the
+     * default, and is taken for it, as the report takes it.
      *
      * @param  \Illuminate\Container\Container  $container
      * @param  string  $contract
@@ -279,15 +294,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     public static function isPackageDefault(Container $container, string $contract): bool
     {
-        $concrete = $container->getBindings()[$contract]['concrete'] ?? null;
-
-        // An instance held over the default leaves the binding beneath it in
-        // place, and Laravel offers no public way to tell, so the instances are
-        // read in the container's own scope; the package's defaults are never
-        // shared, so any instance held under the contract is someone's.
-        $isHeld = \Closure::bind(static fn (Container $container): bool => isset($container->instances[$contract]), null, Container::class);
-
-        return !$isHeld($container) && $concrete instanceof \Closure && (new \ReflectionFunction($concrete))->getClosureScopeClass()?->getName() === self::class;
+        return SeamClassifier::of($container)->isPackageDefault($contract);
     }
 
     /**

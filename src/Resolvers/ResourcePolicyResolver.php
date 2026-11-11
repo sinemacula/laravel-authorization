@@ -12,8 +12,6 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
-use SineMacula\Laravel\Authorization\Database\GrantApplications;
-use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
@@ -23,6 +21,7 @@ use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Resolves the resource policies a check on a resource reads (AUTHZ-7.3).
@@ -44,17 +43,21 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * its type's alone, never none. A type alone is cached apart from every record.
  *
  * The attachments and their documents are read in one query, on the write
- * connection, through the resolution cache, as a grantee's policies are: kept
- * for the request or job, and in the persistent store when one is configured. A
- * policy attached to the record and to its type is read once, as the record's.
- * `policiesForMany()` reads those of many resources at once, one query for the
- * records of each type, and keeps each record's entry, so a check on any one of
- * them then reads none; when the table compares keys otherwise than byte for
- * byte, folding case say, each record's are read on their own instead. The
- * authorization manager reads through the instance the service provider gives
- * it; a manager given none reads no resource policies. A document that cannot
- * be read is written to the log channel and its exception thrown, so it denies
- * every check on the resource rather than being skipped.
+ * connection, those whose denies count in every scope, naming half a tenant or
+ * of a policy naming half a tenant, through queries united with the scope's
+ * own, each a range of an index, so the scope's attachments are read as they
+ * would be without them (see `ResourcePolicyAttachments`), through the
+ * resolution cache, as a grantee's policies are: kept for the request or job,
+ * and in the persistent store when one is configured. A policy attached to the
+ * record and to its type is read once, as the record's. `policiesForMany()`
+ * reads those of many resources at once, one query for the records of each
+ * type, and keeps each record's entry, so a check on any one of them then reads
+ * none; when the table compares keys otherwise than byte for byte, folding case
+ * say, each record's are read on their own instead. The authorization manager
+ * reads through the instance the service provider gives it; a manager given
+ * none reads no resource policies. A document that cannot be read is written to
+ * the log channel and its exception thrown, so it denies every check on the
+ * resource rather than being skipped.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,14 +67,8 @@ final readonly class ResourcePolicyResolver
     /** @var string The column of an attachment holding the attached record's key, null for a type's. */
     private const string ATTACHED_KEY = '.resource_id';
 
-    /** @var string The column of an attachment holding the attached policy's key. */
-    private const string POLICY_KEY = '.policy_id';
-
-    /** @var string The column of an attachment holding the attached resource's type. */
-    private const string ATTACHED_TYPE = '.resource_type';
-
-    /** @var string The column the query reads the attached resource's key into. */
-    private const string RESOURCE_ID = 'attached_resource_id';
+    /** @var string The column the query reads whether a policy is attached to a record of the type by a row naming half a tenant into. */
+    private const string HALF_ATTACHED = 'authz_half_attached';
 
     /** @var int How many policies attached to records are read at a time. */
     private const int RECORD_PAGE = 100;
@@ -168,14 +165,25 @@ final readonly class ResourcePolicyResolver
      * so one made since the last check counts, a page at a time. A type longer
      * than the table stores has none.
      *
+     * The policies whose denies count on records of the type in every scope are
+     * read too (see `Support\TenantColumns`), in the same query, through
+     * queries united with the scope's own, each a range of an index, so with
+     * none the scope's attachments are read as they would be without them: a
+     * policy naming half a tenant, read with its denies alone, and a policy
+     * attached to a record of the type by a row naming half a tenant. Each is
+     * kept in the given array by its key, true for the first, whose every
+     * attachment counts for its denies alone, false for the second, whose
+     * attachments naming half a tenant do.
+     *
      * @param  string  $type
      * @param  string  $action
      * @param  int  $limit
+     * @param  array<string, bool>  $everywhere
      * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>|null
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
-    public function recordPoliciesFor(string $type, string $action, int $limit): ?array
+    public function recordPoliciesFor(string $type, string $action, int $limit, array &$everywhere = []): ?array
     {
         if (\strlen($type) > Reference::MAX_BYTES) {
             return [];
@@ -184,28 +192,18 @@ final readonly class ResourcePolicyResolver
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
         $class = ModelClasses::get('policy');
 
-        $table = TableNames::get('resource_policies');
-
         $model    = new $class;
         $policies = $class::query()->withoutGlobalScopes()->useWritePdo()
-            ->whereIn($model->getQualifiedKeyName(), static function (Builder $query) use ($table, $type): void {
-                $query->select($table . self::POLICY_KEY)->from($table)->where($table . self::ATTACHED_TYPE, $type)->whereNotNull($table . self::ATTACHED_KEY);
-
-                TenantScope::currentChain()->grants($query, $table);
-                GrantApplications::only($query, $table, TenantScope::currentApplication());
-            })
+            ->select($model->qualifyColumn('*'))
+            ->selectSub(ResourcePolicyAttachments::halfOnRecords($model, $type)->limit(1), self::HALF_ATTACHED)
+            ->whereIn($model->getQualifiedKeyName(), ResourcePolicyAttachments::onRecords($model, $type))
             ->lazyById(self::RECORD_PAGE);
 
-        $names   = static fn (Statement $statement): bool => $statement->coversAction($action);
         $found   = [];
         $scanned = 0;
 
         foreach ($policies as $policy) {
-            $hydrated = GrantResolver::hydrate($policy);
-
-            if (\array_filter($hydrated->statements, $names) !== []) {
-                $found[] = $hydrated->withResource("{$type}:*");
-            }
+            self::keepRecordPolicy($policy, $type, $action, $found, $everywhere);
 
             // More scanned than the limit's multiple, or more found than the
             // limit, without overflowing however large the limit is.
@@ -239,23 +237,15 @@ final readonly class ResourcePolicyResolver
         $table = TableNames::get('resource_policies');
 
         $model = new $class;
-        $query = $class::query()->withoutGlobalScopes()->useWritePdo()
-            ->join($table, $table . self::POLICY_KEY, '=', $model->getQualifiedKeyName())
-            ->where($table . self::ATTACHED_TYPE, $type)
-            ->where(static function (Builder $query) use ($table, $id): void {
-                $query->whereNull($table . self::ATTACHED_KEY);
+        $query = ResourcePolicyAttachments::of($model, $type, static function (Builder $query) use ($table, $id): void {
+            $query->whereNull($table . self::ATTACHED_KEY);
 
-                if ($id === null) {
-                    return;
-                }
+            if ($id === null) {
+                return;
+            }
 
-                $query->orWhere($table . self::ATTACHED_KEY, $id);
-            })
-            ->where(static function (Builder $query) use ($table): void {
-                TenantScope::currentChain()->grants($query, $table);
-                GrantApplications::only($query, $table, TenantScope::currentApplication());
-            })
-            ->select([$model->qualifyColumn('*'), $table . '.resource_id as ' . self::RESOURCE_ID]);
+            $query->orWhere($table . self::ATTACHED_KEY, $id);
+        });
 
         $hydrated = [];
 
@@ -293,25 +283,15 @@ final readonly class ResourcePolicyResolver
             return [];
         }
 
-        $rows = $class::query()->withoutGlobalScopes()->useWritePdo()
-            ->join($table, $table . self::POLICY_KEY, '=', $model->getQualifiedKeyName())
-            ->where($table . self::ATTACHED_TYPE, $type)
-            ->where(static function (Builder $query) use ($table, $ids): void {
-                $query->whereNull($table . self::ATTACHED_KEY)->orWhereIn($table . self::ATTACHED_KEY, $ids);
-            })
-            ->where(static function (Builder $query) use ($table): void {
-                TenantScope::currentChain()->grants($query, $table);
-                GrantApplications::only($query, $table, TenantScope::currentApplication());
-            })
-            ->select([$model->qualifyColumn('*'), $table . '.resource_id as ' . self::RESOURCE_ID])
-            ->get()
-            ->all();
+        $rows = ResourcePolicyAttachments::of($model, $type, static function (Builder $query) use ($table, $ids): void {
+            $query->whereNull($table . self::ATTACHED_KEY)->orWhereIn($table . self::ATTACHED_KEY, $ids);
+        })->get()->all();
 
         $byRecord = [];
 
         foreach ($rows as $row) {
             /** @var string|null $recordId */
-            $recordId = $row->getAttribute(self::RESOURCE_ID);
+            $recordId = $row->getAttribute(ResourcePolicyAttachments::RESOURCE_ID);
 
             $byRecord[$recordId === null ? '' : "#{$recordId}"][] = $row;
         }
@@ -510,6 +490,39 @@ final readonly class ResourcePolicyResolver
     }
 
     /**
+     * Keep the policy attached to records of the type among those found when a
+     * statement of it names the action, as attached to the type's records, its
+     * denies alone when it names half a tenant; and keep, by its key, whether
+     * it names half a tenant, when its denies count on those records in every
+     * scope (see `recordPoliciesFor()`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  string  $type
+     * @param  string  $action
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\Policy>  $found
+     * @param  array<string, bool>  $everywhere
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     */
+    private static function keepRecordPolicy(Policy $policy, string $type, string $action, array &$found, array &$everywhere): void
+    {
+        $isHalf   = TenantColumns::isDenyOnly(null, null, $policy);
+        $hydrated = GrantResolver::hydrate($policy);
+        $hydrated = $isHalf ? $hydrated->denies() : $hydrated;
+
+        if (\array_filter($hydrated->statements, static fn (Statement $statement): bool => $statement->coversAction($action)) !== []) {
+            $found[] = $hydrated->withResource("{$type}:*");
+        }
+
+        if (!$isHalf && $policy->getAttribute(self::HALF_ATTACHED) === null) {
+            return;
+        }
+
+        $everywhere[(string) $hydrated->id] = $isHalf;
+    }
+
+    /**
      * Return the policy the row holds, hydrated once however many records it is
      * read for, or the exception its document threw, kept so it is thrown again
      * without hydrating again.
@@ -584,13 +597,13 @@ final readonly class ResourcePolicyResolver
         $denies = [];
 
         foreach ($policies as $policy) {
-            $statements = \array_filter($policy->statements, static fn (Statement $statement): bool => $statement->effect === PolicyEffect::DENY);
+            $only = $policy->denies();
 
-            if ($statements === [] || isset($seen[$policy->id . "\0" . $policy->resource])) {
+            if ($only->statements === [] || isset($seen[$policy->id . "\0" . $policy->resource])) {
                 continue;
             }
 
-            $denies[] = new EvaluationPolicy($policy->name, $statements, $policy->version, $policy->id, $policy->resource);
+            $denies[] = $only;
         }
 
         return $denies;
@@ -598,7 +611,11 @@ final readonly class ResourcePolicyResolver
 
     /**
      * Hydrate each policy read once, as attached to the record when it is
-     * attached to the record, else to the type.
+     * attached to the record, else to the type. An attachment whose denies
+     * alone count, one naming half a tenant or of a policy naming half a tenant
+     * (see `TenantColumns`), never labels a policy an attachment whose allows
+     * count also reaches, so an explanation names where its allows came from; a
+     * policy only such attachments reach is hydrated with its denies alone.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy>  $rows
      * @param  string  $type
@@ -612,29 +629,54 @@ final readonly class ResourcePolicyResolver
         /** @var array<string, array{\SineMacula\Laravel\Authorization\Models\Policy, string}> $attached */
         $attached = [];
 
+        /** @var array<string, array{\SineMacula\Laravel\Authorization\Models\Policy, string}> $granting */
+        $granting = [];
+
         foreach ($rows as $row) {
-            $key = (string) $row->getKey(); // @phpstan-ignore cast.string
+            self::label($attached, $row, $type);
 
-            /** @var string|null $recordId */
-            $recordId = $row->getAttribute(self::RESOURCE_ID);
-
-            // The record's attachment wins over the type's, told apart by its
-            // key, never by its label.
-            if ($recordId === null && isset($attached[$key])) {
+            if (TenantColumns::isDenyOnly($row->getAttribute(ResourcePolicyAttachments::TENANT_TYPE), $row->getAttribute(ResourcePolicyAttachments::TENANT_ID), $row)) {
                 continue;
             }
 
-            $attached[$key] = [$row, $recordId === null ? "{$type}:*" : "{$type}:{$recordId}"];
+            self::label($granting, $row, $type);
         }
 
         $policies = [];
 
-        foreach ($attached as [$row, $resource]) {
-            $policy = self::hydrateOnce($row, $hydrated);
+        foreach ($attached as $key => $label) {
+            [$row, $resource] = $granting[$key] ?? $label;
 
-            $policies[] = $policy instanceof InvalidPolicyDocumentException ? throw $policy : $policy->withResource($resource);
+            $policy = self::hydrateOnce($row, $hydrated);
+            $policy = $policy instanceof InvalidPolicyDocumentException ? throw $policy : $policy->withResource($resource);
+
+            $policies[] = isset($granting[$key]) ? $policy : $policy->denies();
         }
 
         return $policies;
+    }
+
+    /**
+     * Keep the row's label in the given labels by its policy's key: the
+     * resource it attaches the policy to, the record's attachment winning over
+     * the type's, told apart by its key, never by its label.
+     *
+     * @param  array<string, array{\SineMacula\Laravel\Authorization\Models\Policy, string}>  $labels
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $row
+     * @param  string  $type
+     * @return void
+     */
+    private static function label(array &$labels, Policy $row, string $type): void
+    {
+        $key = (string) $row->getKey(); // @phpstan-ignore cast.string
+
+        /** @var string|null $recordId */
+        $recordId = $row->getAttribute(ResourcePolicyAttachments::RESOURCE_ID);
+
+        if ($recordId === null && isset($labels[$key])) {
+            return;
+        }
+
+        $labels[$key] = [$row, $recordId === null ? "{$type}:*" : "{$type}:{$recordId}"];
     }
 }

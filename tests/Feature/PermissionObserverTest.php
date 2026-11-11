@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Events\Permission\Created as PermissionCreated;
@@ -66,6 +67,34 @@ final class PermissionObserverTest extends TestCase
         $this->expectException(OwnerChangedException::class);
 
         $permission->save();
+    }
+
+    /**
+     * A role naming half a tenant that carries the permission through a stored
+     * row applies nowhere, so it never keeps the permission's guard from
+     * changing; a whole role still does.
+     *
+     * @return void
+     */
+    public function testAGuardChangePassesOverARoleNamingHalfATenant(): void
+    {
+        $permission = Permission::query()->create(['name' => 'posts:read']);
+        $role       = Role::query()->create(['name' => 'half', 'guard' => 'web']);
+
+        $role->permissions()->attach($permission->id);
+
+        DB::table('roles')->where('id', $role->id)->update(['tenant_type' => 'stub_tenant', 'tenant_id' => null]);
+
+        $permission->guard = 'api';
+        $permission->save();
+
+        self::assertSame('api', $permission->fresh()?->guard);
+
+        Role::query()->create(['name' => 'whole', 'guard' => 'api'])->permissions()->attach($permission->id);
+
+        $permission->guard = 'admin';
+
+        self::assertInstanceOf(GuardMismatchException::class, self::refusalOf(static fn (): bool => $permission->save()));
     }
 
     /**

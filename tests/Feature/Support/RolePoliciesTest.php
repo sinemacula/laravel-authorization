@@ -636,11 +636,57 @@ final class RolePoliciesTest extends TestCase
         $reader->attachPolicy($mobile, application: 'mobile');
 
         self::assertEqualsCanonicalizing([
-            ['policy_id' => $edits->id, 'role_id' => $editor->id],
-            ['policy_id' => $reads->id, 'role_id' => $editor->id],
-            ['policy_id' => $reads->id, 'role_id' => $reader->id],
+            ['policy_id' => $edits->id, 'role_id' => $editor->id, 'is_whole' => true],
+            ['policy_id' => $reads->id, 'role_id' => $editor->id, 'is_whole' => true],
+            ['policy_id' => $reads->id, 'role_id' => $reader->id, 'is_whole' => true],
         ], RolePolicies::attachedTo($type, [$editor->id, $reader->id]));
         self::assertSame([], RolePolicies::attachedTo($type, []));
+    }
+
+    /**
+     * A role's attachment naming half a tenant, a key without a type or a type
+     * without a key, holds wherever the role is held, for its denies alone: it
+     * is read in every scope, its policy listed as reached only that way unless
+     * an attachment that holds reaches it too, never as a route of the role,
+     * and told apart as not whole; a role's policy that names half a tenant is
+     * read in every scope too. Attached in another tenant, it is not read.
+     *
+     * @return void
+     */
+    public function testARolesAttachmentNamingHalfATenantCountsForItsDeniesAloneEverywhere(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $editor = Role::create(['name' => 'editor']);
+        $type   = $editor->getMorphClass();
+        $row    = ['authorizable_type' => $type, 'authorizable_id' => $editor->id, 'include_subtree' => true];
+
+        [$keyless, $typeless, $both, $owned, $elsewhere] = \array_map(self::policy(...), ['keyless', 'typeless', 'both', 'owned', 'elsewhere']);
+
+        $user->assignRole($editor);
+        $editor->attachPolicy($both);
+
+        DB::table('authorizable_policies')->insert([
+            ['policy_id' => $keyless->id, ...$row, 'tenant_type' => 'tenant', 'tenant_id' => null],
+            ['policy_id' => $typeless->id, ...$row, 'tenant_type' => null, 'tenant_id' => 't-1'],
+            ['policy_id' => $both->id, ...$row, 'tenant_type' => null, 'tenant_id' => 't-1'],
+            ['policy_id' => $owned->id, ...$row, 'tenant_type' => 'tenant', 'tenant_id' => 't-2'],
+            ['policy_id' => $elsewhere->id, ...$row, 'tenant_type' => 'tenant', 'tenant_id' => 't-2'],
+        ]);
+        DB::table('policies')->where('id', $owned->id)->update(['tenant_type' => 'tenant', 'tenant_id' => null]);
+
+        $inherited = RolePolicies::heldThrough($user->roles()->get(), $user->roles(), new ResolutionPins(null, true));
+
+        self::assertEqualsCanonicalizing([$keyless->id, $typeless->id, $both->id, $both->id, $owned->id], $inherited->keys);
+        self::assertEqualsCanonicalizing([$keyless->id, $typeless->id], $inherited->denyOnly);
+        self::assertEqualsCanonicalizing([$both->id, $owned->id], $inherited->byRole[$editor->id]);
+        self::assertEqualsCanonicalizing([
+            ['policy_id' => $keyless->id, 'role_id' => $editor->id, 'is_whole' => false],
+            ['policy_id' => $typeless->id, 'role_id' => $editor->id, 'is_whole' => false],
+            ['policy_id' => $both->id, 'role_id' => $editor->id, 'is_whole' => true],
+            ['policy_id' => $both->id, 'role_id' => $editor->id, 'is_whole' => false],
+            ['policy_id' => $owned->id, 'role_id' => $editor->id, 'is_whole' => true],
+        ], RolePolicies::attachedTo($type, [$editor->id]));
+        self::assertCount(1, RolePolicies::probe($user->roles(), ['policy_id'])->where('policy_id', $keyless->id)->get());
     }
 
     /**

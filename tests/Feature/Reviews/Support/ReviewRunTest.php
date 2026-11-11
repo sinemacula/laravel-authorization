@@ -379,17 +379,17 @@ final class ReviewRunTest extends TestCase
     }
 
     /**
-     * A grant naming half a tenant is selected exactly where a check reads it:
-     * a key without a type at the platform, so wherever what applies is read,
-     * and a type without a key nowhere; a review of everywhere selects a type
-     * without a key too, and a review rooted within a tenant selects neither,
-     * since neither can be shown to lie within it.
+     * A grant naming half a tenant is selected exactly where a check reads it,
+     * which is nowhere: neither a key without a type nor a type without a key
+     * is selected wherever what applies is read; a review of everywhere selects
+     * both, and a review rooted within a tenant selects neither, since neither
+     * can be shown to lie within it.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testARowNamingHalfATenantIsSelectedWhereACheckReadsIt(): void
+    public function testARowNamingHalfATenantIsSelectedOnlyInAReviewOfEverywhere(): void
     {
         $this->seedGrants();
 
@@ -405,8 +405,9 @@ final class ReviewRunTest extends TestCase
         $halves = static fn (ReviewScope $scope): array => \array_values(\array_intersect(self::selected($scope), ['no-key', 'no-type']));
 
         self::assertEqualsCanonicalizing(['no-key', 'no-type'], $halves(ReviewScope::everywhere()));
-        self::assertSame(['no-type'], $halves(ReviewScope::appliesIn(null, ApplicationSelector::any())));
-        self::assertSame(['no-type'], $halves(ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none())));
+        self::assertSame([], $halves(ReviewScope::appliesIn(null, ApplicationSelector::any())));
+        self::assertSame([], $halves(ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none())));
+        self::assertSame([], $halves(ReviewScope::appliesIn(self::tenant('team1'), ApplicationSelector::any())));
         self::assertSame([], $halves(ReviewScope::rootedWithin(self::tenant('org1'))));
         self::assertSame([], $halves(ReviewScope::rootedWithin(self::tenant('org2'))));
         self::assertEqualsCanonicalizing(['acct1', 'team1'], self::selected(ReviewScope::rootedWithin(self::tenant('acct1'))));

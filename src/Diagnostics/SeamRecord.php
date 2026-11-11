@@ -8,7 +8,8 @@ namespace SineMacula\Laravel\Authorization\Diagnostics;
  * What the package recorded of one seam as it bound it, before binding: whether
  * something was bound to the contract already and what, the closure the package
  * bound, the key it forwards to, the class it builds, whether a class the
- * configuration names was bound in place of the default, and, for the grant
+ * configuration names was bound in place of the default, or the name it gives
+ * the class to bind in its place as the application boots, and, for the grant
  * hook, the decorator running the configured hooks that replaced an instance
  * held at once, with the instance it decorates: the one held as the package
  * registered, or one a provider handed the container after it.
@@ -44,6 +45,7 @@ final readonly class SeamRecord
      * @param  string|null  $deferredProvider
      * @param  object|null  $wrapper
      * @param  object|null  $wrapped
+     * @param  string|null  $named
      */
     public function __construct(
 
@@ -82,6 +84,9 @@ final readonly class SeamRecord
 
         /** The instance the decorator replaced, held as the package registered or handed the container after, else null. */
         public ?object $wrapped = null,
+
+        /** The name the configuration gives the class bound in place of the default as the application boots, while the closure recorded resolves the default, else null. */
+        public ?string $named = null,
     ) {}
 
     /**
@@ -107,7 +112,22 @@ final readonly class SeamRecord
             $this->deferredProvider,
             $wrapper,
             $wrapped,
+            $this->named,
         );
+    }
+
+    /**
+     * Determine whether the closure recorded stands for the class the
+     * configuration names: bound in place of the default, or to be bound in its
+     * place as the application boots, whether that step is still to run or was
+     * dropped, as a refused boot drops it; every step that runs records the
+     * seam again.
+     *
+     * @return bool
+     */
+    public function isConfigured(): bool
+    {
+        return $this->configured || $this->named !== null;
     }
 
     /**

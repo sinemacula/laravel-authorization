@@ -32,6 +32,7 @@ use SineMacula\Laravel\Authorization\Support\PolicyPrincipals;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Attaches policies to resources and resource types, and detaches them
@@ -203,6 +204,14 @@ final class ResourcePolicyService
      * nothing attached, the detachment is decided unchanged at platform scope,
      * so its action is decided either way.
      *
+     * An attachment naming half a tenant, which the package never writes, is
+     * detached too: its denies hold everywhere (see `Support\TenantColumns`),
+     * so its detachment is decided at platform scope, in its application,
+     * needing the actor's platform authority to detach a resource policy, never
+     * a scope it names half of. It is removed as stored, counted, and written
+     * to the log as malformed rather than reported by an event, which would
+     * name it the platform's.
+     *
      * @param  mixed  $resource
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return int
@@ -218,15 +227,17 @@ final class ResourcePolicyService
 
         /** @var int<0, max> */
         return OperationScope::run(Operation::begin($actor, [PackagePermissions::RESOURCE_POLICY_DETACH]), static function (Operation $operation) use ($actor, $reference): int {
-            $attachments = self::attachmentsOf($reference);
-            $events      = [];
+            [$attachments, $malformed] = self::attachmentsOf($reference);
 
+            $events  = [];
             $grantee = self::granteeOf($reference);
 
             $action = PackagePermissions::RESOURCE_POLICY_DETACH;
-            $detach = static fn (array $attachment): OperationResource => OperationResource::revoke($action, $grantee, ...$attachment);
+            $detach = static fn (array $attachment): OperationResource => OperationResource::revoke($action, $grantee, $attachment[0], $attachment[1]);
 
-            $actor?->authorizeChanges($operation, \array_map($detach, $attachments), OperationResource::unchanged($action, $grantee, null, GrantScope::platform()));
+            $unchanged = OperationResource::unchanged($action, $grantee, null, GrantScope::platform());
+
+            $actor?->authorizeChanges($operation, \array_map($detach, [...$attachments, ...$malformed]), $unchanged);
 
             foreach ($attachments as [$policy, $scope]) {
                 $held = self::table($reference, $scope)->detach(self::key($policy));
@@ -240,7 +251,7 @@ final class ResourcePolicyService
 
             OperationScope::dispatch(...$events);
 
-            return \count($events);
+            return \count($events) + self::detachMalformed($operation, $reference, $malformed);
         }, $actor);
     }
 
@@ -371,11 +382,56 @@ final class ResourcePolicyService
     }
 
     /**
+     * Detach each attachment to the resource naming half a tenant given, as
+     * stored, inside the caller's operation, writing each detached to the log
+     * as malformed once the operation commits, since no event can say where it
+     * held, and invalidating the cache as their events would; and return how
+     * many were detached: one no longer there is passed over.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @param  list<array{\SineMacula\Laravel\Authorization\Models\Policy, \SineMacula\Laravel\Authorization\Support\GrantScope, string|null, string|null}>  $malformed
+     * @return int
+     */
+    private static function detachMalformed(Operation $operation, ResourceReference $resource, array $malformed): int
+    {
+        $events = [];
+
+        foreach ($malformed as [$policy, $scope, $type, $id]) {
+            $detached = AuthorizationConnection::connection()->table(self::tableName())
+                ->where('resource_type', $resource->type)
+                ->where('resource_id', $resource->id)
+                ->where('policy_id', self::key($policy))
+                ->where('tenant_type', $type)
+                ->where('tenant_id', $id)
+                ->where('application', $scope->application)
+                ->delete();
+
+            if ($detached !== 1) {
+                continue;
+            }
+
+            TenantColumns::reportRemoved('a resource policy attachment', $type, $id, ['resource' => $resource->identifier, 'policy_id' => self::key($policy)]);
+
+            $events[] = new PolicyDetached($operation, (string) $resource->type, $resource->id, Reference::of($policy), self::name($policy), $scope);
+        }
+
+        OperationScope::invalidate(...$events);
+
+        return \count($events);
+    }
+
+    /**
      * Return each policy attached to the resource, in every scope, with the
-     * scope it is attached in.
+     * scope it is attached in; and, read by the same query, each attached in a
+     * row naming half a tenant, with the platform scope in its application in
+     * place of the scope, and its tenant columns as stored.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
-     * @return list<array{\SineMacula\Laravel\Authorization\Models\Policy, \SineMacula\Laravel\Authorization\Support\GrantScope}>
+     * @return array{
+     *     list<array{\SineMacula\Laravel\Authorization\Models\Policy, \SineMacula\Laravel\Authorization\Support\GrantScope}>,
+     *     list<array{\SineMacula\Laravel\Authorization\Models\Policy, \SineMacula\Laravel\Authorization\Support\GrantScope, string|null, string|null}>
+     * }
      */
     private static function attachmentsOf(ResourceReference $resource): array
     {
@@ -393,6 +449,7 @@ final class ResourcePolicyService
         /** @var array<string, \SineMacula\Laravel\Authorization\Models\Policy> $policies */
         $policies    = $class::query()->withoutGlobalScopes()->useWritePdo()->whereKey(\array_column($rows, 'policy_id'))->get()->getDictionary();
         $attachments = [];
+        $malformed   = [];
 
         foreach ($rows as $row) {
             $policy = $policies[$row['policy_id']] ?? null;
@@ -401,11 +458,17 @@ final class ResourcePolicyService
                 continue;
             }
 
+            if (TenantColumns::isHalf($row['tenant_type'], $row['tenant_id'])) {
+                $malformed[] = [$policy, new GrantScope(null, $row['application']), $row['tenant_type'], $row['tenant_id']];
+
+                continue;
+            }
+
             $tenant        = $row['tenant_type'] === null ? null : new Reference($row['tenant_type'], (string) $row['tenant_id']);
             $attachments[] = [$policy, new GrantScope($tenant, $row['application'])];
         }
 
-        return $attachments;
+        return [$attachments, $malformed];
     }
 
     /**

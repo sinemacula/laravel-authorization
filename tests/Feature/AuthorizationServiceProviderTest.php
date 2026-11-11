@@ -38,6 +38,7 @@ use SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
+use SineMacula\Laravel\Authorization\Contracts\GrantUsageStore;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
@@ -46,8 +47,12 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Diagnostics\ContainerState;
+use SineMacula\Laravel\Authorization\Diagnostics\DiagnosticMode;
+use SineMacula\Laravel\Authorization\Diagnostics\Enums\Origin;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\PackageStatus;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
+use SineMacula\Laravel\Authorization\Diagnostics\SeamClassifier;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -67,6 +72,7 @@ use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\PendingRegistration;
 use SineMacula\Laravel\Authorization\Registrars\QueryScopeRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
@@ -144,6 +150,25 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationManager::class)]
 final class AuthorizationServiceProviderTest extends TestCase
 {
+    /** @var list<class-string> Each seam the package gives a default for. */
+    private const array DEFAULT_SEAMS = [
+        SubjectResolver::class,
+        TenantTree::class,
+        IdentityDirectory::class,
+        ResourceTenantResolver::class,
+        AuthenticationRequirementChecker::class,
+        SessionPolicySource::class,
+        PolicyResolver::class,
+        ActionCatalogue::class,
+        ContextKeyCatalogue::class,
+        AuthenticationContext::class,
+        RequestContext::class,
+        EnvironmentContext::class,
+        GrantHook::class,
+        GrantUsageStore::class,
+        ConsoleSubjectResolver::class,
+    ];
+
     /**
      * Configure the switchable subject resolver, as an application configures
      * its own, and register the provider again so the binding uses it.
@@ -2085,6 +2110,196 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
+     * Return each seam the package gives a default for.
+     *
+     * @return iterable<string, array{class-string}>
+     */
+    public static function defaultSeamProvider(): iterable
+    {
+        foreach (self::DEFAULT_SEAMS as $contract) {
+            yield \class_basename($contract) => [$contract];
+        }
+    }
+
+    /**
+     * The package's default is the package's default before it is resolved and
+     * after, while what it built is held and once that is forgotten: under its
+     * package-owned key, or, for the context key catalogue, under the contract
+     * itself.
+     *
+     * @param  class-string  $contract
+     * @return void
+     */
+    #[DataProvider('defaultSeamProvider')]
+    public function testTheDefaultIsThePackagesBeforeAndAfterItIsResolved(string $contract): void
+    {
+        $app  = $this->withTheDefaults();
+        $held = static fn (): ?object => ContainerState::instance($app, $contract) ?? ContainerState::instance($app, "authorization.default:{$contract}");
+
+        self::assertNull($held());
+        self::assertTrue(AuthorizationServiceProvider::isPackageDefault($app, $contract), 'Before it is resolved.');
+
+        $app->make($contract);
+
+        self::assertNotNull($held());
+        self::assertSame($contract === ContextKeyCatalogue::class, ContainerState::instance($app, $contract) !== null);
+        self::assertTrue(AuthorizationServiceProvider::isPackageDefault($app, $contract), 'Once resolved, with what it built held.');
+
+        $app->forgetInstance($contract);
+        $app->forgetScopedInstances();
+
+        self::assertNull($held());
+        self::assertTrue(AuthorizationServiceProvider::isPackageDefault($app, $contract), 'Once resolved, with nothing held.');
+    }
+
+    /**
+     * An instance the application hands over the default, before it is resolved
+     * or after, is not the package's default, and the default is again once the
+     * instance is forgotten. An instance handed over the context key catalogue
+     * once it was resolved is held as the one it built is, so it cannot be told
+     * from the default, and is taken for it, as the report takes it.
+     *
+     * @param  class-string  $contract
+     * @return void
+     */
+    #[DataProvider('defaultSeamProvider')]
+    public function testAnInstanceHandedOverTheDefaultIsNotTheDefault(string $contract): void
+    {
+        $app = $this->withTheDefaults();
+
+        $app->instance($contract, self::createStub($contract));
+
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, $contract), 'Handed before it is resolved.');
+
+        $app->make($contract);
+
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, $contract), 'Handed, then resolved.');
+
+        $app->forgetInstance($contract);
+
+        self::assertTrue(AuthorizationServiceProvider::isPackageDefault($app, $contract), 'Once the instance is forgotten.');
+
+        $app->make($contract);
+        $app->instance($contract, self::createStub($contract));
+
+        self::assertSame($contract === ContextKeyCatalogue::class, AuthorizationServiceProvider::isPackageDefault($app, $contract), 'Handed once resolved.');
+    }
+
+    /**
+     * A class the configuration names in place of the default is not the
+     * package's default: from the moment the package registers, while the
+     * contract is bound to resolve the default until the application boots, and
+     * once the class is bound, before it is resolved and after. A policy store,
+     * which has no default and is left unbound until then, is none either.
+     *
+     * @return void
+     */
+    public function testAClassConfiguredIsNotTheDefault(): void
+    {
+        foreach (self::configuredSeams() as $contract => [$key, $default, $other]) {
+            $authorization = [];
+
+            Arr::set($authorization, $key, $other);
+
+            $app = self::freshApplication($authorization);
+
+            (new AuthorizationServiceProvider($app))->register();
+
+            self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, $contract), "{$contract} as the package registers.");
+            self::assertSame($default !== null, $app->bound($contract), $contract);
+
+            self::bootPackage($app);
+
+            self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, $contract), "{$contract} once the application boots.");
+            self::assertInstanceOf($contract === ResourceTenantResolver::class ? DeclaredResourceTenant::class : $other, $app->make($contract), $contract);
+            self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, $contract), "{$contract} once resolved.");
+        }
+    }
+
+    /**
+     * A class the configuration names is still not the package's default once a
+     * diagnostic boot refused, on issues that have nothing to do with it (no
+     * database connection or guard is configured), and dropped the steps that
+     * bind it: the contract is left resolving the default in its place, and the
+     * report shows it configured, never as the package's default. A policy
+     * store, which has no default, is left unbound.
+     *
+     * @return void
+     */
+    public function testAClassConfiguredIsNotTheDefaultOnceARefusedBootDroppedIt(): void
+    {
+        foreach (self::configuredSeams() as $contract => [$key, $default, $other]) {
+            $authorization = [];
+
+            Arr::set($authorization, $key, $other);
+
+            $app = self::freshApplication($authorization);
+
+            DiagnosticMode::enable($app);
+
+            (new AuthorizationServiceProvider($app))->register();
+
+            $app->boot();
+
+            $row = SeamClassifier::of($app)->classify($contract);
+
+            self::assertSame(PackageStatus::REFUSING, PackageState::of($app)?->status(), $contract);
+            self::assertFalse(PendingRegistration::find($app)?->isPending(), $contract);
+            self::assertFalse(AuthorizationServiceProvider::isPackageDefault($app, $contract), $contract);
+            self::assertSame($default === null ? [Origin::UNBOUND, null] : [Origin::CONFIGURED, "authorization.{$key}"], [$row->origin, $row->source], $contract);
+        }
+    }
+
+    /**
+     * Return each seam the package gives a default for, with each way a sibling
+     * package binds it.
+     *
+     * @return iterable<string, array{class-string, string}>
+     */
+    public static function siblingBindingProvider(): iterable
+    {
+        foreach (self::DEFAULT_SEAMS as $contract) {
+            foreach (['bind', 'singleton', 'scoped', 'instance'] as $method) {
+                yield \class_basename($contract) . " by {$method}" => [$contract, $method];
+            }
+        }
+    }
+
+    /**
+     * A sibling's binding is not the package's default, whether it was made
+     * before the package registered or after, and before it is resolved or
+     * after.
+     *
+     * @param  class-string  $contract
+     * @param  string  $method
+     * @return void
+     */
+    #[DataProvider('siblingBindingProvider')]
+    public function testASiblingsBindingIsNotTheDefault(string $contract, string $method): void
+    {
+        $before = self::freshApplication([]);
+        $bound  = self::registerOverABinding($before, $method, $contract);
+
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($before, $contract), 'Bound before the package registered.');
+        self::assertSame($bound, $before->make($contract));
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($before, $contract), 'Bound before, then resolved.');
+
+        $after = self::freshApplication([]);
+
+        (new AuthorizationServiceProvider($after))->register();
+
+        self::bootPackage($after);
+
+        self::assertTrue(AuthorizationServiceProvider::isPackageDefault($after, $contract));
+
+        self::bindBy($after, $method, $contract, $bound = self::createStub($contract));
+
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($after, $contract), 'Bound after the package registered.');
+        self::assertSame($bound, $after->make($contract));
+        self::assertFalse(AuthorizationServiceProvider::isPackageDefault($after, $contract), 'Bound after, then resolved.');
+    }
+
+    /**
      * The middleware aliases the provider registers are the ones it declares.
      *
      * @return void
@@ -2317,6 +2532,25 @@ final class AuthorizationServiceProviderTest extends TestCase
         ];
 
         $binders[$method]();
+    }
+
+    /**
+     * Return the booted application with the package registered again, no seam
+     * naming a class in place of the package's default.
+     *
+     * @return \Illuminate\Foundation\Application
+     */
+    private function withTheDefaults(): Application
+    {
+        $app = $this->application();
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $app->make(ConfigRepository::class);
+        $config->set('authorization.subject_resolver', AuthGuardSubjectResolver::class);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        return $app;
     }
 
     /**

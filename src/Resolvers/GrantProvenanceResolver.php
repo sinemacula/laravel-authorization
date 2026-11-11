@@ -23,6 +23,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 use SineMacula\Laravel\Authorization\Support\RolePolicies;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Resolves, for an explained check (N89), what a grantee's grants come to
@@ -252,9 +253,10 @@ final class GrantProvenanceResolver
         $grants     = $grantee->policies(); // @phpstan-ignore method.notFound
         $provenance = null;
         $resolve    = static function () use ($grantee, $grants, $isIdentity, &$provenance): Resolution {
-            $provenance = self::policyProvenance($grantee, $grants, $isIdentity);
+            $whole      = [];
+            $provenance = self::policyProvenance($grantee, $grants, $isIdentity, $whole);
 
-            return self::unkept(self::hydrated($grants, \array_map(\strval(...), \array_keys($provenance))));
+            return self::unkept(self::hydrated($grants, \array_map(\strval(...), \array_keys($provenance)), $whole));
         };
 
         $policies = ResolutionCache::instance()?->rememberPolicies($grantee, $resolve) ?? $resolve()->value;
@@ -268,22 +270,29 @@ final class GrantProvenanceResolver
      * the grantee, or to a role held, through each ancestor up to the role it
      * is attached to. The roles are read only when the query that reads the
      * grantee's own attachments finds a role holding a policy in the current
-     * scope.
+     * scope. The attachments whose denies alone count in every scope are read
+     * too (see `GrantResolver::deniedEverywhere()`), and the key of each policy
+     * reached through one whose allows count is kept in the given array. An
+     * attachment naming half a tenant, whose denies alone count, is never where
+     * an allow came from, so it adds its policy's key with no provenance, and
+     * is never reported as the platform's.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $grantee
      * @param  PolicyGrants  $grants
      * @param  bool  $isIdentity
+     * @param  array<string, bool>  $whole
      * @return array<string, list<\SineMacula\Laravel\Authorization\Evaluation\GrantProvenance>>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      */
-    private static function policyProvenance(Model $grantee, MorphToMany $grants, bool $isIdentity): array
+    private static function policyProvenance(Model $grantee, MorphToMany $grants, bool $isIdentity, array &$whole = []): array
     {
         $roles     = RolePolicies::heldBy($grantee);
         $reference = self::referenceTo($grantee);
         $columns   = ['policy_id', 'authorizable_type', ...self::SCOPE];
         $query     = InlinePolicies::attachedToTheirGrantee((clone $grants->getQuery())->toBase(), $grants->getTable())
-            ->select(\array_map($grants->qualifyPivotColumn(...), $columns));
+            ->select(\array_map($grants->qualifyPivotColumn(...), $columns))
+            ->unionAll(GrantResolver::deniedEverywhere($grants, $columns));
 
         if ($roles !== null) {
             $query->unionAll(RolePolicies::probe($roles, $columns));
@@ -299,10 +308,20 @@ final class GrantProvenanceResolver
                 continue;
             }
 
+            $isWhole                  = !TenantColumns::isHalf($row['tenant_type'], $row['tenant_id']);
+            $whole[$row['policy_id']] = ($whole[$row['policy_id']] ?? false) || $isWhole;
+            $provenance[$row['policy_id']] ??= [];
+
+            // A row naming half a tenant only denies, so it is never where an
+            // allow came from, nor reported as the platform's.
+            if (!$isWhole) {
+                continue;
+            }
+
             $provenance[$row['policy_id']][] = self::rowProvenance($row, $reference, $isIdentity);
         }
 
-        return $roles !== null && self::hasRoleRow($rows, $type) ? self::rolePolicies($roles, $reference, $isIdentity, $provenance) : $provenance;
+        return $roles !== null && self::hasRoleRow($rows, $type) ? self::rolePolicies($roles, $reference, $isIdentity, $provenance, $whole) : $provenance;
     }
 
     /**
@@ -333,11 +352,12 @@ final class GrantProvenanceResolver
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $reference
      * @param  bool  $isIdentity
      * @param  array<string, list<\SineMacula\Laravel\Authorization\Evaluation\GrantProvenance>>  $provenance
+     * @param  array<string, bool>  $whole
      * @return array<string, list<\SineMacula\Laravel\Authorization\Evaluation\GrantProvenance>>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      */
-    private static function rolePolicies(MorphToMany $roles, ?Reference $reference, bool $isIdentity, array $provenance): array
+    private static function rolePolicies(MorphToMany $roles, ?Reference $reference, bool $isIdentity, array $provenance, array &$whole): array
     {
         /** @var list<\SineMacula\Laravel\Authorization\Models\Role> $held */
         $held     = self::held($roles)->all();
@@ -345,6 +365,15 @@ final class GrantProvenanceResolver
         $attached = [];
 
         foreach (RolePolicies::attachedTo($roles->getRelated()->getMorphClass(), self::keysOf($paths)) as $row) {
+            $whole[$row['policy_id']] = ($whole[$row['policy_id']] ?? false) || $row['is_whole'];
+            $provenance[$row['policy_id']] ??= [];
+
+            // An attachment naming half a tenant only denies, so no route
+            // through it is where an allow came from.
+            if (!$row['is_whole']) {
+                continue;
+            }
+
             $attached[$row['role_id']][] = $row['policy_id'];
         }
 
@@ -365,16 +394,19 @@ final class GrantProvenanceResolver
 
     /**
      * Return the policies with the given keys, hydrated for evaluation, each
-     * once, in the order of the keys; a policy whose document cannot be read
-     * throws, as `GrantResolver::hydrate()` does.
+     * once, in the order of the keys, with its denies alone unless it was
+     * reached through an attachment whose allows count and names no half tenant
+     * itself, as `GrantResolver::policies()` hydrates them; a policy whose
+     * document cannot be read throws, as `GrantResolver::hydrate()` does.
      *
      * @param  PolicyGrants  $grants
      * @param  list<string>  $keys
+     * @param  array<string, bool>  $whole
      * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
-    private static function hydrated(MorphToMany $grants, array $keys): array
+    private static function hydrated(MorphToMany $grants, array $keys, array $whole): array
     {
         if ($keys === []) {
             return [];
@@ -389,7 +421,8 @@ final class GrantProvenanceResolver
                 continue;
             }
 
-            $policies[] = GrantResolver::hydrate($fresh[$key]);
+            $policy     = GrantResolver::hydrate($fresh[$key]);
+            $policies[] = ($whole[$key] ?? false) && !TenantColumns::isDenyOnly(null, null, $fresh[$key]) ? $policy : $policy->denies();
         }
 
         return $policies;

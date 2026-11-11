@@ -49,6 +49,27 @@ final class RecordOwnerTest extends TestCase
     }
 
     /**
+     * A row naming half a tenant is refused for the action named, saving by
+     * default, naming the column it lacks; a whole tenant and the platform
+     * pass.
+     *
+     * @return void
+     */
+    public function testARowNamingHalfATenantIsRefusedForTheActionNamed(): void
+    {
+        $granted = self::refusalOf(static fn () => RecordOwner::assertWhole(new Role(['name' => 'editor', 'tenant_id' => 'tenant-a']), 'role', 'grant'));
+        $saved   = self::refusalOf(static fn () => RecordOwner::assertWhole(new Role(['name' => 'editor', 'tenant_type' => 'stub_tenant']), 'role'));
+
+        self::assertInstanceOf(InvalidTenantColumnsException::class, $granted);
+        self::assertStringStartsWith('Cannot grant role with inconsistent tenant columns — \'tenant_type\' is required', $granted->getMessage());
+        self::assertInstanceOf(InvalidTenantColumnsException::class, $saved);
+        self::assertStringStartsWith('Cannot save role with inconsistent tenant columns — \'tenant_id\' is required', $saved->getMessage());
+
+        RecordOwner::assertWhole(new Role(['name' => 'editor']), 'role', 'grant');
+        RecordOwner::assertWhole(new Role(['name' => 'editor', 'tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']), 'role', 'grant');
+    }
+
+    /**
      * A saved role, permission or policy cannot change its owner, either way,
      * though anything else about it may change.
      *

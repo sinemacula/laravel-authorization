@@ -950,6 +950,148 @@ final class SeamBindingsTest extends TestCase
     }
 
     /**
+     * Return each way the package registers a seam, the grant hook's: as a
+     * default, as a shared seam, and as the closure that resolves the default
+     * until the class configured is bound, each resolved between registering
+     * and registering again or not.
+     *
+     * @return iterable<string, array{\Closure(\SineMacula\Laravel\Authorization\Registrars\SeamBindings): mixed, bool}>
+     */
+    public static function registrationProvider(): iterable
+    {
+        $registrations = [
+            'a default'       => static fn (SeamBindings $seams) => $seams->bindDefault(GrantHook::class, RecordingGrantHook::class),
+            'a shared seam'   => static fn (SeamBindings $seams) => $seams->bindSharedIf(GrantHook::class, self::recordingHook(...), RecordingGrantHook::class),
+            'a class to bind' => static fn (SeamBindings $seams) => $seams->bindConfigured(GrantHook::class, 'authorization.tenant_tree', GrantHooks::class),
+        ];
+
+        foreach ($registrations as $case => $register) {
+            yield $case => [$register, false];
+            yield "{$case}, resolved" => [$register, true];
+        }
+    }
+
+    /**
+     * Registering again over a contract still bound as the package bound it
+     * keeps that closure, records it as the package's own and records nothing
+     * earlier, whether it was resolved in between or not; an instance handed
+     * over it before it is resolved is earlier.
+     *
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Registrars\SeamBindings): mixed  $register
+     * @param  bool  $isResolved
+     * @return void
+     */
+    #[DataProvider('registrationProvider')]
+    public function testRegisteringAgainKeepsThePackagesOwnBinding(\Closure $register, bool $isResolved): void
+    {
+        $app     = self::application(['tenant_tree' => RecordingGrantHook::class]);
+        $pending = new PendingRegistration;
+
+        $register(self::seams($app, $pending));
+
+        $first = BindingRegistry::of($app)->get(GrantHook::class);
+
+        if ($isResolved) {
+            $app->make(GrantHook::class);
+        }
+
+        $register(self::seams($app, $pending));
+
+        $record = BindingRegistry::of($app)->get(GrantHook::class);
+
+        self::assertNotNull($record);
+        self::assertNotSame($first, $record);
+        self::assertSame($first?->binding, $record->binding);
+        self::assertSame($record->binding, ContainerState::concrete($app, GrantHook::class));
+        self::assertFalse($record->wasBound());
+        self::assertNull($record->deferredProvider);
+
+        // An instance handed over a shared seam once resolved is held as the
+        // one it built is, so only one handed before it is resolved is told.
+        if ($isResolved) {
+            return;
+        }
+
+        $handed = new RefusingGrantHook;
+
+        $app->instance(GrantHook::class, $handed);
+        $register(self::seams($app, $pending));
+
+        self::assertSame($handed, BindingRegistry::of($app)->get(GrantHook::class)?->earlierInstance);
+    }
+
+    /**
+     * The closure that resolves the default until the class configured is bound
+     * is recorded with the name the configuration gives, as the package
+     * registers and as it registers again.
+     *
+     * @return void
+     */
+    public function testTheNameConfiguredIsRecordedUntilTheClassIsBound(): void
+    {
+        $app   = self::application(['tenant_tree' => StubTenantTree::class]);
+        $seams = self::seams($app, new PendingRegistration);
+
+        $seams->bindConfigured(TenantTree::class, 'authorization.tenant_tree', FlatTenantTree::class);
+
+        $first = BindingRegistry::of($app)->get(TenantTree::class);
+
+        $seams->bindConfigured(TenantTree::class, 'authorization.tenant_tree', FlatTenantTree::class);
+
+        $again = BindingRegistry::of($app)->get(TenantTree::class);
+
+        self::assertSame([StubTenantTree::class, StubTenantTree::class], [$first?->named, $again?->named]);
+        self::assertNotSame($first, $again);
+        self::assertNull(BindingRegistry::of(self::registered([]))->get(TenantTree::class)?->named);
+    }
+
+    /**
+     * Registering a class configured again, over the binding the package made
+     * of it in place of an earlier one, keeps what was bound before the package
+     * first registered as the earlier binding: a closure, an instance, an alias
+     * or a deferred provider.
+     *
+     * @return void
+     */
+    public function testRegisteringAgainKeepsWhatWasBoundBeforeTheFirstRegistration(): void
+    {
+        $closure  = static fn (): GrantHook => new RefusingGrantHook;
+        $instance = new RefusingGrantHook;
+        $earlier  = [
+            'earlier'          => [static fn (Application $app) => $app->bind(GrantHook::class, $closure), $closure],
+            'earlierInstance'  => [static fn (Application $app) => $app->instance(GrantHook::class, $instance), $instance],
+            'earlierAlias'     => [static fn (Application $app) => $app->alias(RefusingGrantHook::class, GrantHook::class), RefusingGrantHook::class],
+            'deferredProvider' => [static fn (Application $app) => self::defer($app), DeferredBindingProvider::class],
+        ];
+
+        foreach ($earlier as $field => [$bind, $expected]) {
+            $app   = self::application();
+            $seams = self::seams($app);
+
+            $bind($app);
+
+            $seams->bindDefault(GrantHook::class, RecordingGrantHook::class, true, 'authorization.example', RecordingGrantHook::class);
+            $seams->bindDefault(GrantHook::class, RecordingGrantHook::class, true, 'authorization.example', RecordingGrantHook::class);
+
+            $record = BindingRegistry::of($app)->get(GrantHook::class);
+
+            self::assertNotNull($record, $field);
+            self::assertSame($expected, \get_object_vars($record)[$field], $field);
+            self::assertTrue($record->configured, $field);
+        }
+    }
+
+    /**
+     * Return a new recording grant hook.
+     *
+     * @return \SineMacula\Laravel\Authorization\Contracts\GrantHook
+     */
+    private static function recordingHook(): GrantHook
+    {
+        return new RecordingGrantHook;
+    }
+
+    /**
      * Return the class that declares the closure the contract is bound to.
      *
      * @param  \Illuminate\Foundation\Application  $app

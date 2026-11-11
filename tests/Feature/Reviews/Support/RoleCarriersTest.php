@@ -104,11 +104,14 @@ final class RoleCarriersTest extends TestCase
         self::grants()->attachPolicy($role, $other = self::policy('other'), application: 'web');
         self::grants()->attachPolicy($role, $offchain = self::policy('offchain'), tenant: self::tenant('acct2'));
         self::grants()->attachPolicy($role, $halved = self::policy('halved'), tenant: self::tenant('acct2'));
+        self::grants()->attachPolicy($role, $keyed = self::policy('keyed'), tenant: self::tenant('acct1'));
         self::grants()->attachPolicy(self::identity('ann'), $policy);
 
-        // An attachment naming a type without a key is read wherever what
-        // applies is not, for its routes to weigh, and never where it is.
+        // An attachment naming half a tenant is read wherever what applies is
+        // not, for its routes to weigh, and never where it is, at the platform
+        // or in a tenant.
         DB::table('authorizable_policies')->where('policy_id', $halved->getKey())->update(['tenant_id' => null]);
+        DB::table('authorizable_policies')->where('policy_id', $keyed->getKey())->update(['tenant_type' => null]);
 
         $inline = Policy::query()->create(
             ['name' => 'inline', 'owner_type' => 'u', 'owner_id' => 'someone', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['x:y']]]]],
@@ -122,7 +125,7 @@ final class RoleCarriersTest extends TestCase
         $all = RoleCarriers::attachments(ReviewRun::of(ReviewScope::everywhere()), [$key]);
 
         self::assertEqualsCanonicalizing(
-            [Reference::of($policy)->id, Reference::of($other)->id, Reference::of($offchain)->id, Reference::of($halved)->id],
+            [Reference::of($policy)->id, Reference::of($other)->id, Reference::of($offchain)->id, Reference::of($halved)->id, Reference::of($keyed)->id],
             self::targets($all[$key]),
         );
         self::assertSame(
@@ -130,14 +133,15 @@ final class RoleCarriersTest extends TestCase
             self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::appliesIn(self::tenant('team1'), ApplicationSelector::none())), [$key])[$key]),
         );
         self::assertEqualsCanonicalizing(
-            [Reference::of($policy)->id, Reference::of($offchain)->id, Reference::of($halved)->id],
+            [Reference::of($policy)->id, Reference::of($offchain)->id, Reference::of($halved)->id, Reference::of($keyed)->id],
             self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::everywhere(ApplicationSelector::none())), [$key])[$key]),
         );
+        self::assertSame([], RoleCarriers::attachments(ReviewRun::of(ReviewScope::appliesIn(null, ApplicationSelector::none())), [$key]));
 
         // Outside a review of what applies in a tenant, an attachment is read
         // whatever its tenant, for the routes to weigh where it holds.
         self::assertEqualsCanonicalizing(
-            [Reference::of($policy)->id, Reference::of($other)->id, Reference::of($offchain)->id, Reference::of($halved)->id],
+            [Reference::of($policy)->id, Reference::of($other)->id, Reference::of($offchain)->id, Reference::of($halved)->id, Reference::of($keyed)->id],
             self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::rootedWithin(self::tenant('acct1'))), [$key])[$key]),
         );
         self::assertSame([Reference::of($other)->id], self::targets(RoleCarriers::attachments(ReviewRun::of(ReviewScope::everywhere()), null, Reference::of($other)->id)[$key]));
@@ -212,7 +216,8 @@ final class RoleCarriersTest extends TestCase
      * A query of role grants is limited to those that reach one of the
      * attachments: of a role whose chain reaches the attachment's role, in an
      * application and a tenant where both hold; a role reaching no attachment
-     * adds nothing, and no attachment leaves no grant.
+     * adds nothing, and no attachment leaves no grant. A grant naming half a
+     * tenant, which no check reads, reaches none of them.
      *
      * @return void
      *
@@ -235,6 +240,11 @@ final class RoleCarriersTest extends TestCase
         self::grants()->grantRole(self::identity('sibling'), $child, tenant: self::tenant('acct2'));
         self::grants()->grantRole(self::identity('api'), $child, tenant: self::tenant('acct1'), application: 'api');
         self::grants()->grantRole(self::identity('unrelated'), $other, tenant: self::tenant('acct1'));
+        self::grants()->grantRole(self::identity('no-type'), $child, tenant: self::tenant('acct1'));
+        self::grants()->grantRole(self::identity('no-key'), $child, tenant: self::tenant('acct1'));
+
+        DB::table('authorizable_roles')->where('authorizable_id', 'no-type')->update(['tenant_type' => null]);
+        DB::table('authorizable_roles')->where('authorizable_id', 'no-key')->update(['tenant_id' => null]);
 
         $run         = ReviewRun::of(ReviewScope::everywhere());
         $table       = 'authorizable_roles';
@@ -248,15 +258,20 @@ final class RoleCarriersTest extends TestCase
         self::assertEqualsCanonicalizing(['platform', 'here'], $reaching($attachments));
         self::assertSame([], $reaching([]));
 
-        // An attachment naming a type without a key, which no check reads in a
-        // tenant, is reached only by a grant held everywhere.
+        // An attachment naming half a tenant, which no check reads anywhere, is
+        // reached only by a grant held everywhere, never by one naming half a
+        // tenant itself.
         $nowhere = self::policy('nowhere');
+        $noType  = self::policy('no-type');
 
         self::grants()->attachPolicy($parent, $nowhere, tenant: self::tenant('acct1'));
+        self::grants()->attachPolicy($parent, $noType, tenant: self::tenant('acct1'));
 
         DB::table('authorizable_policies')->where('policy_id', $nowhere->getKey())->update(['tenant_id' => null]);
+        DB::table('authorizable_policies')->where('policy_id', $noType->getKey())->update(['tenant_type' => null]);
 
         self::assertSame(['platform'], $reaching(RoleCarriers::attachments($run, null, Reference::of($nowhere)->id)));
+        self::assertSame(['platform'], $reaching(RoleCarriers::attachments($run, null, Reference::of($noType)->id)));
         self::assertSame([], $reaching([Reference::of($other)->id . '-none' => $attachments[Reference::of($parent)->id]]));
     }
 

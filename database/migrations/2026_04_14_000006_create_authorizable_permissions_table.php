@@ -24,6 +24,7 @@ declare(strict_types = 1);
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\ExactReferences;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
@@ -37,10 +38,8 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
-        /** @var string $permissionsTable */
-        $permissionsTable = config('authorization.tables.permissions', 'permissions');
+        $table            = TableNames::get('authorizable_permissions');
+        $permissionsTable = TableNames::get('permissions');
 
         $schema = Schema::connection($this->getConnection());
 
@@ -108,8 +107,7 @@ return new class extends Migration {
      */
     public function down(): void
     {
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
+        $table = TableNames::get('authorizable_permissions');
 
         Schema::connection($this->getConnection())->dropIfExists($table);
     }

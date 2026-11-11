@@ -23,6 +23,7 @@ declare(strict_types = 1);
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\ExactReferences;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
@@ -36,8 +37,7 @@ return new class extends Migration {
      */
     public function up(): void
     {
-        /** @var string $table */
-        $table  = config('authorization.tables.roles', 'roles');
+        $table  = TableNames::get('roles');
         $schema = Schema::connection($this->getConnection());
 
         (new MigrationCollisionGuard($schema))->ensureNotExists($table);
@@ -126,8 +126,7 @@ return new class extends Migration {
      */
     public function down(): void
     {
-        /** @var string $table */
-        $table = config('authorization.tables.roles', 'roles');
+        $table = TableNames::get('roles');
 
         Schema::connection($this->getConnection())->dropIfExists($table);
     }

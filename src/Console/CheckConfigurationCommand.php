@@ -16,9 +16,10 @@ use Symfony\Component\Console\Output\OutputInterface;
 
 /**
  * Report the configuration the application runs with (AUTHZ-17.2, N113): every
- * setting, every seam and where its binding came from, the grant hooks in the
- * order they run, the connection, and how the package is wired into the
- * application, with every issue the configuration's checks find.
+ * setting, the name each table takes, every seam and where its binding came
+ * from, the grant hooks in the order they run, the connection, and how the
+ * package is wired into the application, with every issue the configuration's
+ * checks find.
  *
  * The report is built by `Diagnostics\Inspector` without building any seam,
  * connecting to anything or running a query, so it is safe before migrations
@@ -35,12 +36,12 @@ use Symfony\Component\Console\Output\OutputInterface;
  * checks by building something is shown as checked at boot.
  *
  * It is printed as text by default, one line per issue first, then a section
- * each for the settings, the seams, the grant hooks, the connection and the
- * integrations, and a last line with the outcome; or, with `--format=json`, as
- * the report's versioned JSON alone (see `ConfigurationReport::toArray()`),
- * with no prose or styling on the standard output. Neither shows a credential,
- * a URL, a context value, a value the report does not allow, or an exception's
- * message.
+ * each for the settings, the tables, the seams, the grant hooks, the connection
+ * and the integrations, and a last line with the outcome; or, with
+ * `--format=json`, as the report's versioned JSON alone (see
+ * `ConfigurationReport::toArray()`), with no prose or styling on the standard
+ * output. Neither shows a credential, a URL, a context value, a value the
+ * report does not allow, or an exception's message.
  *
  * Exits 0 when every check passed; 1 when a setting is refused; 3 when the
  * report could not be completed and no setting is refused; and 2 for an invalid

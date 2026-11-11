@@ -15,10 +15,12 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  * edited nor deleted, which would change or lift the cap past that check.
  *
  * The policy observer refuses an edit or a deletion of such a policy with
- * `GuardrailException`, naming every scope it is a guardrail on, until each
- * guardrail is removed through the guardrail service; the table's foreign key
- * refuses a deletion made past the model. A policy not yet saved is a guardrail
- * nowhere, and passes without a query.
+ * `GuardrailException`, naming every scope it is a guardrail on, and counting
+ * the guardrail rows naming half a tenant as malformed, never as the platform
+ * or a tenant, until each guardrail is removed through the guardrail service, a
+ * malformed row with the policy's guardrail on the platform; the table's
+ * foreign key refuses a deletion made past the model. A policy not yet saved is
+ * a guardrail nowhere, and passes without a query.
  *
  * The policy's row is locked before its guardrails are read, as the guardrail
  * service locks it before setting one, so an edit and a guardrail set at the
@@ -79,40 +81,49 @@ final class PolicyGuardrails
         // this change is done.
         InlinePolicies::storedForUpdate($policy->getKey());
 
-        $tenants = self::scopes($policy);
+        [$tenants, $malformed] = self::scopes($policy);
 
-        if ($tenants === []) {
+        if ($tenants === [] && $malformed === 0) {
             return;
         }
 
-        throw GuardrailException::inUse(PolicyDocument::nameOf($policy->getAttribute('name')), $tenants, $change);
+        throw GuardrailException::inUse(PolicyDocument::nameOf($policy->getAttribute('name')), $tenants, $change, $malformed);
     }
 
     /**
      * Return every scope the policy is a guardrail on, each a tenant or null
      * for the platform, the platform first and then the tenants in a fixed
-     * order, by a locking read, so a guardrail another transaction committed
-     * since this one began is seen, as a plain read of a MySQL snapshot would
-     * not see it.
+     * order, and how many of its guardrail rows name half a tenant, which are
+     * neither the platform's nor any tenant's (see `TenantColumns`), by a
+     * locking read, so a guardrail another transaction committed since this one
+     * began is seen, as a plain read of a MySQL snapshot would not see it.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
-     * @return list<\SineMacula\Laravel\Authorization\Support\Reference|null>
+     * @return array{list<\SineMacula\Laravel\Authorization\Support\Reference|null>, int}
      */
     private static function scopes(Policy $policy): array
     {
-        $table   = TableNames::get('guardrails');
-        $query   = AuthorizationConnection::connection()->table($table)->useWritePdo()->where('policy_id', $policy->getKey())->sharedLock();
-        $tenants = [];
+        $table     = TableNames::get('guardrails');
+        $query     = AuthorizationConnection::connection()->table($table)->useWritePdo()->where('policy_id', $policy->getKey())->sharedLock();
+        $tenants   = [];
+        $malformed = 0;
 
         // The platform's first, then by tenant.
-        $query->orderByRaw('case when tenant_type is null then 0 else 1 end')->orderBy('tenant_type')->orderBy('tenant_id');
+        $query->orderByRaw('case when tenant_type is null and tenant_id is null then 0 else 1 end')->orderBy('tenant_type')->orderBy('tenant_id');
 
         foreach ($query->get(['tenant_type', 'tenant_id']) as $row) {
             /** @var array{tenant_type: string|null, tenant_id: int|string|null} $columns */
-            $columns   = (array) $row;
+            $columns = (array) $row;
+
+            if (TenantColumns::isHalf($columns['tenant_type'], $columns['tenant_id'])) {
+                $malformed++;
+
+                continue;
+            }
+
             $tenants[] = $columns['tenant_type'] === null ? null : new Reference($columns['tenant_type'], (string) $columns['tenant_id']);
         }
 
-        return $tenants;
+        return [$tenants, $malformed];
     }
 }

@@ -20,6 +20,8 @@ use SineMacula\Laravel\Authorization\Diagnostics\Settings\SettingRow;
  * - `settings`: every setting the package defines and each unknown key set,
  *   with its value where it may be shown, its source and status (see
  *   `Settings\SettingRow`);
+ * - `tables`: the prefix of the tables' default names, and the name each table
+ *   takes, whether it was set explicitly (see `TableReader`);
  * - `seams`: where each seam's binding came from, its class or classes, how
  *   long it lives, its extenders and history (see `SeamRow`);
  * - `grant_hooks`: the hooks in the order they run (see `GrantHookOrder`);
@@ -49,6 +51,7 @@ final readonly class ConfigurationReport
      * @param  array<string, mixed>  $connection
      * @param  list<array{name: string, state: string, detail: string|null}>  $integrations
      * @param  list<\SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue>  $issues
+     * @param  array{prefix: string|null, names: list<array{key: string, name: string|null, explicit: bool}>}  $tables
      */
     public function __construct(
 
@@ -69,6 +72,9 @@ final readonly class ConfigurationReport
 
         /** Every issue found. */
         public array $issues,
+
+        /** The prefix of the tables' default names, and the name each table takes. */
+        public array $tables = TableReader::UNREAD,
     ) {
         $this->status = self::statusOf($issues);
     }
@@ -102,6 +108,7 @@ final readonly class ConfigurationReport
             'version'      => self::VERSION,
             'status'       => $this->status->value,
             'settings'     => \array_map(static fn (SettingRow $row): array => $row->toArray(), $this->settings),
+            'tables'       => $this->tables,
             'seams'        => \array_map(static fn (SeamRow $row): array => $row->toArray(), $this->seams),
             'grant_hooks'  => $this->grantHooks,
             'connection'   => $this->connection,

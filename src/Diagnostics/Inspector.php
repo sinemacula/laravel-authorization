@@ -102,6 +102,7 @@ final readonly class Inspector
         $root     = $parts->read('configuration', fn (): mixed => $this->config->get('authorization', []), []);
         $findings = $parts->read('issues', fn (): ConfigFindings => $stored ?? ConfigValidator::issues($root, $this->container), new ConfigFindings([], []));
         $seams    = $parts->read('seams', $this->seams(...), []);
+        $tables   = $parts->read('tables', static fn (): array => (new TableReader($root))->read(), TableReader::UNREAD);
 
         return new ConfigurationReport(
             settings: $parts->read('settings', static fn (): array => (new SettingsReader($root, $findings, $bootChecks))->rows(), []),
@@ -114,6 +115,7 @@ final readonly class Inspector
             connection: $parts->read('connection', fn (): array => (new ConnectionReader($this->config))->read(), ConnectionReader::UNREAD),
             integrations: $parts->read('integrations', fn (): array => (new IntegrationReader($this->container, $this->config))->read(), []),
             issues: [...$findings->issues, ...$parts->failures()],
+            tables: $tables,
         );
     }
 
