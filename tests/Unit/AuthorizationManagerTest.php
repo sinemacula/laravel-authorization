@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Unit;
 
+use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Translation\Translator;
@@ -588,6 +589,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         Container::setInstance(new Container);
         Container::getInstance()->instance(ResourceTenantResolver::class, new NoResourceTenant);
+        self::reportEveryDecision();
 
         $principal = $this->stubAuthorizable([], [
             Policy::fromArray([
@@ -1477,6 +1479,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testCannotIsTheNegationOfCan(): void
     {
+        self::reportEveryDecision();
+
         $reported  = [];
         $principal = $this->stubAuthorizable(['posts:create']);
         $manager   = $this->recordingManager($principal, $reported);
@@ -1503,6 +1507,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAnyIsAllowedAtTheFirstAllowAndDecidesNoMore(): void
     {
+        self::reportEveryDecision();
+
         $reported = [];
         $manager  = $this->recordingManager($this->stubAuthorizable(['posts:read']), $reported);
         $policy   = Policy::fromArray(['name' => 'p', 'statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['input.k' => 'v']]]]]);
@@ -1545,6 +1551,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAllIsRefusedAtTheFirstRefusalAndDecidesNoMore(): void
     {
+        self::reportEveryDecision();
+
         $reported = [];
         $manager  = $this->recordingManager($this->stubAuthorizable(['posts:create', 'posts:read']), $reported);
 
@@ -1564,6 +1572,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAllIsAllowedWhenEveryActionIsAllowed(): void
     {
+        self::reportEveryDecision();
+
         $reported = [];
         $manager  = $this->recordingManager($this->stubAuthorizable(['posts:create', 'posts:read']), $reported);
 
@@ -1632,6 +1642,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAnyAndAllDecideOnEveryScopedClone(): void
     {
+        self::reportEveryDecision();
+
         $reported  = [];
         $principal = $this->stubAuthorizable(['posts:create', 'posts:read']);
         $manager   = $this->recordingManager(null, $reported);
@@ -1861,5 +1873,16 @@ final class AuthorizationManagerTest extends TestCase
             new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::UNCAPPED),
             new TraceEntry(DecisionStage::SESSION, TraceOutcome::UNCAPPED),
         ];
+    }
+
+    /**
+     * Report every decision, allows included, through a configuration bound for
+     * the test alone.
+     *
+     * @return void
+     */
+    private static function reportEveryDecision(): void
+    {
+        Container::getInstance()->instance('config', new Repository(['authorization' => ['events' => ['decisions' => ['allows' => 'all']]]]));
     }
 }

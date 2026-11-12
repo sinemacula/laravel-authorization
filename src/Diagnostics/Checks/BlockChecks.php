@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
 use SineMacula\Laravel\Authorization\Config\BulkConfigValidator;
 use SineMacula\Laravel\Authorization\Config\CacheConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ConfigBlock;
+use SineMacula\Laravel\Authorization\Config\EventConfigValidator;
 use SineMacula\Laravel\Authorization\Config\IntegerSetting;
 use SineMacula\Laravel\Authorization\Config\NamedEntryConfigValidator;
 use SineMacula\Laravel\Authorization\Config\PolicyConfigValidator;
@@ -18,16 +19,20 @@ use SineMacula\Laravel\Authorization\Config\ReviewConfigValidator;
 use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
 use SineMacula\Laravel\Authorization\Config\UsageConfigValidator;
 use SineMacula\Laravel\Authorization\Diagnostics\IssueCollector;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionReporting;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 
 /**
  * The structural checks of the blocks of plain settings: the switches, the
  * cache, the policy limits, the limits of query scoping, bulk checks,
- * administration and reviews, grant usage tracking and break-glass, each
- * setting on its own.
+ * administration and reviews, grant usage tracking, break-glass and the
+ * decision events, each setting, and each sensitive action, on its own.
  *
  * The cache store is checked by name only; that it resolves through the cache
- * manager, which builds it, was checked as the application booted.
+ * manager, which builds it, was checked as the application booted. So is each
+ * sensitive action: whether it is declared, which reads the action catalogue,
+ * was checked as the application booted, so a list naming any is marked
+ * `checked_at_boot`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -83,6 +88,7 @@ final readonly class BlockChecks
 
         $this->usage();
         $this->breakGlass();
+        $this->events();
     }
 
     /**
@@ -259,6 +265,58 @@ final readonly class BlockChecks
         $role  = static fn (int|string $name, mixed $settings): int => BreakGlassConfigValidator::role($name, $settings, $limit);
 
         $this->collector->verifyEntries("{$path}.roles", ConfigBlock::entry($block, 'roles', []), $role);
+    }
+
+    /**
+     * Check the events block and the decision events' settings it sets.
+     *
+     * @return void
+     */
+    private function events(): void
+    {
+        $events = $this->read(EventConfigValidator::KEY, $this->blockOf(EventConfigValidator::KEY), EventConfigValidator::KEYS);
+        $block  = $events === null ? null : $this->read(EventConfigValidator::DECISIONS, ConfigBlock::entry($events, 'decisions', []), EventConfigValidator::SETTINGS);
+
+        if ($block === null) {
+            return;
+        }
+
+        foreach (EventConfigValidator::SWITCHES as $setting) {
+            if (!\array_key_exists($setting, $block)) {
+                continue;
+            }
+
+            $value = $block[$setting];
+
+            $this->collector->verify(EventConfigValidator::DECISIONS . ".{$setting}", static fn (): bool => EventConfigValidator::isReported($setting, $value));
+        }
+
+        $allows = ConfigBlock::entry($block, 'allows', DecisionReporting::SENSITIVE);
+
+        $this->collector->verify(EventConfigValidator::DECISIONS . '.allows', static fn (): string => EventConfigValidator::allows($allows));
+        $this->sensitiveActions(ConfigBlock::entry($block, 'sensitive_actions', []));
+    }
+
+    /**
+     * Check each sensitive action, then that they are a list, marking the list
+     * as checked at boot when it names any and every check passed.
+     *
+     * @param  mixed  $actions
+     * @return void
+     */
+    private function sensitiveActions(mixed $actions): void
+    {
+        $path = EventConfigValidator::SENSITIVE_ACTIONS;
+
+        if (!$this->collector->verifyEntries($path, $actions, EventConfigValidator::sensitiveAction(...))) {
+            return;
+        }
+
+        if (!$this->collector->verify($path, static fn (): array => EventConfigValidator::sensitiveActions($actions)) || $actions === []) {
+            return;
+        }
+
+        $this->collector->checkedAtBoot($path);
     }
 
     /**

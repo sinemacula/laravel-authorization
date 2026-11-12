@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -21,6 +22,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\DecidesOnAttributeValues;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
@@ -42,7 +44,7 @@ use Tests\TestCase;
 #[CoversClass(DecisionEvaluated::class)]
 final class DecisionEvaluatedTest extends TestCase
 {
-    use DecidesOnAttributeValues, ReadsDispatchedEvents;
+    use DecidesOnAttributeValues, ReadsDispatchedEvents, ReportsEveryDecision;
 
     /** @var list<string> Every property a decision event has, in order. */
     private const array PROPERTIES = [
@@ -59,6 +61,8 @@ final class DecisionEvaluatedTest extends TestCase
      */
     public function testAnAllowCarriesReferencesAndKeysButNoValue(): void
     {
+        $this->reportEveryDecision();
+
         $user = $this->valueReadingSubject();
         $post = self::postWithStatus(self::SECRET_STATUS);
 
@@ -181,6 +185,8 @@ final class DecisionEvaluatedTest extends TestCase
      */
     public function testAnOutsideResourceIsReportedWhereItWasDecided(): void
     {
+        $this->reportEveryDecision();
+
         $this->valueReadingSubject();
 
         $outside  = StubTenant::query()->create(['id' => 'tenant-3', 'name' => 'tenant-3']);
@@ -213,6 +219,8 @@ final class DecisionEvaluatedTest extends TestCase
      */
     public function testAnApplicationAccessCheckNamesTheScopeItIsDecidedIn(): void
     {
+        $this->reportEveryDecision();
+
         config(['authorization.application_access' => ['admin' => 'admin:access']]);
 
         $user = StubIdentity::create(['id' => 'user-1']);
@@ -262,6 +270,91 @@ final class DecisionEvaluatedTest extends TestCase
         self::assertEquals(Reference::of($other), $events[0]->identity);
         self::assertSame('tenant-1', $events[0]->tenant?->id);
         self::assertSame('admin', $events[0]->application);
+    }
+
+    /**
+     * Under the shipped settings a denial is reported, an ordinary allow is
+     * not, and an allow of a sensitive action is, saying so; the last decision
+     * is stored whether its event is reported or not.
+     *
+     * @return void
+     */
+    public function testTheShippedSettingsReportDenialsAndSensitiveAllowsAlone(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-9']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        $user->givePermission(Permission::create(['name' => 'posts:delete']));
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make('config');
+        $config->set('authorization.events.decisions.sensitive_actions', ['posts:delete']);
+
+        Event::fake([DecisionEvaluated::class]);
+
+        $scope = Authorization::for($user);
+        $read  = $scope->check('posts:read');
+
+        self::assertTrue($read->isAllowed());
+        self::assertSame($read, $scope->lastDecision());
+        self::assertSame([], self::dispatchedEvents(DecisionEvaluated::class));
+
+        self::assertTrue($scope->check('posts:delete')->isAllowed());
+        self::assertFalse($scope->check('posts:edit')->isAllowed());
+
+        $events = self::dispatchedEvents(DecisionEvaluated::class);
+
+        self::assertSame(['posts:delete', 'posts:edit'], \array_map(static fn (DecisionEvaluated $event): string => $event->action, $events));
+        self::assertSame(
+            [DecisionReport::SENSITIVE_ACTION, DecisionReport::DENIAL],
+            \array_map(static fn (DecisionEvaluated $event): DecisionReport => $event->reportedBecause(), $events),
+        );
+        self::assertSame([true, false], \array_map(static fn (DecisionEvaluated $event): bool => $event->isSensitiveAction(), $events));
+        self::assertEquals(Reference::of($user), $events[0]->subject);
+        self::assertTrue($events[0]->isAllowed());
+    }
+
+    /**
+     * `allows` set to `all` reports every allow, a sensitive one still as
+     * sensitive, and set to `none` reports none, a sensitive one included,
+     * while denials are still reported; with `denials` off they are not.
+     *
+     * @return void
+     */
+    public function testTheSettingsDecideWhichDecisionsAreReported(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-9']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        $user->givePermission(Permission::create(['name' => 'posts:delete']));
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make('config');
+        $config->set('authorization.events.decisions.sensitive_actions', ['posts:delete']);
+
+        Event::fake([DecisionEvaluated::class]);
+
+        $scope  = Authorization::for($user);
+        $decide = static function () use ($scope): void {
+            $scope->check('posts:read');
+            $scope->check('posts:delete');
+            $scope->check('posts:edit');
+        };
+
+        $config->set('authorization.events.decisions.allows', 'all');
+        $decide();
+        $config->set('authorization.events.decisions.allows', 'none');
+        $decide();
+        $config->set('authorization.events.decisions.denials', false);
+        $decide();
+
+        $events = self::dispatchedEvents(DecisionEvaluated::class);
+
+        self::assertSame(['posts:read', 'posts:delete', 'posts:edit', 'posts:edit'], \array_map(static fn (DecisionEvaluated $event): string => $event->action, $events));
+        self::assertSame(
+            [DecisionReport::ALL_ALLOWS, DecisionReport::SENSITIVE_ACTION, DecisionReport::DENIAL, DecisionReport::DENIAL],
+            \array_map(static fn (DecisionEvaluated $event): DecisionReport => $event->reportedBecause(), $events),
+        );
     }
 
     /**

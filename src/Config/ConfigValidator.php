@@ -47,7 +47,7 @@ final class ConfigValidator
         'models', 'connection', 'tables', 'defaults', 'permission_enums', 'permission_providers', 'gate', 'log_channel', 'policy_store',
         'policies', 'query_scoping', 'bulk', 'context', 'attributes', 'subject_resolver', 'tenant_tree', 'identity_directory',
         'application_access', 'resource_tenant_resolver', 'requirement_checker', 'session', 'cache', 'hierarchy', 'rank',
-        'administration', 'reviews', 'usage', 'break_glass', 'grant_hooks',
+        'administration', 'reviews', 'usage', 'break_glass', 'events', 'grant_hooks',
     ];
 
     /** @var array<string, class-string<\Illuminate\Database\Eloquent\Model>> The package model each `models.*` key must be or extend. */
@@ -100,6 +100,7 @@ final class ConfigValidator
         UsageConfigValidator::validate($usage);
         NamedEntryConfigValidator::queueConnection(\is_array($usage) ? ConfigBlock::entry($usage, 'connection', null) : null, $container);
         BreakGlassConfigValidator::validate($given('break_glass'));
+        EventConfigValidator::validate($given('events'), $container);
         GrantHookConfigValidator::validate($given('grant_hooks'));
     }
 

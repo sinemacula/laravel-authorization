@@ -107,7 +107,9 @@ it hands over.
 - **No dedicated impersonation event.** The `DecisionEvaluated` event carries a reference to the principal the decision
   was about, so an audit listener can detect that it differs from `$request->user()`. A decision made through
   `previewFor()` also carries the caller as its `previewer`, so "admin X previewed user Y" needs no event of the
-  application's own; a decision made through `for()` carries none, since `for()` is a trusted seam, not a preview.
+  application's own; a decision made through `for()` carries none, since `for()` is a trusted seam, not a preview. By
+  default an allow made through `for()` is reported only for an action in `events.decisions.sensitive_actions`, so a
+  listener that audits every impersonated allow sets `events.decisions.allows` to `all`.
 - **The permission step uses the target principal's permissions.** When `for($user)` is active, the held-permission
   check is made at the allow stage, after the caps and only when no allow statement decides, through
   `SubjectGrants::permissionFor()` over the target subject's grantees, its principal and its identity -- the target

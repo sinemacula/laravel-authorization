@@ -31,6 +31,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\RefusesThePackage;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\ChangingRequirementChecker;
 use Tests\Feature\Stubs\ChangingSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
@@ -53,7 +54,7 @@ use Tests\TestCase;
 #[CoversTrait(ForgetsDecisions::class)]
 final class ForgetsDecisionsTest extends TestCase
 {
-    use RefusesThePackage;
+    use RefusesThePackage, ReportsEveryDecision;
 
     /** @var string The action a step-up allows. */
     private const string EXPORT = 'reports:export';
@@ -63,6 +64,20 @@ final class ForgetsDecisionsTest extends TestCase
 
     /** @var string The session the subject signed in with. */
     private const string SESSION = 'session-1';
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * A denial remembered before a step-up is forgotten once the proof is

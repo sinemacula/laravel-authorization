@@ -22,6 +22,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\TestCase;
 
@@ -41,7 +42,21 @@ use Tests\TestCase;
 #[CoversTrait(BuildsScopedManagers::class)]
 final class BuildsScopedManagersTest extends TestCase
 {
-    use PreviewsSubjects, ReadsDispatchedEvents;
+    use PreviewsSubjects, ReadsDispatchedEvents, ReportsEveryDecision;
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * Building a preview admits it at once, a check about the caller recorded

@@ -83,15 +83,16 @@ impersonates: the guard, the session, the Gate and Blade stay the caller's.
    afterwards, even when the use throws. A preview's answers equal those of `for($target)` under the same scope and
    state; only admission and recording differ, and a preview refuses where its previewer is not admitted.
 
-9. **Recording (N85, N86).** Every decision about the target dispatches `DecisionEvaluated`, or `AuthorizationFailed`
-   for an `authorize()` refusal, with `subject` the target and `previewer` the caller: `CheckBatch` takes the previewer
-   and puts it in every provenance it records. When a listener has meanwhile recorded another decision, the
-   `AuthorizationFailed` names the preview's scope and its previewer. Previews always dispatch. A preview `check()` or
-   `checkMany()` stores the last decision with its provenance as usual. A preview `permissionsFor()` dispatches one
-   event per action it evaluates, an exception to N70 for previews alone, and stores none of them, through the
-   dispatch-only switch, so the last decision stays the admission's. The admission is a real check about the previewer:
-   it records and dispatches as normal, with no previewer. Payloads are references, names and keys, never a value or a
-   session.
+9. **Recording (N85, N86).** Every decision about the target dispatches `DecisionEvaluated` while
+   `events.decisions.previews` is on, as it is by default, reported as a preview, and `AuthorizationFailed` for every
+   `authorize()` refusal, with `subject` the target and `previewer` the caller: `CheckBatch` takes the previewer and
+   puts it in every provenance it records. When a listener has meanwhile recorded another decision, the
+   `AuthorizationFailed` names the preview's scope and its previewer. Previews dispatch whatever `allows` sets. A
+   preview `check()` or `checkMany()` stores the last decision with its provenance as usual. A preview
+   `permissionsFor()` dispatches one event per action it evaluates, an exception to N70 for previews alone, and stores
+   none of them, through the dispatch-only switch, so the last decision stays the admission's. The admission is a real
+   check about the previewer: it records and dispatches as normal, with no previewer. Payloads are references, names and
+   keys, never a value or a session.
 
 10. **Explanations (N85).** The right to preview discloses the target's explanation and trace (statements,
     conditions, caps and requirements), never an attribute value or a session detail, which no trace holds. A refused

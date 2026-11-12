@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\DecidingLaravelPolicy;
 use Tests\Feature\Stubs\StubIdentity;
@@ -38,7 +39,7 @@ use Tests\TestCase;
 #[CoversTrait(DecidesThroughAuthorization::class)]
 final class DecidesThroughAuthorizationTest extends TestCase
 {
-    use ReadsDispatchedEvents;
+    use ReadsDispatchedEvents, ReportsEveryDecision;
 
     /**
      * Register the policy class for the tenant model, and fake the decision
@@ -50,6 +51,8 @@ final class DecidesThroughAuthorizationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->reportEveryDecision();
 
         Gate::policy(StubTenant::class, DecidingLaravelPolicy::class);
 

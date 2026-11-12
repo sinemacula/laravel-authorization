@@ -345,8 +345,9 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
 Gate switch, the policy store, the policy limits, the context keys and sources, the attribute providers, the subject
 resolver, the identity directory, the authentication requirement checker, the session policy source and the scope map,
-the cache, the bulk checks' chunk size, the role hierarchy and rank, the access reviews' limit, and grant usage
-tracking (see [Usage tracking](#usage-tracking)).
+the cache, the bulk checks' chunk size, the role hierarchy and rank, the access reviews' limit, grant usage tracking
+(see [Usage tracking](#usage-tracking)) and which decisions `DecisionEvaluated` reports (see [Which decisions are
+reported](#which-decisions-are-reported)).
 
 ### Configuration checks
 
@@ -357,10 +358,10 @@ is a boot for `authorization:check`, which reports every issue while the package
 
 - A key the package does not define is refused, at the top level and in every block whose keys the package defines
   (`models`, `tables`, `defaults`, `gate`, `policies` and `policies.limits`, `context`, `attributes`, `session`,
-  `cache`, `hierarchy`, `rank`, `query_scoping`, `bulk`, `administration`, `reviews` and `usage`), naming its full
-  path, such as `authorization.models.rol`, so a misspelt key never leaves its default in place. The maps you fill in
-  (`context.keys`, `context.sources`, the attribute providers, `session.scopes` and `application_access`) take any
-  key; each entry is checked against its own shape instead.
+  `cache`, `hierarchy`, `rank`, `query_scoping`, `bulk`, `administration`, `reviews`, `usage`, `events` and
+  `events.decisions`), naming its full path, such as `authorization.models.rol`, so a misspelt key never leaves its
+  default in place. The maps you fill in (`context.keys`, `context.sources`, the attribute providers, `session.scopes`
+  and `application_access`) take any key; each entry is checked against its own shape instead.
 - A setting left out takes its default, also when the configuration was cached without the package's defaults merged
   into it. A setting set to null is refused, a block set to null among them, except where null means the default or
   none: `connection`, `policy_store`, `cache.store`, `usage.connection`, `usage.queue`, a break-glass role's
@@ -368,8 +369,9 @@ is a boot for `authorization:check`, which reports every issue while the package
 - A value read from the environment is checked as it is written, since the config file casts none of them. A whole
   number is an int, or a string written as one in base 10 (`300`, not `300s`, `3e2`, `300.0`, `-0`, one with a space
   around it or an empty value) and no larger than PHP holds. A switch (`gate.enabled`, `hierarchy.enabled`,
-  `rank.enabled`, `usage.enabled`, `break_glass.enabled` and `break_glass.notes`) is true or false, which the
-  environment gives for `true`, `false`, `(true)` and `(false)`; `0`, `1`, `off` and `no` are refused.
+  `rank.enabled`, `usage.enabled`, `break_glass.enabled`, `break_glass.notes` and the three switches of
+  `events.decisions`) is true or false, which the environment gives for `true`, `false`, `(true)` and `(false)`; `0`,
+  `1`, `off` and `no` are refused.
 - Each table name is a plain identifier (a letter or an underscore, then letters, digits and underscores) with no
   schema before it, short enough that every index and key name the migrations build from it fits in 63 characters,
   PostgreSQL's limit (from 33 to 51 characters, depending on the table), and the thirteen names are distinct.
@@ -392,9 +394,10 @@ administration limits, the access reviews' limit, usage tracking, the break-glas
 `Config\BreakGlassConfigValidator::read()`), `cache.ttl` and `cache.prefix`, the three switches, the permission enums
 and providers, `application_access` (an entry for an application that is not a permission name, null among it, is
 refused rather than opening the application), `session.scopes`, `context.keys` and `context.sources`, the attribute
-providers and `grant_hooks`. A block on the way to a setting that is not an array is refused too, rather than read as
-one that leaves the setting out. A setting read on every check is read with a few array lookups and plain comparisons,
-so the checks add next to nothing to a request.
+providers, `grant_hooks` and `events.decisions`, whose sensitive actions are checked after boot for their type only. A
+block on the way to a setting that is not an array is refused too, rather than read as one that leaves the setting out.
+A setting read on every check is read with a few array lookups and plain comparisons, so the checks add next to nothing
+to a request.
 
 The names are checked after boot for their type only. A table name, a model class or `defaults.guard` that is not a
 string, or is empty, is refused with the same exception, and so is a `tables.prefix` that is not a string, a
@@ -2001,16 +2004,17 @@ preview is evaluated as `administration.previewing` (see [Preview](#preview)). T
 definitions (roles, permissions and policies), what a role carries (its permissions, policies and parent), never to a
 resource policy's attachment or to grant rows.
 
-**Audit.** Every decision is reported with `DecisionEvaluated`, and a refusal with `AuthorizationFailed`, as
-`authorize()` reports one, each naming the operation resource `authorization:operation:{operation id}`. Each try of a
-call that conflicted reports its decisions under the same operation id; a call refused as `administration.conflict` ends
-with that refusal, reported with both events under the operation's first action, which marks the allowed decisions of
-its earlier tries as superseded, since none of them was written. The change
-events of a write are dispatched only after it commits, and their operation carries the same id, the actor's principal
-and identity, whether the call was trusted or delegated, any impersonator and the actions its changes fall under, so a
-decision and the write it allowed are correlated. The actions are decided through `check()` only when `isTrusted` is
-false: a trusted call names its actions too, though nothing was decided, and a sync names both its grant and its revoke
-action whichever it made.
+**Audit.** Each decision is reported with `DecisionEvaluated` when `events.decisions` selects it (an allow only when
+`allows` is `all`, or is `sensitive` and `sensitive_actions` lists its action, see [Which decisions are
+reported](#which-decisions-are-reported)), and every refusal with `AuthorizationFailed`, as `authorize()` reports one,
+each naming the operation resource `authorization:operation:{operation id}`. Each try of a call that conflicted reports
+its decisions under the same operation id; a call refused as `administration.conflict` ends with that refusal, reported
+with both events under the operation's first action, which marks the allowed decisions of its earlier tries as
+superseded, since none of them was written. The change events of a write are dispatched only after it commits, and their
+operation carries the same id, the actor's principal and identity, whether the call was trusted or delegated, any
+impersonator and the actions its changes fall under, so a decision and the write it allowed are correlated. The actions
+are decided through `check()` only when `isTrusted` is false: a trusted call names its actions too, though nothing was
+decided, and a sync names both its grant and its revoke action whichever it made.
 
 A refusal is reported synchronously, inside the operation's transaction, and that transaction then rolls back, taking
 with it anything written on the same connection. An audit store that persists denials must therefore write them on a
@@ -2690,7 +2694,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 
 Event::listen(static function (AuthorizationEvent $event): void {
-    // Every role, permission, policy, grant and guardrail change, every override and every decision.
+    // Every role, permission, policy, grant and guardrail change, every override and every reported decision.
 });
 
 Event::listen(static function (RoleDeleted $event): void {
@@ -2796,9 +2800,10 @@ A grant, boundary, resource policy or guardrail event holds in its scope's tenan
 or policy event holds in the tenant that owns the record, and in no one application.
 
 `DecisionEvaluated` and `AuthorizationFailed` implement the marker too, but are dispatched when the decision is made,
-not after a commit: a denial is a fact even if the surrounding transaction rolls back. `DecisionEvaluated` is
-dispatched for every decision `check()` makes, and `AuthorizationFailed` when `authorize()` refuses. Both are
-`final readonly` snapshots of the same references, names and ids (AUTHZ-15.3), never a model, the context the caller
+not after a commit: a denial is a fact even if the surrounding transaction rolls back. `DecisionEvaluated` reports the
+decisions `check()` makes that `events.decisions` selects (see [Which decisions are
+reported](#which-decisions-are-reported)), and `AuthorizationFailed` is dispatched whenever `authorize()` refuses. Both
+are `final readonly` snapshots of the same references, names and ids (AUTHZ-15.3), never a model, the context the caller
 passed, a session, or a condition or attribute value (AUTHZ-15.4):
 
 ```php
@@ -2817,6 +2822,8 @@ Event::listen(static function (DecisionEvaluated $event): void {
     $event->statements;     // the StatementReference of each statement that decided it (see below)
     $event->usedBreakGlass; // whether a break-glass grant allowed it; false until break-glass grants arrive
     $event->keys;           // the context keys it read, such as ['resource.status', 'input.reason'], never their values
+    $event->reportedBecause();   // the DecisionReport it was reported for, such as DecisionReport::DENIAL
+    $event->isSensitiveAction(); // whether its action is one of events.decisions.sensitive_actions
 });
 ```
 
@@ -2833,6 +2840,54 @@ patterns name, each once: a policy that reads `resource.status` or interpolates 
 event, never the value. The decision itself, with its stage and its trace, is not on the event; a listener that needs it
 for debugging reads `Authorization::lastDecision()`, which holds it by the time the event is dispatched, and
 `Authorization::lastDecisionProvenance()` (see [The programmatic API](#the-programmatic-api)).
+
+#### Which decisions are reported
+
+An application makes far more allows than anything else, and most of them say nothing an audit needs, so by default
+`DecisionEvaluated` reports every denial, every insufficient authentication, every decision made through a preview and
+the allows of the actions you list as sensitive, and no other allow. `config/authorization.php` sets which:
+
+```php
+'events' => [
+    'decisions' => [
+        'denials'                     => true,        // every denial
+        'insufficient_authentication' => true,        // every denial whose only unmet requirement is authentication
+        'previews'                    => true,        // every decision made through previewFor()
+        'allows'                      => 'sensitive', // 'all', 'sensitive' (the listed actions alone) or 'none'
+        'sensitive_actions'           => ['invoices:refund', 'authorization:role.grant'],
+    ],
+],
+```
+
+A listener that needs every allow, a usage report say, sets `allows` to `all`. An application whose listeners expect a
+`DecisionEvaluated` for every check, allows included, sets `AUTHORIZATION_EVENTS_ALLOWS=all` and leaves the three
+switches on.
+
+Each setting reports its kind of decision on its own, and a decision is reported when any setting that is on reports
+it. The event says why with `reportedBecause()`, a `DecisionReport`, naming the most specific reason that applies and
+is reported, in this order: `BREAK_GLASS`, `PREVIEW`, `INSUFFICIENT_AUTHENTICATION`, `DENIAL`, `SENSITIVE_ACTION`, then
+`ALL_ALLOWS`. A preview's denial is therefore reported as `PREVIEW` while `previews` is on, and as `DENIAL` while it is
+off and `denials` is on; an allow of a sensitive action is `SENSITIVE_ACTION` with `allows` set to `all` as well, and is
+not reported with `allows` set to `none`. `isSensitiveAction()` says whether the action is listed, whatever the reason
+it was reported for, so an audit mapper can record the allows of sensitive actions alone. A break-glass allow is to be
+reported whatever the settings, as `BREAK_GLASS`, once break-glass grants arrive; until then no decision uses one.
+
+`sensitive_actions` names catalogue actions exactly, with no wildcard: each is letters, digits and `_ - : .`, and must
+be declared by the package or by your permission enums or providers. Whether each is declared is checked at boot, as the
+session scopes are, by reading the action catalogue, and only when the list names one; `authorization:check` lists the
+setting as `checked_at_boot`. Every other value is checked as written: a switch is true or false, `allows` one of its
+three values, and null is refused for each.
+
+The settings are read once for each `check()`, bulk check or listing that reports its decisions, so each decision costs
+a few comparisons more. Which decisions are reported changes nothing else: every decision is decided, and stored as the
+last decision, as before, a bulk check reports the decisions it reports one event each in the order of its checks, and a
+preview's listing stores none of its decisions and, while `previews` is on, reports each action it evaluates (see
+[Preview](#preview)).
+
+`AuthorizationFailed` is not filtered: it is dispatched for every refusal `authorize()` throws, whatever these settings,
+and its `reportedBecause()` names the reason the refusal would be reported for with every setting on. A refusal is
+usually reported by both events, so a listener of both tells an observation (`DecisionEvaluated`) from a failure
+(`AuthorizationFailed`) by the event's class, and counts a refusal once.
 
 ### The programmatic API
 
@@ -2871,10 +2926,11 @@ or about the subject of the scoped manager it is called on:
 
 `check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` deciding as `checkMany()`
 decides a batch of one: every other method but `queryScope()` and the listings adapts one of them, and each decision
-they make is recorded as the last decision and reported with `DecisionEvaluated`; `queryScope()` compiles a scope from
-the same pipeline without deciding a check, and `permissionsFor()` decides each action through the path `checkMany()`
-takes but as introspection, so both record and report nothing, except on a preview, where the admission is recorded and
-reported at every use and a listing dispatches each action's `DecisionEvaluated` (see [Preview](#preview)).
+they make is recorded as the last decision and reported with `DecisionEvaluated` when `events.decisions` selects it (see
+[Which decisions are reported](#which-decisions-are-reported)); `queryScope()` compiles a scope from the same pipeline
+without deciding a check, and `permissionsFor()` decides each action through the path `checkMany()` takes but as
+introspection, so both record and report nothing, except on a preview, where the admission is recorded at every use, and
+reported as any check is, and a listing dispatches each action's `DecisionEvaluated` (see [Preview](#preview)).
 `permissionsFor()` and `heldPermissionsFor()` take their subject as an argument, null for the one the manager's checks
 are about (see [Effective permissions](#effective-permissions)). The resource and the context take the same forms
 everywhere: a model, a `[type, id]` pair, a `ResourceReference`, an `AuthorizableResource`, a model class or a string
@@ -3028,11 +3084,11 @@ deciding about the model through `Authorization::for($model)`.
 
 Each check goes through the same stages as `check()`, its own tenant, scope, policies, caps and attributes included, so
 its decision, reason, stage, trace and requirements are those `check()` would give. Each is recorded as the last
-decision and reported with its own `DecisionEvaluated` as soon as it is decided, before the next one, in the order of
-the checks; there is no event for the batch as a whole. `Authorization::lastDecision()` is then the last check
-decided, and an empty batch leaves it as it was. A check that throws where `check()` would throw (an attribute
-provider that fails, say) stops the batch there: the checks before it are recorded and reported, nothing is returned,
-and the tenant scope is restored however the batch ends.
+decision and, when `events.decisions` selects it, reported with its own `DecisionEvaluated` as soon as it is decided,
+before the next one, in the order of the checks; there is no event for the batch as a whole.
+`Authorization::lastDecision()` is then the last check decided, and an empty batch leaves it as it was. A check that
+throws where `check()` would throw (an attribute provider that fails, say) stops the batch there: the checks before it
+are recorded and reported, nothing is returned, and the tenant scope is restored however the batch ends.
 
 What the checks share is read once. The subject is resolved once for the batch, and its grants, roles, policies,
 permission boundaries, session caps and the guardrails are resolved once in each scope (tenant and application) the
@@ -3195,9 +3251,10 @@ the request, so authorize the action again when it is taken, with `authorize()`,
 Gate.
 
 **It records nothing.** Listing is introspection, not a check: it records no last decision and dispatches no
-`DecisionEvaluated` and no `AuthorizationFailed`. On a preview, each action's `DecisionEvaluated` is dispatched, naming
-both parties, though none is stored, and the preview's admission is recorded and reported as any check (see
-[Preview](#preview)). Break-glass grants, when they arrive, will define how a listing that relies on one is reported.
+`DecisionEvaluated` and no `AuthorizationFailed`. On a preview, each action's `DecisionEvaluated` is dispatched while
+`events.decisions.previews` is on, as it is by default, naming both parties, though none is stored, and the preview's
+admission is recorded and reported as any check (see [Preview](#preview)). Break-glass grants, when they arrive, will
+define how a listing that relies on one is reported.
 
 **Held permissions and their requirements.** `heldPermissionsFor()` takes the same arguments as `permissionsFor()` and
 lists the same actions, in the same order, through the same path, each as a
@@ -3331,13 +3388,14 @@ too: previewed with no scope given, a `Subject` given on the platform is preview
 rather than in the request's tenant, while a model is previewed in the request's scope, whatever marker the request's
 subject carries.
 
-**What is recorded.** Every decision about the subject dispatches `DecisionEvaluated`, or `AuthorizationFailed` for an
-`authorize()` refusal, with `subject` the previewed subject and `previewer` the caller, in the scope the decision was
-made in, or the preview's when a listener has meanwhile recorded another decision; previews always dispatch. A
-preview `check()` or `checkMany()` stores the last decision with that provenance. A preview `permissionsFor()`
-dispatches one event for each action it evaluates, but stores none of them, so the last decision stays its admission.
-The admission is a check about the caller, recorded and reported as normal, with no previewer. `explain()` and a
-decision's trace are disclosed under the right to preview; they name statements, conditions, caps and requirements,
+**What is recorded.** Every decision about the subject dispatches `DecisionEvaluated` while `events.decisions.previews`
+is on, as it is by default, reported as `PREVIEW` whatever `allows` sets, and every `authorize()` refusal dispatches
+`AuthorizationFailed`, with `subject` the previewed subject and `previewer` the caller, in the scope the decision was
+made in, or the preview's when a listener has meanwhile recorded another decision. A preview `check()` or `checkMany()`
+stores the last decision with that provenance. A preview `permissionsFor()` dispatches one event for each action it
+evaluates, but stores none of them, so the last decision stays its admission. The admission is a check about the caller,
+recorded and reported as any check is, with no previewer, so as an allow it is not reported by default. `explain()` and
+a decision's trace are disclosed under the right to preview; they name statements, conditions, caps and requirements,
 never a value or a session.
 
 **What is refused.** On a preview, `for()`, `forUser()`, `previewFor()` and `permissionsFor()` naming a subject would
@@ -3370,7 +3428,8 @@ Take a preview query in whole, or not into a write at all. See [Preview](docs/de
 
 `explain()` answers "why can" and "why can't" (AUTHZ-11.5). It decides the check exactly as `check()` does, through the
 same path and the same stages, so its verdict is the same, and records and reports it as any check: it is the last
-decision and dispatches its `DecisionEvaluated`. It returns an `Explanation`:
+decision, and its `DecisionEvaluated` is dispatched when `events.decisions` reports it (see [Which decisions are
+reported](#which-decisions-are-reported)). It returns an `Explanation`:
 
 ```php
 $explanation = Authorization::for($user)->explain('posts:publish', $post, ['reason' => 'launch']);
@@ -4960,16 +5019,16 @@ It reports:
   the value or an exception's message. On an application booted for the command, these are what the boot found; on
   one that booted otherwise, the boot's checks passed, so the command runs them again, and an issue shows the
   configuration changed since, such as by `config()->set()`.
-- **Settings**: every setting the package defines, and any unknown key set, with its status: `ok`, `refused`,
-  `skipped` or `unchecked`, or, for a setting whose check builds what it names (the context sources, the attribute
-  providers, the session scopes and the cache store), what became of that check as the application booted:
-  `checked_at_boot` when it ran and passed, `failed_at_boot` when it ran and failed, and `not_run` when the boot did
-  not run it, as another check had already refused the configuration. Such a check is never run again by the command.
-  A value is shown only for settings whose values are safe to show: class names, table names, switches, whole
-  numbers, and guard, connection, store, queue, channel and permission names. Any other value, and every value under
-  an unknown key, is shown by its type alone (`string`, `array(3)`). Whether a set value came from the file or the
-  environment is not known once the configuration is merged or cached, so it is `unknown`, and `default` for a
-  setting left out.
+- **Settings**: every setting the package defines, and any unknown key set, with its status: `ok`, `refused`, `skipped`
+  or `unchecked`, or, for a setting whose check builds what it names (the context sources, the attribute providers, the
+  session scopes, the sensitive actions and the cache store), what became of that check as the application booted:
+  `checked_at_boot` when it ran and passed, `failed_at_boot` when it ran and failed, and `not_run` when the boot did not
+  run it, as another check had already refused the configuration. Such a check is never run again by the command. A
+  value is shown only for settings whose values are safe to show: class names, table names, switches, whole numbers,
+  guard, connection, store, queue, channel, permission and action names, and the decision events' `allows`. Any other
+  value, and every value under an unknown key, is shown by its type alone (`string`, `array(3)`). Whether a set value
+  came from the file or the environment is not known once the configuration is merged or cached, so it is `unknown`, and
+  `default` for a setting left out.
 - **Tables**: the prefix of the tables' default names, and the name each table takes, the one the package reads and
   the migrations create: the name you set, as written, or the table's own with the prefix before it, and whether you
   set it. A prefix or name that is refused, and a default name while the prefix is refused, is not shown.
@@ -5218,15 +5277,16 @@ The kernel's `call()` bootstraps the application before it runs the command, so 
 bootstrap throws; without the switch, a refused configuration fails there. The switch is held in the application's
 container, never statically or in the environment, so it reaches that application alone.
 
-**What the boot does.** The configuration's structural checks run first, collecting every issue. When they find any,
-the package refuses every operation and runs none of the registration work it leaves to the boot: no configured class
-is loaded or bound, no deferred provider is loaded for it, and the grant hooks do not extend the contract. Otherwise
-that work runs as on any boot, then the checks that build what the configuration names (the authentication context and
-the context sources, the attribute providers, the session scopes' catalogue and the cache store), each recording
-whether it passed, failed or did not run. The configured permission providers may run there, as the session scopes
-are checked against the actions they declare while the configuration is validated, never as the report is written,
-which shows what the boot recorded. The package is healthy, and boots exactly as it otherwise would, only when
-every check passed; any issue, including a check that failed in a way the package did not foresee, refuses.
+**What the boot does.** The configuration's structural checks run first, collecting every issue. When they find any, the
+package refuses every operation and runs none of the registration work it leaves to the boot: no configured class is
+loaded or bound, no deferred provider is loaded for it, and the grant hooks do not extend the contract. Otherwise that
+work runs as on any boot, then the checks that build what the configuration names (the authentication context and the
+context sources, the attribute providers, the session scopes' catalogue, the sensitive actions, read against the action
+catalogue, and the cache store), each recording whether it passed, failed or did not run. The configured permission
+providers may run there, as the session scopes and the sensitive actions are checked against the actions they declare
+while the configuration is validated, never as the report is written, which shows what the boot recorded. The package is
+healthy, and boots exactly as it otherwise would, only when every check passed; any issue, including a check that failed
+in a way the package did not foresee, refuses.
 
 In the refusing state the package registers `authorization:check` alone among its commands (none that writes grants or
 syncs), does not install its Gate hook and does not wire usage tracking. The Blade directives, the query macros and
@@ -5339,7 +5399,7 @@ $scope->within(fn () => Authorization::for($scope->subjectIn($subject))->explain
 ```
 
 The scope in place before is restored afterwards, even when the check throws. The check is recorded as the last
-decision and dispatches its `DecisionEvaluated`, as any explained check does.
+decision, and its `DecisionEvaluated` is dispatched when `events.decisions` reports it, as for any explained check.
 
 **The resource.** It is passed to the check as `check()` takes it, so the check on it is an ordinary one. A
 `{morph type}:{key}` resource, `post:42`, names that record as the `['post', '42']` pair: its tenant comes from the

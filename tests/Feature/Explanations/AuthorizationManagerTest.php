@@ -35,6 +35,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\PreviewsSubjects;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\CustomGrantsIdentity;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
@@ -62,10 +63,24 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationManager::class)]
 final class AuthorizationManagerTest extends TestCase
 {
-    use CatchesRefusals, PreviewsSubjects;
+    use CatchesRefusals, PreviewsSubjects, ReportsEveryDecision;
 
     /** @var string A value a check is given, which no explanation may carry. */
     private const string SECRET = 'sentinel-value-7f3a';
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * A permission granted directly is explained by its grant: the permission,

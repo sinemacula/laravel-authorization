@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Config\CacheConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ConfigBlock;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ContextConfigValidator;
+use SineMacula\Laravel\Authorization\Config\EventConfigValidator;
 use SineMacula\Laravel\Authorization\Config\NamedEntryConfigValidator;
 use SineMacula\Laravel\Authorization\Config\PolicyConfigValidator;
 use SineMacula\Laravel\Authorization\Config\QueryScopingConfigValidator;
@@ -181,25 +182,27 @@ final class ConfigValidatorTest extends TestCase
         $shipped = require __DIR__ . '/../../config/authorization.php';
 
         $allowed = [
-            ''                => ConfigValidator::KEYS,
-            'models'          => \array_keys(ConfigValidator::MODELS),
-            'tables'          => TableConfigValidator::keys(),
-            'defaults'        => NamedEntryConfigValidator::DEFAULTS,
-            'gate'            => SwitchConfigValidator::KEYS,
-            'hierarchy'       => SwitchConfigValidator::KEYS,
-            'rank'            => SwitchConfigValidator::KEYS,
-            'policies'        => PolicyConfigValidator::SETTINGS,
-            'policies.limits' => PolicyLimits::KEYS,
-            'query_scoping'   => QueryScopingConfigValidator::LIMITS,
-            'bulk'            => BulkConfigValidator::KEYS,
-            'context'         => ContextConfigValidator::SETTINGS,
-            'attributes'      => AttributeConfigValidator::SETTINGS,
-            'session'         => SessionConfigValidator::SETTINGS,
-            'cache'           => CacheConfigValidator::SETTINGS,
-            'administration'  => AdministrationConfigValidator::LIMITS,
-            'reviews'         => ReviewConfigValidator::SETTINGS,
-            'usage'           => UsageConfigValidator::SETTINGS,
-            'break_glass'     => BreakGlassConfigValidator::SETTINGS,
+            ''                 => ConfigValidator::KEYS,
+            'models'           => \array_keys(ConfigValidator::MODELS),
+            'tables'           => TableConfigValidator::keys(),
+            'defaults'         => NamedEntryConfigValidator::DEFAULTS,
+            'gate'             => SwitchConfigValidator::KEYS,
+            'hierarchy'        => SwitchConfigValidator::KEYS,
+            'rank'             => SwitchConfigValidator::KEYS,
+            'policies'         => PolicyConfigValidator::SETTINGS,
+            'policies.limits'  => PolicyLimits::KEYS,
+            'query_scoping'    => QueryScopingConfigValidator::LIMITS,
+            'bulk'             => BulkConfigValidator::KEYS,
+            'context'          => ContextConfigValidator::SETTINGS,
+            'attributes'       => AttributeConfigValidator::SETTINGS,
+            'session'          => SessionConfigValidator::SETTINGS,
+            'cache'            => CacheConfigValidator::SETTINGS,
+            'administration'   => AdministrationConfigValidator::LIMITS,
+            'reviews'          => ReviewConfigValidator::SETTINGS,
+            'usage'            => UsageConfigValidator::SETTINGS,
+            'break_glass'      => BreakGlassConfigValidator::SETTINGS,
+            'events'           => EventConfigValidator::KEYS,
+            'events.decisions' => EventConfigValidator::SETTINGS,
         ];
 
         foreach ($allowed as $path => $keys) {
@@ -267,7 +270,7 @@ final class ConfigValidatorTest extends TestCase
     {
         $blocks = [
             'models', 'tables', 'defaults', 'permission_enums', 'permission_providers', 'gate', 'policies', 'query_scoping', 'bulk', 'context', 'attributes',
-            'application_access', 'session', 'cache', 'hierarchy', 'rank', 'administration', 'reviews', 'usage', 'break_glass', 'grant_hooks',
+            'application_access', 'session', 'cache', 'hierarchy', 'rank', 'administration', 'reviews', 'usage', 'break_glass', 'events', 'grant_hooks',
         ];
 
         foreach ($blocks as $key) {
@@ -607,6 +610,39 @@ final class ConfigValidatorTest extends TestCase
             fn () => ConfigValidator::validate($config, $this->container()),
             'authorization.break_glass.roles.responder.max_minutes',
             'a role\'s maximum of 61 minutes is longer than the global maximum of 60.',
+        );
+    }
+
+    /**
+     * The decision events' settings are validated with the rest: the shipped
+     * ones pass, as does a missing block, and a value a setting does not take
+     * is refused under its key.
+     *
+     * @return void
+     */
+    public function testTheDecisionEventsAreValidated(): void
+    {
+        $config = $this->authorizationConfig();
+
+        self::assertSame(
+            ['denials' => true, 'insufficient_authentication' => true, 'previews' => true, 'allows' => 'sensitive', 'sensitive_actions' => []],
+            $config['events']['decisions'],
+        );
+
+        ConfigValidator::validate($config, $this->container());
+
+        $missing = $config;
+
+        unset($missing['events']);
+
+        ConfigValidator::validate($missing, $this->container());
+
+        $config['events']['decisions']['allows'] = 'every';
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->container()),
+            'authorization.events.decisions.allows',
+            'expected one of all, sensitive, none, got \'every\' (string).',
         );
     }
 

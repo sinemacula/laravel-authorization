@@ -35,6 +35,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\CatchesRefusals;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubMachine;
@@ -53,7 +54,7 @@ use Tests\TestCase;
 #[CoversClass(ActingContext::class)]
 final class ActingContextTest extends TestCase
 {
-    use ActsAsTenant, CatchesRefusals;
+    use ActsAsTenant, CatchesRefusals, ReportsEveryDecision;
 
     /**
      * Turn rank off: these tests are about the acting context, and name
@@ -66,6 +67,8 @@ final class ActingContextTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->reportEveryDecision();
 
         config(['authorization.rank.enabled' => false]);
     }

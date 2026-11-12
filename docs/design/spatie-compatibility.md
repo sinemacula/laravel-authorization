@@ -163,12 +163,12 @@ identity-level events. The `Events\Role\PermissionGranted` / `Events\Role\Permis
 permissions are attached to or detached from a role, which Spatie does not emit as a distinct event.
 
 The package also ships `AuthorizationFailed` (hard-denial, fired from `authorize()`, and from the `permission` and
-`authorize` middleware, before the exception is thrown; a `role` denial is not a decision and fires none)
-and `DecisionEvaluated` (every evaluation path, success or denial, including a Gate check whose argument cannot be
-identified as a resource, which is recorded as an implicit deny with a `null` resource) — Spatie has no equivalents;
-audit consumers subscribe to these to persist who each decision was about, its reason, the statements that decided it
-and the context keys it read, never their values. The decision itself, with its trace, is read from
-`Authorization::lastDecision()`.
+`authorize` middleware, before the exception is thrown; a `role` denial is not a decision and fires none) and
+`DecisionEvaluated` (every evaluation path, denials, previews and allows as `events.decisions` selects, including a Gate
+check whose argument cannot be identified as a resource, which is recorded as an implicit deny with a `null` resource) —
+Spatie has no equivalents; audit consumers subscribe to these to persist who each decision was about, its reason, the
+statements that decided it and the context keys it read, never their values. The decision itself, with its trace, is
+read from `Authorization::lastDecision()`.
 
 See each event class under `src/Events/` for the full audit payload — every event carries a stable `@api` contract
 and breaking changes require a major version bump.
