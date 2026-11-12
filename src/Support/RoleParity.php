@@ -18,8 +18,14 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * AUTHZ-5.2).
  *
  * A role takes only the platform's permissions and parents and its own
- * tenant's, so a platform role takes only the platform's. Two concrete guards
- * must be equal; a guard-agnostic side is compatible with every guard.
+ * tenant's, so a platform role takes only the platform's. A role, permission or
+ * parent naming half a tenant, a type without a key or a key without a type,
+ * which the package never writes, is neither the platform's nor any tenant's,
+ * so it is never linked, as it is never granted
+ * (`InvalidTenantColumnsException`); a link with one already stored applies
+ * nowhere, so it never keeps the guard of the other record from changing. Two
+ * concrete guards must be equal; a guard-agnostic side is compatible with every
+ * guard.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -28,50 +34,50 @@ final class RoleParity
 {
     /**
      * Refuse a permission the role cannot carry: one limited to another guard,
-     * or one another tenant owns (`OwnerMismatchException`).
+     * or one another tenant owns (`OwnerMismatchException`). Linking the two,
+     * either naming half a tenant is refused (`InvalidTenantColumnsException`);
+     * checking a link already stored, when the guard of either changes, a link
+     * with such a record is passed over, since it applies nowhere and nothing
+     * is linked.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
+     * @param  bool  $isLinking
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException
      */
-    public static function assertCarries(Role $role, Permission $permission): void
+    public static function assertCarries(Role $role, Permission $permission, bool $isLinking = true): void
     {
-        if (!self::guardsMatch($role->guard, $permission->guard)) {
-            throw new GuardMismatchException($role->name, $permission->name, (string) $role->guard, (string) $permission->guard);
-        }
+        $mismatch = static fn (): GuardMismatchException => new GuardMismatchException($role->name, $permission->name, (string) $role->guard, (string) $permission->guard);
 
-        $owners = self::foreignOwners($role, $permission);
-
-        if ($owners !== null) {
-            throw new OwnerMismatchException($role->name, $owners[0], 'permission', $permission->name, $owners[1]);
-        }
+        self::assertLinkable($role, $permission, 'permission', $isLinking, $mismatch);
     }
 
     /**
      * Refuse a parent the role cannot sit under: one limited to another guard,
-     * or one another tenant owns (`OwnerMismatchException`).
+     * or one another tenant owns (`OwnerMismatchException`). Linking the two,
+     * either naming half a tenant is refused (`InvalidTenantColumnsException`);
+     * checking a link already stored, when the guard of either changes, a link
+     * with such a role is passed over, since it applies nowhere and nothing is
+     * linked.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $parent
+     * @param  bool  $isLinking
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\ParentGuardMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException
      */
-    public static function assertUnder(Role $role, Role $parent): void
+    public static function assertUnder(Role $role, Role $parent, bool $isLinking = true): void
     {
-        if (!self::guardsMatch($role->guard, $parent->guard)) {
-            throw new ParentGuardMismatchException($role->name, $parent->name, (string) $role->guard, (string) $parent->guard);
-        }
+        $mismatch = static fn (): ParentGuardMismatchException => new ParentGuardMismatchException($role->name, $parent->name, (string) $role->guard, (string) $parent->guard);
 
-        $owners = self::foreignOwners($role, $parent);
-
-        if ($owners !== null) {
-            throw new OwnerMismatchException($role->name, $owners[0], 'parent role', $parent->name, $owners[1]);
-        }
+        self::assertLinkable($role, $parent, 'parent role', $isLinking, $mismatch);
     }
 
     /**
@@ -98,6 +104,66 @@ final class RoleParity
         $name = $target->getAttribute('name');
 
         throw new GranteeGuardMismatchException($kind, $name, (string) $guard, (string) $granteeGuard);
+    }
+
+    /**
+     * Refuse a permission or parent of the kind the role cannot take: one
+     * limited to another guard, with the exception the callback makes, or one
+     * another tenant owns (`OwnerMismatchException`); one naming half a tenant
+     * is refused when they are being linked, else passed over (see
+     * `isWhole()`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  \SineMacula\Laravel\Authorization\Models\Permission|\SineMacula\Laravel\Authorization\Models\Role  $related
+     * @param  string  $kind
+     * @param  bool  $isLinking
+     * @param  \Closure(): \Throwable  $mismatch
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException
+     * @throws \Throwable
+     */
+    private static function assertLinkable(Role $role, Permission|Role $related, string $kind, bool $isLinking, \Closure $mismatch): void
+    {
+        if (!self::isWhole($role, $related, $kind, $isLinking)) {
+            return;
+        }
+
+        if (!self::guardsMatch($role->guard, $related->guard)) {
+            throw $mismatch();
+        }
+
+        $owners = self::foreignOwners($role, $related);
+
+        if ($owners !== null) {
+            throw new OwnerMismatchException($role->name, $owners[0], $kind, $related->name, $owners[1]);
+        }
+    }
+
+    /**
+     * Determine whether the role and the permission or parent it is linked to
+     * each name a whole tenant, or none: when they are being linked, either
+     * naming half a tenant is refused rather than taken as the platform's;
+     * otherwise such a link is reported as not whole, to be passed over.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  \Illuminate\Database\Eloquent\Model  $related
+     * @param  string  $kind
+     * @param  bool  $isLinking
+     * @return bool
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
+     */
+    private static function isWhole(Role $role, Model $related, string $kind, bool $isLinking): bool
+    {
+        if ($isLinking) {
+            RecordOwner::assertWhole($role, 'role', 'link');
+            RecordOwner::assertWhole($related, $kind, 'link');
+        }
+
+        return !TenantColumns::isHalf($role->getAttribute('tenant_type'), $role->getAttribute('tenant_id'))
+            && !TenantColumns::isHalf($related->getAttribute('tenant_type'), $related->getAttribute('tenant_id'));
     }
 
     /**

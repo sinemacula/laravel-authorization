@@ -22,12 +22,13 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * the role and permission of an edge.
  *
  * A row keeps both where it is stored to hold (`origin`, its tenant columns as
- * they are) and where a check reads it (`scope`). The two differ only for a row
- * naming half a tenant, which the package never writes: a check reads a key
- * without a type at the platform, by its missing type alone, so its scope is
- * the platform's; and a type without a key nowhere, so it is not placed (see
- * `isPlaced()`), and meets an attachment, or a grant, only one that holds
- * everywhere (see `canMeet()`).
+ * they are) and the scope it is weighed in (`scope`). The two differ only for a
+ * row naming half a tenant, a type without a key or a key without a type, which
+ * the package never writes: its scope names no tenant, but a check applies its
+ * grants nowhere, as `TenantChain` reads neither half as the platform's, and
+ * its restrictions everywhere (N130, see `Support\TenantColumns`), so it is not
+ * placed (see `isPlaced()`), and meets an attachment, or a grant, only one that
+ * holds everywhere (see `canMeet()`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -140,16 +141,14 @@ final readonly class GrantRow
     }
 
     /**
-     * Determine whether a check reads the row anywhere: every row but one
-     * naming a tenant type without a key.
+     * Determine whether a check applies the row as a grant anywhere: every row
+     * but one naming half a tenant.
      *
      * @return bool
      */
     public function isPlaced(): bool
     {
-        $origin = $this->originScope();
-
-        return $origin === null || $origin->tenantType === null || $origin->tenantId !== null;
+        return !$this->isMalformed();
     }
 
     /**

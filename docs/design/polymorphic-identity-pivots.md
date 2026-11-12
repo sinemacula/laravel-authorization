@@ -131,6 +131,14 @@ sets:
 ],
 ```
 
+`authorization.tables.prefix` (`AUTHORIZATION_TABLE_PREFIX`) is put before every table name left at its default, the
+key's own, and before no name set explicitly, so `'prefix' => 'app_'` with the block above gives `app_roles` and
+`user_role_assignments`. Whether a name was set explicitly is told by its value alone, as a merged or cached
+configuration no longer records where a value came from: a name set to the key's own is the default, and is prefixed.
+`Config\TableNames::get()` is the one place a name is resolved: the models, the services and the migrations all read it
+there, and `TableConfigValidator` checks each prefixed default against its table's bound as it checks a name set
+explicitly.
+
 The column names are fixed: the relations, the migrations and the grant reads all use the names above.
 
 ## Temporal Grant Mechanics

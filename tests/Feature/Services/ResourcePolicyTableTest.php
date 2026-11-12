@@ -112,6 +112,27 @@ final class ResourcePolicyTableTest extends TestCase
     }
 
     /**
+     * An attachment naming half a tenant, a key without a type or a type
+     * without a key, is not the platform's: attaching the policy at the
+     * platform writes a row beside it, and detaching it there leaves it as it
+     * is.
+     *
+     * @return void
+     */
+    public function testAnAttachmentNamingHalfATenantIsNotThePlatforms(): void
+    {
+        $policy = self::policy();
+        $row    = ['policy_id' => $policy, 'resource_type' => 'posts', 'resource_id' => '7', 'application' => null, 'include_subtree' => true];
+
+        DB::table('resource_policies')->insert([[...$row, 'tenant_type' => null, 'tenant_id' => 'tenant-a'], [...$row, 'tenant_type' => 'stub_tenant', 'tenant_id' => null]]);
+
+        self::assertNull(self::table('7', GrantScope::platform())->detach($policy));
+        self::assertSame(GrantOutcome::GRANTED, self::table('7', GrantScope::platform())->attach($policy));
+        self::assertEquals(GrantScope::platform(), self::table('7', GrantScope::platform())->detach($policy));
+        self::assertSame(2, DB::table('resource_policies')->count());
+    }
+
+    /**
      * The unique key folds nulls, so a second row for the same policy and
      * resource in the same scope is refused even when the resource id, tenant
      * and application are null.

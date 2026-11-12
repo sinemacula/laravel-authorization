@@ -22,7 +22,11 @@ use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
  * - an alias, or a deferred provider not loaded yet, is shown as such;
  * - a sibling's declared closure still bound, with no instance handed over it,
  *   is the sibling's adapter;
- * - the package's own closure is its default, or the configured class;
+ * - the package's own closure is its default, or the configured class, as is
+ *   the closure that resolves the default in place of the class the
+ *   configuration names until the steps left to the application's boot bind
+ *   that class, and after a refused boot dropped them (see
+ *   `PendingRegistration`);
  * - the closure or the instance held before the package registered is an
  *   earlier binding, and so is the decorator running the configured grant hooks
  *   that replaced such an instance, shown by the instance it decorates; one
@@ -40,6 +44,10 @@ use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
  * is read from the binding the package's closure forwards to, not from the
  * closure itself, and a binding made with a class name is followed to the
  * class's own binding: what it builds lives as long as the longer of the two.
+ *
+ * Whether a seam holds the package's default is the same rule:
+ * `AuthorizationServiceProvider::isPackageDefault()` answers from
+ * `isPackageDefault()` here, so it never disagrees with the report.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,6 +83,28 @@ final readonly class SeamClassifier
     ) {}
 
     /**
+     * Return a classifier of the seams of the container, reading what the
+     * package recorded and what sibling packages declared, as held there, and
+     * holding nothing new when it holds none.
+     *
+     * @param  \Illuminate\Contracts\Container\Container  $container
+     * @param  string|null  $basePath
+     * @return self
+     */
+    public static function of(Container $container, ?string $basePath = null): self
+    {
+        $registry     = ContainerState::instance($container, BindingRegistry::class);
+        $declarations = ContainerState::instance($container, Declarations::class);
+
+        return new self(
+            $container,
+            $registry instanceof BindingRegistry ? $registry : new BindingRegistry,
+            $declarations instanceof Declarations ? $declarations : new Declarations,
+            $basePath,
+        );
+    }
+
+    /**
      * Return the seam bound to the contract, as the report shows it.
      *
      * @param  string  $contract
@@ -103,6 +133,24 @@ final readonly class SeamClassifier
             declaration: $declaration,
             source: $source,
         );
+    }
+
+    /**
+     * Determine whether the contract holds the package's own default, as the
+     * report would show it: what supplies it is the closure the package bound
+     * as its default, whether resolved or not and whatever it holds, and not a
+     * sibling's declared adapter, a binding made before the package registered
+     * or after, an instance handed over it, a class the configuration names, an
+     * alias or a deferred provider. Nothing is built.
+     *
+     * @param  string  $contract
+     * @return bool
+     */
+    public function isPackageDefault(string $contract): bool
+    {
+        [$origin] = self::origin(CurrentBinding::of($this->container, $contract), $this->registry->get($contract), $this->declarations->for($contract));
+
+        return $origin === Origin::PACKAGE_DEFAULT;
     }
 
     /**
@@ -145,7 +193,7 @@ final readonly class SeamClassifier
         $supplier = $binding->supplier();
 
         return match (true) {
-            $supplier === $record->binding                             => $record->configured ? [Origin::CONFIGURED, $record->configKey] : [Origin::PACKAGE_DEFAULT, null],
+            $supplier === $record->binding                             => $record->isConfigured() ? [Origin::CONFIGURED, $record->configKey] : [Origin::PACKAGE_DEFAULT, null],
             $record->isEarlier($supplier)                              => [Origin::EARLIER_BINDING, null],
             $record->deferredProvider !== null && !$record->configured => [Origin::DEFERRED_LOADED, $record->deferredProvider],
             default                                                    => [Origin::LATER_BINDING, null],

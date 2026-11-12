@@ -694,7 +694,9 @@ final class CheckBatchTest extends TestCase
                 return;
             }
 
-            $reads[] = \str_contains($query->sql, ' in (') ? 'bulk' : 'single';
+            // A bulk read names the records' keys in a list; every read also
+            // names, in a subquery, the policies naming half a tenant.
+            $reads[] = \preg_match('/resource_id["`] in \(/', $query->sql) === 1 ? 'bulk' : 'single';
         });
 
         Authorization::check(self::ACTION, $posts[0]);

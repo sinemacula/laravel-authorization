@@ -551,6 +551,20 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 
 ## Failure / Edge Cases
 
+- **A row naming half a tenant** (N130): a `tenant_type` without a `tenant_id`, or the reverse, which the package never
+  writes, is neither the platform's nor any tenant's, and fails closed both ways (`Support\TenantColumns`). What grants
+  of it (a role or permission grant, a policy attachment's allows, a role's policy attachment's allows, a resource
+  policy's allows, the ownership of a role or permission) applies nowhere. What restricts of it applies everywhere, at
+  the platform and in every tenant and below it: a boundary (`BoundaryResolver`), a guardrail (`GuardrailResolver`), and
+  the denies of a policy attachment, a role's policy attachment or a resource policy, which are read in every scope with
+  their deny statements alone (`Evaluation\Policy::denies()`). An attachment of a policy naming half a tenant is read
+  the same way, whatever scope the attachment names, so its allows apply nowhere and its denies everywhere. A policy
+  reached through another attachment that holds, of a policy naming no half tenant, is read whole. Query scoping reads
+  the same (`Query\RecordAttachments`): a policy attached to records by a row naming half a tenant has its denies of the
+  action compiled once more, with the condition that such a row attaches it to the row's record, and a policy naming
+  half a tenant is compiled with its denies alone, attached to the record in any tenant; every other policy is compiled
+  once, as with no such row. Each such row is read through a query of its own, a range of an index, so a check with none
+  does no more work than without them.
 - **No subject**: `subject_unresolved` at the subject stage, without consulting any policy. This covers anonymous
   requests and a subject resolver that resolves no subject.
 - **Malformed policy document**: writes are refused -- the `Policy` model validates the document on assignment with

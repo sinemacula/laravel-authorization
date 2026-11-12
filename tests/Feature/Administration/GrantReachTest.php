@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -61,6 +62,59 @@ final class GrantReachTest extends TestCase
         self::assertSame(['', 'tenant:parent', 'tenant:top'], self::reached(new GrantScope($parent, null, false)));
         self::assertSame(['', 'tenant:child', 'tenant:parent', 'tenant:top'], self::reached(new GrantScope($parent)));
         self::assertSame(['', 'team:parent'], self::reached(new GrantScope(new Reference('team', 'parent'))));
+    }
+
+    /**
+     * A row naming half a tenant, a key without a type or a type without a key,
+     * is neither the platform's nor in any tenant of a reach, so a reach keeps
+     * it only when it reaches every tenant and leaves the query alone.
+     *
+     * @return void
+     */
+    public function testARowNamingHalfATenantIsInNoReach(): void
+    {
+        [$top, $parent, $child] = [new Reference('tenant', 'top'), new Reference('tenant', 'parent'), new Reference('tenant', 'child')];
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put($parent, $top)->put($child, $parent));
+        $this->rows(['tenant' => ['top', 'parent', 'child']]);
+
+        DB::table('guardrails')->where('tenant_id', 'parent')->update(['tenant_type' => null]);
+        DB::table('guardrails')->where('tenant_id', 'child')->update(['tenant_id' => null]);
+
+        self::assertSame(['', 'tenant:top'], self::reached(new GrantScope($parent)));
+        self::assertSame(['', 'tenant:top'], self::reached(new GrantScope($child)));
+        self::assertSame(['', '-:parent', 'tenant:-', 'tenant:top'], self::reached(GrantScope::platform()));
+    }
+
+    /**
+     * The rows a callback says hold everywhere are kept in any reach besides
+     * those it reaches, as what restricts naming half a tenant is; a reach of
+     * every tenant leaves the query alone and never asks.
+     *
+     * @return void
+     */
+    public function testTheRowsHoldingEverywhereAreKeptInAnyReach(): void
+    {
+        [$top, $parent, $child] = [new Reference('tenant', 'top'), new Reference('tenant', 'parent'), new Reference('tenant', 'child')];
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put($parent, $top)->put($child, $parent));
+        $this->rows(['tenant' => ['top', 'parent', 'child', 'other']]);
+
+        DB::table('guardrails')->where('tenant_id', 'parent')->update(['tenant_type' => null]);
+        DB::table('guardrails')->where('tenant_id', 'child')->update(['tenant_id' => null]);
+
+        $asked      = [];
+        $everywhere = static function (Builder $query, string $table) use (&$asked): Builder {
+            $asked[] = $table;
+
+            return TenantColumns::whereHalf($query, $table . '.tenant_type', $table . '.tenant_id');
+        };
+        $kept = static fn (GrantScope $scope): array => self::through(GrantReach::of($scope), $everywhere);
+
+        self::assertSame(['', '-:parent', 'tenant:-', 'tenant:top'], $kept(new GrantScope($top, null, false)));
+        self::assertSame(['guardrails'], $asked);
+        self::assertSame(['', '-:parent', 'tenant:-', 'tenant:other', 'tenant:top'], $kept(GrantScope::platform()));
+        self::assertSame(['guardrails'], $asked);
     }
 
     /**
@@ -259,20 +313,23 @@ final class GrantReachTest extends TestCase
     }
 
     /**
-     * Return the tenants of the guardrail rows the reach keeps, sorted, `''`
-     * for the platform's.
+     * Return the tenants of the guardrail rows the reach keeps, with those the
+     * callback says hold everywhere, sorted, `''` for the platform's and `-`
+     * for a missing half of a tenant.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\GrantReach  $reach
+     * @param  (\Closure(\Illuminate\Contracts\Database\Query\Builder, string): mixed)|null  $everywhere
      * @return list<string>
      */
-    private static function through(GrantReach $reach): array
+    private static function through(GrantReach $reach, ?\Closure $everywhere = null): array
     {
         $kept = [];
 
-        foreach ($reach->constrain(DB::table('guardrails'), 'guardrails')->get(['tenant_type', 'tenant_id']) as $row) {
+        foreach ($reach->constrain(DB::table('guardrails'), 'guardrails', $everywhere)->get(['tenant_type', 'tenant_id']) as $row) {
             /** @var array{tenant_type: string|null, tenant_id: string|null} $columns */
             $columns = (array) $row;
-            $kept[]  = $columns['tenant_type'] === null ? '' : $columns['tenant_type'] . ':' . $columns['tenant_id'];
+            $isNone  = $columns['tenant_type'] === null && $columns['tenant_id'] === null;
+            $kept[]  = $isNone ? '' : ($columns['tenant_type'] ?? '-') . ':' . ($columns['tenant_id'] ?? '-');
         }
 
         \sort($kept);

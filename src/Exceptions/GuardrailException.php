@@ -103,18 +103,24 @@ final class GuardrailException extends \LogicException
 
     /**
      * Return the refusal of an edit or a deletion of a policy in use as a
-     * guardrail on the tenants, null for the platform.
+     * guardrail on the tenants, null for the platform, and in the given number
+     * of rows naming half a tenant, which the package never writes, named as
+     * malformed, never as the platform or a tenant, and removed through the
+     * guardrail service with the policy's guardrail on the platform.
      *
      * @param  string  $policyName
      * @param  list<\SineMacula\Laravel\Authorization\Support\Reference|null>  $tenants
      * @param  string  $change
+     * @param  int  $malformed
      * @return self
      */
-    public static function inUse(string $policyName, array $tenants, string $change): self
+    public static function inUse(string $policyName, array $tenants, string $change, int $malformed = 0): self
     {
-        $named = \implode(', ', \array_map(static fn (?Reference $tenant): string => $tenant === null ? 'the platform' : "{$tenant->type}:{$tenant->id}", $tenants));
+        $scopes = \array_map(static fn (?Reference $tenant): string => $tenant === null ? 'the platform' : "{$tenant->type}:{$tenant->id}", $tenants);
+        $named  = \implode(', ', $malformed === 0 ? $scopes : [...$scopes, "{$malformed} malformed row(s) naming half a tenant"]);
+        $how    = $malformed === 0 ? '' : ' (a malformed row is removed with the policy\'s guardrail on the platform)';
 
-        $message = "Policy '{$policyName}' is a guardrail on {$named}; remove each guardrail through the guardrail service before {$change} the policy.";
+        $message = "Policy '{$policyName}' is a guardrail on {$named}; remove each guardrail through the guardrail service{$how} before {$change} the policy.";
 
         return new self($message, self::IN_USE, $policyName, $tenants);
     }

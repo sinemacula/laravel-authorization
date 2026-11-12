@@ -9,18 +9,22 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Shared body of the role and permission listing commands.
  *
  * An administrative view: it bypasses the tenant scope, so platform-wide and
  * tenant-owned records are listed alike, each with its ID, name, guard, owner
- * (`platform`, or the owning tenant as `{morphType}:{key}`), system flag, and
- * the count of its related records, which counts every related record whatever
- * its owner. An optional `--guard` filter restricts the listing to a single
- * guard name. Each listing command declares its name in `NAME` and the
- * `authorization.models` key of what it lists in `MODEL`, from which its
- * signature, its description and the rest of the listing are built.
+ * (`platform`, the owning tenant as `{morphType}:{key}`, or, for a record
+ * naming half a tenant, which the package never writes and which is neither the
+ * platform's nor any tenant's, `malformed (tenant_type=…, tenant_id=…)` with
+ * the missing half `null`), system flag, and the count of its related records,
+ * which counts every related record whatever its owner. An optional `--guard`
+ * filter restricts the listing to a single guard name. Each listing command
+ * declares its name in `NAME` and the `authorization.models` key of what it
+ * lists in `MODEL`, from which its signature, its description and the rest of
+ * the listing are built.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -123,7 +127,11 @@ abstract class ListCatalogueCommand extends Command
             $record->getKey(),
             $name,
             $guard ?? '(any)',
-            $tenantType === null ? 'platform' : "{$tenantType}:{$tenantId}",
+            match (true) {
+                TenantColumns::isHalf($tenantType, $tenantId) => TenantColumns::malformed($tenantType, $tenantId),
+                $tenantType === null                          => 'platform',
+                default                                       => "{$tenantType}:{$tenantId}",
+            },
             $record->getAttribute('is_system') ? 'Yes' : 'No',
             $count,
         ];

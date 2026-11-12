@@ -11,10 +11,10 @@ use SineMacula\Laravel\Authorization\Config\IntegerSetting;
  *
  * A value is shown only when its kind is one the report may show (see
  * `SettingCatalogue`) and the value has the shape the kind expects: a class
- * name, a table's name or another name made of the characters such names use, a
- * switch, or a whole number. Anything else, whatever the setting, is shown by
- * its type alone (`string`, `array(3)`), so a credential set where a name was
- * expected is never printed in full.
+ * name, a table's name or prefix, or another name made of the characters such
+ * names use, a switch, or a whole number. Anything else, whatever the setting,
+ * is shown by its type alone (`string`, `array(3)`), so a credential set where
+ * a name was expected is never printed in full.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,14 +29,18 @@ final class ValueRenderer
     /** @var string A plain SQL identifier. */
     private const string TABLE_PATTERN = '/\A[A-Za-z_][A-Za-z0-9_]*\z/';
 
+    /** @var string A plain SQL identifier, or nothing, as the tables' prefix is. */
+    private const string TABLE_PREFIX_PATTERN = '/\A(?:[A-Za-z_][A-Za-z0-9_]*)?\z/';
+
     /** @var string A name, as guards, connections, stores, queues, channels, morph types and permissions are named. */
     private const string NAME_PATTERN = '/\A[A-Za-z0-9_\-:.*]{1,191}\z/';
 
     /** @var array<string, string> The pattern a value of each kind of one name matches. */
     private const array PATTERNS = [
-        SettingCatalogue::CLASS_NAME => self::CLASS_PATTERN,
-        SettingCatalogue::TABLE      => self::TABLE_PATTERN,
-        SettingCatalogue::NAME       => self::NAME_PATTERN,
+        SettingCatalogue::CLASS_NAME   => self::CLASS_PATTERN,
+        SettingCatalogue::TABLE        => self::TABLE_PATTERN,
+        SettingCatalogue::TABLE_PREFIX => self::TABLE_PREFIX_PATTERN,
+        SettingCatalogue::NAME         => self::NAME_PATTERN,
     ];
 
     /** @var array<string, array{string, string|null}> The patterns each entry, and each key when one is given, of a value of each kind of map matches. */

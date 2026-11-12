@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * Tells whether removing a grant, or shortening one, can only narrow authority,
@@ -159,7 +160,7 @@ final class Narrowing
             ->where('authorizable_type', $change->grantee->type)
             ->where('authorizable_id', $change->grantee->id);
 
-        $tenant === null ? $query->whereNull('tenant_type')->whereNull('tenant_id') : $query->where('tenant_type', $tenant->type)->where('tenant_id', $tenant->id);
+        $tenant === null ? TenantChain::whereNullTenant($query, 'tenant_type', 'tenant_id') : $query->where('tenant_type', $tenant->type)->where('tenant_id', $tenant->id);
 
         $row = $query->first(['policy_id', 'include_subtree']);
 

@@ -9,6 +9,8 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * The guardrails of one scope, read and written by the guardrail service inside
@@ -101,6 +103,40 @@ final readonly class GuardrailTable
     }
 
     /**
+     * Remove the guardrail rows of the policy with the given key that name half
+     * a tenant, which the package never writes, each as stored, read under a
+     * row lock, and return the tenant columns of each removed: they cap
+     * everywhere, as the platform's do (see `TenantColumns`), so they are
+     * removed only with the policy's guardrail on the platform. A row no longer
+     * there when its removal runs is passed over.
+     *
+     * @param  string  $policy
+     * @return list<array{tenant_type: string|null, tenant_id: string|null}>
+     */
+    public function removeMalformed(string $policy): array
+    {
+        $rows  = $this->connection->table($this->table)->where('policy_id', $policy);
+        $found = TenantColumns::whereHalf($rows, 'tenant_type', 'tenant_id')->lockForUpdate()->get(['tenant_type', 'tenant_id']);
+
+        /** @var list<array{tenant_type: string|null, tenant_id: string|null}> $removed */
+        $removed = [];
+
+        foreach ($found as $row) {
+            /** @var array{tenant_type: string|null, tenant_id: string|null} $columns */
+            $columns = (array) $row;
+            $exact   = $this->connection->table($this->table)->where('policy_id', $policy);
+
+            if ($exact->where('tenant_type', $columns['tenant_type'])->where('tenant_id', $columns['tenant_id'])->delete() !== 1) {
+                continue;
+            }
+
+            $removed[] = $columns;
+        }
+
+        return $removed;
+    }
+
+    /**
      * Insert the guardrail in the scope unless the scope has it, and report
      * whether it was inserted.
      *
@@ -134,7 +170,7 @@ final readonly class GuardrailTable
         $query = $this->connection->table($this->table)->where('policy_id', $policy);
 
         if ($this->tenant === null) {
-            return $query->whereNull('tenant_type')->whereNull('tenant_id');
+            return TenantChain::whereNullTenant($query, 'tenant_type', 'tenant_id');
         }
 
         return $query->where('tenant_type', $this->tenant->type)->where('tenant_id', $this->tenant->id);

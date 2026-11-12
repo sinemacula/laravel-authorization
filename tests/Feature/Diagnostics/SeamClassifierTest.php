@@ -11,14 +11,18 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Console\Support\SeamText;
+use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Contracts\GrantUsageStore;
+use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\ScopeRegistry;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Diagnostics\BindingRegistry;
+use SineMacula\Laravel\Authorization\Diagnostics\ContainerState;
 use SineMacula\Laravel\Authorization\Diagnostics\Declarations;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\Lifetime;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\Origin;
@@ -28,6 +32,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\SeamClassifier;
 use SineMacula\Laravel\Authorization\Diagnostics\SeamRow;
 use SineMacula\Laravel\Authorization\Hooks\GrantHooks;
 use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
+use SineMacula\Laravel\Authorization\Registrars\PendingRegistration;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Usage\DatabaseGrantUsageStore;
@@ -344,6 +349,108 @@ final class SeamClassifierTest extends TestCase
         self::assertSame(Origin::DEFERRED, $row->origin);
         self::assertSame(DeferredBindingProvider::class, $row->toArray()['deferred_provider']);
         self::assertTrue($app->isDeferredService(TenantTree::class));
+    }
+
+    /**
+     * While the steps left to the application's boot are pending, the closure
+     * that resolves the default in place of the class the configuration names
+     * is shown as the class configured, which the package's default is not;
+     * once the steps were dropped, as a refused diagnostic boot drops them, it
+     * is still the class configured, never the default, and so it is once they
+     * ran.
+     *
+     * @return void
+     */
+    public function testAClassConfiguredIsShownWhileTheStepsArePendingOrDropped(): void
+    {
+        $app = new Application(\dirname(__DIR__, 3));
+
+        $app->instance('config', new Repository(['authorization' => ['tenant_tree' => ExplodingTenantTree::class]]));
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        $pending = self::classifyAll($app);
+
+        self::assertSame([Origin::CONFIGURED, 'authorization.tenant_tree'], [$pending[TenantTree::class]->origin, $pending[TenantTree::class]->source]);
+        self::assertSame(FlatTenantTree::class, $pending[TenantTree::class]->class());
+        self::assertSame(Origin::PACKAGE_DEFAULT, $pending[IdentityDirectory::class]->origin);
+
+        PendingRegistration::find($app)?->discard();
+
+        $dropped = self::classifyAll($app);
+
+        self::assertFalse(PendingRegistration::find($app)?->isPending());
+        self::assertSame([Origin::CONFIGURED, 'authorization.tenant_tree'], [$dropped[TenantTree::class]->origin, $dropped[TenantTree::class]->source]);
+        self::assertSame(FlatTenantTree::class, $dropped[TenantTree::class]->class());
+        self::assertSame(Origin::PACKAGE_DEFAULT, $dropped[IdentityDirectory::class]->origin);
+
+        $app = self::registered(['tenant_tree' => ExplodingTenantTree::class]);
+
+        self::assertFalse(PendingRegistration::find($app)?->isPending());
+        self::assertSame(Origin::CONFIGURED, self::classifyAll($app)[TenantTree::class]->origin);
+    }
+
+    /**
+     * A classifier of a container reads what the package recorded and what
+     * siblings declared there, as held, with the base path given; in a
+     * container holding neither it holds none, and finds no seam the package's.
+     *
+     * @return void
+     */
+    public function testAClassifierOfAContainerReadsWhatItHolds(): void
+    {
+        $line    = __LINE__ + 1;
+        $factory = static fn (): object => new \stdClass;
+        $app     = self::registered(after: static function (Application $app) use ($factory): void {
+            $app->bind(TenantTree::class, $factory);
+            $app->bind(IdentityDirectory::class, ExplodingTenantTree::class);
+
+            Declarations::of($app)->adapter(IdentityDirectory::class, 'acme/sibling', ExplodingTenantTree::class, Lifetime::TRANSIENT);
+        });
+
+        $of = SeamClassifier::of($app, $app->basePath());
+
+        self::assertSame(self::FILE . ":{$line}", $of->classify(TenantTree::class)->factory);
+        self::assertSame('unverified', $of->classify(IdentityDirectory::class)->toArray()['declaration']['state'] ?? null);
+        self::assertSame(Origin::PACKAGE_DEFAULT, $of->classify(ActionCatalogue::class)->origin);
+        self::assertSame(__FILE__ . ":{$line}", SeamClassifier::of($app)->classify(TenantTree::class)->factory);
+
+        $bare = new Application(\dirname(__DIR__, 3));
+
+        $bare->bind(TenantTree::class, FlatTenantTree::class);
+
+        self::assertSame(Origin::EXTERNAL, SeamClassifier::of($bare)->classify(TenantTree::class)->origin);
+        self::assertFalse(SeamClassifier::of($bare)->isPackageDefault(TenantTree::class));
+        self::assertNull(ContainerState::instance($bare, BindingRegistry::class));
+        self::assertNull(ContainerState::instance($bare, Declarations::class));
+    }
+
+    /**
+     * The package's default holds whether or not it was resolved, and whatever
+     * is held of it; the context key catalogue, the one default held under its
+     * contract once resolved, included. An instance handed over a default not
+     * yet resolved is a later binding.
+     *
+     * @return void
+     */
+    public function testTheDefaultHoldsOnceResolved(): void
+    {
+        $app       = self::registered();
+        $catalogue = $app->make(ContextKeyCatalogue::class);
+        $rows      = self::classifyAll($app);
+
+        self::assertInstanceOf(DeclaredContextKeyCatalogue::class, $catalogue);
+        self::assertSame($catalogue, ContainerState::instance($app, ContextKeyCatalogue::class));
+        self::assertSame(Origin::PACKAGE_DEFAULT, $rows[ContextKeyCatalogue::class]->origin);
+        self::assertSame(Lifetime::SINGLETON, $rows[ContextKeyCatalogue::class]->lifetime);
+
+        $app->forgetInstance(ContextKeyCatalogue::class);
+        $app->instance(TenantTree::class, self::unbuilt(ExplodingTenantTree::class));
+
+        $rows = self::classifyAll($app);
+
+        self::assertSame(Origin::PACKAGE_DEFAULT, $rows[ContextKeyCatalogue::class]->origin);
+        self::assertSame(Origin::LATER_BINDING, $rows[TenantTree::class]->origin);
     }
 
     /**
@@ -803,9 +910,10 @@ final class SeamClassifierTest extends TestCase
     }
 
     /**
-     * Classify every seam the report lists, checking that nothing was built and
-     * that whether each was resolved is unchanged, and return the rows keyed by
-     * contract.
+     * Classify every seam the report lists, checking that nothing was built,
+     * that whether each was resolved is unchanged, and that each holds the
+     * package's default exactly when its row shows it, as the classifier and
+     * the provider say, and return the rows keyed by contract.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return array<string, \SineMacula\Laravel\Authorization\Diagnostics\SeamRow>
@@ -819,6 +927,11 @@ final class SeamClassifierTest extends TestCase
 
         foreach ($contracts as $contract) {
             $rows[$contract] = $classifier->classify($contract);
+            $isDefault       = $rows[$contract]->origin === Origin::PACKAGE_DEFAULT;
+
+            self::assertSame($isDefault, $classifier->isPackageDefault($contract), $contract);
+            self::assertSame($isDefault, SeamClassifier::of($app)->isPackageDefault($contract), $contract);
+            self::assertSame($isDefault, AuthorizationServiceProvider::isPackageDefault($app, $contract), $contract);
         }
 
         self::assertSame($resolved, \array_map($app->resolved(...), $contracts), 'Classifying resolved a seam.');

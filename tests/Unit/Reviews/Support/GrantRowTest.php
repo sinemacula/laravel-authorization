@@ -94,9 +94,9 @@ final class GrantRowTest extends TestCase
 
     /**
      * A row naming half a tenant keeps the half it stores as its origin, keyed
-     * and ordered by it as the grant queries order it, and is malformed: a key
-     * without a type is read where a check reads it, at the platform, while a
-     * type without a key is placed nowhere.
+     * and ordered by it as the grant queries order it, and is malformed and
+     * placed nowhere, a key without a type as a type without a key, since a
+     * check reads neither half as the platform's.
      *
      * @return void
      */
@@ -106,7 +106,7 @@ final class GrantRowTest extends TestCase
         $noKey  = self::half('tenant', null);
         $whole  = self::half('tenant', 't1');
 
-        self::assertSame([null, 't1', true, true], [$noType->originScope()?->tenantType, $noType->originScope()?->tenantId, $noType->isMalformed(), $noType->isPlaced()]);
+        self::assertSame([null, 't1', true, false], [$noType->originScope()?->tenantType, $noType->originScope()?->tenantId, $noType->isMalformed(), $noType->isPlaced()]);
         self::assertSame(['tenant', null, true, false], [$noKey->originScope()?->tenantType, $noKey->originScope()?->tenantId, $noKey->isMalformed(), $noKey->isPlaced()]);
         self::assertSame([false, true], [$whole->isMalformed(), $whole->isPlaced()]);
         self::assertNull($noType->scope?->tenant);
@@ -124,26 +124,30 @@ final class GrantRowTest extends TestCase
     }
 
     /**
-     * A row placed nowhere meets only a placed row that holds everywhere, never
-     * another placed nowhere nor one held in a tenant; any other two can meet.
+     * A row placed nowhere, naming either half of a tenant, meets only a placed
+     * row that holds everywhere, never another placed nowhere nor one held in a
+     * tenant; any other two can meet.
      *
      * @return void
      */
     public function testARowPlacedNowhereMeetsOnlyARowHeldEverywhere(): void
     {
-        $nowhere  = self::half('tenant', null);
-        $platform = self::half(null, null);
+        $noKey    = self::half('tenant', null);
         $noType   = self::half(null, 't1');
+        $platform = self::half(null, null);
         $tenant   = self::half('tenant', 't1');
 
-        self::assertTrue($nowhere->canMeet($platform));
-        self::assertTrue($platform->canMeet($nowhere));
-        self::assertTrue($nowhere->canMeet($noType));
-        self::assertFalse($nowhere->canMeet($tenant));
-        self::assertFalse($tenant->canMeet($nowhere));
-        self::assertFalse($nowhere->canMeet(self::half('tenant', null)));
+        foreach ([$noKey, $noType] as $nowhere) {
+            self::assertTrue($nowhere->canMeet($platform));
+            self::assertTrue($platform->canMeet($nowhere));
+            self::assertFalse($nowhere->canMeet($tenant));
+            self::assertFalse($tenant->canMeet($nowhere));
+            self::assertFalse($nowhere->canMeet(self::half('tenant', null)));
+            self::assertFalse($nowhere->canMeet(self::half(null, 't2')));
+        }
+
         self::assertTrue($tenant->canMeet($platform));
-        self::assertTrue($tenant->canMeet($noType));
+        self::assertTrue($tenant->canMeet(self::half('tenant', 't2')));
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\ListCatalogueCommand;
 use SineMacula\Laravel\Authorization\Console\ListPermissionsCommand;
@@ -113,6 +114,32 @@ final class ListCatalogueCommandTest extends TestCase
 
         self::assertMatchesRegularExpression('/\|\s*ID\s*\|\s*Name\s*\|\s*Guard\s*\|\s*Owner\s*\|\s*System\s*\|\s*Roles\s*\|/', $output);
         self::assertMatchesRegularExpression('/\|\s*' . $permission->id . '\s*\|\s*posts:edit\s*\|\s*web\s*\|\s*platform\s*\|\s*No\s*\|\s*1\s*\|/', $output);
+    }
+
+    /**
+     * A role or permission naming half a tenant, a key without a type or a type
+     * without a key, which the package never writes, is listed as malformed,
+     * its tenant columns as stored, never as the platform's or a tenant's.
+     *
+     * @return void
+     */
+    public function testARecordNamingHalfATenantIsListedAsMalformed(): void
+    {
+        foreach (['role' => Role::class, 'permission' => Permission::class] as $model => $class) {
+            $keyless  = $class::create(['name' => 'keyless', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
+            $typeless = $class::create(['name' => 'typeless', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
+
+            DB::table($model . 's')->where('id', $keyless->getKey())->update(['tenant_id' => null]);
+            DB::table($model . 's')->where('id', $typeless->getKey())->update(['tenant_type' => null]);
+
+            self::assertSame(0, Artisan::call('authorization:list-' . $model . 's'));
+
+            $output = Artisan::output();
+
+            self::assertMatchesRegularExpression('/\|\s*keyless\s*\|\s*\(any\)\s*\|\s*malformed \(tenant_type=tenant, tenant_id=null\)\s*\|/', $output, $model);
+            self::assertMatchesRegularExpression('/\|\s*typeless\s*\|\s*\(any\)\s*\|\s*malformed \(tenant_type=null, tenant_id=t-1\)\s*\|/', $output, $model);
+            self::assertStringNotContainsString('platform', $output, $model);
+        }
     }
 
     /**

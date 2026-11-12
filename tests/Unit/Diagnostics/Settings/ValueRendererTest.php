@@ -34,6 +34,8 @@ final class ValueRendererTest extends TestCase
         yield 'a list of classes' => [SettingCatalogue::CLASS_LIST, ['App\A', 'App\B'], ['App\A', 'App\B']];
         yield 'a map of classes' => [SettingCatalogue::CLASS_MAP, ['post' => 'App\Post'], ['post' => 'App\Post']];
         yield 'a table' => [SettingCatalogue::TABLE, 'roles', 'roles'];
+        yield 'a table prefix' => [SettingCatalogue::TABLE_PREFIX, 'app_', 'app_'];
+        yield 'no table prefix' => [SettingCatalogue::TABLE_PREFIX, '', ''];
         yield 'a switch' => [SettingCatalogue::SWITCH, false, false];
         yield 'a whole number' => [SettingCatalogue::WHOLE_NUMBER, 300, 300];
         yield 'a whole number as the environment writes it' => [SettingCatalogue::WHOLE_NUMBER, '300', 300];
@@ -71,6 +73,10 @@ final class ValueRendererTest extends TestCase
         yield 'a list holding a non-class' => [SettingCatalogue::CLASS_LIST, ['App\A', 'p@ss']];
         yield 'a map keyed by a non-name' => [SettingCatalogue::CLASS_MAP, ['p@ss word' => 'App\Post']];
         yield 'a table with a schema' => [SettingCatalogue::TABLE, 'public.roles'];
+        yield 'an empty table' => [SettingCatalogue::TABLE, ''];
+        yield 'a table prefix holding a space' => [SettingCatalogue::TABLE_PREFIX, 'p@ss word'];
+        yield 'a table prefix starting with a digit' => [SettingCatalogue::TABLE_PREFIX, '1app_'];
+        yield 'no table prefix' => [SettingCatalogue::TABLE_PREFIX, null];
         yield 'a switch as a string' => [SettingCatalogue::SWITCH, 'true'];
         yield 'a number with a fraction' => [SettingCatalogue::WHOLE_NUMBER, '3.5'];
         yield 'a name holding a space' => [SettingCatalogue::NAME, 'p@ss word'];

@@ -208,6 +208,15 @@ The tables live on the application's default connection. To keep them on another
 tables use, set `AUTHORIZATION_DB_CONNECTION` (or `connection` in `config/authorization.php`) before migrating: the
 migrations create the tables there, and the models read and write there.
 
+To keep the package's tables apart from your own, set a prefix before migrating, with `AUTHORIZATION_TABLE_PREFIX` (or
+`tables.prefix`): `app_` makes `roles` `app_roles`, and so on for every table. The prefix is put before every table
+name left at its default, and before no name you set yourself (`AUTHORIZATION_TABLE_ROLES` and the like, or the
+`tables` block), which is used as you write it. Whether you set a name is told by its value alone, since a merged or
+cached configuration no longer says where a value came from: a name that differs from the table's own is yours, while
+one set to the table's own name, `roles` for the `roles` table, is the default and takes the prefix. The migrations
+create the tables under the names the prefix makes, and the models, the services and `Config\TableNames::get()` read
+them there, so changing the prefix after migrating points the package at tables that do not exist.
+
 Every check that does not name its subject is about the subject the subject resolver returns. The shipped resolver,
 `AuthGuardSubjectResolver`, returns the user Laravel authenticated on its default guard, with no tenant and the guard's
 name as the application, so `Authorization::can()`, the package's middleware and the Blade directives decide about the
@@ -286,9 +295,15 @@ those operations, such as the manager or the resolved tenant, can still be built
 refuse.
 
 A sibling package that registers after this one and wants to replace only the package's default, never a binding the
-application made, asks `AuthorizationServiceProvider::isPackageDefault($app, $contract)`. It is true only while the
-contract holds the package's own default: a class your configuration names, an instance, any other binding and an
-unbound contract all answer false.
+application made, asks `AuthorizationServiceProvider::isPackageDefault($app, $contract)`, and so may a check that runs
+once the application has booted. It is true exactly when `authorization:check` shows the seam as the package's default,
+as it reads what the package recorded when it bound the seam: before the default is resolved and after, whether an
+instance of it is held or not. A class your configuration names answers false from the moment the package registers,
+also after a refused boot (see [The diagnostic boot](#the-diagnostic-boot)) never binds it and the default resolves in
+its place. An instance you hand the container, a sibling's declared adapter, any other binding made before the package
+registered or after, an alias, a deferred provider and an unbound contract all answer false. It builds nothing. The
+context key catalogue is the one default the container holds once resolved, so an instance handed over it after that
+cannot be told from the default, and answers true, as the report shows it.
 
 List the enums whose cases are the application's permissions, and any permission providers; the Gate asks the package
 about every permission either declares:
@@ -356,6 +371,11 @@ is a boot for `authorization:check`, which reports every issue while the package
 - Each table name is a plain identifier (a letter or an underscore, then letters, digits and underscores) with no
   schema before it, short enough that every index and key name the migrations build from it fits in 63 characters,
   PostgreSQL's limit (from 33 to 51 characters, depending on the table), and the twelve names are distinct.
+- `tables.prefix` is empty, or a lower-case letter, then lower-case letters, digits and underscores, of at most 16
+  characters; null is refused. Each name it makes is checked as a name you set is: within its table's bound, which the
+  longest prefix allowed keeps every default within, and distinct from the others, so a name you set that the prefix
+  gives another table is refused as a duplicate. A prefix that pushed a default past its bound would be refused under
+  `authorization.tables.prefix`.
 - `defaults.guard` names a guard in `auth.guards`, `log_channel` a channel in `logging.channels`, and
   `usage.connection`, when set, a connection in `queue.connections`. `connection` names a connection in
   `database.connections`, or, when it is null or empty, `database.default` must. Each is read from the configuration as
@@ -374,19 +394,21 @@ than read as one that leaves the setting out. A setting read on every check is r
 comparisons, so the checks add next to nothing to a request.
 
 The names are checked after boot for their type only. A table name, a model class or `defaults.guard` that is not a
-string, or is empty, is refused with the same exception, and so is a `connection` or `cache.store` that is neither null
-nor a string, or a `cache.store` that is empty (null, and for `connection` an empty string, mean the default). Whether
-the name exists is checked only at boot, so one changed after boot to a name that does not exist is used as it is, never
-swapped for the default: a table fails with the database's own error and a model class with PHP's when they are used, a
-connection or a cache store with Laravel's own `InvalidArgumentException` from the database or cache manager, and a
-lookup by name under a guard that does not exist finds only the roles and permissions that name no guard. The log
-channel is checked at boot only, by design: a warning is written from inside error handling, and writing one never stops
-a check, so a channel changed after boot to one that does not exist is written to as the default channel.
+string, or is empty, is refused with the same exception, and so is a `tables.prefix` that is not a string, a
+`connection` or `cache.store` that is neither null nor a string, or a `cache.store` that is empty (null, and for
+`connection` an empty string, mean the default). Whether the name exists is checked only at boot, so one changed after
+boot to a name that does not exist is used as it is, never swapped for the default: a table fails with the database's
+own error and a model class with PHP's when they are used, a connection or a cache store with Laravel's own
+`InvalidArgumentException` from the database or cache manager, and a lookup by name under a guard that does not exist
+finds only the roles and permissions that name no guard. The log channel is checked at boot only, by design: a warning
+is written from inside error handling, and writing one never stops a check, so a channel changed after boot to one that
+does not exist is written to as the default channel.
 
 A suite package that reads these names reads them the way the package does, through `Config\TableNames::get('roles')`,
 `Config\ModelClasses::get('role')` and `Config\DefaultGuard::get()`, each taking an optional configuration repository.
-A name the configuration leaves out is the package's own; one that is not a non-empty string is refused as above. The
-three are part of the package's stable API.
+A name the configuration leaves out is the package's own; one that is not a non-empty string is refused as above. A
+table's name is the one the package reads, with `tables.prefix` before it when it is left at its default
+(`Config\TableNames::prefix()` reads the prefix alone). The three are part of the package's stable API.
 
 `authorization:check` lists every issue at once rather than stopping at the first: those the boot found, when the
 application booted for it, and otherwise those these checks find again on the configuration as it stands, except the
@@ -545,8 +567,9 @@ Grants are idempotent: granting what the grantee holds, with the same expiry, ch
 returns `GrantOutcome::UNCHANGED`, and a concurrent duplicate never raises a unique-constraint violation. Re-granting a
 grant that has expired re-arms it with the new expiry (`REARMED`), and a new expiry on a live grant is reported as
 `EXPIRY_CHANGED`. A sync re-arms a listed grant that has expired with the sync's expiry, or with none when it is given
-none, and leaves a live one as it is. A role's permissions work the same way: `RoleService::grantPermission()` and
-`syncPermissions()`, and the role's `givePermission()` and `syncPermissions()`, each take an optional expiry. The
+none, and leaves a live one as it is, unless it is a role listed with a reach of its own and held with the other (see
+below). A role's permissions work the same way: `RoleService::grantPermission()` and `syncPermissions()`, and the
+role's `givePermission()` and `syncPermissions()`, each take an optional expiry. The
 identity traits' sync methods take no expiry, so a lapsed temporary grant they list comes back permanent; to re-arm it
 for a limited time, call `GrantService::syncRoles()` (or `syncPermissions()`, `syncPolicies()`) with an expiry. Setting
 a role's parent locks the roles involved and refuses a cycle. A role with children cannot be deleted
@@ -629,6 +652,37 @@ an external id) is still named by its key. A sibling package, or the application
 the tenant, a `Reference` made from it, or its morph type and key, never the other identifier. A non-Eloquent tenant
 returns from `getKey()` the value its rows are to be keyed by, and keeps it for the tenant's life.
 
+**A row naming half a tenant.** A row is the platform's only when both `tenant_type` and `tenant_id` are null, and a
+tenant's when both name it. The package never writes one without the other, and refuses to save a role, permission or
+policy that way (`InvalidTenantColumnsException`). A row changed past it to name half a tenant, a type without a key or
+a key without a type, is neither the platform's nor any tenant's, and fails closed both ways:
+
+- **What grants applies nowhere.** A role grant, permission grant, policy attachment, a role's policy attachment, the
+  allows of a resource policy, and the ownership of a role or permission stored that way grant nothing, at the
+  platform, in any tenant or below one; a role or permission owned that way is seen in no tenant, nor at the platform.
+- **What restricts applies everywhere.** A boundary or guardrail stored that way caps, and the denies of a policy
+  attachment, a role's policy attachment or a resource policy stored that way deny, at the platform, in every tenant
+  and below every tenant, as a platform row does.
+- **An attachment that both allows and denies is split.** Its allows apply nowhere and its denies everywhere. An
+  attachment of a policy naming half a tenant is read the same way, whatever scope the attachment names.
+
+This holds in a check, a bulk check, `permissionsFor()` and query scoping alike, cold or from the resolution cache. A
+check reads such rows through queries of their own, each a range of an index, so with none it does no more work than it
+would without them; the `2026_11_11_000001_add_half_tenant_indexes` migration adds the `tenant_id` indexes of
+`guardrails`, `resource_policies` and `policies` these reads use. An explanation never names such a row as the
+platform's or as where an allow came from. A role, permission or policy owned that way is never granted, attached or
+linked to a role anywhere (`InvalidTenantColumnsException`); a link to one already stored applies nowhere, so it never
+keeps the guard of a role or permission from changing. A rewrite of a policy that a boundary stored that way uses is
+decided at platform scope, since the boundary caps everywhere. Such a row is removed by a removal in every scope:
+`revokeAll()`, `BoundaryService::removeAll()` and `ResourcePolicyService::detachAll()`, which `authorization:prune`
+runs, and, for a guardrail, removing its policy's guardrail at the platform. Each decides it at platform scope, in its
+application, so an acting context needs the platform authority for the action, never a tenant's; it is removed as
+stored, counted, and, once the removal commits, written to the log as malformed rather than reported by an event, and
+the cache forgets it. A row another writer removed first is neither counted nor written. An expired one is pruned the
+same way. `authorization:list-roles` and `authorization:list-permissions` show such an owner as
+`malformed (tenant_type=…, tenant_id=…)`, a policy's guardrail refusal counts such guardrails as malformed, and an
+[access review](#access-reviews) lists such a row as `malformed`.
+
 Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class
 implementing `SineMacula\Laravel\Authorization\Contracts\TenantTree` as `tenant_tree` in `config/authorization.php`,
 answering a tenant's ancestors, whether one tenant is within another, and a tenant's subtree as a query. The subtree
@@ -647,6 +701,25 @@ $user->assignRole('admin', tenant: $organisation);                          // t
 $user->assignRole('billing', tenant: $organisation, includeSubtree: false); // the organisation alone
 
 Authorization::treeChanged($account);
+```
+
+A sync gives every role it grants one reach, `includeSubtree`, and leaves the reach of a role held live as it is. To
+sync roles of both reaches in one call, list a role with its own reach, as `Support\RoleReach::of($role, false)`, beside
+role models and names. Such a role is compared with its reach: one held live with the other reach has its reach changed
+in place, in one write that keeps its row, its expiry and when it was granted, reported with `RoleAssigned` carrying the
+new reach and listed in the result's `reachChanged`, and a delegated call needs the right to grant it with that reach,
+as `grantRole()` does. Roles not listed are revoked and new ones granted, in the same transaction. In a tenant, a role
+listed with both reaches is refused with `InvalidArgumentException` before anything is written. A sync that writes
+platform-wide grants, with no tenant named or owning every role, writes them reaching everywhere whatever their entries
+say, so there both entries name the same reach and the sync goes ahead:
+
+```php
+use SineMacula\Laravel\Authorization\Support\RoleReach;
+
+$user->syncRoles([
+    'admin',                                         // the organisation and its accounts
+    RoleReach::of('billing', includeSubtree: false), // the organisation alone
+], tenant: $organisation);
 ```
 
 Every row of a subtree is typed, so tenants of different types sharing an id are never confused. A tree whose source
@@ -1267,9 +1340,10 @@ the call commits, only when it changed something, with the policy, its name, the
 `AuthorizationEvent`, and the change takes effect on the next check in every worker. A policy in use as a guardrail can
 be neither edited nor deleted: either is refused with `GuardrailException`, whose `getReason()` is `in_use` and whose
 `getTenants()` lists every scope it caps, the platform first as null, until each guardrail is removed through the
-service, and the table's foreign key refuses a delete made past the model. A guardrail's statements are named in the
-decision, the trace and `explain()` as any policy's are, at the `deny` stage for its denies and the `guardrail` stage
-for its allows.
+service, and the table's foreign key refuses a delete made past the model. A guardrail row naming half a tenant is in no
+scope: the refusal counts it as malformed, and removing the policy's guardrail at the platform removes it too. A
+guardrail's statements are named in the decision, the trace and `explain()` as any policy's are, at the `deny` stage for
+its denies and the `guardrail` stage for its allows.
 
 The guardrails that apply are read in one query, apart from the policies, so a custom `PolicyResolver` never drops
 them, and are cached with the rest of the resolution: once warm, a check reads none.
@@ -1530,11 +1604,14 @@ Each is prefixed with `authorization:`. A sync, `revokeAll()`, `removeAll()` and
 make under its own action (there is no blanket action), and every change is decided before any is written, so a batch is
 atomic: one refusal leaves nothing written and dispatches no change event, and no change is decided on authority an
 earlier one would have handed out. `revokeAll()` removes the grantee's boundaries too, so it decides
-`authorization:boundary.remove` for each. A sync decides a grant of each listed row the grantee does not hold live, the
-row kept unchanged for each it does hold live, and a revocation of each it drops; it judges which rows are live at one
-instant and re-arms as of the same instant, so a row decided as kept unchanged is never re-armed, even when it expires
-before it is written. A grant, an attachment or a set is decided whether or not it changes anything; a revocation by
-name decides each held row of the name, or, when none is held, the row the lookup ranks first.
+`authorization:boundary.remove` for each. A row naming half a tenant is decided at platform scope, in its application,
+since it is neither the platform's nor any tenant's and what restricts of it holds everywhere: an actor whose authority
+is held only within a tenant is refused while the grantee or record has one. A sync decides a grant of each listed row
+the grantee does not hold live, the row kept unchanged for each it does hold live, and a revocation of each it drops; it
+judges which rows are live at one instant and re-arms as of the same instant, so a row decided as kept unchanged is
+never re-armed, even when it expires before it is written. A grant, an attachment or a set is decided whether or not it
+changes anything; a revocation by name decides each held row of the name, or, when none is held, the row the lookup
+ranks first.
 
 A delegated call that finds nothing to change is still decided, on the change it was asked for: a revocation, detach or
 removal of what the grantee does not hold, a sync of what it already holds live, and `revokeAll()`, `removeAll()` or
@@ -3330,15 +3407,15 @@ by reference or given as a resolved `Subject`, or `unknown` when its record is g
 
 A grant or attachment row that names half a tenant (a type without a key, or the reverse), which the package never
 writes, is listed as damaged, never as a clean platform origin: its `grant_state` is `malformed` and its `origin_scope`
-shows the tenant columns as stored, the missing half null. It appears exactly where a check reads it today (a check
-reads a key without a type at the platform, by its missing type alone, and a type without a key nowhere), and a type
-without a key is also listed in a review of everywhere, which needs platform-wide admission, never in one rooted
-within a tenant, since it cannot be shown to lie there. A route resting on such a row is `malformed` too. Checks
-themselves still read these rows as before.
+shows the tenant columns as stored, the missing half null. A check applies what grants of such a row nowhere and what
+restricts of it everywhere (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), so
+it is never a placed grant of a review of what applies; a review of everywhere, which needs platform-wide admission,
+lists it all the same, and no review rooted within a tenant does, since it cannot be shown to lie there. A route
+resting on such a row is `malformed` too, and reaches a holder only through a row that holds everywhere.
 
 | Stored tenant    | `appliesIn()` (any tenant, or the platform) | `rootedWithin()` (any tenant) | `everywhere()` |
 |------------------|---------------------------------------------|-------------------------------|----------------|
-| Key without type | Listed, read at the platform                | Not listed                    | Listed         |
+| Key without type | Not listed                                  | Not listed                    | Listed         |
 | Type without key | Not listed                                  | Not listed                    | Listed         |
 
 Holders, holdings, expiries and an actor's grants each follow their scope selection.
@@ -3895,7 +3972,8 @@ reaches its subtree, or a platform-wide one. The principal's own grants count, a
 as they do for a check, so a person's grants never count for a machine; a grant held by another principal of the same
 identity never counts. A `Subject` is taken as it is, and any other object becomes one as the subject resolver's
 `forUser()` makes it. Given an application, only the grants that hold in it count, those made for every application
-included; without one, a grant counts whichever application it holds in. The answer is:
+included; without one, a grant counts whichever application it holds in. A grant row naming half a tenant applies
+nowhere, so it never counts. The answer is:
 
 - `GrantPresence::PRESENT` when such a grant is found;
 - `GrantPresence::ABSENT` when none is found and none could have been missed;
@@ -4711,6 +4789,9 @@ It reports:
   an unknown key, is shown by its type alone (`string`, `array(3)`). Whether a set value came from the file or the
   environment is not known once the configuration is merged or cached, so it is `unknown`, and `default` for a
   setting left out.
+- **Tables**: the prefix of the tables' default names, and the name each table takes, the one the package reads and
+  the migrations create: the name you set, as written, or the table's own with the prefix before it, and whether you
+  set it. A prefix or name that is refused, and a default name while the prefix is refused, is not shown.
 - **Seams**: for each contract the package binds or reads, where its binding came from (`package_default`, `configured`,
   `earlier_binding`, `later_binding`, `declared`, `deferred`, `deferred_loaded`, `alias`, `external_binding` or
   `unbound`), the class it builds when that is known without building it, how long what it builds lives (of the key a
@@ -4722,11 +4803,13 @@ It reports:
   boots, is still the earlier binding, shown by the hook it wraps, with the configured hooks listed as
   `authorization.grant_hooks (applied to the held instance)`. One a provider bound after the package registered, which
   the configured hooks wrap as the application boots too, is a later binding, shown by its own class and decorated by
-  the configured hooks, listed the same way. A deferred provider the application knew of as the package
-  registered, which the package then left the contract to, is `deferred_loaded` once it has loaded. A seam bound to a
-  closure whose class is decided when it is first resolved is shown by the closure's file and line, `supplied by custom
-  code`; that is a note, and never fails the check. An optional contract nothing binds, such as `PolicyStore` or
-  `ScopeRegistry`, is `unbound`.
+  the configured hooks, listed the same way. A deferred provider the application knew of as the package registered,
+  which the package then left the contract to, is `deferred_loaded` once it has loaded. A seam bound to a closure whose
+  class is decided when it is first resolved is shown by the closure's file and line, `supplied by custom code`; that is
+  a note, and never fails the check. A seam whose class the configuration names is `configured` from the moment the
+  package registers, shown by the default the contract resolves to until the boot binds the class, and still when a
+  refused boot never binds it. An optional contract nothing binds, such as `PolicyStore` or `ScopeRegistry`, is
+  `unbound`.
 - **Grant hooks**: the hooks in the order they run: those `authorization.grant_hooks` lists, by class, then the hook
   bound to the contract. The chain stops at the first refusal.
 - **Connection**: the database connection's name, whether `authorization.connection` or `database.default` chose it,
@@ -4741,8 +4824,8 @@ Building the report builds no seam, store, catalogue or provider, resolves nothi
 connects to nothing and runs no query, so it is safe before the migrations have run, and the connection shows
 `connectivity: not_tested`.
 
-**The text.** The default format prints one line per issue first, then a section each for the settings, the seams,
-the grant hooks, the connection and the integrations, each line `[subject] state`, and a last line, `Every check
+**The text.** The default format prints one line per issue first, then a section each for the settings, the tables, the
+seams, the grant hooks, the connection and the integrations, each line `[subject] state`, and a last line, `Every check
 passed.`, `A check failed.` or `The check could not be completed.`:
 
 ```text
@@ -4752,6 +4835,11 @@ Settings
 [setting authorization.models.role] ok; SineMacula\Laravel\Authorization\Models\Role
 [setting authorization.cache.prefix] ok; value not shown (string)
 [setting authorization.models.rol] refused; unknown key; value not shown (string)
+
+Tables
+[table prefix] app_
+[table roles] app_roles; the default, with the prefix
+[table permissions] identity_permissions; set explicitly, so used as written
 
 Seams
 [seam SubjectResolver] package default; SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver; scoped
@@ -4774,8 +4862,8 @@ Integrations
 A check failed.
 ```
 
-(Lines are shortened here, `...` standing for what a line goes on to say; the report lists every setting, seam and
-integration.) Every name is printed with its console markup and control characters escaped.
+(Lines are shortened here, `...` standing for what a line goes on to say; the report lists every setting, table, seam
+and integration.) Every name is printed with its console markup and control characters escaped.
 
 **The JSON.** `--format=json` prints the report's versioned JSON alone on the standard output, with no prose or
 styling. Its keys are stable; version 1 is:
@@ -4789,6 +4877,10 @@ styling. Its keys are stable; version 1 is:
          "type": "string", "source": "default | unknown",
          "status": "ok | refused | skipped | unchecked | checked_at_boot | failed_at_boot | not_run"}
     ],
+    "tables": {
+        "prefix": "... | null",
+        "names": [{"key": "roles", "name": "... | null", "explicit": false}]
+    },
     "seams": [
         {"contract": "...", "origin": "package_default", "class": "... | null", "classes": ["..."],
          "decides": "... | null", "factory": "file:line | null",
@@ -4828,7 +4920,9 @@ deferred provider not loaded yet, and `deferred_provider_at_registration` the on
 package registered, loaded since or not. `declaration` is null when no sibling package declared the seam; its `state`
 is `instance_over_it` while the declared closure is bound but an instance handed to the container supplies the
 contract. Each part of `connection` is null when the connection could not be read, and `redacted` lists the fields
-of a part withheld as they are not names. `exception` names the class alone of what a check that could not be
+of a part withheld as they are not names. `tables.prefix` is empty when no prefix is set, and null, as is a table's
+`name`, when it is not shown; `explicit` is true for a name set to something other than the table's own. `exception`
+names the class alone of what a check that could not be
 completed threw.
 
 **Exit codes.**

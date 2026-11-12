@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * What roles carry, as an access review reads it: the live permission edges of
@@ -237,7 +238,7 @@ final class RoleCarriers
      * Limit a query of role grants to those that meet the attachment, as
      * `GrantRow::canMeet()` and `ReviewRun::meeting()` weigh them: an
      * attachment no check reads anywhere meets only a placed grant that holds
-     * everywhere, one with no tenant type.
+     * everywhere, one with neither tenant column.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  \Illuminate\Database\Query\Builder  $query
@@ -250,7 +251,7 @@ final class RoleCarriers
     {
         $meeting = $run->meeting($query, $table, $scope);
 
-        return $isPlaced ? $meeting : $meeting->whereNull($table . '.tenant_type');
+        return $isPlaced ? $meeting : TenantChain::whereNullTenant($meeting, $table . '.tenant_type', $table . '.tenant_id');
     }
 
     /**

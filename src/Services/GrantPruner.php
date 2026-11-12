@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Removes the grants that no longer count: those that have expired, those whose
@@ -236,7 +237,11 @@ final readonly class GrantPruner
 
     /**
      * Remove one chunk of expired grants, reporting each removed, and return
-     * how many were removed.
+     * how many were removed. A row naming half a tenant, which the package
+     * never writes, is removed and counted too, but held in no scope, so it is
+     * written to the log as malformed rather than reported by an event, which
+     * would name it the platform's or a tenant's (see `TenantColumns`); having
+     * expired, it already counted nowhere, so no cache entry holds it.
      *
      * @param  list<ExpiredRow>  $rows
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
@@ -245,13 +250,24 @@ final readonly class GrantPruner
      */
     private static function pruneChunk(array $rows, Operation $operation, GrantTarget $kind): int
     {
-        $targets = self::keyed($kind, \array_column($rows, 'target_id'));
-        $events  = [];
+        $targets   = self::keyed($kind, \array_column($rows, 'target_id'));
+        $events    = [];
+        $malformed = 0;
 
         foreach ($rows as $row) {
             $target = $targets[$row['target_id']] ?? null;
 
             if ($target === null || self::grant($kind, $row)->delete() === 0) {
+                continue;
+            }
+
+            if (TenantColumns::isHalf($row['tenant_type'], $row['tenant_id'])) {
+                $context = ['grantee' => "{$row['authorizable_type']}:{$row['authorizable_id']}", 'target_id' => $row['target_id']];
+
+                TenantColumns::reportRemoved("an expired {$kind->value} grant", $row['tenant_type'], $row['tenant_id'], $context);
+
+                $malformed++;
+
                 continue;
             }
 
@@ -261,7 +277,7 @@ final readonly class GrantPruner
 
         OperationScope::dispatch(...$events);
 
-        return \count($events);
+        return \count($events) + $malformed;
     }
 
     /**
@@ -342,7 +358,7 @@ final readonly class GrantPruner
     }
 
     /**
-     * Return the scope a grant row holds in.
+     * Return the scope a grant row naming a whole tenant, or none, holds in.
      *
      * @param  ExpiredRow  $row
      * @return \SineMacula\Laravel\Authorization\Support\GrantScope

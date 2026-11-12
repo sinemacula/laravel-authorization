@@ -8,9 +8,12 @@ use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Whether a delegated rewrite of a policy's document hands out only what the
@@ -33,7 +36,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *   and across the policy's reach (see `AdministeredScope::isAllowedAcross()`),
  *   since the rewrite widens the boundary wherever it is set, and the policy
  *   route for the allows it adds across the policy's reach (see `PolicyRoute`),
- *   the grantable route decided on the new document's digest.
+ *   the grantable route decided on the new document's digest. A policy a
+ *   boundary naming half a tenant uses is weighed at platform scope instead,
+ *   each check across every tenant, since such a boundary caps everywhere (see
+ *   `Support\TenantColumns`).
  *
  * A rewrite that reaches no holder widens no one, and passes.
  *
@@ -70,11 +76,32 @@ final class PolicyRewrite
         }
 
         $added  = DocumentComparison::added($old, $new);
-        $across = DefinitionConstraints::across($operation, $policy);
+        $across = self::across($operation, $policy);
         $route  = static fn (): ?DecisionReason => self::unbounded($policy, $across, $resource, $checks)
             ?? PolicyRoute::refusalOf($operation, $across, $policy, $document, $added, $checks);
 
-        return DefinitionConstraints::growth($operation, $resource, AffectedHolders::none()->ofPolicy($policy, [$old, $new]), $checks, $route);
+        return DefinitionConstraints::growth($operation, $resource, AffectedHolders::none()->ofPolicy($policy, [$old, $new]), $checks, $route, $across);
+    }
+
+    /**
+     * Return the change the rewrite is weighed across: the policy handed out
+     * across every grant its owner allows (see
+     * `DefinitionConstraints::across()`), or, when a boundary naming half a
+     * tenant uses it, at platform scope, since such a boundary caps everywhere
+     * (see `Support\TenantColumns`), so widening the policy lifts the cap in
+     * every tenant, as the removal of such a boundary is decided there too.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @return \SineMacula\Laravel\Authorization\Administration\OperationChange
+     */
+    private static function across(OperationResource $operation, Policy $policy): OperationChange
+    {
+        $table  = TableNames::get('authorizable_boundaries');
+        $query  = AuthorizationConnection::connection()->table($table)->useWritePdo()->where('policy_id', $policy->getKey());
+        $isHalf = TenantColumns::whereHalf($query, 'tenant_type', 'tenant_id')->exists();
+
+        return $isHalf ? new OperationChange(Reference::of($policy), $policy, GrantScope::platform()) : DefinitionConstraints::across($operation, $policy);
     }
 
     /**

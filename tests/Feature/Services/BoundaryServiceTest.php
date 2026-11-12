@@ -7,8 +7,10 @@ namespace Tests\Feature\Services;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundarySet;
 use SineMacula\Laravel\Authorization\Exceptions\BoundaryException;
@@ -21,6 +23,8 @@ use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Resolvers\BoundaryResolver;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
@@ -37,6 +41,7 @@ use Tests\Concerns\InterleavesWrites;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
+use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\VanishedPolicy;
 use Tests\TestCase;
@@ -361,7 +366,12 @@ final class BoundaryServiceTest extends TestCase
 
         Event::fake([BoundaryRemoved::class]);
 
-        $events = OperationScope::run(Operation::begin(), static fn (Operation $operation): array => BoundaryService::removeEverywhere(Reference::of($user), $operation));
+        $grantee = Reference::of($user);
+
+        [$events, $malformed] = OperationScope::run(Operation::begin(), static fn (Operation $operation): array => BoundaryService::removeEverywhere($grantee, $operation));
+
+        self::assertSame(0, $malformed);
+
         $scopes = \array_map(static fn (BoundaryRemoved $event): array => [$event->name, $event->scope->tenant?->id, $event->scope->includeSubtree], $events);
 
         \sort($scopes);
@@ -405,6 +415,78 @@ final class BoundaryServiceTest extends TestCase
         self::assertSame(['user-2'], DB::table('authorizable_boundaries')->pluck('authorizable_id')->all());
         self::assertSame(0, self::service()->removeAll($user));
         self::assertCount(2, self::dispatchedEvents(BoundaryRemoved::class));
+    }
+
+    /**
+     * Removing all of a grantee's boundaries removes one naming half a tenant
+     * too, as stored: it caps everywhere, so its removal needs the authority to
+     * remove a platform boundary, never a scope it names half of. An actor
+     * holding that authority only in a tenant is refused while one remains; it
+     * is counted, written to the log as malformed, reported by no event, and
+     * the cache forgets it, trusted or decided alike.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRemovingAllNeedsPlatformAuthorityForABoundaryNamingHalfATenant(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $local  = StubIdentity::create(['id' => 'local-admin']);
+        $logger = new RecordingLogger;
+        $grants = GrantService::instance();
+
+        self::assertInstanceOf(GrantService::class, $grants);
+
+        $grants->grantRole($local, Role::query()->firstOrCreate(['name' => 'administration-rank-0'], ['rank' => 0]), tenant: $tenant);
+        $grants->grantPermission($local, Permission::query()->firstOrCreate(['name' => 'authorization:*']), tenant: $tenant);
+
+        $this->app?->instance('log', $logger);
+
+        $half = ['policy_id' => self::cap('half')->id, 'authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1', 'tenant_id' => 'tenant-a'];
+
+        self::service()->set($user, self::cap('tenant'), $tenant);
+        DB::table('authorizable_boundaries')->insert($half);
+
+        $asLocal = static fn (): int => TenantScope::within($tenant, null, static fn (): int => self::service()->removeAll($user, ActingContext::for($local)));
+        $capped  = static fn (): array => \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, BoundaryResolver::boundariesFor($user));
+
+        self::assertSame(['half'], $capped());
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, $asLocal);
+
+        Event::fake([BoundaryRemoved::class]);
+
+        self::assertSame(2, self::service()->removeAll($user, self::administrator()));
+        self::assertSame([], $capped());
+        self::assertSame(['tenant'], \array_map(static fn (BoundaryRemoved $event): string => $event->name, self::dispatchedEvents(BoundaryRemoved::class)));
+        self::assertSame(0, DB::table('authorizable_boundaries')->count());
+
+        self::service()->set($user, self::cap('again'), $tenant);
+
+        self::assertSame(1, $asLocal());
+
+        DB::table('authorizable_boundaries')->insert([...$half, 'tenant_type' => 'stub_tenant', 'tenant_id' => null]);
+
+        self::assertSame(['half'], $capped());
+        self::assertSame(1, self::service()->removeAll($user));
+        self::assertSame([], $capped());
+        self::assertSame(0, DB::table('authorizable_boundaries')->count());
+        self::assertCount(2, self::dispatchedEvents(BoundaryRemoved::class));
+        self::assertSame(
+            [
+                'Authorization: removed a boundary naming half a tenant, malformed (tenant_type=null, tenant_id=tenant-a).',
+                'Authorization: removed a boundary naming half a tenant, malformed (tenant_type=stub_tenant, tenant_id=null).',
+            ],
+            \array_column($logger->records, 'message'),
+        );
+        self::assertSame(
+            [
+                ['grantee' => "{$user->getMorphClass()}:user-1", 'policy_id' => $half['policy_id'], 'tenant_type' => null, 'tenant_id' => 'tenant-a'],
+                ['grantee' => "{$user->getMorphClass()}:user-1", 'policy_id' => $half['policy_id'], 'tenant_type' => 'stub_tenant', 'tenant_id' => null],
+            ],
+            \array_column($logger->records, 'context'),
+        );
     }
 
     /**

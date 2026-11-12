@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\RoleReach;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Concerns\ChecksGrantsByName;
 use Tests\Concerns\RefusesThePackage;
@@ -108,6 +109,45 @@ final class HasRolesTest extends TestCase
         $user->syncRoles([], application: 'mobile');
 
         self::assertSame([], DB::table('authorizable_roles')->pluck('application')->all());
+    }
+
+    /**
+     * A sync through the trait gives each role listed with a reach of its own
+     * that reach, and a role listed alone the default, reaching below; a role
+     * held with the other reach than its entry names has its reach changed in
+     * place, reported with the assigned event, and a role not listed is
+     * revoked.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncGivesEachRoleItsOwnReach(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $tenant = new Reference('stub_tenant', 'tenant-a');
+
+        foreach (['billing', 'editor', 'viewer', 'gone'] as $name) {
+            Role::create(['name' => $name]);
+        }
+
+        $user->assignRole('editor', null, $tenant);
+        $user->assignRole('gone', null, $tenant);
+
+        Event::fake([RoleAssigned::class, RoleRevoked::class]);
+
+        self::assertSame($user, $user->syncRoles([RoleReach::of('billing', false), RoleReach::of('editor', false), 'viewer'], $tenant));
+
+        $reaches = DB::table('authorizable_roles')
+            ->join('roles', 'roles.id', '=', 'authorizable_roles.role_id')
+            ->pluck('authorizable_roles.include_subtree', 'roles.name')
+            ->map(static fn (mixed $reach): bool => (bool) $reach)
+            ->all();
+
+        self::assertEquals(['billing' => false, 'editor' => false, 'viewer' => true], $reaches);
+        Event::assertDispatchedTimes(RoleAssigned::class, 3);
+        Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->name === 'editor' && !$event->scope->includeSubtree);
+        Event::assertDispatchedTimes(RoleRevoked::class, 1);
     }
 
     /**

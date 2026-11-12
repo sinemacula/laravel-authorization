@@ -118,6 +118,42 @@ final class BoundaryResolverTest extends TestCase
     }
 
     /**
+     * A boundary naming half a tenant, a key without a type or a type without a
+     * key, which the package never writes, caps everywhere, as a platform-wide
+     * one does: at the platform, in its tenant, below it and in a sibling,
+     * whether or not it reaches below.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABoundaryNamingHalfATenantAppliesEverywhere(): void
+    {
+        [$org, $account, $sibling] = \array_map(self::createTenant(...), ['org', 'account', 'sibling']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org))->put(Reference::of($sibling), Reference::of($org)));
+
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        self::service()->set($user, self::cap('in-account'), $account);
+
+        $grantee = ['authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1'];
+
+        DB::table('authorizable_boundaries')->insert([
+            ['policy_id' => self::cap('keyless')->id, ...$grantee, 'tenant_type' => $org->getMorphClass(), 'tenant_id' => null, 'include_subtree' => false],
+            ['policy_id' => self::cap('typeless')->id, ...$grantee, 'tenant_type' => null, 'tenant_id' => 'org', 'include_subtree' => false],
+        ]);
+
+        self::assertSame(['keyless', 'typeless'], self::names($user));
+
+        foreach ([$org, $sibling] as $tenant) {
+            self::assertSame(['keyless', 'typeless'], TenantScope::within($tenant, null, static fn (): array => self::names($user)));
+        }
+
+        self::assertSame(['in-account', 'keyless', 'typeless'], TenantScope::within($account, null, static fn (): array => self::names($user)));
+    }
+
+    /**
      * A grantee's boundaries are its own: another grantee's never apply.
      *
      * @return void
