@@ -40,6 +40,7 @@ use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\InterleavesWrites;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
@@ -60,7 +61,21 @@ use Tests\TestCase;
 #[CoversClass(ResourcePolicyService::class)]
 final class ResourcePolicyServiceTest extends TestCase
 {
-    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents, RefusesThePackage;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents, RefusesThePackage, ReportsEveryDecision;
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * The service is bound once in the container.

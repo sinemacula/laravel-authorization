@@ -32,6 +32,7 @@ use Symfony\Component\Console\Input\ArgvInput;
 use Symfony\Component\Console\Output\BufferedOutput;
 use Symfony\Component\Console\Tester\CommandTester;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\FailingContextSource;
 use Tests\Feature\Stubs\FailingSubjectResolver;
 use Tests\Feature\Stubs\FixedConsoleSubjectResolver;
@@ -62,7 +63,7 @@ use Tests\TestCase;
 #[CoversClass(WhyCommand::class)]
 final class WhyCommandTest extends TestCase
 {
-    use ActsAsTenant;
+    use ActsAsTenant, ReportsEveryDecision;
 
     /** @var string A value the command is given, which nothing it prints may carry. */
     private const string SECRET = 'sentinel-context-7f3a';
@@ -75,6 +76,20 @@ final class WhyCommandTest extends TestCase
 
     /** @var string The refusal of a resource with a colon but an empty type or key. */
     private const string RESOURCE = 'The resource must be in the format {morphType}:{key} or {morphType}:* (e.g. post:42), or be given with --opaque.';
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * The command is registered under its `NAME` constant, the name its

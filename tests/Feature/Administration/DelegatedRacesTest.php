@@ -32,6 +32,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions as Actions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\RacesDelegatedCalls;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -61,7 +62,21 @@ use Tests\TestCase;
 #[CoversClass(ConflictRetries::class)]
 final class DelegatedRacesTest extends TestCase
 {
-    use ActsAsTenant, RacesDelegatedCalls;
+    use ActsAsTenant, RacesDelegatedCalls, ReportsEveryDecision;
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * The actor's authority revoked between the decision and the write has the

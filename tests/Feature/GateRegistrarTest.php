@@ -37,6 +37,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\AllowingLaravelPolicy;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\DenyingLaravelPolicy;
@@ -75,7 +76,7 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationManager::class)]
 final class GateRegistrarTest extends TestCase
 {
-    use ReadsDispatchedEvents;
+    use ReadsDispatchedEvents, ReportsEveryDecision;
 
     /**
      * Boot the provider with the demo permission enum so the Gate asks the
@@ -88,6 +89,8 @@ final class GateRegistrarTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->reportEveryDecision();
 
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->container()->make(ConfigRepository::class);

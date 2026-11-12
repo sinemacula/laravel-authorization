@@ -140,7 +140,7 @@ final class GuardedBootTest extends TestCase
         self::assertContains('authorization.gate.enabled', $paths);
         self::assertContains('authorization.usage.enabled', $paths);
         self::assertSame($paths[0], $state->refusal()->getConfigKey());
-        self::assertSame(\array_fill(0, 5, BootCheckOutcome::NOT_RUN), \array_map(static fn (BootCheck $check): BootCheckOutcome => $check->outcome, $state->bootChecks()));
+        self::assertSame(\array_fill(0, 6, BootCheckOutcome::NOT_RUN), \array_map(static fn (BootCheck $check): BootCheckOutcome => $check->outcome, $state->bootChecks()));
 
         self::assertSame(0, Explosions::$count);
         self::assertFalse(BindingRegistry::of($app)->get(TenantTree::class)?->configured);

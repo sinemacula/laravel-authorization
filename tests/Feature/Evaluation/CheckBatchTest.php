@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
@@ -46,6 +47,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
@@ -77,13 +79,27 @@ use Tests\TestCase;
 #[CoversClass(CheckBatch::class)]
 final class CheckBatchTest extends TestCase
 {
-    use ReadsDispatchedEvents;
+    use ReadsDispatchedEvents, ReportsEveryDecision;
 
     /** @var string The action the checks decide. */
     private const string ACTION = 'posts:read';
 
     /** @var string The status the published posts have. */
     private const string PUBLISHED = 'published';
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * Each check is decided as `check()` decides it, whatever form its resource
@@ -153,6 +169,118 @@ final class CheckBatchTest extends TestCase
         self::assertFalse($events[1]->isAllowed());
         self::assertSame(DecisionReason::NO_MATCH, $events[1]->reason);
         self::assertEquals(Reference::of($user), $events[0]->subject);
+    }
+
+    /**
+     * Under the shipped settings a bulk check reports each decision the
+     * settings report, one event for each, in the order of the checks, a
+     * sensitive action's allow among them, and leaves out the ordinary allows,
+     * while the last decision is still the last check, reported or not.
+     *
+     * @return void
+     */
+    public function testABulkCheckReportsEachReportedDecisionInOrder(): void
+    {
+        $user  = $this->subject();
+        $posts = $this->posts(2);
+
+        $user->givePermission(Permission::create(['name' => self::ACTION]));
+        $user->givePermission(Permission::create(['name' => 'posts:delete']));
+
+        $this->decisionEvents(['allows' => 'sensitive', 'sensitive_actions' => ['posts:delete']]);
+
+        Event::fake([DecisionEvaluated::class]);
+
+        $decisions = Authorization::checkMany([
+            'a' => new CheckInput(self::ACTION, $posts[0]),
+            'b' => new CheckInput('posts:edit', $posts[0]),
+            'c' => new CheckInput('posts:delete', $posts[1]),
+            'd' => new CheckInput('posts:edit', $posts[1]),
+            'e' => new CheckInput(self::ACTION, $posts[1]),
+        ]);
+
+        $events = self::dispatchedEvents(DecisionEvaluated::class);
+        $named  = \array_map(static fn (ScopedPost $post): string => $post->getMorphClass() . ':' . self::key($post), [$posts[0], $posts[1], $posts[1]]);
+
+        self::assertSame(['posts:edit', 'posts:delete', 'posts:edit'], \array_map(static fn (DecisionEvaluated $event): string => $event->action, $events));
+        self::assertSame($named, \array_map(static fn (DecisionEvaluated $event): ?string => $event->resource, $events));
+        self::assertSame(
+            [DecisionReport::DENIAL, DecisionReport::SENSITIVE_ACTION, DecisionReport::DENIAL],
+            \array_map(static fn (DecisionEvaluated $event): DecisionReport => $event->reportedBecause(), $events),
+        );
+        self::assertSame($decisions['e'], Authorization::lastDecision());
+        self::assertTrue($decisions['e']->isAllowed());
+    }
+
+    /**
+     * The settings are read once, as the batch is made: a listener changing
+     * them part way through changes nothing for the rest of the batch, only for
+     * the next.
+     *
+     * @return void
+     */
+    public function testTheSettingsAreReadOnceForEachBatch(): void
+    {
+        $user  = $this->subject();
+        $posts = $this->posts(3);
+
+        $user->givePermission(Permission::create(['name' => self::ACTION]));
+
+        $this->decisionEvents(['allows' => 'all']);
+
+        $seen = new \ArrayObject;
+
+        Event::listen(DecisionEvaluated::class, function (DecisionEvaluated $event) use ($seen): void {
+            $seen->append($event->action);
+            $this->decisionEvents(['allows' => 'none']);
+        });
+
+        $checks = \array_map(static fn (ScopedPost $post): CheckInput => new CheckInput(self::ACTION, $post), $posts);
+
+        Authorization::checkMany($checks);
+
+        self::assertCount(3, $seen);
+
+        Authorization::checkMany($checks);
+        Authorization::check(self::ACTION, $posts[0]);
+
+        self::assertCount(3, $seen);
+    }
+
+    /**
+     * A batch that reports nothing, through its switch or for want of a
+     * dispatcher, never reads the settings, so one changed after boot to a
+     * value it does not take refuses only a batch that reports, as it is made.
+     *
+     * @return void
+     */
+    public function testOnlyABatchThatReportsReadsTheSettings(): void
+    {
+        $this->subject()->givePermission(Permission::create(['name' => self::ACTION]));
+        $this->decisionEvents(['allows' => 'some']);
+
+        /** @var \Illuminate\Foundation\Application $app */
+        $app      = $this->app;
+        $contexts = $app->make(CheckContextFactory::class);
+        $pipeline = new DecisionPipeline($app->make(PolicyEvaluator::class), $app->make(PolicyResolver::class), $contexts, new ResourcePolicyResolver, new GuardrailResolver);
+        $make     = static fn (?Dispatcher $events, bool $isDispatching): CheckBatch => new CheckBatch(
+            $pipeline,
+            $app->make(LastDecisionStore::class),
+            $app->make(SubjectResolver::class),
+            $events,
+            $isDispatching,
+            true,
+        );
+
+        $subject = Authorization::currentSubject();
+
+        self::assertTrue($make($app->make(Dispatcher::class), false)->decideOne($subject, new CheckInput(self::ACTION))->isAllowed());
+        self::assertTrue($make(null, true)->decideOne($subject, new CheckInput(self::ACTION))->isAllowed());
+
+        $this->expectException(InvalidAuthorizationConfigException::class);
+        $this->expectExceptionMessage('\'authorization.events.decisions.allows\'');
+
+        $make($app->make(Dispatcher::class), true);
     }
 
     /**
@@ -1025,6 +1153,19 @@ final class CheckBatchTest extends TestCase
         self::assertEquals(DecisionProvenance::of($subject), $request->requested);
         self::assertCount(1, $explained->evidence->grants ?? []);
         self::assertNull($batch(false)->decide($subject, ['a' => $check, 'b' => $check])['a']->evidence);
+    }
+
+    /**
+     * Set the decision events' settings, read by each batch made from now on.
+     *
+     * @param  array<string, mixed>  $settings
+     * @return void
+     */
+    private function decisionEvents(array $settings): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->container()->make('config');
+        $config->set('authorization.events.decisions', $settings);
     }
 
     /**

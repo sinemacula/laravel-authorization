@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Preview\PreviewAdmission;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use Tests\Concerns\PreviewsSubjects;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\TestCase;
 
 /**
@@ -28,7 +29,21 @@ use Tests\TestCase;
 #[CoversClass(PreviewAdmission::class)]
 final class PreviewAdmissionTest extends TestCase
 {
-    use PreviewsSubjects;
+    use PreviewsSubjects, ReportsEveryDecision;
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * A batch previewed over three checks of one scope is admitted once, and

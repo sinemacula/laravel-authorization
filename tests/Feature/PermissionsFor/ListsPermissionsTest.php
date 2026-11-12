@@ -30,6 +30,7 @@ use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubRequirementChecker;
@@ -53,7 +54,7 @@ use Tests\TestCase;
 #[CoversTrait(ListsPermissions::class)]
 final class ListsPermissionsTest extends TestCase
 {
-    use CatchesRefusals, PreviewsSubjects, ReadsDispatchedEvents, RefusesThePackage;
+    use CatchesRefusals, PreviewsSubjects, ReadsDispatchedEvents, RefusesThePackage, ReportsEveryDecision;
 
     /** @var string The first action the enum declares. */
     private const string CREATE = 'posts:create';
@@ -76,6 +77,8 @@ final class ListsPermissionsTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->reportEveryDecision();
 
         $this->app?->make('config')->set('authorization.permission_enums', [PermissionEnum::class]);
     }

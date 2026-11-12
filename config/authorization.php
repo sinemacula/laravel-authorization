@@ -768,6 +768,40 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Decision events
+    |---------------------------------------------------------------------------
+    |
+    | Which decisions `DecisionEvaluated` reports. `denials` reports every
+    | denial, `insufficient_authentication` every denial whose only unmet
+    | requirement is authentication, and `previews` every decision made
+    | through `previewFor()`; each is true or false. `allows` is `sensitive`
+    | (the default), which reports the allows of the actions listed in
+    | `sensitive_actions` alone, `all`, which reports every allow, or `none`.
+    | Each setting reports its kind of decision on its own, and an event says
+    | why it was reported with `reportedBecause()`. A break-glass allow is to
+    | be reported whatever these settings once break-glass grants arrive.
+    | `AuthorizationFailed` is dispatched for every refusal `authorize()`
+    | throws, whatever these settings.
+    |
+    | `sensitive_actions` lists action names exactly as the catalogue
+    | declares them, with no wildcard; each must be declared by the package
+    | or the application, which is checked at boot. Any other value, null
+    | among it, is refused at boot.
+    |
+    */
+
+    'events' => [
+        'decisions' => [
+            'denials'                     => env('AUTHORIZATION_EVENTS_DENIALS', true),
+            'insufficient_authentication' => env('AUTHORIZATION_EVENTS_INSUFFICIENT_AUTHENTICATION', true),
+            'previews'                    => env('AUTHORIZATION_EVENTS_PREVIEWS', true),
+            'allows'                      => env('AUTHORIZATION_EVENTS_ALLOWS', 'sensitive'),
+            'sensitive_actions'           => [],
+        ],
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
     | Grant hooks
     |---------------------------------------------------------------------------
     |

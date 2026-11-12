@@ -28,6 +28,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -49,7 +50,7 @@ use Tests\TestCase;
 #[CoversClass(GuardrailAuthority::class)]
 final class GuardrailAuthorityTest extends TestCase
 {
-    use ActsAsTenant;
+    use ActsAsTenant, ReportsEveryDecision;
 
     /** @var \Tests\Feature\Stubs\StubTenant The organisation, the root of the tree. */
     private StubTenant $org;
@@ -69,6 +70,8 @@ final class GuardrailAuthorityTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->reportEveryDecision();
 
         [$this->org, $this->account, $this->team] = \array_map(self::createTenant(...), ['org', 'account', 'team']);
 

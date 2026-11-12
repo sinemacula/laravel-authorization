@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
@@ -127,5 +128,73 @@ final class DecisionEventTest extends TestCase
         self::assertNull($event->resource);
         self::assertSame([], $event->statements);
         self::assertSame([], $event->keys);
+    }
+
+    /**
+     * An event made with a reason and a sensitive action reports them as they
+     * were given, whatever reason its decision has.
+     *
+     * @return void
+     */
+    public function testReportsTheReasonAndSensitivityItWasMadeWith(): void
+    {
+        $denial = Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY);
+        $event  = DecisionEvaluated::of(new DecisionProvenance, 'posts:delete', null, $denial, DecisionReport::SENSITIVE_ACTION, true);
+        $made   = self::event(DecisionEffect::ALLOW, null, null, DecisionReport::DENIAL, true);
+
+        self::assertSame(DecisionReport::SENSITIVE_ACTION, $event->reportedBecause());
+        self::assertTrue($event->isSensitiveAction());
+        self::assertSame(DecisionReport::DENIAL, $made->reportedBecause());
+        self::assertTrue($made->isSensitiveAction());
+    }
+
+    /**
+     * An event made without a reason names the most specific one its decision
+     * has, as though every setting were on, and no sensitive action: a
+     * preview's, then insufficient authentication, then any denial, then any
+     * allow.
+     *
+     * @return void
+     */
+    public function testAnEventMadeWithoutAReasonNamesTheMostSpecificItHas(): void
+    {
+        $previewer = new Reference('user', '3');
+
+        self::assertSame(DecisionReport::PREVIEW, self::event(DecisionEffect::ALLOW, null, $previewer)->reportedBecause());
+        self::assertSame(DecisionReport::PREVIEW, self::event(DecisionEffect::DENY, DecisionReason::INSUFFICIENT_AUTHENTICATION, $previewer)->reportedBecause());
+        self::assertSame(DecisionReport::INSUFFICIENT_AUTHENTICATION, self::event(DecisionEffect::DENY, DecisionReason::INSUFFICIENT_AUTHENTICATION)->reportedBecause());
+        self::assertSame(DecisionReport::DENIAL, self::event(DecisionEffect::DENY, DecisionReason::NO_MATCH)->reportedBecause());
+        self::assertSame(DecisionReport::ALL_ALLOWS, self::event(DecisionEffect::ALLOW, null)->reportedBecause());
+        self::assertFalse(self::event(DecisionEffect::ALLOW, null)->isSensitiveAction());
+        self::assertFalse(DecisionEvaluated::of(new DecisionProvenance, 'posts:read', null, Decision::allow(DecisionStage::ALLOW))->isSensitiveAction());
+        self::assertSame(
+            DecisionReport::DENIAL,
+            AuthorizationFailed::of(new DecisionProvenance, 'posts:read', null, Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT))->reportedBecause(),
+        );
+    }
+
+    /**
+     * Return an event on `posts:edit` with the effect, reason and previewer
+     * given, made with the reason and sensitivity given.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect  $effect
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null  $reason
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $previewer
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport|null  $report
+     * @param  bool  $isSensitive
+     * @return \SineMacula\Laravel\Authorization\Events\DecisionEvaluated
+     */
+    private static function event(
+        DecisionEffect $effect,
+        ?DecisionReason $reason,
+        ?Reference $previewer = null,
+        ?DecisionReport $report = null,
+        bool $isSensitive = false,
+    ): DecisionEvaluated {
+        if ($report === null) {
+            return new DecisionEvaluated(null, null, $previewer, 'posts:edit', null, null, null, $effect, $reason, [], false, []);
+        }
+
+        return new DecisionEvaluated(null, null, $previewer, 'posts:edit', null, null, null, $effect, $reason, [], false, [], $report, $isSensitive);
     }
 }
