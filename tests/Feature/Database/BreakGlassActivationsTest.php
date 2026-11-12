@@ -417,11 +417,13 @@ final class BreakGlassActivationsTest extends TestCase
         $identity = StubIdentity::create(['id' => 'person-1']);
         $machine  = new StubMachine;
         $live     = self::activate($user, self::emergencyRole());
+        $marks    = BreakGlassActivations::instance();
 
+        self::assertNotNull($marks);
         self::assertTrue(BreakGlassActivations::isCounted($user));
         self::assertFalse(BreakGlassActivations::isCounted($machine));
         self::assertFalse(BreakGlassActivations::isIdentity($identity));
-        self::assertSame('permissions', BreakGlassActivations::kindFor('permissions', $identity));
+        self::assertSame('permissions', $marks->kindOf('permissions', $identity));
 
         BreakGlassActivations::markIdentity($identity);
         BreakGlassActivations::markIdentity($identity);
@@ -429,8 +431,8 @@ final class BreakGlassActivationsTest extends TestCase
         self::assertTrue(BreakGlassActivations::isIdentity($identity));
         self::assertFalse(BreakGlassActivations::isIdentity($user));
         self::assertFalse(BreakGlassActivations::isCounted($identity));
-        self::assertSame('identity-permissions', BreakGlassActivations::kindFor('permissions', $identity));
-        self::assertSame('permissions', BreakGlassActivations::kindFor('permissions', $user));
+        self::assertSame('identity-permissions', $marks->kindOf('permissions', $identity));
+        self::assertSame('permissions', $marks->kindOf('permissions', $user));
 
         $held = $user->roles()->first();
 

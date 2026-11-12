@@ -457,7 +457,13 @@ final class AuthorizationServiceProvider extends ServiceProvider
                 $store   = $manager->store($storeName);
             }
 
-            return new ResolutionCache(store: $store, ttl: $ttl, prefix: $prefix, isTrackingUsage: UsageTracking::isEnabled());
+            return new ResolutionCache(
+                store: $store,
+                ttl: $ttl,
+                prefix: $prefix,
+                isTrackingUsage: UsageTracking::isEnabled(),
+                activations: $app->make(BreakGlassActivations::class),
+            );
         });
     }
 

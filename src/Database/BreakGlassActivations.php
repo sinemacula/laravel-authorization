@@ -38,7 +38,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
  * Whether a model stands as an identity is marked on the instance, for the
  * request or job (the service provider binds the record with `scoped()`), so
  * its resolutions are kept apart from its resolutions as a subject (see
- * `kindFor()`), and an instance once read as an identity counts no activation
+ * `kindOf()`), and an instance once read as an identity counts no activation
  * for the rest of the request or job.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -177,9 +177,9 @@ final class BreakGlassActivations
      * @param  object  $grantee
      * @return string
      */
-    public static function kindFor(string $kind, object $grantee): string
+    public function kindOf(string $kind, object $grantee): string
     {
-        return self::isIdentity($grantee) ? self::IDENTITY_KIND . $kind : $kind;
+        return isset($this->identities[$grantee]) ? self::IDENTITY_KIND . $kind : $kind;
     }
 
     /**

@@ -1351,7 +1351,7 @@ final class ResolutionCacheTest extends TestCase
      */
     private function request(int $ttl = 300): ResolutionCache
     {
-        $cache = new ResolutionCache($this->store, $ttl, 'authorization-test');
+        $cache = new ResolutionCache($this->store, $ttl, 'authorization-test', activations: $this->app?->make(BreakGlassActivations::class));
 
         $this->app?->instance(ResolutionCache::class, $cache);
 

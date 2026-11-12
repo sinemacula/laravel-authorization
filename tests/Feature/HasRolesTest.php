@@ -405,7 +405,7 @@ final class HasRolesTest extends TestCase
         self::assertTrue($user->hasRole('editor'));
         self::assertSame(['editor'], $user->getRoles());
 
-        $fresh = StubIdentity::query()->findOrFail($user->id);
+        $fresh = StubIdentity::query()->whereKey($user->getKey())->firstOrFail();
 
         BreakGlassActivations::markIdentity($fresh);
 

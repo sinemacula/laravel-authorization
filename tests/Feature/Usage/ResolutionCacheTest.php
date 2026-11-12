@@ -191,7 +191,7 @@ final class ResolutionCacheTest extends TestCase
      */
     private function cache(Repository $store, bool $isTracking): ResolutionCache
     {
-        $cache = new ResolutionCache($store, 300, 'usage-test', $isTracking);
+        $cache = new ResolutionCache($store, 300, 'usage-test', $isTracking, $this->app?->make(BreakGlassActivations::class));
 
         $this->app?->instance(ResolutionCache::class, $cache);
 

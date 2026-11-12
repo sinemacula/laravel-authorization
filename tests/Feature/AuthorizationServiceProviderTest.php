@@ -1250,6 +1250,36 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
+     * The bound resolution cache keeps an instance read as an identity apart
+     * from the same grantee read as a subject.
+     *
+     * @return void
+     */
+    public function testTheResolutionCacheKeepsAnIdentityApart(): void
+    {
+        $app         = $this->app;
+        $resolutions = 0;
+        $resolve     = static function () use (&$resolutions): Resolution {
+            $resolutions++;
+
+            return new Resolution(['posts:read']);
+        };
+
+        self::assertNotNull($app);
+
+        $identity = new Reference('user', 'user-1');
+
+        BreakGlassActivations::markIdentity($identity);
+
+        $cache = $app->make(ResolutionCache::class);
+
+        $cache->rememberPermissions(new Reference('user', 'user-1'), $resolve);
+        $cache->rememberPermissions($identity, $resolve);
+
+        self::assertSame(2, $resolutions);
+    }
+
+    /**
      * Registering the provider again resolves nothing, though the tenant
      * bindings it watches are already bound.
      *

@@ -61,6 +61,7 @@ final readonly class ResolutionCache
      * @param  int  $ttl
      * @param  string  $prefix
      * @param  bool  $isTrackingUsage
+     * @param  \SineMacula\Laravel\Authorization\Database\BreakGlassActivations|null  $activations
      */
     public function __construct(
 
@@ -75,6 +76,9 @@ final readonly class ResolutionCache
 
         /** Whether grant usage is tracked, so a grantee's permissions and policies are kept with the routes of the grants behind them. */
         private bool $isTrackingUsage = false,
+
+        /** The request's record of the instances read as an identity; null keeps every grantee's entries under its kind. */
+        private ?BreakGlassActivations $activations = null,
     ) {
         $this->memo  = new ResolutionMemo(static fn (): string => TenantScope::scopeKey());
         $this->store = $store === null ? null : new VersionedStore($store, $prefix);
@@ -326,8 +330,8 @@ final readonly class ResolutionCache
      */
     public function routesOf(string $kind, object $grantee): ?RouteMap
     {
-        $kind   = BreakGlassActivations::kindFor(ResolutionCodec::kindOf($kind, $this->isTrackingUsage), $grantee);
-        $routes = $this->memo->get(self::ROUTES . $kind . ':' . PrincipalCacheKey::for($grantee))[0] ?? null;
+        $kind   = ResolutionCodec::kindOf($kind, $this->isTrackingUsage);
+        $routes = $this->memo->get(self::ROUTES . ($this->activations?->kindOf($kind, $grantee) ?? $kind) . ':' . PrincipalCacheKey::for($grantee))[0] ?? null;
 
         return $routes instanceof RouteMap ? $routes : null;
     }
@@ -515,7 +519,7 @@ final readonly class ResolutionCache
 
         // An instance read as another subject's identity counts none of its
         // break-glass activations, so its entries are kept apart.
-        $kind    = BreakGlassActivations::kindFor($kind, $grantee);
+        $kind    = $this->activations?->kindOf($kind, $grantee) ?? $kind;
         $memoKey = $kind . ':' . PrincipalCacheKey::for($grantee);
 
         /** @var list<mixed>|null $memoised */
