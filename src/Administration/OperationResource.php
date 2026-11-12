@@ -190,6 +190,30 @@ final readonly class OperationResource implements AuthorizableResource
     }
 
     /**
+     * Return the operation resource of a pair of mutually exclusive roles
+     * declared or removed, under `authorization:role-exclusion.declare` or
+     * `.remove`: a change to the pair as a definition, owned, and so decided,
+     * where the role given is, the role whose owner is the pair's (see
+     * `Services\RoleExclusionService`), naming the other role, as stored, among
+     * the proposed changes, by its key under `excluded` and its name under
+     * `excluded_role`. It is weighed by the owner rule and by the rank and
+     * administered-scope rules of a role definition (see `ExcludedRoles`), so
+     * it is never marked as only narrowing. A screen that builds the same pair
+     * here gets the decision the service makes.
+     *
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $excluded
+     * @return self
+     */
+    public static function exclusion(string $action, Role $role, Role $excluded): self
+    {
+        $change = ['excluded' => $excluded->id, 'excluded_role' => $excluded->name];
+
+        return new self($action, false, Reference::tenantOf($role), [...self::targetAttributes($role), 'change' => $change], new DefinitionChange($role, $change, null, $excluded));
+    }
+
+    /**
      * Return the operation resource of a policy given a new document, as the
      * policy service decides it: a rewrite under `authorization:policy.update`,
      * or the action given, such as `authorization:policy.create`. The document,

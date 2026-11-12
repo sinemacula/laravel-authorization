@@ -9,8 +9,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 /**
  * Implemented by every event the package dispatches for a change to its stored
  * records: the role, permission and policy record events, the role permission
- * events, the grant, boundary, resource policy and guardrail events. The
- * decision events and `SystemOverrideUsed` do not implement it.
+ * events, the role exclusion events, the grant, boundary, resource policy and
+ * guardrail events. The decision events and `SystemOverrideUsed` do not
+ * implement it.
  *
  * An audit mapper typed against it reads what the change was, who it was about,
  * where it holds, whose access it changed, the rest of its details and the call

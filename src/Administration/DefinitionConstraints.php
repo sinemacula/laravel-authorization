@@ -26,8 +26,9 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *    the tenant the check is made from (see `FurtherChecks`) must be the owner,
  *    or it is refused as `administration.owner`, whether or not it narrows (see
  *    `OwnerConstraint`). A definition being created is owned by the tenant its
- *    record names. A resource policy's attachment is a grant to a resource,
- *    which the rule never weighs (N79).
+ *    record names, and a pair of mutually exclusive roles by the tenant that
+ *    owns its owning role. A resource policy's attachment is a grant to a
+ *    resource, which the rule never weighs (N79).
  * 2. A change that can only narrow is then allowed: removing a permission from
  *    a role, detaching an allow-only policy, one that changes nothing.
  * 3. Every other change is weighed by what it changes, each case below.
@@ -60,6 +61,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *   `authorization:administration.unbounded`, as replacing a boundary with a
  *   wider one does (see `PolicyRewrite`). Describing or renaming a policy
  *   passes.
+ * - **Declaring or removing a pair of mutually exclusive roles** hands out
+ *   nothing, so it needs no impact check, but each role of the pair must be
+ *   junior to the actor, and a removal lifts the pair across the whole reach of
+ *   its owner, so the actor must administer it (see `ExcludedRoles`).
  * - **Adding a permission or attaching a policy to a role**, and **setting or
  *   replacing a role's parent**, hands what is added to every holder of the
  *   role and of every role below it: the impact check over them, and the
@@ -208,7 +213,7 @@ final class DefinitionConstraints
         $record = $definition->record;
 
         return match (true) {
-            $record instanceof Role       => self::ofRole($operation, $record, $definition->values, $resource, $checks),
+            $record instanceof Role       => self::ofRole($operation, $record, $definition, $resource, $checks),
             $record instanceof Permission => self::ofPermission($operation, $definition, $record, $resource, $checks),
             $record instanceof Policy     => self::ofPolicy($operation, $definition, $record, $resource, $checks),
             default                       => DecisionReason::ADMINISTRATION_UNPROVABLE,
@@ -216,25 +221,30 @@ final class DefinitionConstraints
     }
 
     /**
-     * Return why a change to the role itself is refused, or null when it is
+     * Return why a change to the role itself, or to a pair of mutually
+     * exclusive roles it is the owning side of, is refused, or null when it is
      * allowed.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
-     * @param  array<string, bool|float|int|string|null>  $values
+     * @param  \SineMacula\Laravel\Authorization\Administration\DefinitionChange  $definition
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      */
-    private static function ofRole(OperationResource $operation, Role $role, array $values, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
+    private static function ofRole(OperationResource $operation, Role $role, DefinitionChange $definition, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
+        $values = $definition->values;
+
         return match ($operation->action) {
             PackagePermissions::ROLE_CREATE     => self::createdRank($operation, self::rankOf($values), $checks),
             PackagePermissions::ROLE_RENAME     => self::reaching($operation, $resource, AffectedHolders::none()->ofRoles([$role->id]), $checks),
             PackagePermissions::ROLE_UPDATE     => self::ranked($operation, $role, $values, $resource, $checks),
             PackagePermissions::ROLE_DELETE     => self::unlessWidening(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $role)),
             PackagePermissions::ROLE_PARENT_SET => RoleParent::refusal($operation, $role, $values['parent'] ?? null, $resource, $checks),
-            default                             => DecisionReason::ADMINISTRATION_UNPROVABLE,
+            PackagePermissions::ROLE_EXCLUSION_DECLARE,
+            PackagePermissions::ROLE_EXCLUSION_REMOVE => ExcludedRoles::refusal($operation, $role, $definition->related, $resource, $checks),
+            default                                   => DecisionReason::ADMINISTRATION_UNPROVABLE,
         };
     }
 

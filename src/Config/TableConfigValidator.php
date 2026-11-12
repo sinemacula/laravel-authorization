@@ -11,14 +11,14 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * Boot-time validator for the `authorization.tables` config, run by
  * `ConfigValidator`.
  *
- * The block must be an array setting no key but the package's thirteen tables
+ * The block must be an array setting no key but the package's fourteen tables
  * (N116). Each name it sets must be a plain SQL identifier: a letter or an
  * underscore, then letters, digits and underscores. A name qualified by a
  * schema (`schema.table`) is refused, as the migrations build the names of
  * their indexes and keys from the table's name, and a dot there would break
  * them. A name the block leaves out is the table's default, as the config file
  * has it (see `TableNames::defaultName()`); a name set to null is refused. The
- * thirteen names, those left out included, must be distinct, compared whatever
+ * fourteen names, those left out included, must be distinct, compared whatever
  * their case, since some databases fold it.
  *
  * Each name is bounded by its own length (`LENGTHS`): the migrations name each
@@ -41,6 +41,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * - `grant_usage`: `_grant_key_primary`, 18;
  * - `usage_coverage`: `_until_index`, 12;
  * - `break_glass`: `_role_id_foreign`, Laravel's name for its foreign key, 16.
+ * - `role_exclusions`: `_excluded_foreign`, 17, every name its migration builds
+ *   being given there.
  *
  * Laravel puts the connection's table prefix before the names it builds, so the
  * bounds hold for a connection without one; a prefix shortens what is left for
@@ -82,6 +84,7 @@ final class TableConfigValidator
         'grant_usage'              => self::IDENTIFIER_LENGTH - 18,
         'usage_coverage'           => self::IDENTIFIER_LENGTH - 12,
         'break_glass'              => self::IDENTIFIER_LENGTH - 16,
+        'role_exclusions'          => self::IDENTIFIER_LENGTH - 17,
     ];
 
     /** @var int The most characters the prefix may have. */
@@ -122,7 +125,7 @@ final class TableConfigValidator
     }
 
     /**
-     * Return the keys the block may set: the prefix, then the thirteen tables.
+     * Return the keys the block may set: the prefix, then the fourteen tables.
      *
      * @return list<string>
      */

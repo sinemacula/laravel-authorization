@@ -19,7 +19,9 @@ administration never grants anything it cannot justify.
    `permission.update`, `permission.delete`, `policy.create`, `policy.rename`, `policy.update`, `policy.delete`,
    `boundary.set`, `boundary.remove`, `guardrail.manage`, `resource-policy.attach`, `resource-policy.detach`,
    `role.read`, `permission.read`, `policy.read`, `permission.grantable`, `policy.grantable`, `administration.self`,
-   `administration.impersonated` and `administration.unbounded`. The right to manage guardrails was
+   `administration.impersonated`, `administration.unbounded`, `role-exclusion.declare` and `role-exclusion.remove`,
+   the last two weighed by the owner rule and by `Administration\ExcludedRoles` (see
+   [Separation of duties](separation-of-duties.md)). The right to manage guardrails was
    `authorization:guardrails:manage`; it is renamed, with no alias, since the package is unreleased.
 
 2. **Trusted or delegated, never in between (N75, in this release).** A management service call without an acting

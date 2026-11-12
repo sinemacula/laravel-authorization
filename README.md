@@ -81,6 +81,10 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   scope, whoever the subject is, as a boundary caps one grantee's. Every guardrail that applies must allow the check,
   a guardrail grants nothing, and only an actor holding `authorization:guardrail.manage` from above the scope, a
   permission the package declares itself and no guardrail caps, may set or remove one.
+- **Separation of duties**: two roles may be declared mutually exclusive, so no grantee holds both where their reach
+  overlaps. A pair is managed through `RoleExclusionService` as the other definitions are, declaring one that someone
+  already holds both roles of is refused with a report of who holds both, and every pair can be reported on later;
+  enforcing the pairs on every grant comes next (see [Separation of duties](#separation-of-duties)).
 - **Session caps and machines**: a check is capped by the scopes of the subject's credential, from a session policy
   source you bind and mapped to actions through a scope map checked at boot, and by any actions the caller passes to
   `Authorization::capped()`. Every cap must cover the action, a cap grants nothing, and an empty cap allows nothing. A
@@ -171,15 +175,15 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   authority that changed under it: a conflict is tried again, then refused as `administration.conflict` (see
   [Delegated administration](#delegated-administration)).
 - **Management services** that own every write of a role, permission, policy, grant, resource attachment, permission
-  boundary or guardrail: each call runs in one transaction on the package's connection, through the configured models,
-  and grants are idempotent under concurrency. The traits, the grant and revoke commands and the Spatie import write
-  through them; only `authorization:sync` still writes the permission catalogue through the permission model, in its own
-  transaction.
-- **Events** for every grant, revocation, expiry change, resource attachment, boundary or guardrail change and model
-  change that changes something, for each use of the system override, for each decision, and when `authorize()` refuses.
-  All implement one marker interface; the change events are snapshots of plain values that carry the call's operation
-  (its id, its actor and identity, whether it was trusted or delegated, and its actions), and are dispatched only once
-  the write commits.
+  boundary, guardrail or pair of mutually exclusive roles: each call runs in one transaction on the package's
+  connection, through the configured models, and grants are idempotent under concurrency. The traits, the grant and
+  revoke commands and the Spatie import write through them; only `authorization:sync` still writes the permission
+  catalogue through the permission model, in its own transaction.
+- **Events** for every grant, revocation, expiry change, resource attachment, boundary, guardrail or role exclusion
+  change and model change that changes something, for each use of the system override, for each decision, and when
+  `authorize()` refuses. All implement one marker interface; the change events are snapshots of plain values that carry
+  the call's operation (its id, its actor and identity, whether it was trusted or delegated, and its actions), and are
+  dispatched only once the write commits.
 - **Resolution cache** for roles, permissions, policies, boundaries and guardrails, in memory and optionally in any
   cache store, versioned so every write takes effect on the next check in every worker, and falling back to the database
   when the store fails.
@@ -374,7 +378,7 @@ is a boot for `authorization:check`, which reports every issue while the package
   `1`, `off` and `no` are refused.
 - Each table name is a plain identifier (a letter or an underscore, then letters, digits and underscores) with no
   schema before it, short enough that every index and key name the migrations build from it fits in 63 characters,
-  PostgreSQL's limit (from 33 to 51 characters, depending on the table), and the thirteen names are distinct.
+  PostgreSQL's limit (from 33 to 51 characters, depending on the table), and the fourteen names are distinct.
 - `tables.prefix` is empty, or a lower-case letter, then lower-case letters, digits and underscores, of at most 16
   characters; null is refused. Each name it makes is checked as a name you set is: within its table's bound, which the
   longest prefix allowed keeps every default within, and distinct from the others, so a name you set that the prefix
@@ -537,12 +541,13 @@ Gate::forUser($user)->allows('posts:update');
 
 ### Managing roles, permissions and grants
 
-Every write goes through seven services, which you inject or resolve from the container: `RoleService`,
+Every write goes through eight services, which you inject or resolve from the container: `RoleService`,
 `PermissionService` and `PolicyService` for the records, `GrantService` for what a grantee holds,
 `ResourcePolicyService` for the policies attached to resources (see [Resource-based
 policies](#resource-based-policies)), `BoundaryService` for the permission boundaries of principals and identities (see
-[Permission boundaries](#permission-boundaries)), and `GuardrailService` for the guardrails of tenants and the platform,
-whose acting context is required (see [Guardrails](#guardrails)). Each call runs in one transaction on the package's
+[Permission boundaries](#permission-boundaries)), `GuardrailService` for the guardrails of tenants and the platform,
+whose acting context is required (see [Guardrails](#guardrails)), and `RoleExclusionService` for the pairs of mutually
+exclusive roles (see [Separation of duties](#separation-of-duties)). Each call runs in one transaction on the package's
 connection (`authorization.connection`), through the models `authorization.models` configures, and takes an optional
 `actor`, the `ActingContext` making the call. A call without one is trusted system work, as seeders, migrations and
 console commands are, and is not decided; a call with one is delegated administration, each change decided as that
@@ -1359,6 +1364,100 @@ its denies and the `guardrail` stage for its allows.
 The guardrails that apply are read in one query, apart from the policies, so a custom `PolicyResolver` never drops
 them, and are cached with the rest of the resolution: once warm, a check reads none.
 
+### Separation of duties
+
+Two roles may be declared mutually exclusive (AUTHZ-11.8), so that no grantee holds both where their reach overlaps: a
+clerk who raises payments and an approver who signs them off, say. This release adds the declarations, their management
+and the conflict report; enforcing every declared pair on every grant, and on a change to a role's parents, comes in the
+next release, so for now a grant made after a pair is declared is not refused, and the report finds it.
+
+```php
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException;
+use SineMacula\Laravel\Authorization\Services\RoleExclusionService;
+
+$exclusions = app(RoleExclusionService::class);
+
+try {
+    $exclusions->declare('clerk', 'approver', ActingContext::current()); // GrantOutcome::GRANTED, or UNCHANGED
+} catch (RoleExclusionConflictException $exception) {
+    foreach ($exception->getReport()->conflicts as $conflict) {
+        $conflict->holder;   // Reference to the principal or grantee holding both
+        $conflict->identity; // Reference to the identity one role came through, or null
+        $conflict->first;    // ExclusionRoute to the pair's first role: grantee, path, scope and expiry
+        $conflict->second;   // ExclusionRoute to the second
+    }
+}
+
+$exclusions->remove('clerk', 'approver');      // whether the pair was declared
+$exclusions->pairs();                          // every RoleExclusion declared, or those naming a role given
+$exclusions->conflicts('clerk', 'approver');   // the ConflictReport of two roles, declared as a pair or not
+$exclusions->conflictsForAll();                // the ConflictReport of every pair declared, in the order pairs() lists
+```
+
+**Declaring a pair.** A pair names its two roles by key, never by name, so it holds when a role is renamed, and it is
+stored in a canonical order, the lower key first, so declaring `(A, B)` and `(B, A)` is one pair: declaring a pair that
+is declared already changes nothing and returns `GrantOutcome::UNCHANGED`, as an idempotent grant does. A role named by
+a string is looked up as `RoleService` looks one up, under the default guard and in the tenant scope; a model must be
+saved. A role paired with itself is refused with `InvalidRoleExclusionException`, an unknown name with
+`UnknownRoleException`, and a role naming half a tenant with `InvalidTenantColumnsException`. Deleting a role takes its
+pairs with it.
+
+**Owners.** A pair is a definition, owned as the others are (D20). A definition may name the platform's roles and those
+of its own tenant and its tenant's ancestors, as a role takes its parent and its permissions, so a pair is owned by the
+owner of its role owned furthest down: the platform for two platform roles, else the tenant whose role is paired with
+one of the platform's, its own or an ancestor's. Two roles owned by tenants neither of which lies within the other, two
+siblings say, cannot be paired, and are refused with `OwnerMismatchException`. The owner is stored with the pair, and a
+removal is decided on it, so a pair stays removable after a tree move leaves its roles' owners neither within the
+other.
+
+**Administration.** `declare()` and `remove()` take an optional acting context, as the other management services do: a
+call without one is trusted system work, and a call with one is decided through `check()` on the pair's operation
+resource (`OperationResource::exclusion()`), under `authorization:role-exclusion.declare` or
+`authorization:role-exclusion.remove`, before anything is read for the report or written. It is made only from the
+tenant that owns the pair, a platform pair's from the platform (`administration.owner`); both roles must be junior to
+the actor (`administration.rank`); and a removal, which lifts the pair across its owner's whole reach, needs an actor
+that administers all of it (`administration.scope`), while a declaration only adds a constraint and is decided at its
+node, as a guardrail set is. Each call is one operation, recorded on the row it writes, and dispatches
+`Role\ExclusionDeclared` or `Role\ExclusionRemoved` once it commits, only when it changed something, with the two roles,
+their names, the owner and the actor.
+
+**The conflict report.** Two roles conflict for a holder where its routes to them overlap (N136):
+
+- **Reach.** Two grants overlap where a check sees both roles held: in the same tenant, where one reaches below a
+  tenant the other is in or below, per the bound tenant tree, or where either is platform-wide. A grant in a parent
+  that reaches below it overlaps one in a child; one limited to the parent itself does not, and grants in disjoint
+  tenants never do.
+- **Applications.** A grant for every application overlaps one for any application; two for the same application
+  overlap, and two for different applications do not.
+- **Inheritance.** A role held through its parents counts, while the role hierarchy is enabled: holding a role below
+  one of the pair is holding it, and the route names the path from the role granted up to the pair's role.
+- **Owners.** A role counts wherever a check sees it held, no more and no less. A check in a tenant sees the platform's
+  roles and those of the tenant and its ancestors, so a tenant's role is held where the grant and the owner's subtree
+  meet: a grant in the owner or below it holds it where the grant holds; a grant above the owner holds it in the
+  owner's subtree when it reaches below, and not at all when it is limited to its own tenant; a platform-wide grant
+  holds it in the owner's subtree. A chain of parent roles ends at the first role no such check sees, so a tenant moved
+  away from a parent role's owner no longer holds what that role carries. Each route's `reach` says where it is held.
+- **Identities.** A principal's own grants and its identity's are weighed together, as a check weighs them, when the
+  identity's grants reach the principal (both machines or neither): the identity directory lists each holder's
+  principals, and a principal holding one role itself and the other through its identity conflicts, the identity
+  named. Sibling principals of one identity are never weighed together. A report is `isComplete` only when the
+  directory listed every holder's principals completely.
+- **What holds nothing.** An expired grant, and a grant naming half a tenant, which grants nowhere (N130), hold no role.
+
+The report reads every holder of both roles, and of every role below either, in a fixed number of queries on the write
+connection, never one for each holder or tenant, through the access reviews' role chains; the tree is asked about every
+pair of tenants the routes weigh together in one query, a chunk of pairs at a time, and the identity directory once for
+each holder. `declare()` reads it under the locks it writes under, both roles' rows locked first, so a delegated grant
+of either waits for it, and reads each role and grant row under a shared lock, so a grant another session commits while
+the declaration runs is still found, whatever snapshot the transaction holds. It refuses with
+`RoleExclusionConflictException`, carrying the report, when it holds any conflict: nothing is written and nothing is
+removed, so an administrator resolves each conflict, revoking a grant or narrowing its reach, and declares the pair
+again. `conflictsForAll()` finds the conflicts a tenant moved, an identity linked to a principal or a grant made since
+left behind. The reads, `pairs()`, `conflicts()` and `conflictsForAll()`, are trusted and not decided: they read every
+pair and grant stored, whatever tenant owns it, so show them only to those who should see them. See
+[docs/design/separation-of-duties.md](docs/design/separation-of-duties.md).
+
 ### Session caps and machines
 
 A session cap bounds what a check may allow, whatever the subject's grants allow. It is a set of actions and action
@@ -1605,6 +1704,7 @@ writes them and a policy naming them validates:
 | `policy.create`, `policy.rename`, `policy.update`, `policy.delete`                 | A policy's lifecycle, an inline one included, and its document       |
 | `boundary.set`, `boundary.remove`                                                  | A permission boundary set, replaced or removed                       |
 | `guardrail.manage`                                                                 | A guardrail set or removed, from above the scope it caps             |
+| `role-exclusion.declare`, `role-exclusion.remove`                                  | A pair of mutually exclusive roles declared or removed               |
 | `resource-policy.attach`, `resource-policy.detach`                                 | A policy attached to or detached from a record or a resource type    |
 | `role.read`, `permission.read`, `policy.read`                                      | Reading and listing through the services; not decided yet            |
 | `permission.grantable`, `policy.grantable`                                         | Delegating a permission, or one version of a policy, not held        |
@@ -1679,9 +1779,9 @@ actor administers; a parent's node-only authority reaches no child's row, and a 
 that may widen authority reaches no further than the actor administers, so one whose reach holds a tenant where the
 actor's authority for the action is denied or limited is refused (see *Administered scope* below). A screen that builds
 the same resource through the same named constructor (`OperationResource::grant()`, `revoke()`, `unchanged()`,
-`definition()` or `rewrite()`) and checks it with `$actor->check($resource)` gets the decision the service makes.
-Nothing is ever attached to one operation, so a check on it reads only the resource policies attached to the type
-`authorization:operation`. The resource offers what the change names to your policies, under `resource`:
+`definition()`, `rewrite()` or `exclusion()`) and checks it with `$actor->check($resource)` gets the decision the
+service makes. Nothing is ever attached to one operation, so a check on it reads only the resource policies attached
+to the type `authorization:operation`. The resource offers what the change names to your policies, under `resource`:
 
 | Key                                                                                          | Type   | What it holds                                                         |
 |----------------------------------------------------------------------------------------------|--------|-----------------------------------------------------------------------|
@@ -1697,6 +1797,7 @@ Nothing is ever attached to one operation, so a check on it reads only the resou
 | `resource.expires_at`                                                                        | time   | When a grant expires; missing for one that never does                 |
 | `resource.digest`                                                                            | string | The digest of the document a `policy.grantable` descriptor names      |
 | `resource.change.name`, `.description`, `.rank`, `.parent`, `.guard`, `.category`, `.digest` | mixed  | A definition's proposed change, a document by its stored digest       |
+| `resource.change.excluded`, `resource.change.excluded_role`                                  | string | The other role a pair of exclusive roles names, by key and name       |
 | `resource.change.owner_type`, `resource.change.owner_id`                                     | string | The grantee an inline policy is created for                           |
 | `resource.impersonated`, `resource.impersonator_type`, `resource.impersonator_id`            | mixed  | Whether the actor is impersonated, and by whom                        |
 
@@ -2795,9 +2896,12 @@ grant hook alone, so no accessor returns them and `auditProperties()` never hold
 | `Resource\PolicyDetached`          | `resource.policy.detached`           | the record, or null for a whole type | none                             |
 | `Guardrail\GuardrailSet`           | `guardrail.set`                      | the tenant, or null for the platform | none                             |
 | `Guardrail\GuardrailRemoved`       | `guardrail.removed`                  | the tenant, or null for the platform | none                             |
+| `Role\ExclusionDeclared`           | `role.exclusion.declared`            | the pair's first role                | none                             |
+| `Role\ExclusionRemoved`            | `role.exclusion.removed`             | the pair's first role                | none                             |
 
 A grant, boundary, resource policy or guardrail event holds in its scope's tenant and application; a role, permission
-or policy event holds in the tenant that owns the record, and in no one application.
+or policy event holds in the tenant that owns the record, and a role exclusion event in the tenant that owns the pair,
+each in no one application.
 
 `DecisionEvaluated` and `AuthorizationFailed` implement the marker too, but are dispatched when the decision is made,
 not after a commit: a denial is a fact even if the surrounding transaction rolls back. `DecisionEvaluated` reports the
@@ -5552,6 +5656,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Explanations](docs/design/explanations.md)                                                 | Explain mode, the `Explanation` and `authorization:why`       |
 | [Access reviews](docs/design/access-reviews.md)                                             | Grant routes, queries, rows, admission, paging and exports    |
 | [Break-glass](docs/design/break-glass.md)                                                   | Emergency access: settings, records, resolution and the plan  |
+| [Separation of duties](docs/design/separation-of-duties.md)                                 | Mutually exclusive roles, owners and the conflict report      |
 
 ## Requirements
 

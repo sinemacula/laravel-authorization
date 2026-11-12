@@ -97,7 +97,7 @@ return [
     | Each name must be a plain identifier (a letter or an underscore, then
     | letters, digits and underscores) with no schema before it, short enough
     | that every index and key name the migrations build from it fits in 63
-    | characters (33 to 51, depending on the table), and the thirteen names
+    | characters (33 to 51, depending on the table), and the fourteen names
     | must be distinct. A name left out takes its default, the key's own but
     | for `break_glass`, whose default is `break_glass_activations`; null is
     | refused.
@@ -131,6 +131,7 @@ return [
         'grant_usage'              => env('AUTHORIZATION_TABLE_GRANT_USAGE', 'grant_usage'),
         'usage_coverage'           => env('AUTHORIZATION_TABLE_USAGE_COVERAGE', 'usage_coverage'),
         'break_glass'              => env('AUTHORIZATION_TABLE_BREAK_GLASS', 'break_glass_activations'),
+        'role_exclusions'          => env('AUTHORIZATION_TABLE_ROLE_EXCLUSIONS', 'role_exclusions'),
     ],
 
     /*

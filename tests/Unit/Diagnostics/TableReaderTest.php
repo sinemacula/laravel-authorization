@@ -88,7 +88,7 @@ final class TableReaderTest extends TestCase
             $read = (new TableReader($root))->read();
 
             self::assertNull($read['prefix']);
-            self::assertCount(13, $read['names']);
+            self::assertCount(14, $read['names']);
             self::assertSame([null], \array_values(\array_unique(\array_column($read['names'], 'name'))));
             self::assertSame([false], \array_values(\array_unique(\array_column($read['names'], 'explicit'))));
         }

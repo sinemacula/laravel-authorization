@@ -59,6 +59,8 @@ final class PackagePermissionsTest extends TestCase
         'authorization:subject.preview',
         'authorization:review.read',
         'authorization:review.export',
+        'authorization:role-exclusion.declare',
+        'authorization:role-exclusion.remove',
     ];
 
     /**
@@ -130,11 +132,15 @@ final class PackagePermissionsTest extends TestCase
             PackagePermissions::SUBJECT_PREVIEW,
             PackagePermissions::REVIEW_READ,
             PackagePermissions::REVIEW_EXPORT,
+            PackagePermissions::ROLE_EXCLUSION_DECLARE,
+            PackagePermissions::ROLE_EXCLUSION_REMOVE,
         ]);
         self::assertSame('Preview what a subject may do, without acting as it.', (new PackagePermissions)->permissions()[32]->description);
         self::assertSame('Set and remove guardrails from above the scope they cap.', (new PackagePermissions)->permissions()[21]->description);
         self::assertSame('Run an access review of who holds what.', (new PackagePermissions)->permissions()[33]->description);
         self::assertSame('Export an access review.', (new PackagePermissions)->permissions()[34]->description);
+        self::assertSame('Declare two roles mutually exclusive.', (new PackagePermissions)->permissions()[35]->description);
+        self::assertSame('Remove a declared pair of mutually exclusive roles.', (new PackagePermissions)->permissions()[36]->description);
     }
 
     /**

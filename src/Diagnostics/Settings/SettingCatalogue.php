@@ -78,6 +78,7 @@ final class SettingCatalogue
         'authorization.tables.grant_usage'                           => self::TABLE,
         'authorization.tables.usage_coverage'                        => self::TABLE,
         'authorization.tables.break_glass'                           => self::TABLE,
+        'authorization.tables.role_exclusions'                       => self::TABLE,
         'authorization.defaults.guard'                               => self::NAME,
         'authorization.permission_enums'                             => self::CLASS_LIST,
         'authorization.permission_providers'                         => self::CLASS_LIST,

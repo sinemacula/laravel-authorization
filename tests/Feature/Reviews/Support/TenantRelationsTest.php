@@ -177,6 +177,99 @@ final class TenantRelationsTest extends TestCase
     }
 
     /**
+     * Pairs of a tenant and an ancestor are settled in one query, the subtrees
+     * of every ancestor read together, and then answered without asking the
+     * tree; a tenant is within itself without a query, and a pair settled
+     * already is not asked again.
+     *
+     * @return void
+     */
+    public function testPairsOfATenantAndAnAncestorAreSettledInOneQuery(): void
+    {
+        $counting = $this->countingTree();
+        $meets    = new TenantRelations;
+        $pairs    = [
+            [self::tenant('team1'), self::tenant('org1')],
+            [self::tenant('acct2'), self::tenant('acct1')],
+            [self::tenant('team1'), self::tenant('acct1')],
+            [self::tenant('acct2'), self::tenant('org1')],
+            [self::tenant('org2'), self::tenant('org1')],
+            [new Reference('other', 'team1'), self::tenant('org1')],
+        ];
+
+        $same = [self::tenant('acct1'), self::tenant('acct1')];
+
+        self::assertSame(0, self::queriesOf(static fn () => $meets->settleWithin([$same])));
+        self::assertSame(1, self::queriesOf(static function () use ($meets, $pairs, $same): void {
+            $meets->settleWithin($pairs);
+            $meets->settleWithin([...$pairs, $same]);
+        }));
+        self::assertSame([true, false, true, true, false, false], \array_map(static fn (array $pair): bool => $meets->isWithin($pair[0], $pair[1]), $pairs));
+        self::assertTrue($meets->isWithin(self::tenant('acct1'), self::tenant('acct1')));
+        self::assertSame(0, $counting->withinAsked);
+        self::assertSame(0, $counting->ancestorsRead);
+    }
+
+    /**
+     * Pairs are settled a chunk at a time, so a pair in a later chunk is found
+     * as one in the first is.
+     *
+     * @return void
+     */
+    public function testPairsAreSettledAChunkAtATime(): void
+    {
+        $this->tree();
+
+        $pairs = [];
+
+        for ($index = 0; $index < TenantRelations::PAIRS; $index++) {
+            $pairs[] = [self::tenant('stranger-' . $index), self::tenant('org1')];
+        }
+
+        $pairs[] = [self::tenant('team1'), self::tenant('acct1')];
+
+        $queries = 0;
+
+        DB::listen(static function () use (&$queries): void {
+            $queries++;
+        });
+
+        $meets = new TenantRelations;
+
+        $meets->settleWithin($pairs);
+
+        self::assertSame(2, $queries);
+        self::assertTrue($meets->isWithin(self::tenant('team1'), self::tenant('acct1')));
+        self::assertFalse($meets->isWithin(self::tenant('stranger-0'), self::tenant('org1')));
+        self::assertSame(2, $queries);
+    }
+
+    /**
+     * Over a flat tree, pairs are settled without a query: a tenant is within
+     * itself alone.
+     *
+     * @return void
+     */
+    public function testAFlatTreeSettlesPairsWithoutAQuery(): void
+    {
+        $this->app?->instance(TenantTree::class, new FlatTenantTree);
+
+        $queries = 0;
+
+        DB::listen(static function () use (&$queries): void {
+            $queries++;
+        });
+
+        $meets = new TenantRelations;
+
+        $meets->settleWithin([[self::tenant('a'), self::tenant('b')], [self::tenant('a'), self::tenant('a')]]);
+
+        self::assertFalse($meets->isWithin(self::tenant('a'), self::tenant('b')));
+        self::assertTrue($meets->isWithin(self::tenant('a'), self::tenant('a')));
+        self::assertSame(0, $queries);
+    }
+
+    /**
      * A grant query is limited to the grants that meet the attachment: the
      * platform's, the attachment's tenant's, one reaching below a tenant of the
      * attachment's chain, and, for an attachment reaching below, one in its
@@ -315,6 +408,25 @@ final class TenantRelationsTest extends TestCase
         $meets->settle([$grant], [$attachment]);
 
         self::assertTrue($meets->canHoldTogether($grant, $attachment));
+    }
+
+    /**
+     * Return the number of queries the call ran.
+     *
+     * @param  \Closure(): mixed  $call
+     * @return int
+     */
+    private static function queriesOf(\Closure $call): int
+    {
+        $queries = new \ArrayObject;
+
+        DB::listen(static function (QueryExecuted $query) use ($queries): void {
+            $queries->append($query->sql);
+        });
+
+        $call();
+
+        return \count($queries);
     }
 
     /**

@@ -11,7 +11,7 @@ use Tests\Fixtures\LockRecordingGrammar;
 
 /**
  * Records the queries that take a row lock on a connection, whatever its
- * driver.
+ * driver, and the tables a call locks rows of.
  *
  * On MySQL and PostgreSQL a locking query carries `for update`, so a query
  * listener sees it. SQLite has no row locks and compiles none, so there the
@@ -59,6 +59,44 @@ trait RecordsRowLocks
         $this->beforeApplicationDestroyed(static fn () => self::restoreGrammar($connection));
 
         return $locks;
+    }
+
+    /**
+     * Return the tables the call locked rows of, exclusively or shared, each
+     * once, in order: as the grammar records them on SQLite, else as the locks
+     * in the SQL.
+     *
+     * @param  \Closure(): mixed  $call
+     * @return list<string>
+     */
+    protected function lockedTables(\Closure $call): array
+    {
+        $locks = $this->recordRowLocks();
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $call();
+
+        $log = DB::getQueryLog();
+
+        DB::disableQueryLog();
+
+        $tables = \array_map(static fn (array $lock): string => $lock[0], $locks->getArrayCopy());
+
+        foreach ($log as $entry) {
+            if (\preg_match('/ for share| lock in share mode/i', $entry['query']) !== 1) {
+                continue;
+            }
+
+            $tables[] = self::lockedTable($entry['query']);
+        }
+
+        $tables = \array_values(\array_unique($tables));
+
+        \sort($tables);
+
+        return $tables;
     }
 
     /**

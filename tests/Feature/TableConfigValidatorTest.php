@@ -50,6 +50,7 @@ final class TableConfigValidatorTest extends TestCase
         '2026_11_08_000001_add_access_review_indexes',
         '2026_11_09_000001_create_grant_usage_tables',
         '2026_11_12_000001_create_break_glass_activations_table',
+        '2026_11_12_000002_create_role_exclusions_table',
     ];
 
     /**
@@ -67,7 +68,7 @@ final class TableConfigValidatorTest extends TestCase
         self::assertSame(63, TableConfigValidator::IDENTIFIER_LENGTH);
         self::assertSame(
             ['roles', 'permissions', 'policies', 'role_permissions', 'authorizable_roles', 'authorizable_permissions', 'authorizable_policies', 'resource_policies',
-                'authorizable_boundaries', 'guardrails', 'grant_usage', 'usage_coverage', 'break_glass'],
+                'authorizable_boundaries', 'guardrails', 'grant_usage', 'usage_coverage', 'break_glass', 'role_exclusions'],
             \array_keys(TableConfigValidator::LENGTHS),
         );
     }
@@ -196,6 +197,8 @@ final class TableConfigValidatorTest extends TestCase
             self::assertContains($names['authorizable_permissions'] . '_permission_id_foreign', RecordingBlueprint::$names);
             self::assertContains($names['break_glass'] . '_role_id_foreign', RecordingBlueprint::$names);
             self::assertSame(TableConfigValidator::IDENTIFIER_LENGTH, \strlen($names['break_glass'] . '_role_id_foreign'));
+            self::assertContains($names['role_exclusions'] . '_excluded_foreign', RecordingBlueprint::$names);
+            self::assertSame(TableConfigValidator::IDENTIFIER_LENGTH, \strlen($names['role_exclusions'] . '_excluded_foreign'));
         } finally {
             foreach (\array_reverse(self::MIGRATIONS) as $file) {
                 self::runMigration($file, 'down');
@@ -263,7 +266,7 @@ final class TableConfigValidatorTest extends TestCase
     }
 
     /**
-     * The block may set the prefix beside the thirteen tables, and a prefix
+     * The block may set the prefix beside the fourteen tables, and a prefix
      * that is empty, or a lower-case letter, then lower-case letters, digits
      * and underscores, of at most 16 characters, is accepted.
      *

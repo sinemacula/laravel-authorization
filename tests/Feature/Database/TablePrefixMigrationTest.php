@@ -52,6 +52,7 @@ final class TablePrefixMigrationTest extends TestCase
         '2026_11_09_000001_create_grant_usage_tables',
         '2026_11_11_000001_add_half_tenant_indexes',
         '2026_11_12_000001_create_break_glass_activations_table',
+        '2026_11_12_000002_create_role_exclusions_table',
     ];
 
     /**

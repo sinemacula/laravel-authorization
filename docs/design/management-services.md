@@ -22,6 +22,8 @@ permission catalogue through the permission model in its own transaction on the 
   a tenant (AUTHZ-7.4).
 - `GuardrailService`: set and remove the guardrails of a tenant or of the platform (AUTHZ-7.6), for an acting subject
   allowed to.
+- `RoleExclusionService`: declare and remove pairs of mutually exclusive roles, and report who holds both roles of a
+  pair (AUTHZ-11.8; see [Separation of duties](separation-of-duties.md)).
 
 Each is a final class bound as a singleton (it holds no state), resolved from the container or injected. Every public
 method takes the acting context making the call as an optional `$actor`, an `Administration\ActingContext`: null for
