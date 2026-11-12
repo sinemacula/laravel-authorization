@@ -70,9 +70,10 @@ trait ListsPermissions
      * On a preview from `previewFor()`, the subject is the preview's target,
      * named by null alone: naming any subject, or a scope of another tenant or
      * application than the preview's, throws `InvalidPreviewException`. The
-     * preview is admitted first, and every action it evaluates dispatches its
-     * `DecisionEvaluated`, naming both parties, while the last decision is left
-     * as the admission recorded it (N86).
+     * preview is admitted first, and each action it evaluates is reported with
+     * `DecisionEvaluated` as `authorization.events.decisions` selects, every
+     * one while `previews` is on, naming both parties, while the last decision
+     * is left as the admission recorded it (N86).
      *
      * @param  object|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
@@ -113,8 +114,9 @@ trait ListsPermissions
      * whose check would be `insufficient_authentication` is not listed, it
      * refuses and throws what `permissionsFor()` would, and it records no last
      * decision and dispatches no `DecisionEvaluated` and no
-     * `AuthorizationFailed`, a preview's listing dispatching each action's
-     * `DecisionEvaluated` alone (N86).
+     * `AuthorizationFailed`, a preview's listing dispatching
+     * `DecisionEvaluated` alone, as `authorization.events.decisions` selects
+     * (N86).
      *
      * @param  object|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope

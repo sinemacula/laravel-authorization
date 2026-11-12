@@ -32,6 +32,7 @@ use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
@@ -77,6 +78,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
@@ -117,7 +119,7 @@ use Tests\TestCase;
 #[CoversTrait(HasPolicies::class)]
 final class AuthorizationManagerTest extends TestCase
 {
-    use ReadsDispatchedEvents, RefusesThePackage;
+    use ReadsDispatchedEvents, RefusesThePackage, ReportsEveryDecision;
 
     /**
      * A role granted in an organisation allows in an account below it and not
@@ -908,6 +910,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testCheckNamesAModelAPairAndAClassStringByTheirIdentifiers(): void
     {
+        $this->reportEveryDecision();
+
         $user  = StubIdentity::create(['id' => '8a9b0c1d-2e3f-4a4b-9c5d-6e7f8a9b0c14']);
         $post  = StubIdentity::create(['id' => '9b0c1d2e-3f4a-4b5c-8d6e-7f8a9b0c1d15']);
         $other = StubIdentity::create(['id' => '0c1d2e3f-4a5b-4c6d-9e7f-8a9b0c1d2e16']);
@@ -1004,6 +1008,89 @@ final class AuthorizationManagerTest extends TestCase
 
         Event::assertDispatched(DecisionEvaluated::class, $evaluated);
         Event::assertDispatched(AuthorizationFailed::class, $failed);
+    }
+
+    /**
+     * `AuthorizationFailed` reports every refusal whatever the decision events'
+     * settings, for the reason it has with every setting on and saying whether
+     * its action is sensitive, from `authorize()` and for a refusal made
+     * elsewhere alike, while `DecisionEvaluated` reports none of them with
+     * every setting off.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    public function testEveryRefusalIsReportedWhateverTheSettings(): void
+    {
+        $user = StubIdentity::create(['id' => '6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f']);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.events.decisions', [
+            'denials'                     => false,
+            'insufficient_authentication' => false,
+            'previews'                    => false,
+            'allows'                      => 'none',
+            'sensitive_actions'           => ['posts:delete'],
+        ]);
+
+        Event::fake([DecisionEvaluated::class, AuthorizationFailed::class]);
+
+        try {
+            Authorization::for($user)->authorize('posts:delete', ['posts', 7]);
+            self::fail('The check was allowed.');
+        } catch (AuthorizationException) {
+            // Expected.
+        }
+
+        Authorization::for($user)->reportRefusal('posts:edit', null, Decision::deny(DecisionReason::ADMINISTRATION_CONFLICT, DecisionStage::ADMINISTRATION));
+
+        $failed = self::dispatchedEvents(AuthorizationFailed::class);
+
+        Event::assertNotDispatched(DecisionEvaluated::class);
+        self::assertSame(['posts:delete', 'posts:edit'], \array_map(static fn (AuthorizationFailed $event): string => $event->action, $failed));
+        self::assertSame(
+            [DecisionReport::DENIAL, DecisionReport::DENIAL],
+            \array_map(static fn (AuthorizationFailed $event): DecisionReport => $event->reportedBecause(), $failed),
+        );
+        self::assertSame([true, false], \array_map(static fn (AuthorizationFailed $event): bool => $event->isSensitiveAction(), $failed));
+        self::assertSame('posts:7', $failed[0]->resource);
+    }
+
+    /**
+     * An unmet authentication requirement is reported under the shipped
+     * settings with `DecisionEvaluated`, as insufficient authentication, and
+     * with `AuthorizationFailed` for the same reason when `authorize()` refuses
+     * it, the two told apart by their class.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testInsufficientAuthenticationIsReportedByBothEvents(): void
+    {
+        Event::fake([DecisionEvaluated::class, AuthorizationFailed::class]);
+
+        $user    = StubIdentity::create(['id' => '7d8e9f0a-1b2c-4d3e-9f4a-5b6c7d8e9f0a']);
+        $checker = new StubRequirementChecker(RequirementResult::unmet(['multifactor']));
+        $manager = $this->inSession($user, 'session-1', $checker)->withPolicies([self::requiringPolicy()]);
+
+        try {
+            $manager->authorize('reports:export');
+            self::fail('The check was allowed.');
+        } catch (InsufficientAuthenticationException) {
+            // Expected.
+        }
+
+        $evaluated = self::dispatchedEvents(DecisionEvaluated::class);
+        $failed    = self::dispatchedEvents(AuthorizationFailed::class);
+
+        self::assertCount(1, $evaluated);
+        self::assertCount(1, $failed);
+        self::assertSame(DecisionReport::INSUFFICIENT_AUTHENTICATION, $evaluated[0]->reportedBecause());
+        self::assertSame(DecisionReport::INSUFFICIENT_AUTHENTICATION, $failed[0]->reportedBecause());
+        self::assertFalse($failed[0]->isSensitiveAction());
     }
 
     /**
@@ -3499,6 +3586,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testCannotAnyAndAllTakeEveryResourceForm(): void
     {
+        $this->reportEveryDecision();
+
         $user = StubIdentity::create(['id' => 'user-1']);
         $post = StubIdentity::create(['id' => 'post-1']);
 

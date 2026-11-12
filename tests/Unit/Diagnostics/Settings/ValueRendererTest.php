@@ -42,6 +42,8 @@ final class ValueRendererTest extends TestCase
         yield 'a name' => [SettingCatalogue::NAME, 'redis-cache', 'redis-cache'];
         yield 'no name' => [SettingCatalogue::NAME, null, null];
         yield 'a map of names' => [SettingCatalogue::NAME_MAP, ['admin' => 'admin.access'], ['admin' => 'admin.access']];
+        yield 'a list of names' => [SettingCatalogue::NAME_LIST, ['posts:delete', 'roles:assign'], ['posts:delete', 'roles:assign']];
+        yield 'no names' => [SettingCatalogue::NAME_LIST, [], []];
         yield 'a list where a map of classes is expected' => [SettingCatalogue::CLASS_MAP, ['App\Post'], ['App\Post']];
         yield 'a list where a map of names is expected' => [SettingCatalogue::NAME_MAP, ['admin.access'], ['admin.access']];
     }
@@ -71,6 +73,8 @@ final class ValueRendererTest extends TestCase
         yield 'a password where a class is expected' => [SettingCatalogue::CLASS_NAME, 'p@ss word'];
         yield 'an array where a class is expected' => [SettingCatalogue::CLASS_NAME, ['x']];
         yield 'a list holding a non-class' => [SettingCatalogue::CLASS_LIST, ['App\A', 'p@ss']];
+        yield 'a list holding a non-name' => [SettingCatalogue::NAME_LIST, ['posts:delete', 'p@ss word']];
+        yield 'a name where a list of names is expected' => [SettingCatalogue::NAME_LIST, 'posts:delete'];
         yield 'a map keyed by a non-name' => [SettingCatalogue::CLASS_MAP, ['p@ss word' => 'App\Post']];
         yield 'a table with a schema' => [SettingCatalogue::TABLE, 'public.roles'];
         yield 'an empty table' => [SettingCatalogue::TABLE, ''];

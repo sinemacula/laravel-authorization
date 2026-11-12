@@ -5,12 +5,16 @@ declare(strict_types = 1);
 namespace Tests\Feature\Diagnostics;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Config\EventConfigValidator;
+use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Diagnostics\BootCheck;
 use SineMacula\Laravel\Authorization\Diagnostics\BootChecks;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\BootCheckOutcome;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use Tests\Feature\Stubs\EmptyActionCatalogue;
 use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\ReservedContextSource;
 use Tests\Fixtures\Diagnostics\ThrowingContextSource;
@@ -41,11 +45,12 @@ final class BootChecksTest extends TestCase
             'authorization.attributes.subjects',
             'authorization.session.scopes',
             'authorization.cache.store',
+            'authorization.events.decisions.sensitive_actions',
         ];
 
         self::assertSame($expected, BootChecks::paths());
         self::assertSame($expected, \array_map(static fn (BootCheck $check): string => $check->path, BootChecks::notRun()));
-        self::assertSame(\array_fill(0, 5, BootCheckOutcome::NOT_RUN), self::outcomes(BootChecks::notRun()));
+        self::assertSame(\array_fill(0, 6, BootCheckOutcome::NOT_RUN), self::outcomes(BootChecks::notRun()));
     }
 
     /**
@@ -59,7 +64,7 @@ final class BootChecksTest extends TestCase
         [$checks, $issues] = (new BootChecks($this->container()))->run($this->authorizationConfig());
 
         self::assertSame([], $issues);
-        self::assertSame([BootCheckOutcome::PASSED, ...\array_fill(0, 4, BootCheckOutcome::NOT_RUN)], self::outcomes($checks));
+        self::assertSame([BootCheckOutcome::PASSED, ...\array_fill(0, 5, BootCheckOutcome::NOT_RUN)], self::outcomes($checks));
     }
 
     /**
@@ -75,13 +80,15 @@ final class BootChecksTest extends TestCase
         $config['session']['scopes']  = ['posts.read'];
         $config['cache']['store']     = 'array';
 
+        $config['events']['decisions']['sensitive_actions'] = ['posts:delete'];
+
         [$checks, $issues] = (new BootChecks($this->container()))->run($config);
 
         self::assertSame([], $issues);
         $ran     = BootCheckOutcome::PASSED;
         $skipped = BootCheckOutcome::NOT_RUN;
 
-        self::assertSame([$ran, $skipped, $skipped, $ran, $ran], self::outcomes($checks));
+        self::assertSame([$ran, $skipped, $skipped, $ran, $ran, $ran], self::outcomes($checks));
     }
 
     /**
@@ -156,6 +163,46 @@ final class BootChecksTest extends TestCase
         [$checks] = (new BootChecks($this->container()))->run($config);
 
         self::assertSame(BootCheckOutcome::NOT_RUN, $checks[4]->outcome);
+    }
+
+    /**
+     * The sensitive actions are checked against the action catalogue when the
+     * list names one, a refusal recorded at the action it names; a list left
+     * out, or a block on the way to it that is not an array, is read as none.
+     *
+     * @return void
+     */
+    public function testTheSensitiveActionsAreCheckedWhenNamed(): void
+    {
+        $this->container()->instance(ActionCatalogue::class, new EmptyActionCatalogue);
+
+        $config = $this->authorizationConfig();
+
+        $config['events']['decisions']['sensitive_actions'] = [PackagePermissions::GUARDRAIL_MANAGE, 'posts:delete'];
+
+        [$checks, $issues] = (new BootChecks($this->container()))->run($config);
+
+        self::assertSame(EventConfigValidator::SENSITIVE_ACTIONS, $checks[5]->path);
+        self::assertSame([BootCheckOutcome::FAILED, InvalidAuthorizationConfigException::class], [$checks[5]->outcome, $checks[5]->exception]);
+        self::assertSame([[EventConfigValidator::SENSITIVE_ACTIONS . '.1', IssueCode::INVALID_VALUE]], self::pathsAndCodes($issues));
+
+        $config['events']['decisions'] = 'all';
+
+        [$checks, $issues] = (new BootChecks($this->container()))->run($config);
+
+        self::assertSame([[BootCheckOutcome::NOT_RUN], []], [[$checks[5]->outcome], $issues]);
+
+        $config['events'] = 'all';
+
+        [$checks] = (new BootChecks($this->container()))->run($config);
+
+        self::assertSame(BootCheckOutcome::NOT_RUN, $checks[5]->outcome);
+
+        unset($config['events']);
+
+        [$checks] = (new BootChecks($this->container()))->run($config);
+
+        self::assertSame(BootCheckOutcome::NOT_RUN, $checks[5]->outcome);
     }
 
     /**

@@ -39,6 +39,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\RecordsRowLocks;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Concerns\WidensGrants;
 use Tests\Feature\Stubs\StubSecondIdentity;
@@ -66,7 +67,21 @@ use Tests\TestCase;
 #[CoversClass(WideningPhase::class)]
 final class WideningPhaseTest extends TestCase
 {
-    use ActsAsAdministrator, RacesDelegatedCalls, RecordsRowLocks, UsesAnAuthorizationConnection, WidensGrants;
+    use ActsAsAdministrator, RacesDelegatedCalls, RecordsRowLocks, ReportsEveryDecision, UsesAnAuthorizationConnection, WidensGrants;
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * With nothing bound, or the composite holding no hook, nothing is proposed

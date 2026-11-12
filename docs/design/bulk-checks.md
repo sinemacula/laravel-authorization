@@ -69,10 +69,12 @@ the boundary within which a batch sees a write.
    action of `permissionsFor()` shares its resource: its answer, values or failure, bulk or from a provider that reads
    one record at a time, is read once and kept for every check on it.
 
-8. **One event per check, in order.** Each check is recorded as the last decision and dispatches its own
-   `DecisionEvaluated`, with the payload `check()` gives it, as soon as it is decided and before the next is decided.
-   There is no aggregate event. The last decision is the last check completed: an empty batch leaves it untouched, and
-   a check that throws leaves the one before it. The tenant scope is restored in `finally` on every exception.
+8. **One event per check, in order.** Each check is recorded as the last decision and, when `events.decisions` reports
+   it, dispatches its own `DecisionEvaluated`, with the payload `check()` gives it, as soon as it is decided and before
+   the next is decided. The settings are read once for the batch, so which checks are reported is a few comparisons for
+   each (see [Events](events.md), invariant 14). There is no aggregate event. The last decision is the last check
+   completed: an empty batch leaves it untouched, and a check that throws leaves the one before it. The tenant scope is
+   restored in `finally` on every exception.
 
 9. **The consistency boundary.** A batch sees a write as a sequence of `check()` calls in the same request would. An
    authorization write made while the batch runs (a grant, revocation, policy, attachment, boundary or guardrail

@@ -33,6 +33,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\CatchesRefusals;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -61,7 +62,7 @@ use Tests\TestCase;
 #[CoversClass(ResourcePolicyService::class)]
 final class DelegatedAdministrationTest extends TestCase
 {
-    use ActsAsAdministrator, ActsAsTenant, CatchesRefusals;
+    use ActsAsAdministrator, ActsAsTenant, CatchesRefusals, ReportsEveryDecision;
 
     /** @var list<string> The tables a management service writes. */
     private const array TABLES = [
@@ -79,6 +80,8 @@ final class DelegatedAdministrationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->reportEveryDecision();
 
         Event::fake([static fn (string $name): bool => \is_subclass_of($name, AuthorizationEvent::class)]);
 

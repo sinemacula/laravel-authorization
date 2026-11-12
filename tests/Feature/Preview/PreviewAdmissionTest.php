@@ -27,6 +27,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubTenant;
@@ -53,7 +54,21 @@ use Tests\TestCase;
 #[CoversClass(PreviewAdmission::class)]
 final class PreviewAdmissionTest extends TestCase
 {
-    use CatchesRefusals, PreviewsSubjects, ReadsDispatchedEvents;
+    use CatchesRefusals, PreviewsSubjects, ReadsDispatchedEvents, ReportsEveryDecision;
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * A preview in a tenant needs the right there, decided in that tenant: a

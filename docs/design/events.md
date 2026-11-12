@@ -7,9 +7,9 @@ carry references, names and ids, never a value the decision read, and are dispat
 
 ## Purpose
 
-- **Decision events.** `DecisionEvaluated` for every decision `check()` makes (query scoping and `permissionsFor()`
-  dispatch none), `AuthorizationFailed` when `authorize()` refuses. Both extend `DecisionEvent`, the abstract, readonly
-  shape they share, which is never dispatched itself.
+- **Decision events.** `DecisionEvaluated` for each decision `check()` makes that `events.decisions` selects (query
+  scoping and `permissionsFor()` dispatch none), `AuthorizationFailed` whenever `authorize()` refuses. Both extend
+  `DecisionEvent`, the abstract, readonly shape they share, which is never dispatched itself.
 - **Record events.** `Role\Created`, `Role\Updated`, `Role\Deleted`, and the same three under `Permission\` and
   `Policy\`.
 - **Role permission events.** `Role\PermissionGranted` (with the grant's expiry), `Role\PermissionRevoked` and
@@ -149,6 +149,23 @@ carry references, names and ids, never a value the decision read, and are dispat
     guardrail base classes for theirs, each reading the call through `Events\Concerns\DescribesOperation`; each event
     class names its own identifier.
 
+14. **Selective decision events (N137).** Which decisions `DecisionEvaluated` reports is set by
+    `authorization.events.decisions`: `denials`, `insufficient_authentication` and `previews` (each on by default),
+    `allows` (`sensitive` by default, `all` or `none`) and `sensitive_actions` (exact catalogue action names, none by
+    default). Each setting reports its kind of decision on its own, and a decision is reported when any setting that is
+    on reports it. The event names why with `reportedBecause()`, an `Evaluation\Enums\DecisionReport`: the first
+    reason, in the order break-glass, preview, insufficient authentication, denial, sensitive action, all allows, that
+    applies to the decision and is reported; `isSensitiveAction()` says whether its action is listed, whatever the
+    reason. Both are set as the event is dispatched (`Evaluation\DecisionReporting`) and held privately, so the payload
+    and its properties are unchanged; an event made by hand names the most specific reason its decision has, as though
+    every setting were on. The settings are read once for each batch that dispatches (none for a batch that dispatches
+    nothing or has no dispatcher), so each decision costs a few comparisons, and filtering changes neither the decision
+    nor the last decision: a bulk check reports one event for each reported decision, in the order of its checks (N70),
+    and a preview's listing reports each action while `previews` is on, storing none (N86). `AuthorizationFailed` is not
+    filtered: every refusal `authorize()` throws dispatches it, for the reason it has with every setting on, so a
+    listener of both tells an observation from a failure by the event's class. A break-glass allow is to be reported
+    whatever the settings (BL-72b); no decision uses a break-glass grant yet.
+
 ## Success Path
 
 ```php
@@ -178,7 +195,8 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 - **Decision events are dispatched when the decision is made.** `DecisionEvaluated` and `AuthorizationFailed` are
   dispatched straight away, not after a commit: a denial is a fact even if the surrounding transaction rolls back. A
   subject that is no saved record, such as an unsaved model or an object that is not a model, is named by no reference.
-  Every decision is dispatched; which decisions fire is to be configurable (BL-72).
+  Which decisions `DecisionEvaluated` reports is set by `events.decisions` (invariant 14); by default an ordinary allow
+  is not reported, so a listener that needs every allow sets `allows` to `all`.
 - **The resolution cache is invalidated around the commit.** `OperationScope::dispatch()` bumps the versions the
   events affect inside the transaction, so a store that fails rolls the write back, and again once it commits, before
   any listener runs, so an entry a concurrent check stored from the rows before the commit never holds (see
@@ -209,6 +227,8 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 - `Events\Concerns\DescribesGrantChange`, `Events\Concerns\DescribesRecordChange`, `Events\Concerns\DescribesOperation`
   and `Support\AuditProperties`: the audit accessors, the call accessors and the flat details.
 - `Events\DecisionEvent`: the decision payload; `Evaluation\DecisionProvenance`: who a decision was about and where;
+  `Evaluation\DecisionReporting`, `Evaluation\Enums\DecisionReport` and `Config\EventConfigValidator`: which
+  decisions are reported, and why;
   `Evaluation\LastDecisionStore`: the last decision and its provenance; `Evaluation\CheckBatch`: the dispatch and
   store switches.
 - `Support\Reference`, `Support\Operation`, `Support\GrantScope`, `Support\DocumentDigest`.
@@ -231,7 +251,9 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 - `AuditPropertiesTest`, `DescribesGrantChangeTest`, `DescribesRecordChangeTest`, `DescribesOperationTest` and each
   event class's own test: the audit and call accessors' values, and that none reports the call's client.
 - `DecisionEventTest`, `DecisionEvaluatedTest`, `AuthorizationFailedTest`: the decision payload, and no value a decision
-  read anywhere in the serialised event; `DecisionProvenanceTest`, `LastDecisionStoreTest` and the manager's
+  read anywhere in the serialised event, and `reportedBecause()` and `isSensitiveAction()`; `DecisionReportingTest`,
+  `DecisionReportTest` and `EventConfigValidatorTest`: which decisions each setting reports, the order of the reasons
+  and the settings' checks; `DecisionProvenanceTest`, `LastDecisionStoreTest` and the manager's
   `AuthorizationManagerTest`: the provenance of the last decision; `CheckBatchTest`: the dispatch and store switches.
 - `OperationScopeTest`: after-commit dispatch, nesting, rollback and the current operation.
 - `ResourcePolicyServiceTest`, `PolicyAttachedTest`, `PolicyDetachedTest`, `ResourcePolicyEventTest`: the resource
@@ -254,6 +276,7 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 
 ## Change Triggers
 
-- Configurable firing of the decision events (BL-72), and break-glass grants filling `usedBreakGlass` (BL-70).
+- Break-glass grants filling `usedBreakGlass` (BL-70), and break-glass allows reported whatever the settings
+  (BL-72b).
 - Applications: the grant events report the application written.
 - Grant expiry and break-glass: their events join the set.

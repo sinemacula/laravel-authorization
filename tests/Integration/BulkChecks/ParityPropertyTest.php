@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Support\PrefetchedResourceTenants;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\TestCase;
 
 /**
@@ -47,8 +48,24 @@ use Tests\TestCase;
 #[CoversClass(ResourcePolicyResolver::class)]
 final class ParityPropertyTest extends TestCase
 {
+    use ReportsEveryDecision;
+
     /** @var int The scenarios run when `AUTHZ_PARITY_RUNS` is not set. */
     private const int DEFAULT_RUNS = 150;
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * Each check of a batch is decided as a fresh `check()` decides it, with a

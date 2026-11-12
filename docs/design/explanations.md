@@ -145,9 +145,9 @@ the named subject under the given scope and console context, without their brows
    afterwards, even when the check throws.
 
 3. **One path, one explanation (D22).** The command explains through `AuthorizationManager::for()` and `explain()` on
-   the trusted path, in explain mode, as any explained check is: the decision is recorded as the last decision and
-   dispatches its `DecisionEvaluated`. The verdict is the one `check()` gives under the same scope and input. The
-   explanation is captured once and rendered once.
+   the trusted path, in explain mode, as any explained check is: the decision is recorded as the last decision, and its
+   `DecisionEvaluated` is dispatched when `events.decisions` reports it (events.md invariant 14). The verdict is the one
+   `check()` gives under the same scope and input. The explanation is captured once and rendered once.
 
 4. **The context is input alone (N90).** `--context` is a JSON object read as the `input` namespace. Malformed JSON,
    a value that is not an object, and a top-level key naming a trusted namespace, or a dotted key whose first segment

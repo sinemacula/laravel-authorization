@@ -46,6 +46,7 @@ final class ValueRenderer
     /** @var array<string, array{string, string|null}> The patterns each entry, and each key when one is given, of a value of each kind of map matches. */
     private const array MAPS = [
         SettingCatalogue::CLASS_LIST => [self::CLASS_PATTERN, null],
+        SettingCatalogue::NAME_LIST  => [self::NAME_PATTERN, null],
         SettingCatalogue::CLASS_MAP  => [self::CLASS_PATTERN, self::NAME_PATTERN],
         SettingCatalogue::NAME_MAP   => [self::NAME_PATTERN, self::NAME_PATTERN],
     ];

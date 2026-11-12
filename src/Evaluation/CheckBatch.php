@@ -11,7 +11,6 @@ use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
-use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
@@ -47,29 +46,35 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  *
  * Each check is recorded as the last decision, with its provenance, made in the
  * scope the check was decided in (see `DecisionProvenance`), and its
- * `DecisionEvaluated` dispatched, as soon as it is decided, before the next is
- * decided, so the last decision is the last check completed, a check failing
- * part way leaves the one before it, and an empty batch leaves it untouched. A
- * write made meanwhile, by a listener reacting to a decision say, empties what
- * the cache holds, so every later check reads the subject's grants, policies,
- * the policies attached to its resource and the tenant tree afresh, as it would
- * one check at a time. The resources' tenants are read for a chunk as it
- * starts, and their attributes when the first check on a type reads `resource`;
- * a change to either made after it was read is seen from the next chunk, except
- * by the later checks of a reference whose attributes they share. Once the
- * decisions are forgotten (see `DecisionMemory`), a proof recorded or the
- * tenant switched say, the next chunk reads everything ahead again: the
- * request's subject, with its session, its credential's scopes and its tenant,
- * when the batch is about it, while a subject the batch was given by name, with
- * `for()`, `forUser()` or a preview, is kept; the tenant the checks are decided
- * in, where they are made, and the attributes of every record still to be
- * decided, a shared reference's included, while what the cache held is read
- * afresh. The generation is read once per chunk, and a decision already made
- * stands.
+ * `DecisionEvaluated` dispatched when the settings report it, as soon as it is
+ * decided, before the next is decided, so the last decision is the last check
+ * completed, a check failing part way leaves the one before it, and an empty
+ * batch leaves it untouched. A write made meanwhile, by a listener reacting to
+ * a decision say, empties what the cache holds, so every later check reads the
+ * subject's grants, policies, the policies attached to its resource and the
+ * tenant tree afresh, as it would one check at a time. The resources' tenants
+ * are read for a chunk as it starts, and their attributes when the first check
+ * on a type reads `resource`; a change to either made after it was read is seen
+ * from the next chunk, except by the later checks of a reference whose
+ * attributes they share. Once the decisions are forgotten (see
+ * `DecisionMemory`), a proof recorded or the tenant switched say, the next
+ * chunk reads everything ahead again: the request's subject, with its session,
+ * its credential's scopes and its tenant, when the batch is about it, while a
+ * subject the batch was given by name, with `for()`, `forUser()` or a preview,
+ * is kept; the tenant the checks are decided in, where they are made, and the
+ * attributes of every record still to be decided, a shared reference's
+ * included, while what the cache held is read afresh. The generation is read
+ * once per chunk, and a decision already made stands.
  *
  * The checks are decided in chunks of `authorization.bulk.chunk_size` (500 by
  * default), and what a chunk read is released once it is decided, the
  * attributes of a shared reference once the last check on it is.
+ *
+ * Which decisions are reported is set by `authorization.events.decisions`, read
+ * once as a batch that reports its decisions is made (see `DecisionReporting`):
+ * each decision is then reported, or not, with a few comparisons, in the order
+ * the checks are decided, and the last decision is stored whether it is
+ * reported or not.
  *
  * Dispatching the events and storing the last decision are two switches. A
  * batch that does neither decides its checks the same way, through the same
@@ -77,10 +82,11 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * `DecisionEvaluated` is dispatched. `permissionsFor()` lists a subject's
  * actions through one, since listing them is introspection, not a check (N70);
  * the break-glass reporting of BL-70 is to define how it treats it. A batch may
- * also dispatch without storing, leaving the last decision untouched while
- * every decision is reported, or store without dispatching. A preview's listing
- * dispatches without storing (N86): each action it evaluates is reported,
- * naming both parties, and the last decision is left untouched.
+ * also dispatch without storing, leaving the last decision untouched while each
+ * decision the settings report is dispatched, or store without dispatching. A
+ * preview's listing dispatches without storing (N86): each action it evaluates
+ * is reported as the settings select (every one while `previews` is on), naming
+ * both parties, and the last decision is left untouched.
  *
  * The checks of a preview are made with its previewer, which every decision's
  * provenance, and so its event and the last decision, names beside the subject
@@ -104,6 +110,9 @@ final readonly class CheckBatch
 {
     /** @var int How many checks a chunk holds when the configuration sets none. */
     public const int CHUNK_SIZE = 500;
+
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\DecisionReporting|null Which decisions are reported, read once for the batch; null for a batch that dispatches none. */
+    private ?DecisionReporting $reporting;
 
     /**
      * Create a new batch of checks.
@@ -131,8 +140,9 @@ final readonly class CheckBatch
         /** Dispatches each check's decision event; null dispatches none. */
         private ?Dispatcher $events,
 
-        /** Whether each decision's event is dispatched; false for introspection, which reports nothing. */
-        private bool $isDispatching,
+        // Whether each decision's event is dispatched, as the settings report
+        // it; false for introspection, which reports nothing.
+        bool $isDispatching,
 
         /** Whether each decision is stored as the last decision; false for introspection, which leaves it untouched. */
         private bool $isStoring,
@@ -142,7 +152,9 @@ final readonly class CheckBatch
 
         /** Whether each check is decided in explain mode, its decision carrying the evidence an explanation needs; false for every everyday check. */
         private bool $isExplaining = false,
-    ) {}
+    ) {
+        $this->reporting = $isDispatching && $events !== null ? DecisionReporting::configured() : null;
+    }
 
     /**
      * Decide each check for the subject, in the order given, and return the
@@ -425,7 +437,7 @@ final readonly class CheckBatch
      * Store the decision as the last decision, with its provenance and the
      * session of the request when it read an authentication requirement, when
      * the batch stores, and dispatch its decision event when the batch
-     * dispatches and a dispatcher is available.
+     * dispatches, a dispatcher is available and the settings report it.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance  $provenance
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckInput  $check
@@ -439,8 +451,10 @@ final readonly class CheckBatch
             $this->lastDecisionStore->put($decision, $provenance, $decision->freshness === null ? null : $this->subjectResolver->resolve()?->session);
         }
 
-        if ($this->isDispatching) {
-            $this->events?->dispatch(DecisionEvaluated::of($provenance, $check->action, ResourceReferences::identifierOf($reference), $decision));
+        $event = $this->reporting?->evaluated($provenance, $check->action, $reference, $decision);
+
+        if ($event !== null && $this->events !== null) {
+            $this->events->dispatch($event);
         }
 
         return $decision;

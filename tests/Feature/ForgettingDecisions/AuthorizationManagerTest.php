@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\ChangingRequirementChecker;
 use Tests\Feature\Stubs\ChangingSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
@@ -38,8 +39,24 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationManager::class)]
 final class AuthorizationManagerTest extends TestCase
 {
+    use ReportsEveryDecision;
+
     /** @var string The action a step-up allows. */
     private const string EXPORT = 'reports:export';
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * Return the batches: about the request's subject, and about a subject

@@ -41,6 +41,7 @@ use Tests\Concerns\InterleavesWrites;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\VanishedPolicy;
@@ -60,8 +61,22 @@ use Tests\TestCase;
 #[CoversClass(BoundaryService::class)]
 final class BoundaryServiceTest extends TestCase
 {
-    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, CatchesRefusals, ComparesReferences, InterleavesWrites,
-        RacesDelegatedCalls, ReadsDispatchedEvents, RefusesThePackage;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, CatchesRefusals, ComparesReferences,
+        InterleavesWrites, RacesDelegatedCalls, ReadsDispatchedEvents, RefusesThePackage, ReportsEveryDecision;
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * The service is bound once in the container.

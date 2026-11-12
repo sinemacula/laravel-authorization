@@ -587,8 +587,8 @@ final class AuthorizationAssertionsTest extends TestCase
 
     /**
      * Declare the stub permission enum and boot the provider again, so the Gate
-     * hook answers its cases, and fake the decision event so each decision's
-     * principal is observable.
+     * hook answers its cases, and report and fake every decision event, allows
+     * included, so each decision's principal is observable.
      *
      * @return void
      */
@@ -597,6 +597,7 @@ final class AuthorizationAssertionsTest extends TestCase
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app?->make('config');
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
+        $config->set('authorization.events.decisions.allows', 'all');
 
         (new AuthorizationServiceProvider($this->container()))->boot();
 

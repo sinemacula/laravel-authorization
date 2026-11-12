@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionReporting;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Explanation;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
@@ -255,7 +256,10 @@ final class AuthorizationManager
      * decision was recorded with, so it names the scope the decision was made
      * in, as its `DecisionEvaluated` does; when a listener has meanwhile
      * recorded another decision, it names the scope in place, or, on a preview,
-     * the preview's scope and its previewer.
+     * the preview's scope and its previewer. It is dispatched for every refusal
+     * whatever `authorization.events.decisions` sets, which decides only which
+     * decisions `DecisionEvaluated` reports, so a listener of both sees a
+     * refusal twice when its `DecisionEvaluated` is reported too.
      *
      * On a preview from `previewFor()`, the `AuthorizationFailed` listeners run
      * as part of the preview's evaluation, so a package mutation they make is
@@ -286,10 +290,8 @@ final class AuthorizationManager
             return;
         }
 
-        $current    = fn (): DecisionProvenance => DecisionProvenance::of($this->currentSubject());
-        $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? $this->preview?->provenance() ?? $this->inSubjectScope($current);
-        $failed     = AuthorizationFailed::of($provenance, $action, ResourceReferences::identifierOf($reference), $decision);
-        $report     = fn (): mixed => $this->events?->dispatch($failed);
+        $failed = $this->failure($action, $reference, $decision);
+        $report = fn (): mixed => $this->events?->dispatch($failed);
 
         if ($this->preview === null) {
             $report();
@@ -347,7 +349,7 @@ final class AuthorizationManager
         $subject   = $this->currentSubject();
 
         $this->batch()->recordOne($subject, new CheckInput($action, $reference), $decision);
-        $this->events?->dispatch(AuthorizationFailed::of(DecisionProvenance::of($subject), $action, ResourceReferences::identifierOf($reference), $decision));
+        $this->events?->dispatch(DecisionReporting::configured()->failed(DecisionProvenance::of($subject), $action, $reference, $decision));
 
         return AuthorizationException::translated($decision->reason ?? DecisionReason::NO_MATCH, $this->translator, $decision);
     }
@@ -360,11 +362,12 @@ final class AuthorizationManager
      * a batch of one, through the same `CheckBatch`, so a check is decided the
      * same way on its own or in a batch, but reads nothing ahead and holds
      * nothing for later. The decision is recorded as the last decision and
-     * reported with `DecisionEvaluated`. On a manager from `for()` of a
-     * `Subject` naming a tenant or an application, it is decided there, as
-     * every form adapting it is (see `for()`). On a preview from
-     * `previewFor()`, the preview is admitted first, and the decision is about
-     * its target, in its scope, recorded and reported with both parties.
+     * reported with `DecisionEvaluated` when `authorization.events.decisions`
+     * selects it. On a manager from `for()` of a `Subject` naming a tenant or
+     * an application, it is decided there, as every form adapting it is (see
+     * `for()`). On a preview from `previewFor()`, the preview is admitted
+     * first, and the decision is about its target, in its scope, recorded and
+     * reported with both parties.
      *
      * The context is what the caller passes, which a policy reads under `input`
      * (`['post' => ['status' => 'draft']]` is `input.post.status`) and never
@@ -411,16 +414,17 @@ final class AuthorizationManager
      * checks are decided in, and the tenants, attached policies and attributes
      * of the resources in bulk, a chunk of `authorization.bulk.chunk_size` at a
      * time (see `CheckBatch`). Each decision is recorded as the last decision
-     * and reported with its own `DecisionEvaluated` as soon as it is made, in
-     * the order of the checks, so the last decision is the last check
-     * completed, and an empty list records nothing. A check that throws, as
-     * `check()` would, stops the batch there, the checks before it recorded.
-     * Every check is refused with `InvalidCheckArgumentException`, before any
-     * is decided, when one is not a `CheckInput`. On a preview, the preview is
-     * admitted once for the batch, before any check is decided. Once the
-     * decisions are forgotten part way (see `forgetDecisionsFor()`), the rest
-     * of a batch about the request's subject is about the subject the resolver
-     * gives afresh, while a manager from `for()` or `forUser()` keeps its own.
+     * and, when `authorization.events.decisions` selects it, reported with its
+     * own `DecisionEvaluated` as soon as it is made, in the order of the
+     * checks, so the last decision is the last check completed, and an empty
+     * list records nothing. A check that throws, as `check()` would, stops the
+     * batch there, the checks before it recorded. Every check is refused with
+     * `InvalidCheckArgumentException`, before any is decided, when one is not a
+     * `CheckInput`. On a preview, the preview is admitted once for the batch,
+     * before any check is decided. Once the decisions are forgotten part way
+     * (see `forgetDecisionsFor()`), the rest of a batch about the request's
+     * subject is about the subject the resolver gives afresh, while a manager
+     * from `for()` or `forUser()` keeps its own.
      *
      * @template TKey of array-key
      *
@@ -651,6 +655,25 @@ final class AuthorizationManager
         $this->state?->ensureHealthy();
 
         return $this->isSubjectNamed ? $this->subjectOverride : $this->subjectResolver->resolve();
+    }
+
+    /**
+     * Return the `AuthorizationFailed` reporting the refusal of the action on
+     * the resource, with the provenance the decision was recorded with, or,
+     * when a listener has meanwhile recorded another decision, the preview's or
+     * the one in place.
+     *
+     * @param  string  $action
+     * @param  false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null  $reference
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
+     * @return \SineMacula\Laravel\Authorization\Events\AuthorizationFailed
+     */
+    private function failure(string $action, false|ResourceReference|null $reference, Decision $decision): AuthorizationFailed
+    {
+        $current    = fn (): DecisionProvenance => DecisionProvenance::of($this->currentSubject());
+        $provenance = $this->lastDecisionStore->provenanceOf($decision) ?? $this->preview?->provenance() ?? $this->inSubjectScope($current);
+
+        return DecisionReporting::configured()->failed($provenance, $action, $reference, $decision);
     }
 
     /**

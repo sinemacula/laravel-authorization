@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\ChangingRequirementChecker;
 use Tests\Feature\Stubs\ChangingSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
@@ -49,11 +50,27 @@ use Tests\TestCase;
 #[CoversClass(CheckBatch::class)]
 final class CheckBatchTest extends TestCase
 {
+    use ReportsEveryDecision;
+
     /** @var string The action the checks decide. */
     private const string ACTION = 'posts:read';
 
     /** @var string The action a step-up allows. */
     private const string EXPORT = 'reports:export';
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * A call made between the first two chunks has the second read the
