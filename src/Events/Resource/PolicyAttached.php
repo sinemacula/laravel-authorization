@@ -20,4 +20,16 @@ namespace SineMacula\Laravel\Authorization\Events\Resource;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class PolicyAttached extends ResourcePolicyEvent {}
+final readonly class PolicyAttached extends ResourcePolicyEvent
+{
+    /**
+     * Return the stable identifier of the change: `resource.policy.attached`.
+     *
+     * @return string
+     */
+    #[\Override]
+    public function operation(): string
+    {
+        return 'resource.policy.attached';
+    }
+}

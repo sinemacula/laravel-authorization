@@ -19,4 +19,16 @@ namespace SineMacula\Laravel\Authorization\Events\Guardrail;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class GuardrailSet extends GuardrailEvent {}
+final readonly class GuardrailSet extends GuardrailEvent
+{
+    /**
+     * Return the stable identifier of the change: `guardrail.set`.
+     *
+     * @return string
+     */
+    #[\Override]
+    public function operation(): string
+    {
+        return 'guardrail.set';
+    }
+}

@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
+use SineMacula\Laravel\Authorization\Events\Concerns\DescribesGrantChange;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -29,6 +30,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  */
 abstract readonly class BoundaryEvent implements IdentityEvent
 {
+    use DescribesGrantChange;
+
     /**
      * Create a new event instance.
      *

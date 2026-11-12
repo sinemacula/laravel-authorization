@@ -23,10 +23,11 @@ use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\TestCase;
 
 /**
- * Query budget of the grant scope query and the principal presence helper
- * (AUTHZ-14.2, AUTHZ-13.8): each reads the grants in one query, with the
- * tenant's subtree nested in it, so the count is the same for one grant as for
- * thirty, and for a tenant two levels down as for one eight levels down.
+ * Query budget of the grant scope query, the principal presence helper and the
+ * lists of grantees (AUTHZ-14.2, AUTHZ-13.8, N131): each reads the grants in
+ * one query, with the tenant's subtree nested in it, so the count is the same
+ * for one grant as for thirty, and for a tenant two levels down as for one
+ * eight levels down.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -95,6 +96,46 @@ final class GrantScopeQueryBudgetTest extends TestCase
             $measured = $this->queriesOf(static fn (): GrantPresence => self::scopes()->hasGrantIn($subject, $tenant));
 
             self::assertCount(\count($baseline['queries']), $measured['queries'], "The presence helper cost other queries:\n" . \implode("\n", $measured['queries']));
+        }
+    }
+
+    /**
+     * Each list of grantees costs the same queries for few grantees and grants
+     * as for many, and whatever the tenant's depth: the tree's one read of the
+     * ancestors and the one read of the grants for the grantees reaching the
+     * tenant, and the one read of the grants, the subtree nested in it, for the
+     * grantees within it.
+     *
+     * @return void
+     */
+    public function testTheGranteeListsCostIsIndependentOfGrantsAndDepth(): void
+    {
+        $this->chain();
+
+        $shallow = new Reference('tenant', 'level-1');
+        $deep    = new Reference('tenant', 'level-' . self::DEPTH);
+
+        $reaching = $this->queriesOf(static fn (): array => self::scopes()->granteesReaching($shallow));
+        $within   = $this->queriesOf(static fn (): array => self::scopes()->granteesWithin($shallow));
+
+        self::assertSame([6, 6], [\count($reaching['answers'][0]), \count($within['answers'][0])]);
+        self::assertCount(2, $reaching['queries']);
+        self::assertCount(1, $within['queries']);
+
+        for ($index = 0; $index < 3; $index++) {
+            self::grant(StubIdentity::create(['id' => 'more-' . $index]), 10);
+        }
+
+        foreach ([$shallow, $deep] as $tenant) {
+            $measured = $this->queriesOf(static fn (): array => self::scopes()->granteesReaching($tenant));
+
+            self::assertCount(9, $measured['answers'][0]);
+            self::assertCount(\count($reaching['queries']), $measured['queries'], "The grantees reaching cost other queries:\n" . \implode("\n", $measured['queries']));
+
+            $measured = $this->queriesOf(static fn (): array => self::scopes()->granteesWithin($tenant));
+
+            self::assertCount($tenant === $shallow ? 9 : 0, $measured['answers'][0]);
+            self::assertCount(\count($within['queries']), $measured['queries'], "The grantees within cost other queries:\n" . \implode("\n", $measured['queries']));
         }
     }
 
