@@ -76,10 +76,11 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   explanations, what is refused, the refused query writes, why a preview confers no authority
   (`administration.previewing`), the disclosure point and the limits of a manager clone.
 - `grant-scope.md`: the identity directory contract and its default, the shared reader of grant roots, `forIdentity()`'s
-  `within`, `outside` and `unknown` and `hasGrantIn()`'s `present`, `absent` and `unknown`, what counts as a grant, why
-  neither answer is membership or authorisation, why it is a trusted service returning only the status, and the grant
-  hooks: which grants widen an identity's scope, the veto-only contract and its ordered composite, the run before the
-  package's first lock with the coverage check and retry, the recursion guard and nested calls.
+  `within`, `outside` and `unknown` and `hasGrantIn()`'s `present`, `absent` and `unknown`, the grantees reaching a
+  tenant or within it, what counts as a grant, why no answer is membership or authorisation, why it is a trusted service
+  returning only the status or the grantees, and the grant hooks: which grants widen an identity's scope, the veto-only
+  contract and its ordered composite, the run before the package's first lock with the coverage check and retry, the
+  recursion guard and nested calls.
 - `explanations.md`: explain mode, the switch on the one decision path that leaves every everyday check as it was, the
   evidence it records (each condition test with its typed outcome, the unresolved references, where each grant that
   allowed a check came from, and what the check asked), the `Explanation` projection, its causes and the stages it

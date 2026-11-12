@@ -50,6 +50,7 @@ final class TablePrefixMigrationTest extends TestCase
         '2026_04_14_000010_create_guardrails_table',
         '2026_11_08_000001_add_access_review_indexes',
         '2026_11_09_000001_create_grant_usage_tables',
+        '2026_11_11_000001_add_half_tenant_indexes',
     ];
 
     /**
@@ -116,6 +117,10 @@ final class TablePrefixMigrationTest extends TestCase
         self::assertFalse(Schema::hasTable(self::PREFIX . 'guardrails'));
         self::assertTrue(Schema::hasIndex(self::PREFIX . 'authorizable_roles', ['granted_by_type', 'granted_by_id']));
         self::assertTrue(Schema::hasIndex(self::PREFIX . 'role_permissions', ['permission_id']));
+
+        foreach ([self::PREFIX . 'policies', self::PREFIX . 'resource_policies', self::EXPLICIT] as $table) {
+            self::assertTrue(Schema::hasIndex($table, $table . '_tenant_id_index'), $table);
+        }
     }
 
     /**

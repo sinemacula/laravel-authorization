@@ -136,8 +136,9 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   `used`, `unused` or `unknown`.
 - **Grant scope query**: `GrantScopeQuery` tells a trusted integration whether every grant of an identity and of the
   principals an application-bound identity directory lists lies within a tenant (`within`), any lies outside it
-  (`outside`), or that cannot be told (`unknown`), and whether a principal holds a grant that applies in a tenant. It
-  returns only the answer, in one query whatever the number of grants or the depth of the tree, and is neither
+  (`outside`), or that cannot be told (`unknown`), whether a principal holds a grant that applies in a tenant, and who
+  holds a grant reaching a tenant or within its subtree, for a tenant moved under another parent. It returns only the
+  answer or the grantees, in one query whatever the number of grants or the depth of the tree, and is neither
   membership nor authorisation.
 - **Grant hooks**: before a grant that widens an identity's scope is written (to the identity itself, platform-wide,
   or in a tenant its principals held nothing in), the grant service calls the bound hook, before the package takes any
@@ -703,6 +704,9 @@ $user->assignRole('billing', tenant: $organisation, includeSubtree: false); // t
 Authorization::treeChanged($account);
 ```
 
+Reporting a move runs no grant hook. An integration that widens a scope on a move asks the
+[grant scope query](#grant-scope-query) whose grants now reach the moved tenant.
+
 A sync gives every role it grants one reach, `includeSubtree`, and leaves the reach of a role held live as it is. To
 sync roles of both reaches in one call, list a role with its own reach, as `Support\RoleReach::of($role, false)`, beside
 role models and names. Such a role is compared with its reach: one held live with the other reach has its reach changed
@@ -802,6 +806,44 @@ returns the tenant outside the fixture that the checks ask the tree about. By de
 type and an id shaped as the fixture's are, so integer or UUID key columns can hold it: the largest id plus one when
 every id is digits, a new UUID when every id is a UUID, else `outside`. A tree whose keys take another shape overrides
 it with one its storage can hold.
+
+**A fake tree for tests.** To test the rest of an application under a hierarchy without a tree table of its own, bind
+`SineMacula\Laravel\Authorization\Testing\FakeTenantTree`, an in-memory tree built from typed tenants, each with its
+parent, or null for one at the top, every parent before its children, or added one at a time:
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Testing\FakeTenantTree;
+
+$tree = FakeTenantTree::of([
+    [new Reference('organisation', '1'), null],
+    [new Reference('team', '1'), new Reference('organisation', '1')],
+]);
+
+$tree->add(new Reference('team', '2'), new Reference('organisation', '1'));
+
+$this->app->instance(TenantTree::class, $tree);
+```
+
+Tenants are told apart by type and id together, byte for byte, so tenants of different types sharing an id are never
+confused, and a tenant the tree does not hold is one at the top with nothing below it. Adding a tenant held already, or
+one under a parent not held, throws an `InvalidArgumentException`. The fake keeps the contract above: the package's own
+tests pass the kit against it, with mixed types, on SQLite, PostgreSQL and MySQL. Its subtree is a query of literal
+rows, reading no table, however many tenants it holds, on the application's default connection as it stands when the
+subtree is asked for, so it nests in `whereAuthorized()` for models on that connection, and in the grant scope query
+when the package's tables are there too. When the models, or the package's tables, are on another connection, name it as
+the second argument of `of()`, or the first of the constructor: `new FakeTenantTree('tenants')`.
+
+The fake can change once bound: `move()` puts a tenant it holds under another parent, or at the top for null, carrying
+the tenants below it, and refuses a parent that is the tenant or below it. As with a real tree, the package keeps what
+it has read of the tree for the request, so report the move before asking again:
+
+```php
+$tree->move(new Reference('team', '2'), null);
+
+Authorization::treeChanged(new Reference('team', '2'));
+```
 
 The trait methods (`assignRole()`, `givePermission()`, `attachPolicy()`, `$role->givePermission()` and the others) go
 through the same services. Without `actor:` they are trusted; given `actor:`, they pass it on, so the change is decided
@@ -2819,6 +2861,7 @@ or about the subject of the scoped manager it is called on:
 | `withPolicies($policies)`                         | Returns a scoped manager that evaluates only the policies given                                                           |
 | `queryScope($model, $action, $context)`           | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))                               |
 | `GrantScopeQuery::forIdentity()`, `hasGrantIn()`  | Not on the manager: grant scope and presence in a tenant (see [Grant scope query](#grant-scope-query))                    |
+| `granteesReaching()`, `granteesWithin()`          | Not on the manager: whose grants reach a tenant or lie within it (see [Grant scope query](#grant-scope-query))            |
 | `AccessReview::review()`, `trusted()`             | Not on the manager: holders, holdings, expiries, grants by actor, unused (see [Access reviews](#access-reviews))          |
 | `AccessReview::page()`, `stream()`, `export()`    | Not on the manager: a review a keyset page, a lazy stream or JSON Lines at a time, each with a `trusted…()` counterpart   |
 
@@ -3924,9 +3967,10 @@ going.
 
 ### Grant scope query
 
-`GrantScopeQuery` answers two factual questions about grants for a trusted integration, such as `laravel-iam`
-composing SSO's principal scope or a tenant's admission: where the grants of an identity lie against a tenant, and
-whether a principal holds a grant that applies in one. Resolve it from the container, where it is a singleton:
+`GrantScopeQuery` answers factual questions about grants for a trusted integration, such as `laravel-iam` composing
+SSO's principal scope or a tenant's admission: where the grants of an identity lie against a tenant, whether a
+principal holds a grant that applies in one, and who holds a grant reaching a tenant or within it. Resolve it from the
+container, where it is a singleton:
 
 ```php
 use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
@@ -3937,6 +3981,8 @@ $grants = app(GrantScopeQuery::class);
 $grants->forIdentity(Reference::of($person), $account);       // GrantScopeStatus::WITHIN, OUTSIDE or UNKNOWN
 $grants->hasGrantIn($user, $account);                         // GrantPresence::PRESENT, ABSENT or UNKNOWN
 $grants->hasGrantIn($user, $account, application: 'admin');   // only the grants that hold in the admin app
+$grants->granteesReaching($account);                          // list<Reference>: whoever holds a grant reaching it
+$grants->granteesWithin($organisation, application: 'admin'); // list<Reference>: whoever holds one made in or below it
 ```
 
 **The identity directory.** Principals and their identities live in the application, so the package learns which
@@ -4022,24 +4068,57 @@ The two questions differ on purpose. A grant made in an ancestor that reaches it
 so `hasGrantIn($user, $child)` is `PRESENT`; it is rooted outside the child, so `forIdentity($identity, $child)` is
 `OUTSIDE`.
 
+**`granteesReaching()` and `granteesWithin()`.** `treeChanged()` runs no grant hook, so a sibling that reports a
+tenant moved under another parent to its own scope widening asks whose grants the move concerns. Each takes the tenant
+as a model, an `AuthorizableTenant` or a `Reference`, and an optional application, matched as `hasGrantIn()` matches
+it, and returns a `list<Reference>` of the grantees, principals or identities as their rows store them, each once,
+ordered by type and then key, byte by byte:
+
+- `granteesReaching($tenant)` lists whoever holds a live grant that reaches the tenant, as a check there reads it: one
+  made in the tenant, one made in an ancestor that reaches its subtree, or a platform-wide one. The ancestors are read
+  from the tenant tree afresh each time, never an answer a batch of checks kept;
+- `granteesWithin($tenant)` lists whoever holds a live grant made in the tenant or any tenant below it, whether or not
+  the grant reaches below its own tenant, read through the tree's `subtree()` query nested whole, like
+  `forIdentity()`'s.
+
+A subtree moved under a new parent comes to be reached by the grants reaching that parent from above it or made there
+reaching below it, while the grants made within the subtree keep their reach. So ask `granteesReaching()` about the
+moved tenant once it has moved, or about the new parent at any time, which also lists whoever holds a grant made there
+for the parent alone; `granteesWithin()` about the moved tenant lists whose grants moved with it:
+
+```php
+Authorization::treeChanged($account);
+
+$widened = $grants->granteesReaching($account); // the account's grantees, now including its new ancestors'
+$carried = $grants->granteesWithin($account);   // the grantees of the grants inside the moved subtree
+```
+
+What counts as a grant is as below, and a grant row naming half a tenant, which the package never writes, is never
+listed. Nor is a role a policy is attached to, which is no principal or identity: whoever holds the role is listed
+through their own grant of it. A list has no `UNKNOWN` to fall back on, so neither guesses: a tree that throws is
+thrown, a subtree query on another connection than the package's is refused with an `UnexpectedValueException`, and a
+subtree query that fails as it runs is thrown as its `QueryException`, once the savepoint it runs in has rolled back, so
+your transaction stays usable.
+
 **What counts as a grant.** A live role granted, permission granted directly or policy attached, a policy that only
 denies included. Roles are not expanded into their permissions, since a role's root is where it was granted. An
 expired grant counts for nothing, and neither does an inline policy attached to a grantee it does not belong to, which
 no check applies. Permission boundaries and guardrails cap grants; they are not grants and are never read.
 
-**Neither membership nor authorisation.** Neither answer says whether a principal is a member of a tenant, which is
-the application's to know, nor whether it may act there or use an application. `PRESENT` means a grant applies in the
+**Neither membership nor authorisation.** No answer says whether a principal is a member of a tenant, which is the
+application's to know, nor whether it may act there or use an application. `PRESENT` means a grant applies in the
 tenant, not that any check there would allow. `check()` stays the one decision path, and
 `ApplicationAccess::mayUse()` answers application access.
 
 **A trusted service.** Even a bare answer tells the caller something about grants in other tenants, so call it from
-trusted integration code, never from an endpoint a user reaches without the right to know. It returns the status
-alone, never the tenants, grants, names, counts or rows behind it.
+trusted integration code, never from an endpoint a user reaches without the right to know. `forIdentity()` and
+`hasGrantIn()` return the status alone, never the tenants, grants, names, counts or rows behind it; the two lists
+return the grantees alone, never their grants or where they were made.
 
 **What it costs.** Each answer reads the grants in one query on the write connection, so a replica's lag never hides a
-grant, however many grants and principals there are and however deep the tree, plus the tree's own reads and the
-directory's; only a subtree query that fails as it runs costs a second read, of the platform-wide grants. Nothing is
-cached. See [Grant scope](docs/design/grant-scope.md) for the design.
+grant, however many grants and grantees there are and however deep the tree, plus the tree's own reads and the
+directory's; only a subtree query that fails as it runs costs `forIdentity()` a second read, of the platform-wide
+grants. Nothing is cached. See [Grant scope](docs/design/grant-scope.md) for the design.
 
 ### Grant hooks
 
@@ -5102,7 +5181,8 @@ seam, reads a cache or returns early:
 - the model traits' decisions: `hasPermission()`, `getPermissions()`, `hasRole()` and the other role and permission
   checks, `canActOn()` and the rank comparisons;
 - `TenantScope`'s `apply()`, `within()` and tenant getters, and the `ResolvedTenant` factory;
-- `ApplicationAccess::mayUse()`, on every path, and `GrantScopeQuery`'s `forIdentity()` and `hasGrantIn()`;
+- `ApplicationAccess::mayUse()`, on every path, and `GrantScopeQuery`'s `forIdentity()`, `hasGrantIn()`,
+  `granteesReaching()` and `granteesWithin()`;
 - the management services: grants, revocations, roles, permissions, policies, resource policies, boundaries and
   guardrails;
 - the access reviews' public methods and the grant pruner;
@@ -5318,7 +5398,8 @@ $this->actingAsSubject(new Subject($user, $user, session: 'session-1'));
 ```
 
 `SineMacula\Laravel\Authorization\Testing\Concerns\TenantTreeContract` checks a tenant tree of your own against the
-contract the package reads it by (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)).
+contract the package reads it by, and `SineMacula\Laravel\Authorization\Testing\FakeTenantTree` is an in-memory tree
+to bind in tests of your own (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)).
 
 ### Design notes
 

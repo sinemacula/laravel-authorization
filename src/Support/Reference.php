@@ -101,6 +101,21 @@ final readonly class Reference implements AuthorizableTenant
     }
 
     /**
+     * Return the references by type and then key, byte by byte, as `strcmp()`
+     * compares them: never by number, nor folding case, so a list reads alike
+     * whichever database it was read from.
+     *
+     * @param  array<array-key, self>  $references
+     * @return list<self>
+     */
+    public static function sorted(array $references): array
+    {
+        \usort($references, static fn (self $one, self $other): int => \strcmp($one->type, $other->type) ?: \strcmp($one->id, $other->id));
+
+        return $references;
+    }
+
+    /**
      * Return the record's morph type.
      *
      * @return string
