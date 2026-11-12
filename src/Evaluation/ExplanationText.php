@@ -240,8 +240,9 @@ final class ExplanationText
         $grantee = $grant->grantee === null ? '' : $party . self::reference($grant->grantee);
         $roles   = $grant->roles   === [] ? '' : ' through role ' . \implode(' < ', \array_map(self::quoted(...), $grant->roles));
         $scope   = $grant->hasScope ? ' in ' . self::scope($grant->tenant, $grant->application) : ', scope unavailable';
+        $glass   = $grant->activation === null ? '' : ' by break-glass activation ' . self::quoted($grant->activation);
 
-        return $line . $grantee . $roles . $scope;
+        return $line . $grantee . $roles . $glass . $scope;
     }
 
     /**

@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Usage;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
 use SineMacula\Laravel\Authorization\Reviews\Support\Definitions;
@@ -138,7 +139,9 @@ final class RouteSources
      * role of its chain and each thing that role carries, the route through the
      * chain up to it, the route of the role granted and, for an ancestor, the
      * route by which the ancestor is held, the last two kept once each however
-     * much the role carries.
+     * much the role carries. A role held through a break-glass activation is no
+     * stored grant, so no route starts from it, and a use of it never counts as
+     * a use of a role grant.
      *
      * @param  \SineMacula\Laravel\Authorization\Usage\RouteMapBuilder  $map
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
@@ -153,7 +156,7 @@ final class RouteSources
     {
         $role = Definitions::morph(GrantTarget::ROLE);
 
-        foreach ($held as $model) {
+        foreach ($held->filter(static fn (Model $model): bool => BreakGlassActivations::activationOf($model) === null) as $model) {
             $grant   = StoredGrant::throughPivot(GrantTarget::ROLE, $model, $grantee);
             $chain   = $chains[$grant->grantId] ?? [];
             $granted = null;

@@ -8,6 +8,7 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -60,6 +61,7 @@ final readonly class ResolutionCache
      * @param  int  $ttl
      * @param  string  $prefix
      * @param  bool  $isTrackingUsage
+     * @param  \SineMacula\Laravel\Authorization\Database\BreakGlassActivations|null  $activations
      */
     public function __construct(
 
@@ -74,6 +76,9 @@ final readonly class ResolutionCache
 
         /** Whether grant usage is tracked, so a grantee's permissions and policies are kept with the routes of the grants behind them. */
         private bool $isTrackingUsage = false,
+
+        /** The request's record of the instances read as an identity; null keeps every grantee's entries under its kind. */
+        private ?BreakGlassActivations $activations = null,
     ) {
         $this->memo  = new ResolutionMemo(static fn (): string => TenantScope::scopeKey());
         $this->store = $store === null ? null : new VersionedStore($store, $prefix);
@@ -325,7 +330,8 @@ final readonly class ResolutionCache
      */
     public function routesOf(string $kind, object $grantee): ?RouteMap
     {
-        $routes = $this->memo->get(self::ROUTES . ResolutionCodec::kindOf($kind, $this->isTrackingUsage) . ':' . PrincipalCacheKey::for($grantee))[0] ?? null;
+        $kind   = ResolutionCodec::kindOf($kind, $this->isTrackingUsage);
+        $routes = $this->memo->get(self::ROUTES . ($this->activations?->kindOf($kind, $grantee) ?? $kind) . ':' . PrincipalCacheKey::for($grantee))[0] ?? null;
 
         return $routes instanceof RouteMap ? $routes : null;
     }
@@ -447,15 +453,17 @@ final readonly class ResolutionCache
     }
 
     /**
-     * Return the version keys the events of a write bump, or none without a
-     * persistent store.
+     * Return the version keys the events of a write bump, with those of the
+     * grantees given whose grants a write changed without an event, as one
+     * written to a break-glass activation, or none without a persistent store.
      *
      * @param  list<\SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent>  $events
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\Reference>  $grantees
      * @return list<string>
      */
-    public function versionKeys(array $events): array
+    public function versionKeys(array $events, array $grantees = []): array
     {
-        return $this->store === null ? [] : Invalidation::keys($this->store, $events);
+        return $this->store === null ? [] : Invalidation::keys($this->store, $events, $grantees);
     }
 
     /**
@@ -509,6 +517,9 @@ final readonly class ResolutionCache
             $kind = ResolutionCodec::kindOf($kind, true);
         }
 
+        // An instance read as another subject's identity counts none of its
+        // break-glass activations, so its entries are kept apart.
+        $kind    = $this->activations?->kindOf($kind, $grantee) ?? $kind;
         $memoKey = $kind . ':' . PrincipalCacheKey::for($grantee);
 
         /** @var list<mixed>|null $memoised */

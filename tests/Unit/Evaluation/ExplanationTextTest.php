@@ -197,6 +197,31 @@ final class ExplanationTextTest extends TestCase
     }
 
     /**
+     * A grant through a break-glass activation names the activation, quoted,
+     * after the roles it came through and before its scope; any other grant
+     * names none.
+     *
+     * @return void
+     */
+    public function testABreakGlassGrantNamesItsActivation(): void
+    {
+        $statement = new StatementReference('own', 0, 'key');
+        $decision  = Decision::allow(DecisionStage::ALLOW, [$statement])->withEvidence(new DecisionEvidence([
+            new GrantProvenance(GrantSource::BREAK_GLASS_PERMISSION, 'posts:edit', new Reference('user', '1'), false, ['responder'], true, null, null, "act\n1"),
+            new GrantProvenance(GrantSource::ROLE_PERMISSION, 'posts:edit', new Reference('user', '1'), false, ['responder'], true),
+        ]));
+
+        $text = ExplanationText::render($decision->explain());
+
+        self::assertStringContainsString(
+            "\n  grant break glass permission \"posts:edit\" to principal user:1 through role \"responder\" by break-glass activation \"act\\n1\" in platform\n",
+            $text,
+        );
+        self::assertStringContainsString("\n  grant role permission \"posts:edit\" to principal user:1 through role \"responder\" in platform", $text);
+        self::assertSame(1, \substr_count($text, 'by break-glass activation'));
+    }
+
+    /**
      * Return the provenance of a check about the first user, its identity the
      * second person, previewed by the ninth user, decided in the tenant and the
      * application.

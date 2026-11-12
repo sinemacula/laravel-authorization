@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Diagnostics\Checks;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
 use SineMacula\Laravel\Authorization\Config\CacheConfigValidator;
 use SineMacula\Laravel\Authorization\Config\EventConfigValidator;
 use SineMacula\Laravel\Authorization\Config\PolicyConfigValidator;
@@ -103,6 +104,57 @@ final class BlockChecksTest extends TestCase
     public function testTheUsageSwitchIsChecked(): void
     {
         self::assertSame([['authorization.usage.enabled', 'invalid_type']], self::pathsAndCodes($this->check(['usage' => ['enabled' => 'yes']])));
+    }
+
+    /**
+     * Each break-glass setting is checked on its own, every emergency role on
+     * its own against the global maximum, and the roles skipped when the global
+     * maximum is refused; the shipped block passes.
+     *
+     * @return void
+     */
+    public function testEachBreakGlassSettingIsCheckedOnItsOwn(): void
+    {
+        $path = BreakGlassConfigValidator::KEY;
+
+        self::assertSame([], self::pathsAndCodes($this->check([])));
+        self::assertSame(
+            [],
+            self::pathsAndCodes($this->check(['break_glass' => ['max_minutes' => '30', 'roles' => ['responder' => ['max_minutes' => 30]], 'justifications' => ['incident']]])),
+        );
+        self::assertSame([
+            ["{$path}.enabled", 'invalid_value'],
+            ["{$path}.roles.responder", 'invalid_type'],
+            ["{$path}.roles.auditor.max_minutes", 'out_of_range'],
+            ["{$path}.roles.on call", 'invalid_value'],
+            ["{$path}.justifications.1", 'duplicate'],
+            ["{$path}.notes", 'invalid_type'],
+            ["{$path}.note_max_length", 'out_of_range'],
+        ], self::pathsAndCodes($this->check(['break_glass' => [
+            'enabled'         => true,
+            'max_minutes'     => 60,
+            'roles'           => ['responder' => 5, 'auditor' => ['max_minutes' => 61], 'on call' => [], 'admin' => ['max_minutes' => 60]],
+            'justifications'  => ['incident', 'incident'],
+            'notes'           => 'no',
+            'note_max_length' => 0,
+        ]])));
+        self::assertSame(
+            [["{$path}.max_minutes", 'invalid_type'], ["{$path}.roles", 'skipped']],
+            self::pathsAndCodes($this->check(['break_glass' => ['max_minutes' => '1h', 'roles' => ['responder' => 5], 'justifications' => [], 'enabled' => false]])),
+        );
+        self::assertSame(
+            [["{$path}.enabled", 'invalid_value'], ["{$path}.justifications", 'invalid_value']],
+            self::pathsAndCodes($this->check(['break_glass' => ['enabled' => true]])),
+        );
+        self::assertSame(
+            [["{$path}.enabled", 'invalid_type'], ["{$path}.roles", 'invalid_type']],
+            self::pathsAndCodes($this->check(['break_glass' => ['enabled' => 1, 'roles' => 'responder']])),
+        );
+        self::assertSame(
+            [[$path, 'invalid_type'], ...\array_map(static fn (string $setting): array => ["{$path}.{$setting}", 'skipped'], BreakGlassConfigValidator::SETTINGS)],
+            self::pathsAndCodes($this->check(['break_glass' => 'on'])),
+        );
+        self::assertSame([["{$path}.note", 'unknown_key']], self::pathsAndCodes($this->check(['break_glass' => ['note' => true]])));
     }
 
     /**

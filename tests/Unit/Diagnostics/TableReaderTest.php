@@ -7,6 +7,7 @@ namespace Tests\Unit\Diagnostics;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Config\TableConfigValidator;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Diagnostics\TableReader;
 
 /**
@@ -22,8 +23,9 @@ use SineMacula\Laravel\Authorization\Diagnostics\TableReader;
 final class TableReaderTest extends TestCase
 {
     /**
-     * Without a prefix or a name set, every table takes the key's own name, in
-     * the order the shipped configuration lists them.
+     * Without a prefix or a name set, every table takes its default name, the
+     * key's own but for the break-glass table's, in the order the shipped
+     * configuration lists them.
      *
      * @return void
      */
@@ -33,7 +35,8 @@ final class TableReaderTest extends TestCase
 
         self::assertSame('', $read['prefix']);
         self::assertSame(\array_keys(TableConfigValidator::LENGTHS), \array_column($read['names'], 'key'));
-        self::assertSame(\array_keys(TableConfigValidator::LENGTHS), \array_column($read['names'], 'name'));
+        self::assertSame(\array_map(TableNames::defaultName(...), \array_keys(TableConfigValidator::LENGTHS)), \array_column($read['names'], 'name'));
+        self::assertSame('break_glass_activations', \array_column($read['names'], 'name', 'key')['break_glass']);
         self::assertNotContains(true, \array_column($read['names'], 'explicit'));
     }
 
@@ -85,7 +88,7 @@ final class TableReaderTest extends TestCase
             $read = (new TableReader($root))->read();
 
             self::assertNull($read['prefix']);
-            self::assertCount(12, $read['names']);
+            self::assertCount(13, $read['names']);
             self::assertSame([null], \array_values(\array_unique(\array_column($read['names'], 'name'))));
             self::assertSame([false], \array_values(\array_unique(\array_column($read['names'], 'explicit'))));
         }

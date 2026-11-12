@@ -9,6 +9,7 @@ use Illuminate\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -23,8 +24,8 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * operation's dependencies and locked through its pins (see `DependencyPins`)
  * in one fixed order within the part:
  *
- * 1. the grant rows of each grantee named, table by table: its roles, its
- *    permissions, its policies and its boundaries;
+ * 1. the grant rows of each grantee named, table by table: its roles, its live
+ *    break-glass activations, its permissions, its policies and its boundaries;
  * 2. the chain of each tenant named, read afresh, and the guardrails on the
  *    platform and on every tenant of those chains;
  * 3. the resource policies of each resource type named;
@@ -36,10 +37,11 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  *
  * Keys are sorted within each query, and every query reads on the write
  * connection, outside every tenant scope, whether or not a grant has expired,
- * so a re-armed grant's authority is pinned too. The order keeps two operations
- * of the same shape from waiting on each other in opposite orders; it cannot
- * keep two that cross, such as one acting on the other's actor, from
- * deadlocking, which the database detects (see `DependencyPins`).
+ * so a re-armed grant's authority is pinned too; an activation is read only
+ * while live. The order keeps two operations of the same shape from waiting on
+ * each other in opposite orders; it cannot keep two that cross, such as one
+ * acting on the other's actor, from deadlocking, which the database detects
+ * (see `DependencyPins`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -284,6 +286,7 @@ final class AuthorityRows
         $pairs    = static fn (Builder $query): Builder => self::pairs($query, 'authorizable_type', 'authorizable_id', $grantees);
 
         $this->roles(...$this->lockKeys($pairs(self::table('authorizable_roles')), 'role_id'));
+        $this->roles(...$this->lockKeys(BreakGlassActivations::live($pairs(self::table('break_glass')), TableNames::get('break_glass')), 'role_id'));
         $this->permissions(...$this->lockKeys($pairs(self::table('authorizable_permissions')), 'permission_id'));
         $this->policies(...$this->lockKeys($pairs(self::table('authorizable_policies')), 'policy_id'));
         $this->policies(...$this->lockKeys($pairs(self::table('authorizable_boundaries')), 'policy_id'));

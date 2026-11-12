@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\GrantRelation;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
@@ -44,7 +45,9 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * Shared by the roles, permissions and policies relations so the grant
      * tables are always read the same way. The relation compares the grantee's
      * key as the string the tables store, so integer-keyed grantees work on
-     * PostgreSQL too (see `GrantRelation`).
+     * PostgreSQL too (see `GrantRelation`). Given the rows to read in place of
+     * the grant table, as the roles relation reads its role grants with the
+     * live break-glass activations, the relation reads those.
      *
      * @template TRelated of \Illuminate\Database\Eloquent\Model
      * @template TPivot of \Illuminate\Database\Eloquent\Relations\MorphPivot
@@ -53,9 +56,10 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * @param  string  $table
      * @param  string  $relatedKey
      * @param  class-string<TPivot>  $pivotClass
+     * @param  \Illuminate\Database\Query\Builder|null  $rows
      * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<TRelated, $this, TPivot, 'pivot'>
      */
-    private function authorizationGrantRelation(string $related, string $table, string $relatedKey, string $pivotClass): MorphToMany
+    private function authorizationGrantRelation(string $related, string $table, string $relatedKey, string $pivotClass, ?QueryBuilder $rows = null): MorphToMany
     {
         $instance = $this->newRelatedInstance($related);
 
@@ -65,6 +69,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
         // `GuardScopedLookup`.
         // @phpstan-ignore staticMethod.dynamicCall
         $relation = (new GrantRelation($instance->newQuery(), $this, 'authorizable', $table, 'authorizable_id', $relatedKey, $this->getKeyName(), $instance->getKeyName()))
+            ->readingRows($rows)
             ->using($pivotClass)
             ->withPivot('expires_at')
             ->withTimestamps()

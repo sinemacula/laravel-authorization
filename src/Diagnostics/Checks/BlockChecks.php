@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Diagnostics\Checks;
 
 use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Config\AdministrationConfigValidator;
+use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
 use SineMacula\Laravel\Authorization\Config\BulkConfigValidator;
 use SineMacula\Laravel\Authorization\Config\CacheConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ConfigBlock;
@@ -24,8 +25,8 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 /**
  * The structural checks of the blocks of plain settings: the switches, the
  * cache, the policy limits, the limits of query scoping, bulk checks,
- * administration and reviews, grant usage tracking and the decision events,
- * each setting, and each sensitive action, on its own.
+ * administration and reviews, grant usage tracking, break-glass and the
+ * decision events, each setting, and each sensitive action, on its own.
  *
  * The cache store is checked by name only; that it resolves through the cache
  * manager, which builds it, was checked as the application booted. So is each
@@ -86,6 +87,7 @@ final readonly class BlockChecks
         }
 
         $this->usage();
+        $this->breakGlass();
         $this->events();
     }
 
@@ -208,6 +210,61 @@ final readonly class BlockChecks
         $this->collector->verify(UsageConfigValidator::KEY . '.connection', static function () use ($connection, $container): void {
             NamedEntryConfigValidator::queueConnection($connection, $container);
         });
+    }
+
+    /**
+     * Check the break-glass block: the switch, the global maximum, each
+     * emergency role against it, which depends on it being accepted, the
+     * justification codes and the note's settings.
+     *
+     * @return void
+     */
+    private function breakGlass(): void
+    {
+        $path  = BreakGlassConfigValidator::KEY;
+        $block = $this->read($path, $this->blockOf($path), BreakGlassConfigValidator::SETTINGS);
+
+        if ($block === null) {
+            return;
+        }
+
+        $enabled = ConfigBlock::entry($block, 'enabled', false);
+        $codes   = ConfigBlock::entry($block, 'justifications', []);
+        $length  = ConfigBlock::entry($block, 'note_max_length', BreakGlassConfigValidator::NOTE_MAX_LENGTH);
+
+        $this->collector->verify("{$path}.enabled", static fn (): bool => BreakGlassConfigValidator::enabled($enabled));
+        $this->emergencyRoles($block);
+        $this->collector->verify("{$path}.justifications", static fn (): array => BreakGlassConfigValidator::justifications($codes, $enabled === true));
+
+        if (\array_key_exists('notes', $block)) {
+            $this->collector->verify("{$path}.notes", static fn (): bool => BreakGlassConfigValidator::notes($block['notes']));
+        }
+
+        $this->collector->verify("{$path}.note_max_length", static fn (): int => BreakGlassConfigValidator::noteMaxLength($length));
+    }
+
+    /**
+     * Check the break-glass global maximum, then each emergency role on its own
+     * against it, the roles skipped when the maximum is refused.
+     *
+     * @param  array<array-key, mixed>  $block
+     * @return void
+     */
+    private function emergencyRoles(array $block): void
+    {
+        $path    = BreakGlassConfigValidator::KEY;
+        $maximum = ConfigBlock::entry($block, 'max_minutes', BreakGlassConfigValidator::MAX_MINUTES);
+
+        if (!$this->collector->verify("{$path}.max_minutes", static fn (): int => BreakGlassConfigValidator::maxMinutes($maximum))) {
+            $this->collector->skip("{$path}.roles", "{$path}.max_minutes");
+
+            return;
+        }
+
+        $limit = BreakGlassConfigValidator::maxMinutes($maximum);
+        $role  = static fn (int|string $name, mixed $settings): int => BreakGlassConfigValidator::role($name, $settings, $limit);
+
+        $this->collector->verifyEntries("{$path}.roles", ConfigBlock::entry($block, 'roles', []), $role);
     }
 
     /**

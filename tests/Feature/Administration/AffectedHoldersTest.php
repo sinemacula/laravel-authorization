@@ -6,6 +6,7 @@ namespace Tests\Feature\Administration;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\AffectedHolders;
@@ -23,6 +24,7 @@ use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\StubIdentity;
@@ -40,7 +42,7 @@ use Tests\TestCase;
 #[CoversClass(AffectedHolders::class)]
 final class AffectedHoldersTest extends TestCase
 {
-    use CatchesRefusals, RecordsRowLocks;
+    use ActivatesBreakGlass, CatchesRefusals, RecordsRowLocks;
 
     /**
      * A role reaches its grantees and those of every role below it, in any
@@ -68,6 +70,26 @@ final class AffectedHoldersTest extends TestCase
 
         self::assertSame(['one'], self::ids(AffectedHolders::none()->ofRoles([$role->id])->holders()));
         self::assertSame(['one', 'two'], self::ids(AffectedHolders::none()->ofRoles([$role->id, $least->id])->holders()));
+    }
+
+    /**
+     * A role reaches the holders of its live break-glass activations and those
+     * of the roles below it; an ended or expired activation reaches no one.
+     *
+     * @return void
+     */
+    public function testARoleReachesTheHoldersOfItsLiveActivations(): void
+    {
+        $role  = Role::query()->create(['name' => 'responder']);
+        $below = Role::query()->create(['name' => 'junior', 'parent_id' => $role->id]);
+
+        self::activate(self::user('one'), $role);
+        self::activate(self::user('two'), $below, ['tenant_type' => 'tenant', 'tenant_id' => 'a']);
+        self::activate(self::user('ended'), $role, ['ended_at' => Carbon::now()]);
+        self::activate(self::user('expired'), $role, ['expires_at' => Carbon::now()]);
+
+        self::assertSame(['one', 'two'], self::ids(AffectedHolders::none()->ofRoles([$role->id])->holders()));
+        self::assertSame(['two'], self::ids(AffectedHolders::none()->ofRoles([$below->id])->holders()));
     }
 
     /**
@@ -119,7 +141,10 @@ final class AffectedHoldersTest extends TestCase
 
         self::assertSame(DependencyPhase::HOLDERS, $failures[0]);
         self::assertSame(
-            ['roles', 'authorizable_roles', 'authorizable_permissions', 'role_permissions', 'authorizable_policies', 'authorizable_boundaries', 'resource_policies'],
+            [
+                'roles', 'authorizable_roles', 'break_glass_activations', 'authorizable_permissions', 'role_permissions', 'authorizable_policies',
+                'authorizable_boundaries', 'resource_policies',
+            ],
             $failures[1],
         );
         self::assertSame('The rows of [roles] a delegated decision read changed before the write.', $failures[2] ?? null);
@@ -525,10 +550,11 @@ final class AffectedHoldersTest extends TestCase
         DB::disableQueryLog();
 
         self::assertSame(0, $queries);
-        self::assertCount(4, $reads);
+        self::assertCount(5, $reads);
         self::assertStringEndsWith('limit 2', $reads[0]);
         self::assertStringEndsWith('limit 2', $reads[1]);
         self::assertStringEndsWith('limit 2', $reads[3]);
+        self::assertStringEndsWith('limit 2', $reads[4]);
 
         foreach ([0, -1] as $limit) {
             config(['authorization.administration.max_impact' => $limit]);

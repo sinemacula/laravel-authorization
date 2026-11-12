@@ -35,6 +35,28 @@ final class SettingCatalogueTest extends TestCase
     }
 
     /**
+     * The break-glass settings show their switches and whole numbers, and keep
+     * the roles and the justification codes opaque; the table is a table.
+     *
+     * @return void
+     */
+    public function testTheBreakGlassSettingsHaveTheirKinds(): void
+    {
+        self::assertSame(
+            ['table', 'boolean', 'integer', 'opaque', 'opaque', 'boolean', 'integer'],
+            \array_map(SettingCatalogue::kindOf(...), [
+                'authorization.tables.break_glass',
+                'authorization.break_glass.enabled',
+                'authorization.break_glass.max_minutes',
+                'authorization.break_glass.roles',
+                'authorization.break_glass.justifications',
+                'authorization.break_glass.notes',
+                'authorization.break_glass.note_max_length',
+            ]),
+        );
+    }
+
+    /**
      * A setting the package does not define is opaque.
      *
      * @return void

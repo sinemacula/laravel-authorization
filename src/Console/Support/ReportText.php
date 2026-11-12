@@ -216,7 +216,7 @@ final class ReportText
     /**
      * Return the lines of the tables: the prefix of their default names, then
      * the name each table takes, and whether it was set explicitly or is the
-     * key's own with the prefix before it.
+     * table's default with the prefix before it.
      *
      * @param  array{prefix: string|null, names: list<array{key: string, name: string|null, explicit: bool}>}  $tables
      * @return list<string>

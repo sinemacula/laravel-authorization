@@ -468,6 +468,25 @@ final class InvalidationTest extends TestCase
     }
 
     /**
+     * The grantees a write names, as a change to a break-glass activation names
+     * its grantees, bump their own versions, first, each once beside the
+     * events' keys.
+     *
+     * @return void
+     */
+    public function testTheGranteesAWriteNamesBumpTheirOwnVersions(): void
+    {
+        $versions = $this->versions();
+        $user     = new Reference('user', 'user-1');
+        $other    = new Reference('user', 'user-2');
+        $event    = new RoleAssigned(Operation::begin(), $user, new Reference('role', 'role-1'), 'editor', GrantScope::platform(), null);
+
+        self::assertSame([$versions->granteeKey($user), $versions->granteeKey($other)], Invalidation::keys($versions, [], [$user, $other, $user]));
+        self::assertSame([$versions->granteeKey($other), $versions->granteeKey($user)], Invalidation::keys($versions, [$event], [$other]));
+        self::assertSame([], Invalidation::keys($versions, []));
+    }
+
+    /**
      * Return an identity that holds the right to manage guardrails
      * platform-wide.
      *

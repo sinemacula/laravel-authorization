@@ -47,6 +47,7 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Diagnostics\ContainerState;
 use SineMacula\Laravel\Authorization\Diagnostics\DiagnosticMode;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\Origin;
@@ -237,6 +238,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             'authorization',
             AuthorizationManager::class,
             Previewing::class,
+            BreakGlassActivations::class,
         ];
 
         foreach ($abstracts as $abstract) {
@@ -1245,6 +1247,36 @@ final class AuthorizationServiceProviderTest extends TestCase
         $cache->rememberPermissions($grantee, $resolve);
 
         self::assertSame(4, $resolutions);
+    }
+
+    /**
+     * The bound resolution cache keeps an instance read as an identity apart
+     * from the same grantee read as a subject.
+     *
+     * @return void
+     */
+    public function testTheResolutionCacheKeepsAnIdentityApart(): void
+    {
+        $app         = $this->app;
+        $resolutions = 0;
+        $resolve     = static function () use (&$resolutions): Resolution {
+            $resolutions++;
+
+            return new Resolution(['posts:read']);
+        };
+
+        self::assertNotNull($app);
+
+        $identity = new Reference('user', 'user-1');
+
+        BreakGlassActivations::markIdentity($identity);
+
+        $cache = $app->make(ResolutionCache::class);
+
+        $cache->rememberPermissions(new Reference('user', 'user-1'), $resolve);
+        $cache->rememberPermissions($identity, $resolve);
+
+        self::assertSame(2, $resolutions);
     }
 
     /**

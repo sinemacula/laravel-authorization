@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Administration;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\AuthorityRows;
@@ -23,6 +24,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -44,16 +46,16 @@ use Tests\TestCase;
 #[CoversClass(AuthorityRows::class)]
 final class AuthorityRowsTest extends TestCase
 {
-    use RecordsRowLocks;
+    use ActivatesBreakGlass, RecordsRowLocks;
 
     /** @var list<string> The grant tables, in the order a grantee's rows are locked. */
-    private const array GRANTS = ['authorizable_roles', 'authorizable_permissions', 'authorizable_policies', 'authorizable_boundaries'];
+    private const array GRANTS = ['authorizable_roles', 'break_glass_activations', 'authorizable_permissions', 'authorizable_policies', 'authorizable_boundaries'];
 
     /**
      * A grantee's grant rows are locked table by table, then the roles they
-     * hold with the chain above, the permissions those carry and the policies
-     * attached to them, then every permission and policy named, each once and
-     * sorted.
+     * hold, by a grant or a live break-glass activation, with the chain above,
+     * the permissions those carry and the policies attached to them, then every
+     * permission and policy named, each once and sorted.
      *
      * @return void
      *
@@ -68,8 +70,11 @@ final class AuthorityRowsTest extends TestCase
         $edit     = Permission::query()->create(['name' => 'posts:edit']);
         $policy   = Policy::query()->create(['name' => 'readers', 'document' => ['statements' => []]]);
         $boundary = Policy::query()->create(['name' => 'bound', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['*']]]]]);
+        $active   = Role::query()->create(['name' => 'responder']);
 
         self::grants()->grantRole($user, $child);
+        self::activate($user, $active);
+        self::activate($user, Role::query()->create(['name' => 'ended']), ['ended_at' => Carbon::now()]);
         self::grants()->grantPermission($user, $edit);
         self::roles()->grantPermission($parent, $read);
         self::grants()->attachPolicy($parent, $policy);
@@ -85,12 +90,15 @@ final class AuthorityRowsTest extends TestCase
             [...self::GRANTS, 'roles', 'role_permissions', 'authorizable_policies', 'permissions', 'policies'],
             \array_column($locked, 0),
         );
+        $held = self::sorted([$parent->getKey(), $child->getKey(), $active->getKey()]);
+
         self::assertSame([StubIdentity::class, 'user'], $locked[0][1]);
-        self::assertSame(self::sorted([$parent->getKey(), $child->getKey()]), $locked[4][1]);
-        self::assertSame(self::sorted([$parent->getKey(), $child->getKey()]), $locked[5][1]);
-        self::assertSame([$parent->getMorphClass(), ...self::sorted([$parent->getKey(), $child->getKey()])], $locked[6][1]);
-        self::assertSame(self::sorted([$read->getKey(), $edit->getKey()]), $locked[7][1]);
-        self::assertSame(self::sorted([$policy->getKey(), $boundary->getKey()]), $locked[8][1]);
+        self::assertSame([StubIdentity::class, 'user'], \array_slice($locked[1][1], 0, 2));
+        self::assertSame($held, $locked[5][1]);
+        self::assertSame($held, $locked[6][1]);
+        self::assertSame([$parent->getMorphClass(), ...$held], $locked[7][1]);
+        self::assertSame(self::sorted([$read->getKey(), $edit->getKey()]), $locked[8][1]);
+        self::assertSame(self::sorted([$policy->getKey(), $boundary->getKey()]), $locked[9][1]);
     }
 
     /**

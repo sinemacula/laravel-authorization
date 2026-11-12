@@ -46,6 +46,24 @@ final class ExactReferencesTest extends TestCase
     }
 
     /**
+     * The reference columns are the tenant, the grantee, the resource, an
+     * inline policy's owner, who made a grant, who ended a break-glass
+     * activation, and the application.
+     *
+     * @return void
+     */
+    public function testListsEveryReferenceColumn(): void
+    {
+        self::assertSame(
+            [
+                'tenant_type', 'tenant_id', 'authorizable_type', 'authorizable_id', 'resource_type', 'resource_id', 'owner_type', 'owner_id', 'granted_by_type',
+                'granted_by_id', 'ended_by_type', 'ended_by_id', 'application',
+            ],
+            ExactReferences::COLUMNS,
+        );
+    }
+
+    /**
      * The other databases already compare the columns' exact bytes, so no
      * column is changed there.
      *

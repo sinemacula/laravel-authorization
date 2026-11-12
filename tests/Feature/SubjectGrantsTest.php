@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
@@ -14,6 +15,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\SuspendableIdentity;
@@ -32,6 +34,8 @@ use Tests\TestCase;
 #[CoversClass(SubjectGrants::class)]
 final class SubjectGrantsTest extends TestCase
 {
+    use ActivatesBreakGlass;
+
     /**
      * A role or permission held by the principal or by its identity counts; one
      * held by neither does not.
@@ -303,5 +307,37 @@ final class SubjectGrantsTest extends TestCase
         self::assertCount(1, $denied);
         self::assertSame([1 => $deny], $denied[0]->statements);
         self::assertSame(['mixed', 1, 'key', 'posts:*'], [$denied[0]->name, $denied[0]->version, $denied[0]->id, $denied[0]->resource]);
+    }
+
+    /**
+     * The identity behind a principal is marked as one once read, so none of
+     * its break-glass activations reaches the principal, while the principal's
+     * own does; a subject that is its own identity is never marked.
+     *
+     * @return void
+     */
+    public function testAnIdentitysActivationsNeverReachThePrincipal(): void
+    {
+        $principal = SuspendableIdentity::create(['id' => 'account-1']);
+        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $subject   = new Subject($principal, $identity);
+
+        self::activate($identity, self::emergencyRole('admin:read', 'staff'));
+        self::activate($principal, self::emergencyRole('posts:edit', 'editor'));
+
+        self::assertFalse(BreakGlassActivations::isIdentity($identity));
+        self::assertFalse(SubjectGrants::isInactive($subject));
+        self::assertTrue(BreakGlassActivations::isIdentity($identity));
+        self::assertFalse(BreakGlassActivations::isIdentity($principal));
+        self::assertFalse(SubjectGrants::holdsRole($subject, 'staff'));
+        self::assertFalse(SubjectGrants::holdsPermission($subject, 'admin:read'));
+        self::assertTrue(SubjectGrants::holdsRole($subject, 'editor'));
+        self::assertTrue(SubjectGrants::holdsPermission($subject, 'posts:edit'));
+
+        $own = new Subject($principal, $principal);
+
+        self::assertTrue(SubjectGrants::holdsRole($own, 'editor'));
+        self::assertNull(SubjectGrants::grantingIdentity($own));
+        self::assertFalse(BreakGlassActivations::isIdentity($principal));
     }
 }

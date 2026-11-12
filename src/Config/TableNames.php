@@ -11,13 +11,14 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * Read the name of a package table, as `authorization.tables` names it at run
  * time.
  *
- * A table the block leaves out takes its key as its name, as the config file
- * has it. A name left at its default, the key's own, gets `tables.prefix` put
- * before it; a name set explicitly, one that differs from the key's own, is
- * used as it is written. Whether a name was set explicitly is told by its value
- * alone, as a merged or cached configuration no longer says where a value came
- * from: a name set to the key's own, in the environment or the published file,
- * is the default, and is prefixed.
+ * A table the block leaves out takes its default name, as the config file has
+ * it: the key's own, but for `break_glass`, whose default is
+ * `break_glass_activations` (see `DEFAULTS`). A name left at its default gets
+ * `tables.prefix` put before it; a name set explicitly, one that differs from
+ * the default, is used as it is written. Whether a name was set explicitly is
+ * told by its value alone, as a merged or cached configuration no longer says
+ * where a value came from: a name set to the default, in the environment or the
+ * published file, is the default, and is prefixed.
  *
  * A block that is not an array, a name that is not a non-empty string, or a
  * prefix that is not a string is refused with
@@ -42,9 +43,12 @@ final class TableNames
     /** @var string The key of the prefix in the block. */
     public const string PREFIX = 'prefix';
 
+    /** @var array<string, string> The default name of each table whose default is not its key's own. */
+    public const array DEFAULTS = ['break_glass' => 'break_glass_activations'];
+
     /**
      * Return the name of the table under the key: the name the configuration
-     * sets explicitly, else the key itself with the prefix before it.
+     * sets explicitly, else the table's default name with the prefix before it.
      *
      * @param  string  $key
      * @param  \Illuminate\Contracts\Config\Repository|null  $config
@@ -55,7 +59,7 @@ final class TableNames
     public static function get(string $key, ?Repository $config = null): string
     {
         $tables = ConfigValue::block('tables', $config);
-        $name   = ConfigBlock::entry($tables, $key, $key);
+        $name   = ConfigBlock::entry($tables, $key, self::defaultName($key));
 
         if (!\is_string($name) || $name === '') {
             throw new InvalidAuthorizationConfigException(ConfigValue::ROOT . ".tables.{$key}", 'expected a table name, got ' . ConfigValidator::describe($name) . '.');
@@ -100,8 +104,20 @@ final class TableNames
     }
 
     /**
-     * Determine whether the name set under the key is the table's default, the
-     * key's own name, and so takes the prefix, rather than a name set
+     * Return the name the table under the key takes by default, before the
+     * prefix: the key's own, unless `DEFAULTS` gives it another.
+     *
+     * @param  string  $key
+     * @return string
+     */
+    public static function defaultName(string $key): string
+    {
+        return self::DEFAULTS[$key] ?? $key;
+    }
+
+    /**
+     * Determine whether the name set under the key is the table's default name
+     * (see `defaultName()`), and so takes the prefix, rather than a name set
      * explicitly.
      *
      * @param  string  $key
@@ -110,7 +126,7 @@ final class TableNames
      */
     public static function isDefault(string $key, mixed $name): bool
     {
-        return $name === $key;
+        return $name === self::defaultName($key);
     }
 
     /**

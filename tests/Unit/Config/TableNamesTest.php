@@ -14,10 +14,10 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 
 /**
  * Unit tests for reading a package table's name at run time: a name left out is
- * the key's own, a name left at its default takes the prefix while one set
- * explicitly is used as written, and a name, prefix or block changed to one
- * that cannot name a table is refused, never read as the package's name for the
- * table.
+ * its default, the key's own but for the break-glass table's, a name left at
+ * its default takes the prefix while one set explicitly is used as written, and
+ * a name, prefix or block changed to one that cannot name a table is refused,
+ * never read as the package's name for the table.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -119,6 +119,35 @@ final class TableNamesTest extends TestCase
         self::assertSame('', TableNames::prefix(new Repository(['authorization' => ['tables' => ['roles' => 'authz_roles']]])));
         self::assertSame('', TableNames::prefix(new Repository(['authorization' => []])));
         self::assertSame('', TableNames::prefix(new Repository));
+    }
+
+    /**
+     * The break-glass table's default name is `break_glass_activations`, not
+     * its key's own: left out, or set to it, it takes the prefix, and the key's
+     * own name is a name set explicitly, used as written.
+     *
+     * @return void
+     */
+    public function testTheBreakGlassTableHasADefaultOfItsOwn(): void
+    {
+        self::assertSame(['break_glass' => 'break_glass_activations'], TableNames::DEFAULTS);
+        self::assertSame('break_glass_activations', TableNames::defaultName('break_glass'));
+        self::assertSame('roles', TableNames::defaultName('roles'));
+        self::assertSame('break_glass_activations', TableNames::get('break_glass', new Repository));
+        self::assertTrue(TableNames::isDefault('break_glass', 'break_glass_activations'));
+        self::assertFalse(TableNames::isDefault('break_glass', 'break_glass'));
+
+        $config = new Repository(['authorization' => ['tables' => ['prefix' => 'app_']]]);
+
+        self::assertSame('app_break_glass_activations', TableNames::get('break_glass', $config));
+
+        $config->set('authorization.tables.break_glass', 'break_glass_activations');
+
+        self::assertSame('app_break_glass_activations', TableNames::get('break_glass', $config));
+
+        $config->set('authorization.tables.break_glass', 'break_glass');
+
+        self::assertSame('break_glass', TableNames::get('break_glass', $config));
     }
 
     /**

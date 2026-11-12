@@ -340,8 +340,8 @@ final class DependencyPinsTest extends TestCase
 
     /**
      * The actor's authority is locked once, from its principal's and identity's
-     * grant rows on, with the guardrails of the request's tenant and the
-     * operation type's resource policies.
+     * grant rows and live break-glass activations on, with the guardrails of
+     * the request's tenant and the operation type's resource policies.
      *
      * @return void
      *
@@ -362,12 +362,13 @@ final class DependencyPinsTest extends TestCase
         $locked = $locks->getArrayCopy();
 
         self::assertSame(
-            ['authorizable_roles', 'authorizable_permissions', 'authorizable_policies', 'authorizable_boundaries', 'guardrails', 'resource_policies'],
+            ['authorizable_roles', 'break_glass_activations', 'authorizable_permissions', 'authorizable_policies', 'authorizable_boundaries', 'guardrails', 'resource_policies'],
             \array_column($locked, 0),
         );
         self::assertSame([StubIdentity::class, 'admin', StubIdentity::class, 'identity'], $locked[0][1]);
-        self::assertSame([$tenant->getMorphClass(), 'team'], $locked[4][1]);
-        self::assertSame([OperationResource::TYPE], $locked[5][1]);
+        self::assertSame($locked[0][1], \array_slice($locked[1][1], 0, 4));
+        self::assertSame([$tenant->getMorphClass(), 'team'], $locked[5][1]);
+        self::assertSame([OperationResource::TYPE], $locked[6][1]);
         self::assertSame(DependencyPhase::ACTOR, $pins->phase());
     }
 
