@@ -326,6 +326,8 @@ final class RefusingStateTest extends TestCase
             'a prune'                                => static fn () => $pruner->prune(100),
             'an identity\'s grant scope'             => static fn () => $scopes->forIdentity(new Reference('stub_identity', 'user-1'), new Reference('stub_tenant', 't1')),
             'a grant in a tenant'                    => static fn () => $scopes->hasGrantIn($user, new Reference('stub_tenant', 't1')),
+            'the grantees reaching a tenant'         => static fn () => $scopes->granteesReaching(new Reference('stub_tenant', 't1')),
+            'the grantees within a tenant'           => static fn () => $scopes->granteesWithin(new Reference('stub_tenant', 't1')),
         ]);
 
         $this->assertNothingRead();

@@ -57,12 +57,13 @@ interface TenantTree
      * the rows of a subtree, so there it must be a query on the connection of
      * the models it scopes, and one on any other is refused as
      * `subtree_connection`. The grant scope query
-     * (`GrantScopeQuery::forIdentity()`) nests it in its query of the grant
-     * tables, so there it must be a query on the package's connection
-     * (`authorization.connection`), and one on any other is a tree that cannot
-     * be read, answered `unknown` unless a platform-wide grant proves
-     * `outside`. A tree kept on the connection of both the scoped models and
-     * the package's tables serves both.
+     * (`GrantScopeQuery::forIdentity()` and `granteesWithin()`) nests it in its
+     * query of the grant tables, so there it must be a query on the package's
+     * connection (`authorization.connection`); one on any other is a tree that
+     * cannot be read, which `forIdentity()` answers `unknown` unless a
+     * platform-wide grant proves `outside`, and `granteesWithin()` refuses with
+     * an `UnexpectedValueException`. A tree kept on the connection of both the
+     * scoped models and the package's tables serves both.
      *
      * Every row carries both columns, typed, mixed types included: ids that
      * could clash across types are told apart by their type. A tree whose

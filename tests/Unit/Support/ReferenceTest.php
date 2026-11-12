@@ -40,6 +40,33 @@ final class ReferenceTest extends TestCase
     }
 
     /**
+     * References are sorted by type and then key, byte by byte: an upper-case
+     * letter before a lower-case one, and a key by its digits, never by its
+     * number.
+     *
+     * @return void
+     */
+    public function testSortsReferencesByTypeThenKeyByteByByte(): void
+    {
+        $references = [
+            'second' => new Reference('b', '1'),
+            'nine'   => new Reference('a', '9'),
+            'upper'  => new Reference('B', '2'),
+            'ten'    => new Reference('a', '10'),
+            'letter' => new Reference('a', 'A'),
+        ];
+
+        self::assertSame([
+            $references['upper'],
+            $references['ten'],
+            $references['nine'],
+            $references['letter'],
+            $references['second'],
+        ], Reference::sorted($references));
+        self::assertSame([], Reference::sorted([]));
+    }
+
+    /**
      * The reference answers its type and key as a model does, so the resolution
      * cache keys it as the grantee it names.
      *

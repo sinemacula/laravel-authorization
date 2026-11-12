@@ -6,12 +6,16 @@ namespace Tests\Feature\Services;
 
 use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
@@ -21,11 +25,13 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
+use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\RefusesThePackage;
+use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubMachine;
@@ -36,13 +42,14 @@ use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\Fixtures\GrantScope\UnreadableTenantTree;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\SubtreeQueryTree;
+use Tests\Fixtures\TenantTrees\ClashingTenants;
 use Tests\TestCase;
 
 /**
- * Feature tests for the grant scope query (AUTHZ-14.2) and the principal
- * presence helper (AUTHZ-13.8), over a closure-table tree of two organisations,
- * the first with two accounts and a team below the first account, and over the
- * flat tree.
+ * Feature tests for the grant scope query (AUTHZ-14.2), the principal presence
+ * helper (AUTHZ-13.8) and the lists of the grantees reaching a tenant or within
+ * it (N131), over a closure-table tree of two organisations, the first with two
+ * accounts and a team below the first account, and over the flat tree.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,7 +61,7 @@ use Tests\TestCase;
 #[CoversClass(GrantScopeQuery::class)]
 final class GrantScopeQueryTest extends TestCase
 {
-    use RefusesThePackage;
+    use RefusesThePackage, UsesAnAuthorizationConnection;
 
     /** @var string The tenants' morph type. */
     private const string TENANT = 'tenant';
@@ -670,14 +677,14 @@ final class GrantScopeQueryTest extends TestCase
     }
 
     /**
-     * Once the package refuses, both questions refuse by their own guard,
-     * before the tenant is read, a seam resolved or a grant queried.
+     * Once the package refuses, every question refuses by its own guard, before
+     * the tenant is read, a seam resolved or a grant queried.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testBothQuestionsRefuseOnceThePackageRefuses(): void
+    public function testEveryQuestionRefusesOnceThePackageRefuses(): void
     {
         $user     = self::identity('user-1');
         $resolved = [];
@@ -688,11 +695,457 @@ final class GrantScopeQueryTest extends TestCase
         });
 
         $this->assertEachRefused([
-            'forIdentity' => static fn () => self::scopes()->forIdentity(new Reference('stub_identity', 'user-1'), self::tenant('t1')),
-            'hasGrantIn'  => static fn () => self::scopes()->hasGrantIn($user, self::tenant('t1')),
+            'forIdentity'      => static fn () => self::scopes()->forIdentity(new Reference('stub_identity', 'user-1'), self::tenant('t1')),
+            'hasGrantIn'       => static fn () => self::scopes()->hasGrantIn($user, self::tenant('t1')),
+            'granteesReaching' => static fn () => self::scopes()->granteesReaching(self::tenant('t1')),
+            'granteesWithin'   => static fn () => self::scopes()->granteesWithin(self::tenant('t1')),
         ]);
 
         self::assertSame([], \array_values(\array_intersect($resolved, [SubjectResolver::class, IdentityDirectory::class, TenantTree::class])));
+    }
+
+    /**
+     * Every grantee holding a grant of each kind that reaches the tenant is
+     * listed: one made in the tenant, for it alone or reaching below it, one
+     * made in an ancestor that reaches below it, and a platform-wide one; never
+     * one made in an ancestor for itself alone, below the tenant, in a sibling
+     * or in another organisation.
+     *
+     * @param  string  $kind
+     * @return void
+     */
+    #[DataProvider('kindProvider')]
+    public function testTheGranteesReachingTheTenantAreListed(string $kind): void
+    {
+        $this->tree();
+        $this->holders($kind);
+
+        self::assertEquals(self::references('c-ancestor-subtree', 'd-tenant-node', 'e-platform', 'h-tenant-subtree'), self::scopes()->granteesReaching(self::tenant('acct1')));
+        self::assertEquals(self::references('a-below', 'c-ancestor-subtree', 'e-platform', 'h-tenant-subtree'), self::scopes()->granteesReaching(self::tenant('team1')));
+        self::assertEquals(self::references('e-platform', 'g-other'), self::scopes()->granteesReaching(self::tenant('org2')));
+    }
+
+    /**
+     * Every grantee holding a grant of each kind made in the tenant or below it
+     * is listed, whether or not the grant reaches below its own tenant; never
+     * one made in an ancestor, a sibling, another organisation or the platform.
+     *
+     * @param  string  $kind
+     * @return void
+     */
+    #[DataProvider('kindProvider')]
+    public function testTheGranteesWithinTheTenantAreListed(string $kind): void
+    {
+        $this->tree();
+        $this->holders($kind);
+
+        self::assertEquals(self::references('a-below', 'd-tenant-node', 'h-tenant-subtree'), self::scopes()->granteesWithin(self::tenant('acct1')));
+        self::assertEquals(self::references('a-below'), self::scopes()->granteesWithin(self::tenant('team1')));
+        self::assertEquals(
+            self::references('a-below', 'b-ancestor-node', 'c-ancestor-subtree', 'd-tenant-node', 'f-sibling', 'h-tenant-subtree'),
+            self::scopes()->granteesWithin(self::tenant('org1')),
+        );
+    }
+
+    /**
+     * On the flat tree a tenant has no ancestor and nothing below it, so only
+     * the grants made in the tenant, and the platform-wide ones reaching it,
+     * are listed.
+     *
+     * @return void
+     */
+    public function testTheFlatTreeListsTheTenantsOwnGrantees(): void
+    {
+        $this->app?->instance(TenantTree::class, new FlatTenantTree);
+
+        self::grant(self::identity('node'), 'role', self::tenant('acct1'), false);
+        self::grant(self::identity('subtree'), 'permission', self::tenant('acct1'));
+        self::grant(self::identity('elsewhere'), 'policy', self::tenant('org1'));
+        self::grant(self::identity('platform'), 'role', null);
+
+        self::assertEquals(self::references('node', 'platform', 'subtree'), self::scopes()->granteesReaching(self::tenant('acct1')));
+        self::assertEquals(self::references('node', 'subtree'), self::scopes()->granteesWithin(self::tenant('acct1')));
+    }
+
+    /**
+     * An expired grant, a row naming half a tenant, which the package never
+     * writes, and an inline policy attached to a grantee it does not belong to
+     * are no grants, so their grantees are never listed.
+     *
+     * @return void
+     */
+    public function testNoGranteeIsListedForWhatIsNoGrant(): void
+    {
+        $this->tree();
+
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        self::grant(self::identity('expiring'), 'permission', self::tenant('acct1'), expiresAt: Carbon::parse('2026-07-01 13:00:00'));
+
+        self::half('type-only', self::TENANT, null);
+        self::half('key-only', null, 'acct1');
+        self::half('key-only-below', null, 'team1');
+
+        $inline = Policy::create(['name' => 'theirs', 'owner_type' => 'stub', 'owner_id' => 'someone', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['*']]]]]);
+        $stray  = self::identity('stray');
+
+        foreach ([null, 'acct1'] as $tenant) {
+            // A row the write paths refuse, written past them.
+            DB::table('authorizable_policies')->insert([
+                'policy_id'         => $inline->getKey(),
+                'authorizable_type' => $stray->getMorphClass(),
+                'authorizable_id'   => $stray->getKey(),
+                'tenant_type'       => $tenant === null ? null : self::TENANT,
+                'tenant_id'         => $tenant,
+            ]);
+        }
+
+        self::assertEquals(self::references('expiring'), self::scopes()->granteesReaching(self::tenant('acct1')));
+        self::assertEquals(self::references('expiring'), self::scopes()->granteesWithin(self::tenant('org1')));
+
+        Carbon::setTestNow('2026-07-01 13:00:01');
+
+        self::assertSame([], self::scopes()->granteesReaching(self::tenant('acct1')));
+        self::assertSame([], self::scopes()->granteesWithin(self::tenant('org1')));
+
+        Carbon::setTestNow();
+
+        self::grant($stray, 'policy', self::tenant('acct1'));
+
+        self::assertEquals(self::references('stray'), self::scopes()->granteesReaching(self::tenant('acct1')));
+        self::assertEquals(self::references('stray'), self::scopes()->granteesWithin(self::tenant('acct1')));
+    }
+
+    /**
+     * A role a policy is attached to is never listed as a grantee, wherever the
+     * policy is attached: in the tenant, in an ancestor reaching below it, or
+     * platform-wide. Whoever holds the role is listed through their own grant
+     * of it.
+     *
+     * @return void
+     */
+    public function testARoleAPolicyIsAttachedToIsNeverListed(): void
+    {
+        $this->tree();
+
+        $role = Role::create(['name' => 'scoped']);
+
+        $role->attachPolicy(self::denying('in-tenant'), null, self::tenant('acct1'));
+        $role->attachPolicy(self::denying('in-ancestor'), null, self::tenant('org1'));
+        $role->attachPolicy(self::denying('on-platform'));
+
+        self::identity('person')->assignRole($role, null, self::tenant('acct1'));
+
+        self::assertEquals(self::references('person'), self::scopes()->granteesReaching(self::tenant('acct1')));
+        self::assertEquals(self::references('person'), self::scopes()->granteesWithin(self::tenant('org1')));
+        self::assertSame([], self::scopes()->granteesReaching(self::tenant('org2')));
+        self::assertSame([], self::scopes()->granteesWithin(self::tenant('acct2')));
+    }
+
+    /**
+     * In a tree of two tenant types whose ids clash, a tenant is told from
+     * another sharing its id by its type, both above and below it.
+     *
+     * @return void
+     */
+    public function testTenantsSharingAnIdUnderAnotherTypeAreToldApart(): void
+    {
+        $this->app?->instance(TenantTree::class, new ClosureTenantTree);
+
+        ClashingTenants::seed();
+
+        foreach (ClashingTenants::nodes() as [$node]) {
+            self::grant(self::identity('at-' . $node->type . '-' . $node->id), 'role', $node, $node->type !== 'team' || $node->id !== '7');
+        }
+
+        self::assertEquals(self::references('at-org-1', 'at-team-2', 'at-team-7'), self::scopes()->granteesReaching(new Reference('team', '7')));
+        self::assertEquals(self::references('at-org-1', 'at-team-1'), self::scopes()->granteesReaching(new Reference('team', '1')));
+        self::assertEquals(self::references('at-org-7', 'at-team-8'), self::scopes()->granteesReaching(new Reference('team', '8')));
+        self::assertEquals(
+            self::references('at-account-3', 'at-org-1', 'at-team-1', 'at-team-2', 'at-team-7'),
+            self::scopes()->granteesWithin(new Reference('org', '1')),
+        );
+        self::assertEquals(self::references('at-team-1'), self::scopes()->granteesWithin(new Reference('team', '1')));
+        self::assertEquals(self::references('at-org-7', 'at-team-8'), self::scopes()->granteesWithin(new Reference('org', '7')));
+    }
+
+    /**
+     * Principals and identities are listed as their rows store them, each once
+     * however many grants it holds, two sharing a key under different types
+     * apart, by type and then key, byte by byte: never by number, nor folding
+     * case. The stubs' types are their class names, the machine's before the
+     * second identity's.
+     *
+     * @return void
+     */
+    public function testEachGranteeIsListedOnceByTypeThenKey(): void
+    {
+        $this->tree();
+
+        $second  = new StubSecondIdentity(['id' => 'shared']);
+        $machine = new StubMachine(['id' => 'machine']);
+
+        $second->save();
+        $machine->save();
+
+        $identities = \array_map(self::identity(...), ['b', 'shared', 'a', 'C', '9', '10']);
+
+        foreach ($identities as $identity) {
+            self::grant($identity, 'policy', self::tenant('acct1'));
+        }
+
+        self::grant($identities[1], 'role', self::tenant('acct1'), false);
+        self::grant($identities[1], 'permission', null);
+        self::grant($second, 'permission', self::tenant('team1'));
+        self::grant($second, 'role', self::tenant('org1'));
+        self::grant($machine, 'role', self::tenant('acct1'), false);
+
+        $expected = [...self::references('10', '9', 'C', 'a', 'b', 'shared'), Reference::of($machine), Reference::of($second)];
+
+        self::assertEquals($expected, self::scopes()->granteesReaching(self::tenant('acct1')));
+        self::assertEquals($expected, self::scopes()->granteesWithin(self::tenant('org1')));
+    }
+
+    /**
+     * Given an application, only the grants that hold in it count, those made
+     * for every application included; without one, every grant counts.
+     *
+     * @return void
+     */
+    public function testTheApplicationFiltersTheGrantees(): void
+    {
+        $this->tree();
+
+        self::grant(self::identity('admin'), 'role', self::tenant('org1'), application: 'admin');
+        self::grant(self::identity('every'), 'permission', self::tenant('acct1'));
+        self::grant(self::identity('mobile'), 'policy', self::tenant('acct1'), application: 'mobile');
+
+        self::assertEquals(self::references('admin', 'every'), self::scopes()->granteesReaching(self::tenant('acct1'), 'admin'));
+        self::assertEquals(self::references('every', 'mobile'), self::scopes()->granteesReaching(self::tenant('acct1'), 'mobile'));
+        self::assertEquals(self::references('admin', 'every', 'mobile'), self::scopes()->granteesReaching(self::tenant('acct1')));
+        self::assertEquals(self::references('admin', 'every'), self::scopes()->granteesWithin(self::tenant('org1'), 'admin'));
+        self::assertEquals(self::references('every', 'mobile'), self::scopes()->granteesWithin(self::tenant('acct1'), 'mobile'));
+        self::assertEquals(self::references('every'), self::scopes()->granteesWithin(self::tenant('acct1'), 'admin'));
+        self::assertEquals(self::references('admin', 'every', 'mobile'), self::scopes()->granteesWithin(self::tenant('org1')));
+    }
+
+    /**
+     * The tenant may be named by a model or a reference alike, either listing
+     * the grantees of the grants its reference names.
+     *
+     * @return void
+     */
+    public function testATenantModelListsAsItsReference(): void
+    {
+        $this->tree();
+
+        $tenant = StubTenant::query()->create(['id' => 'acct1', 'name' => 'acct1']);
+
+        ClosureTenantTree::add(Reference::of($tenant));
+
+        self::grant(self::identity('holder'), 'role', Reference::of($tenant));
+
+        self::assertEquals(self::references('holder'), self::scopes()->granteesReaching($tenant));
+        self::assertEquals(self::references('holder'), self::scopes()->granteesWithin($tenant));
+        self::assertEquals(self::references('holder'), self::scopes()->granteesWithin(Reference::of($tenant)));
+    }
+
+    /**
+     * Each list reads the grants in one query, whatever the number of grants
+     * and grantees: the subtree is nested in it, and only the ancestors the
+     * grantees reaching the tenant are read through cost the tree's one read.
+     *
+     * @return void
+     */
+    public function testEachListReadsTheGrantsInOneQuery(): void
+    {
+        $this->tree();
+
+        $reaching = $this->queriesOf(static fn (): array => self::scopes()->granteesReaching(self::tenant('team1')));
+        $within   = $this->queriesOf(static fn (): array => self::scopes()->granteesWithin(self::tenant('org1')));
+
+        self::assertSame([[], []], [$reaching['answer'], $within['answer']]);
+        self::assertCount(2, $reaching['queries']);
+        self::assertCount(1, $within['queries']);
+
+        foreach (['b-one', 'c-two', 'd-three'] as $id) {
+            $this->holders('role', $id . '-');
+        }
+
+        self::assertCount(2, $this->queriesOf(static fn (): array => self::scopes()->granteesReaching(self::tenant('team1')))['queries']);
+        self::assertCount(1, $this->queriesOf(static fn (): array => self::scopes()->granteesWithin(self::tenant('org1')))['queries']);
+    }
+
+    /**
+     * A subtree moved under a new parent comes to be reached by the grants
+     * reaching that parent: listed by asking about the new parent, before the
+     * move or after it, or about the moved tenant once it has moved, which no
+     * longer lists those of its former ancestors. The grants made within the
+     * moved subtree keep their place.
+     *
+     * @return void
+     */
+    public function testAMovedSubtreeIsReachedByItsNewParentsGrantees(): void
+    {
+        $this->tree();
+        $this->holders('role');
+
+        self::grant(self::identity('i-new-parent-subtree'), 'permission', self::tenant('org2'));
+        self::grant(self::identity('j-new-parent-node'), 'policy', self::tenant('org2'), false);
+
+        $parent   = self::references('e-platform', 'g-other', 'i-new-parent-subtree', 'j-new-parent-node');
+        $reaching = self::references('d-tenant-node', 'e-platform', 'g-other', 'h-tenant-subtree', 'i-new-parent-subtree');
+        $below    = self::references('a-below', 'e-platform', 'g-other', 'h-tenant-subtree', 'i-new-parent-subtree');
+        $moved    = self::references('a-below', 'd-tenant-node', 'g-other', 'h-tenant-subtree', 'i-new-parent-subtree', 'j-new-parent-node');
+        $within   = self::scopes()->granteesWithin(self::tenant('acct1'));
+
+        self::assertEquals($parent, self::scopes()->granteesReaching(self::tenant('org2')));
+
+        self::move(self::tenant('acct1'), self::tenant('org2'));
+
+        self::assertEquals($parent, self::scopes()->granteesReaching(self::tenant('org2')));
+        self::assertEquals($reaching, self::scopes()->granteesReaching(self::tenant('acct1')));
+        self::assertEquals($below, self::scopes()->granteesReaching(self::tenant('team1')));
+        self::assertEquals($within, self::scopes()->granteesWithin(self::tenant('acct1')));
+        self::assertEquals($moved, self::scopes()->granteesWithin(self::tenant('org2')));
+    }
+
+    /**
+     * Inside a batch of checks, the tenant's ancestors are read afresh each
+     * time, so a move the tree was not told of is seen by the next list.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheAncestorsAreReadAfreshInsideABatch(): void
+    {
+        $this->tree();
+
+        self::grant(self::identity('old'), 'role', self::tenant('org1'));
+        self::grant(self::identity('new'), 'role', self::tenant('org2'));
+
+        $cache = ResolutionCache::instance();
+
+        self::assertNotNull($cache);
+
+        $lists = $cache->batch(static function (): array {
+            $lists = [self::scopes()->granteesReaching(self::tenant('acct1'))];
+
+            self::move(self::tenant('acct1'), self::tenant('org2'));
+
+            $lists[] = self::scopes()->granteesReaching(self::tenant('acct1'));
+
+            return $lists;
+        });
+
+        self::assertEquals([self::references('old'), self::references('new')], $lists);
+    }
+
+    /**
+     * A tree that throws is thrown, never listed as no grantee; a subtree on
+     * another connection than the package's is refused, while the ancestors are
+     * read as ever.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATreeThatCannotBeReadIsThrown(): void
+    {
+        $this->app?->instance(TenantTree::class, new UnreadableTenantTree);
+
+        $lists = [
+            'granteesReaching' => static fn (): array => self::scopes()->granteesReaching(self::tenant('acct1')),
+            'granteesWithin'   => static fn (): array => self::scopes()->granteesWithin(self::tenant('acct1')),
+        ];
+
+        foreach ($lists as $method => $list) {
+            try {
+                $list();
+
+                self::fail("{$method} listed through a tree that cannot be read.");
+            } catch (\RuntimeException $exception) {
+                self::assertSame(UnreadableTenantTree::MESSAGE, $exception->getMessage(), $method);
+            }
+        }
+
+        config()->set('database.connections.tenants', config('database.connections.' . DB::getDefaultConnection()));
+
+        $this->tree();
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static fn (Reference $tenant): Builder => DB::connection('tenants')->query()
+            ->selectRaw('? as tenant_type, ? as tenant_id', [$tenant->type, $tenant->id])));
+
+        self::grant(self::identity('holder'), 'role', self::tenant('org1'));
+
+        self::assertEquals(self::references('holder'), self::scopes()->granteesReaching(self::tenant('acct1')));
+
+        $this->expectException(\UnexpectedValueException::class);
+        $this->expectExceptionMessage('The tenant tree\'s subtree is not a query on the package\'s connection.');
+
+        self::scopes()->granteesWithin(self::tenant('acct1'));
+    }
+
+    /**
+     * A subtree query that builds but fails as the grant query runs is thrown,
+     * after only the grant query's own savepoint is rolled back, so the
+     * transaction the caller runs in stays usable.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASubtreeQueryThatFailsAsItRunsIsThrownAfterItsSavepoint(): void
+    {
+        $this->tree();
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static fn (Reference $tenant): Builder => DB::table('grant_scope_missing_closure')
+            ->select(['descendant_type as tenant_type', 'descendant_id as tenant_id'])
+            ->where('ancestor_type', $tenant->type)
+            ->where('ancestor_id', $tenant->id)));
+
+        self::grant(self::identity('holder'), 'role', self::tenant('acct1'));
+
+        $rolledBack = 0;
+
+        Event::listen(TransactionRolledBack::class, static function () use (&$rolledBack): void {
+            $rolledBack++;
+        });
+
+        DB::transaction(static function () use (&$rolledBack): void {
+            try {
+                self::scopes()->granteesWithin(self::tenant('acct1'));
+
+                self::fail('A subtree query that fails as it runs was listed.');
+            } catch (QueryException $exception) {
+                self::assertStringContainsString('grant_scope_missing_closure', $exception->getMessage());
+            }
+
+            self::assertSame(1, $rolledBack);
+            self::assertEquals(self::references('holder'), self::scopes()->granteesReaching(self::tenant('acct1')));
+        });
+    }
+
+    /**
+     * The grantees are read on the write connection, so a replica that lags
+     * never hides one, and on the package's connection, whatever the default.
+     *
+     * @return void
+     *
+     * @throws \LogicException
+     */
+    public function testTheGranteesAreReadOnThePackagesWriteConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        self::grant(self::identity('holder'), 'permission', self::tenant('acct1'));
+
+        $connection = self::authorizationConnection();
+
+        $connection->setReadPdo(static fn (): never => throw new \LogicException('The read connection was used.'));
+
+        self::assertSame(0, $connection->transactionLevel());
+        self::assertEquals(self::references('holder'), self::scopes()->granteesReaching(self::tenant('acct1')));
+        self::assertEquals(self::references('holder'), self::scopes()->granteesWithin(self::tenant('acct1')));
     }
 
     /**
@@ -714,9 +1167,133 @@ final class GrantScopeQueryTest extends TestCase
     }
 
     /**
+     * Grant each fixture grantee one grant of the kind, in an order other than
+     * that of their keys: below the tenant `acct1`, in its ancestor for itself
+     * alone and reaching below it, in the tenant for itself alone and reaching
+     * below it, at the platform, in a sibling and in another organisation.
+     *
+     * @param  string  $kind
+     * @param  string  $prefix
+     * @return void
+     */
+    private function holders(string $kind, string $prefix = ''): void
+    {
+        $holders = [
+            'h-tenant-subtree'   => [self::tenant('acct1'), true],
+            'g-other'            => [self::tenant('org2'), true],
+            'f-sibling'          => [self::tenant('acct2'), true],
+            'e-platform'         => [null, true],
+            'd-tenant-node'      => [self::tenant('acct1'), false],
+            'c-ancestor-subtree' => [self::tenant('org1'), true],
+            'b-ancestor-node'    => [self::tenant('org1'), false],
+            'a-below'            => [self::tenant('team1'), true],
+        ];
+
+        foreach ($holders as $id => [$tenant, $isSubtree]) {
+            self::grant(self::identity($prefix . $id), $kind, $tenant, $isSubtree);
+        }
+    }
+
+    /**
+     * Write a permission grant to a new stub identity naming half a tenant,
+     * past the write paths, which refuse it.
+     *
+     * @param  string  $id
+     * @param  string|null  $type
+     * @param  string|null  $key
+     * @return void
+     */
+    private static function half(string $id, ?string $type, ?string $key): void
+    {
+        $identity = self::identity($id);
+
+        DB::table('authorizable_permissions')->insert([
+            'permission_id'     => Permission::create(['name' => $id . ':read'])->getKey(),
+            'authorizable_type' => $identity->getMorphClass(),
+            'authorizable_id'   => $identity->getKey(),
+            'tenant_type'       => $type,
+            'tenant_id'         => $key,
+            'include_subtree'   => true,
+        ]);
+    }
+
+    /**
+     * Move the fixture tenant, and every tenant below it, under the new parent
+     * in the closure-table tree, without telling the package.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $parent
+     * @return void
+     */
+    private static function move(Reference $tenant, Reference $parent): void
+    {
+        $above = [$parent, ...(new ClosureTenantTree)->ancestors($parent)];
+        $below = DB::table(ClosureTenantTree::TABLE)
+            ->where('ancestor_type', $tenant->type)
+            ->where('ancestor_id', $tenant->id)
+            ->get(['descendant_type', 'descendant_id', 'depth']);
+
+        foreach ($below as $row) {
+            /** @var array{descendant_type: string, descendant_id: string, depth: int|string} $node */
+            $node  = (array) $row;
+            $depth = (int) $node['depth'];
+
+            DB::table(ClosureTenantTree::TABLE)
+                ->where('descendant_type', $node['descendant_type'])
+                ->where('descendant_id', $node['descendant_id'])
+                ->where('depth', '>', $depth)
+                ->delete();
+
+            foreach ($above as $offset => $ancestor) {
+                DB::table(ClosureTenantTree::TABLE)->insert([
+                    'ancestor_type'   => $ancestor->type,
+                    'ancestor_id'     => $ancestor->id,
+                    'descendant_type' => $node['descendant_type'],
+                    'descendant_id'   => $node['descendant_id'],
+                    'depth'           => $depth + $offset + 1,
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Return the references to the stub identities with the keys.
+     *
+     * @param  string  ...$ids
+     * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
+     */
+    private static function references(string ...$ids): array
+    {
+        return \array_values(\array_map(static fn (string $id): Reference => new Reference((new StubIdentity)->getMorphClass(), $id), $ids));
+    }
+
+    /**
+     * Run the callback, and return its answer with the queries it ran.
+     *
+     * @template TAnswer
+     *
+     * @param  \Closure(): TAnswer  $callback
+     * @return array{answer: TAnswer, queries: list<string>}
+     */
+    private function queriesOf(\Closure $callback): array
+    {
+        $queries = [];
+
+        DB::listen(static function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = $query->sql;
+        });
+
+        $answer = $callback();
+
+        $this->app?->make('events')->forget(QueryExecuted::class);
+
+        return ['answer' => $answer, 'queries' => $queries];
+    }
+
+    /**
      * Grant the grantee one grant of the kind, in the tenant or platform-wide.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity|\Tests\Feature\Stubs\StubSecondIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubIdentity|\Tests\Feature\Stubs\StubMachine|\Tests\Feature\Stubs\StubSecondIdentity  $grantee
      * @param  string  $kind
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $isSubtree
@@ -725,7 +1302,7 @@ final class GrantScopeQueryTest extends TestCase
      * @return void
      */
     private static function grant(
-        StubIdentity|StubSecondIdentity $grantee,
+        StubIdentity|StubMachine|StubSecondIdentity $grantee,
         string $kind,
         ?Reference $tenant,
         bool $isSubtree = true,
