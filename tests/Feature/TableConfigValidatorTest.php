@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Config\TableConfigValidator;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use Tests\Concerns\ReadsRefusedSettings;
 use Tests\Fixtures\Database\RecordingBlueprint;
@@ -48,6 +49,7 @@ final class TableConfigValidatorTest extends TestCase
         '2026_04_14_000010_create_guardrails_table',
         '2026_11_08_000001_add_access_review_indexes',
         '2026_11_09_000001_create_grant_usage_tables',
+        '2026_11_12_000001_create_break_glass_activations_table',
         '2026_11_12_000002_create_role_exclusions_table',
     ];
 
@@ -66,7 +68,7 @@ final class TableConfigValidatorTest extends TestCase
         self::assertSame(63, TableConfigValidator::IDENTIFIER_LENGTH);
         self::assertSame(
             ['roles', 'permissions', 'policies', 'role_permissions', 'authorizable_roles', 'authorizable_permissions', 'authorizable_policies', 'resource_policies',
-                'authorizable_boundaries', 'guardrails', 'grant_usage', 'usage_coverage', 'role_exclusions'],
+                'authorizable_boundaries', 'guardrails', 'grant_usage', 'usage_coverage', 'break_glass', 'role_exclusions'],
             \array_keys(TableConfigValidator::LENGTHS),
         );
     }
@@ -193,6 +195,8 @@ final class TableConfigValidatorTest extends TestCase
 
             self::assertContains($names['role_permissions'] . '_role_id_permission_id_primary', RecordingBlueprint::$names);
             self::assertContains($names['authorizable_permissions'] . '_permission_id_foreign', RecordingBlueprint::$names);
+            self::assertContains($names['break_glass'] . '_role_id_foreign', RecordingBlueprint::$names);
+            self::assertSame(TableConfigValidator::IDENTIFIER_LENGTH, \strlen($names['break_glass'] . '_role_id_foreign'));
             self::assertContains($names['role_exclusions'] . '_excluded_foreign', RecordingBlueprint::$names);
             self::assertSame(TableConfigValidator::IDENTIFIER_LENGTH, \strlen($names['role_exclusions'] . '_excluded_foreign'));
         } finally {
@@ -235,7 +239,34 @@ final class TableConfigValidatorTest extends TestCase
     }
 
     /**
-     * The block may set the prefix beside the thirteen tables, and a prefix
+     * The break-glass table's default name is not its key's own: it is
+     * prefixed, its key's own name is a name set explicitly, and a name another
+     * table takes is refused as its duplicate, whether left out or set to the
+     * default.
+     *
+     * @return void
+     */
+    public function testTheBreakGlassTableTakesItsOwnDefaultName(): void
+    {
+        self::assertSame('app_break_glass_activations', TableConfigValidator::prefixed('break_glass', 'app_'));
+        self::assertSame('app_break_glass_activations', TableConfigValidator::effective('break_glass', 'break_glass_activations', 'app_'));
+        self::assertSame('break_glass', TableConfigValidator::effective('break_glass', 'break_glass', 'app_'));
+        self::assertSame(
+            ['authorization.tables.break_glass', 'duplicate', 'a name no other table has', 'string'],
+            self::refusedSetting(static fn () => TableConfigValidator::validate(['roles' => 'break_glass_activations'])),
+        );
+        $named = ['prefix' => 'x_', 'roles' => 'X_Break_Glass_Activations', 'break_glass' => 'break_glass_activations'];
+
+        self::assertSame(
+            ['authorization.tables.break_glass', 'duplicate', 'a name no other table has', 'string'],
+            self::refusedSetting(static fn () => TableConfigValidator::validate($named)),
+        );
+
+        TableConfigValidator::validate(['roles' => 'break_glass']);
+    }
+
+    /**
+     * The block may set the prefix beside the fourteen tables, and a prefix
      * that is empty, or a lower-case letter, then lower-case letters, digits
      * and underscores, of at most 16 characters, is accepted.
      *
@@ -346,21 +377,22 @@ final class TableConfigValidatorTest extends TestCase
     public function testAPrefixPushingADefaultPastItsBoundIsRefused(): void
     {
         foreach (TableConfigValidator::LENGTHS as $key => $length) {
-            $room   = $length - \strlen($key);
-            $fits   = \str_repeat('p', $room);
-            $over   = $fits . 'p';
-            $reason = "prefix '{$over}' makes authorization.tables.{$key} '{$over}{$key}', longer than {$length} characters, which leaves no room for the names of its "
+            $default = TableNames::defaultName($key);
+            $room    = $length - \strlen($default);
+            $fits    = \str_repeat('p', $room);
+            $over    = $fits . 'p';
+            $reason  = "prefix '{$over}' makes authorization.tables.{$key} '{$over}{$default}', longer than {$length} characters, which leaves no room for the names of its "
                 . 'indexes and keys.';
 
             self::assertGreaterThan(TableConfigValidator::PREFIX_LENGTH, $room, $key);
-            self::assertSame($fits . $key, TableConfigValidator::prefixed($key, $fits));
+            self::assertSame($fits . $default, TableConfigValidator::prefixed($key, $fits));
             self::assertSame(
-                ['authorization.tables.prefix', 'out_of_range', "a prefix of at most {$length} characters less the length of '{$key}'", 'string'],
+                ['authorization.tables.prefix', 'out_of_range', "a prefix of at most {$length} characters less the length of '{$default}'", 'string'],
                 self::refusedSetting(static fn () => TableConfigValidator::prefixed($key, $over)),
             );
 
             try {
-                TableConfigValidator::effective($key, $key, $over);
+                TableConfigValidator::effective($key, $default, $over);
 
                 self::fail("A prefix pushing {$key} past its bound was accepted.");
             } catch (InvalidAuthorizationConfigException $exception) {

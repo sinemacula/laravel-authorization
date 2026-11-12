@@ -9,6 +9,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
@@ -33,6 +34,10 @@ use SineMacula\Laravel\Authorization\Usage\WeighedGrants;
  * subject or identity that reports itself inactive is denied everything,
  * whatever either holds. An identity policy that cannot be read therefore
  * denies the check whatever the identity's kind.
+ *
+ * A break-glass activation reaches only the principal it names: an identity
+ * read here is marked as one (see `BreakGlassActivations::markIdentity()`), so
+ * none of its activations reaches the subject.
  *
  * The manager, the Blade role helpers and the `role:` middleware all ask here,
  * so they read the same grants. The decision asks for the permission that
@@ -233,6 +238,7 @@ final class SubjectGrants
 
     /**
      * Return the subject's identity when it is another model than the subject,
+     * marked as an identity, whose break-glass activations count for nothing,
      * or null.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
@@ -240,6 +246,12 @@ final class SubjectGrants
      */
     private static function separateIdentity(Subject $subject): ?object
     {
-        return $subject->identity === $subject->subject ? null : $subject->identity;
+        $identity = $subject->identity === $subject->subject ? null : $subject->identity;
+
+        if ($identity !== null) {
+            BreakGlassActivations::markIdentity($identity);
+        }
+
+        return $identity;
     }
 }

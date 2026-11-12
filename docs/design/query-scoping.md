@@ -74,19 +74,20 @@ The rows of the model are split into classes, each decided in one scope, as `Res
 | C(none) | when a platform-wide grant admits it, every other row of a tenant                                                                 | platform sources alone                                                 |
 
 The anchors are the tenants the decision's sources may sit at (`ScopeAnchors`), read on the authorization connection
-with no filter on tenant, expiry or application, so they are never fewer than the tenants a check's sources sit at:
-the grants, policies and boundaries of the subject and its identity, the policies of the roles they hold and every
-role above, the owners of those roles and of the permissions granted, every guardrail, and every policy attached to
-the type or its records. The B classes are cut at the active tenant and the anchors within its subtree; the C
-classes at the guardrail and attachment anchors outside it. A row strictly below an anchor D with no anchor between
-reads exactly the sources `within(D, isBelow)` reads: `TenantChain::grants()` then needs `include_subtree` at D, as at
-any ancestor, and no source sits between. Under `FlatTenantTree` there are no `(·,<)` classes, and the only anchor
-within the active tenant's subtree is the active tenant. A platform-wide grant admits the rows outside the subtree when
-the subject holds the action's permission at platform scope, as `ResourceScope` asks it, once; without that grant
-`check()` denies every row outside the subtree as `tenant_scope`, and no C class keeps a row. More anchors than
-`max_anchors`, or more classes than `max_scopes` (`authorization.query_scoping`), refuse as `too_many_scopes`. Both
-are counted before any class is cut, and the classes are cut from each anchor's chain of ancestors, read once through
-the tree, so the tree is asked a number of times bounded by the anchors, never by their pairs.
+with no filter on tenant, expiry or application, so they are never fewer than the tenants a check's sources sit at: the
+grants, break-glass activations, policies and boundaries of the subject and its identity, the policies of the roles they
+hold, through a grant or an activation, and every role above, the owners of those roles and of the permissions granted,
+every guardrail, and every policy attached to the type or its records. The B classes are cut at the active tenant and
+the anchors within its subtree; the C classes at the guardrail and attachment anchors outside it. A row strictly below
+an anchor D with no anchor between reads exactly the sources `within(D, isBelow)` reads: `TenantChain::grants()` then
+needs `include_subtree` at D, as at any ancestor, and no source sits between. Under `FlatTenantTree` there are no
+`(·,<)` classes, and the only anchor within the active tenant's subtree is the active tenant. A platform-wide grant
+admits the rows outside the subtree when the subject holds the action's permission at platform scope, as `ResourceScope`
+asks it, once; without that grant `check()` denies every row outside the subtree as `tenant_scope`, and no C class keeps
+a row. More anchors than `max_anchors`, or more classes than `max_scopes` (`authorization.query_scoping`), refuse as
+`too_many_scopes`. Both are counted before any class is cut, and the classes are cut from each anchor's chain of
+ancestors, read once through the tree, so the tree is asked a number of times bounded by the anchors, never by their
+pairs.
 
 Membership compares tenants as PHP does, while `check()` matches sources to tenants in SQL, so whenever a class is cut
 below an anchor or admitted from outside, the tenant columns of every authorization table must compare bytes (null or

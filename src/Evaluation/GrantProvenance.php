@@ -12,8 +12,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * (AUTHZ-11.5): the permission or policy that applied, how it reached the
  * subject, the grantee it was granted to, the principal or its identity, the
  * roles it came through, the role held first and then each ancestor up to the
- * role that carries it, and the tenant and application of the grant, where the
- * grant was made.
+ * role that carries it, the tenant and application of the grant, where the
+ * grant was made, and, for a role held through a break-glass activation, the
+ * activation's key, never its note.
  *
  * It is read when the explained check resolves its grants, from the rows that
  * resolution reads, and never afterwards. A source that cannot say how a grant
@@ -42,6 +43,7 @@ final readonly class GrantProvenance
      * @param  bool  $hasScope
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  string|null  $application
+     * @param  string|null  $activation
      */
     public function __construct(
 
@@ -68,6 +70,9 @@ final readonly class GrantProvenance
 
         /** The application the grant was made for; null for every application. */
         public ?string $application = null,
+
+        /** The key of the break-glass activation the role was held through; null for any other route. */
+        public ?string $activation = null,
     ) {}
 
     /**
@@ -93,18 +98,19 @@ final readonly class GrantProvenance
      */
     public function named(string $grant): self
     {
-        return new self($this->source, $grant, $this->grantee, $this->isIdentity, $this->roles, $this->hasScope, $this->tenant, $this->application);
+        return new self($this->source, $grant, $this->grantee, $this->isIdentity, $this->roles, $this->hasScope, $this->tenant, $this->application, $this->activation);
     }
 
     /**
      * Return the provenance as the explanation's JSON schema gives it: the
-     * scope `unavailable` when it is not known.
+     * scope `unavailable` when it is not known, and the key of the break-glass
+     * activation under `activation` for a route through one alone.
      *
-     * @return array{source: string, grant: string, grantee: ReferenceArray|null, identity: bool, roles: list<string>, scope: ScopeArray|string}
+     * @return array{source: string, grant: string, grantee: ReferenceArray|null, identity: bool, roles: list<string>, scope: ScopeArray|string, activation?: string}
      */
     public function toArray(): array
     {
-        return [
+        $route = [
             'source'   => $this->source->value,
             'grant'    => $this->grant,
             'grantee'  => self::referenceArray($this->grantee),
@@ -112,6 +118,8 @@ final readonly class GrantProvenance
             'roles'    => $this->roles,
             'scope'    => $this->hasScope ? ['tenant' => self::referenceArray($this->tenant), 'application' => $this->application] : 'unavailable',
         ];
+
+        return $this->activation === null ? $route : [...$route, 'activation' => $this->activation];
     }
 
     /**

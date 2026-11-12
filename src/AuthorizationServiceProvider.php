@@ -43,6 +43,7 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Diagnostics\GuardedBoot;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Diagnostics\SeamClassifier;
@@ -457,7 +458,13 @@ final class AuthorizationServiceProvider extends ServiceProvider
                 $store   = $manager->store($storeName);
             }
 
-            return new ResolutionCache(store: $store, ttl: $ttl, prefix: $prefix, isTrackingUsage: UsageTracking::isEnabled());
+            return new ResolutionCache(
+                store: $store,
+                ttl: $ttl,
+                prefix: $prefix,
+                isTrackingUsage: UsageTracking::isEnabled(),
+                activations: $app->make(BreakGlassActivations::class),
+            );
         });
     }
 
@@ -560,6 +567,10 @@ final class AuthorizationServiceProvider extends ServiceProvider
         // Whether a preview is being evaluated, and which subjects its previews
         // are about, once a request or job.
         $this->app->scoped(Previewing::class);
+
+        // The instances read as a subject's separate identity, whose
+        // break-glass activations count for nothing, once a request or job.
+        $this->app->scoped(BreakGlassActivations::class);
 
         // What `whereAuthorized()` reads of each table and connection, once a
         // request or job.

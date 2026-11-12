@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
@@ -22,25 +23,26 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 /**
  * The principals and identities a change to a shared definition reaches (see
  * `Impact`), read set by set, never holder by holder: the grantees of a role
- * and of every role below it, the grantees of a permission and the holders of
- * every role carrying it, the subjects a policy is attached to, the holders of
- * every role it is attached to, the subjects it bounds, and the principals its
- * allows name when it is attached to a resource, the holders of a role a
- * selector names included.
+ * and of every role below it, a live break-glass activation's included, the
+ * grantees of a permission and the holders of every role carrying it, the
+ * subjects a policy is attached to, the holders of every role it is attached
+ * to, the subjects it bounds, and the principals its allows name when it is
+ * attached to a resource, the holders of a role a selector names included.
  *
  * Each set is read in one query, on the write connection, outside every tenant
  * scope, whatever tenant or application the grant holds in and whether or not
- * it has expired, since re-arming a grant restores what it carried; the roles
- * below a role in one recursive query. The read is bounded by
- * `authorization.administration.max_impact` (1000 by default), counted in
- * distinct holders: each query asks for its distinct holders, at most one more
- * than the limit, whatever the sets read before it hold, so a holder named
- * twice, by one set or by two, never uses up the room of one not yet read.
- * Every query then reads either all its holders, or more than the limit alone
- * holds, and once the holders of every set, merged, are more than the limit,
- * the set is over its limit, and the change it would weigh cannot be proved
- * (see `Impact`), so the reach of a change is never approximated. A principal
- * named by a document that cannot be read puts the set over its limit too.
+ * it has expired, since re-arming a grant restores what it carried, though an
+ * activation only while live; the roles below a role in one recursive query.
+ * The read is bounded by `authorization.administration.max_impact` (1000 by
+ * default), counted in distinct holders: each query asks for its distinct
+ * holders, at most one more than the limit, whatever the sets read before it
+ * hold, so a holder named twice, by one set or by two, never uses up the room
+ * of one not yet read. Every query then reads either all its holders, or more
+ * than the limit alone holds, and once the holders of every set, merged, are
+ * more than the limit, the set is over its limit, and the change it would weigh
+ * cannot be proved (see `Impact`), so the reach of a change is never
+ * approximated. A principal named by a document that cannot be read puts the
+ * set over its limit too.
  *
  * Inside a delegated operation, every set within the limit has its rows locked
  * and pinned, and is read from the rows as locked (see `DependencyPins`), the
@@ -109,7 +111,8 @@ final class AffectedHolders
 
     /**
      * Add the grantees of the roles with the keys, and of every role below them
-     * when the hierarchy is enabled.
+     * when the hierarchy is enabled, by a role grant or a live break-glass
+     * activation.
      *
      * @param  list<string>  $keys
      * @return self
@@ -120,7 +123,10 @@ final class AffectedHolders
             return $this;
         }
 
-        $this->addFrom(self::table('authorizable_roles')->whereIn('role_id', self::withRolesBelow($keys)));
+        $roles = self::withRolesBelow($keys);
+
+        $this->addFrom(self::table('authorizable_roles')->whereIn('role_id', $roles));
+        $this->addFrom(BreakGlassActivations::live(self::table('break_glass')->whereIn('role_id', $roles), TableNames::get('break_glass')));
 
         return $this;
     }

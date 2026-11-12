@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
 use Tests\Feature\Stubs\StubIdentity;
@@ -34,6 +35,7 @@ use Tests\TestCase;
 #[CoversClass(RankComparison::class)]
 final class RankComparisonTest extends TestCase
 {
+    use ActivatesBreakGlass;
     use ActsAsTenant;
 
     /**
@@ -373,6 +375,28 @@ final class RankComparisonTest extends TestCase
         $grants?->grantRole($target, $owned, tenant: $tenant);
 
         self::assertSame(1, RankComparison::rankAcross($target, new GrantScope($tenant, 'admin')));
+    }
+
+    /**
+     * Across a reach, a role the target holds through a live break-glass
+     * activation counts as one granted would; an ended one, or one outside the
+     * reach, never counts.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleHeldThroughAnActivationCountsAcrossTheReach(): void
+    {
+        $target = self::holding('target', 7);
+        $tenant = new Reference('tenant', 'a');
+
+        self::activate($target, Role::create(['name' => 'responder', 'rank' => 2]), ['tenant_type' => 'tenant', 'tenant_id' => 'a']);
+        self::activate($target, Role::create(['name' => 'ended', 'rank' => 1]), ['ended_at' => Carbon::now()]);
+
+        self::assertSame(2, RankComparison::rankAcross($target, new GrantScope($tenant)));
+        self::assertSame(2, RankComparison::rankAcross($target, GrantScope::platform()));
+        self::assertSame(7, RankComparison::rankAcross($target, new GrantScope(new Reference('tenant', 'b'))));
     }
 
     /**

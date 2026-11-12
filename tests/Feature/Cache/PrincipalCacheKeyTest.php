@@ -43,7 +43,7 @@ final class PrincipalCacheKeyTest extends TestCase
     /**
      * An entry is keyed by the prefix, its kind, its grantee and the scope, and
      * an entry of policy documents also by the policy limits, the routed
-     * policies included; any other kind is not.
+     * policies and an identity's included; any other kind is not.
      *
      * @return void
      */
@@ -56,8 +56,12 @@ final class PrincipalCacheKeyTest extends TestCase
         self::assertSame('p:permissions:user:ann:' . $scope, PrincipalCacheKey::entry('p', 'permissions', $grantee));
         self::assertSame('p:permissions-routed:user:ann:' . $scope, PrincipalCacheKey::entry('p', 'permissions-routed', $grantee));
 
-        foreach (['policies', 'policies-routed', 'boundaries', 'resource-policies', 'resource-type-policies', 'guardrails'] as $kind) {
+        $kinds = ['policies', 'policies-routed', 'boundaries', 'resource-policies', 'resource-type-policies', 'guardrails'];
+
+        foreach ([...$kinds, 'identity-policies', 'identity-policies-routed', 'identity-boundaries'] as $kind) {
             self::assertSame("p:{$kind}:user:ann:" . $scope . $limits, PrincipalCacheKey::entry('p', $kind, $grantee));
         }
+
+        self::assertSame('p:identity-permissions:user:ann:' . $scope, PrincipalCacheKey::entry('p', 'identity-permissions', $grantee));
     }
 }

@@ -134,12 +134,13 @@ administration never grants anything it cannot justify.
       (`FurtherChecks::limited()`), so a role grant carrying many policies reads the grantable rights' limits once. A
       guardrail's removal is weighed across the subtree it caps by the same rule (invariant 14);
     - **rank**: unless the grantee is the actor, the actor, ranked in the grant's own tenant and application, must be
-      strictly senior to the most senior rank the grantee holds anywhere the change reaches (platform-wide, the
-      grant's tenant and its ancestors, the tenants below for a grant reaching below, every tenant for a
-      platform-wide grant, any application for a grant to every application, `RankComparison::rankAcross()`), and to
-      the rank a role grant would give it, or the change is `administration.rank` (`administration.rank_uncomparable`
-      when a side or the reach cannot be read), a revocation, a sync, `revokeAll()`, a boundary change and a call that
-      changes nothing included, so a refusal never depends on what the grantee holds;
+      strictly senior to the most senior rank the grantee holds, by a grant or a live break-glass activation, anywhere
+      the change reaches (platform-wide, the grant's tenant and its ancestors, the tenants below for a grant reaching
+      below, every tenant for a platform-wide grant, any application for a grant to every application,
+      `RankComparison::rankAcross()`), and to the rank a role grant would give it, or the change is
+      `administration.rank` (`administration.rank_uncomparable` when a side or the reach cannot be read), a revocation,
+      a sync, `revokeAll()`, a boundary change and a call that changes nothing included, so a refusal never depends on
+      what the grantee holds;
     - **self**: a change to the actor's principal or identity that may widen authority needs
       `authorization:administration.self` on the same operation, at its node and across the change's whole reach as its
       action is, or it is `administration.self`: an actor allowed `authorization:*` at the platform but denied
@@ -229,10 +230,11 @@ administration never grants anything it cannot justify.
     changed under it, and a delegated operation never writes a row its decisions did not see. Inside
     `OperationScope::run()`, each try of a delegated operation holds `Administration\DependencyPins`, which lock every
     dependency before it is read, in one order within the operation (`Enums\DependencyPhase`):
-    - **the actor**, once, before anything else: the grant rows of its principal and identity (roles, permissions,
-      policies, boundaries), the guardrails on the platform and on the chain of the request's tenant, the resource
-      policies of the type `authorization:operation`, the roles held and every role above them with the permissions and
-      policies they carry, then the permission and policy rows all of these name (`Administration\AuthorityRows`);
+    - **the actor**, once, before anything else: the grant rows of its principal and identity (roles, live break-glass
+      activations, permissions, policies, boundaries), the guardrails on the platform and on the chain of the request's
+      tenant, the resource policies of the type `authorization:operation`, the roles held and every role above them with
+      the permissions and policies they carry, then the permission and policy rows all of these name
+      (`Administration\AuthorityRows`);
     - **the target**, before the service reads it: the grantee's grant rows, or a role grantee's chain and what it
       carries (`DependencyPins::lockGrantees()`, the first step of every grant, revocation, sync, `revokeAll()` and
       boundary change), then, before the first change is decided (`ActingContext::authorizeIn()`), for each change the

@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
@@ -38,7 +39,7 @@ use Tests\TestCase;
 #[CoversClass(ScopeAnchors::class)]
 final class ScopeAnchorsTest extends TestCase
 {
-    use ScopesQueries;
+    use ActivatesBreakGlass, ScopesQueries;
 
     /**
      * Every tenant a source of the subject or its identity sits at is read,
@@ -181,5 +182,35 @@ final class ScopeAnchorsTest extends TestCase
         self::assertEqualsCanonicalizing(['theirs', 'callers', 'previews'], $ids($during));
         self::assertSame(['theirs'], $ids($apart));
         self::assertSame(['theirs'], $ids(ScopeAnchors::read($about, $type, true)[0]));
+    }
+
+    /**
+     * The tenant of every break-glass activation of the subject or its identity
+     * is read, whatever its expiry, with the owners of the role it activates
+     * and of the roles above, and the tenants of their policies and
+     * permissions; another's activation is not.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryActivationsTenantAndItsRolesAreRead(): void
+    {
+        $user   = StubIdentity::create(['id' => 'u1']);
+        $other  = StubIdentity::create(['id' => 'u3']);
+        $parent = Role::create(['name' => 'parent']);
+        $role   = Role::create(['name' => 'responder', 'parent_id' => $parent->getKey()]);
+        $owned  = Permission::create(['name' => 'posts:owned', 'tenant_type' => 'teams', 'tenant_id' => 'permission']);
+
+        DB::table('role_permissions')->insert(['role_id' => $parent->getKey(), 'permission_id' => $owned->getKey()]);
+        $parent->attachPolicy(self::storedPolicy('role-policy', []), null, new Reference('teams', 'role-policy'));
+        DB::table('roles')->where('id', $role->getKey())->update(['tenant_type' => 'teams', 'tenant_id' => 'role-owner']);
+
+        self::activate($user, $role, ['tenant_type' => 'teams', 'tenant_id' => 'activated', 'expires_at' => now()->subDay()]);
+        self::activate($other, Role::create(['name' => 'other']), ['tenant_type' => 'teams', 'tenant_id' => 'stranger']);
+
+        [$sources] = ScopeAnchors::read(new Subject($user, $user), (new ScopedPost)->getMorphClass(), true);
+
+        self::assertEqualsCanonicalizing(['activated', 'role-owner', 'role-policy', 'permission'], \array_map(static fn (Reference $tenant): string => $tenant->id, $sources));
     }
 }

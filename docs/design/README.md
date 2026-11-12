@@ -104,6 +104,11 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   tracking: what counts and what never counts, the bucketed in-memory notes flushed by queued jobs, the usage and
   coverage tables, the `GrantUsageStore` contract, the heartbeat and pruning, the coverage rule behind `used`, `unused`
   and `unknown`, regrants, `unused()` and the `usage` field.
+- `break-glass.md`: opt-in emergency access, not yet available: the `break_glass` settings and the switch refused
+  until its audit trail ships, one record per activation in its own table, an activation live until it ends or
+  expires, read through the role grant path so every check sees its role in its scope, human principals alone (never
+  a machine or an identity), its changes seen on the next check, its route named in an explanation without its note,
+  and the plan for activation and revocation, then the lifecycle events, reviews and attribution.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

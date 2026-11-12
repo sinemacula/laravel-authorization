@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\AdministrationConfigValidator;
 use SineMacula\Laravel\Authorization\Config\AttributeConfigValidator;
+use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
 use SineMacula\Laravel\Authorization\Config\BulkConfigValidator;
 use SineMacula\Laravel\Authorization\Config\CacheConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ConfigBlock;
@@ -199,6 +200,7 @@ final class ConfigValidatorTest extends TestCase
             'administration'   => AdministrationConfigValidator::LIMITS,
             'reviews'          => ReviewConfigValidator::SETTINGS,
             'usage'            => UsageConfigValidator::SETTINGS,
+            'break_glass'      => BreakGlassConfigValidator::SETTINGS,
             'events'           => EventConfigValidator::KEYS,
             'events.decisions' => EventConfigValidator::SETTINGS,
         ];
@@ -268,7 +270,7 @@ final class ConfigValidatorTest extends TestCase
     {
         $blocks = [
             'models', 'tables', 'defaults', 'permission_enums', 'permission_providers', 'gate', 'policies', 'query_scoping', 'bulk', 'context', 'attributes',
-            'application_access', 'session', 'cache', 'hierarchy', 'rank', 'administration', 'reviews', 'usage', 'events', 'grant_hooks',
+            'application_access', 'session', 'cache', 'hierarchy', 'rank', 'administration', 'reviews', 'usage', 'break_glass', 'events', 'grant_hooks',
         ];
 
         foreach ($blocks as $key) {
@@ -577,6 +579,37 @@ final class ConfigValidatorTest extends TestCase
             static fn () => ConfigValidator::validate($short, $container),
             'authorization.usage.interval',
             'expected a whole number of at least 60, got 59 (int).',
+        );
+    }
+
+    /**
+     * The break-glass block is validated with the rest: the shipped block
+     * passes, disabled, and `enabled` true is refused with its reason, as is a
+     * role's maximum above the global one.
+     *
+     * @return void
+     */
+    public function testTheBreakGlassBlockIsValidated(): void
+    {
+        $config = $this->authorizationConfig();
+
+        self::assertSame(['enabled' => false, 'max_minutes' => 60, 'roles' => [], 'justifications' => [], 'notes' => false, 'note_max_length' => 500], $config['break_glass']);
+
+        ConfigValidator::validate($config, $this->container());
+
+        $enabled = $config;
+
+        $enabled['break_glass']['enabled']        = true;
+        $enabled['break_glass']['justifications'] = ['incident'];
+
+        $this->assertRejected(fn () => ConfigValidator::validate($enabled, $this->container()), 'authorization.break_glass.enabled', BreakGlassConfigValidator::UNAVAILABLE);
+
+        $config['break_glass']['roles'] = ['responder' => ['max_minutes' => 61]];
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->container()),
+            'authorization.break_glass.roles.responder.max_minutes',
+            'a role\'s maximum of 61 minutes is longer than the global maximum of 60.',
         );
     }
 

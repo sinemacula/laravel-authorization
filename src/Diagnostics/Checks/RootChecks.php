@@ -109,7 +109,7 @@ final readonly class RootChecks
         // the block's path is recorded only for a failure the checks did not
         // foresee.
         foreach (\array_keys(TableConfigValidator::LENGTHS) as $key) {
-            $name = ConfigBlock::entry($block, $key, $key);
+            $name = ConfigBlock::entry($block, $key, TableNames::defaultName($key));
 
             if (!$isPrefixAccepted && TableNames::isDefault($key, $name)) {
                 $this->collector->skip(TableConfigValidator::KEY . ".{$key}", $path);
