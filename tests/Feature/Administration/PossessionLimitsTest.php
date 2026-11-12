@@ -29,7 +29,9 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Fixtures\BulkChecks\FailingTenantTree;
 use Tests\TestCase;
@@ -49,6 +51,8 @@ use Tests\TestCase;
 #[CoversClass(PossessionLimits::class)]
 final class PossessionLimitsTest extends TestCase
 {
+    use ActivatesBreakGlass;
+
     /**
      * Pairs of action patterns, and whether they name an action in common.
      *
@@ -430,6 +434,36 @@ final class PossessionLimitsTest extends TestCase
 
         self::assertFalse(self::limits('posts:edit', subject: new Subject($user, $user), scope: new GrantScope(new Reference('tenant', 'a'), null, false)));
         self::assertTrue(self::limits('posts:edit', subject: new Subject($user, $user)));
+    }
+
+    /**
+     * A deny on a role the principal holds only through a break-glass
+     * activation limits the permission in a reach holding the activation, and
+     * not outside it; an activation of the identity or of a machine principal
+     * never limits, since neither counts.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleHeldThroughAnActivationLimits(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-bg']);
+        $person  = StubIdentity::create(['id' => 'person-bg']);
+        $machine = StubMachine::create(['id' => 'machine-bg']);
+        $role    = self::emergencyRole('posts:edit');
+        $tenant  = ['tenant_type' => 'tenant', 'tenant_id' => 'other'];
+
+        self::grants()->attachPolicy($role, self::denying('responder-deny', 'posts:edit'));
+
+        foreach ([$user, $person, $machine] as $grantee) {
+            self::activate($grantee, $role, $tenant);
+        }
+
+        self::assertTrue(self::limits('posts:edit', subject: new Subject($user, $user)));
+        self::assertFalse(self::limits('posts:edit', subject: new Subject($user, $user), scope: new GrantScope(new Reference('tenant', 'a'), null, false)));
+        self::assertFalse(self::limits('posts:edit', subject: new Subject(new \stdClass, $person)));
+        self::assertFalse(self::limits('posts:edit', subject: new Subject($machine, $machine)));
     }
 
     /**

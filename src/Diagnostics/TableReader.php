@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * takes, as the report shows them, from the configuration alone.
  *
  * Each name is the one the package reads and the migrations create: the name
- * set explicitly, or the key's own with the prefix before it (see
+ * set explicitly, or the table's default with the prefix before it (see
  * `Config\TableNames`), and `explicit` says which. A value is shown only when
  * it passes the boot's checks (see `Config\TableConfigValidator`), so the
  * report never prints a value the settings section hides: a prefix that is
@@ -56,7 +56,7 @@ final readonly class TableReader
         $names  = [];
 
         foreach (\array_keys(TableConfigValidator::LENGTHS) as $key) {
-            $name    = $block === null ? null : ConfigBlock::entry($block, $key, $key);
+            $name    = $block === null ? null : ConfigBlock::entry($block, $key, TableNames::defaultName($key));
             $names[] = [
                 'key'      => $key,
                 'name'     => self::name($key, $name, $prefix),

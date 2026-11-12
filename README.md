@@ -210,11 +210,12 @@ tables use, set `AUTHORIZATION_DB_CONNECTION` (or `connection` in `config/author
 migrations create the tables there, and the models read and write there.
 
 To keep the package's tables apart from your own, set a prefix before migrating, with `AUTHORIZATION_TABLE_PREFIX` (or
-`tables.prefix`): `app_` makes `roles` `app_roles`, and so on for every table. The prefix is put before every table
-name left at its default, and before no name you set yourself (`AUTHORIZATION_TABLE_ROLES` and the like, or the
-`tables` block), which is used as you write it. Whether you set a name is told by its value alone, since a merged or
-cached configuration no longer says where a value came from: a name that differs from the table's own is yours, while
-one set to the table's own name, `roles` for the `roles` table, is the default and takes the prefix. The migrations
+`tables.prefix`): `app_` makes `roles` `app_roles`, and so on for every table. The prefix is put before every table name
+left at its default, and before no name you set yourself (`AUTHORIZATION_TABLE_ROLES` and the like, or the `tables`
+block), which is used as you write it. Whether you set a name is told by its value alone, since a merged or cached
+configuration no longer says where a value came from: a name that differs from the table's own is yours, while one set
+to the table's own name, `roles` for the `roles` table, is the default and takes the prefix. Every table's own name is
+its key's but the break-glass table's: `tables.break_glass` is `break_glass_activations` by default. The migrations
 create the tables under the names the prefix makes, and the models, the services and `Config\TableNames::get()` read
 them there, so changing the prefix after migrating points the package at tables that do not exist.
 
@@ -362,16 +363,16 @@ is a boot for `authorization:check`, which reports every issue while the package
   key; each entry is checked against its own shape instead.
 - A setting left out takes its default, also when the configuration was cached without the package's defaults merged
   into it. A setting set to null is refused, a block set to null among them, except where null means the default or
-  none: `connection`, `policy_store`, `cache.store`, `usage.connection`, `usage.queue` and `log_channel`. The whole
-  `authorization` configuration must be an array.
+  none: `connection`, `policy_store`, `cache.store`, `usage.connection`, `usage.queue`, a break-glass role's
+  `max_minutes` and `log_channel`. The whole `authorization` configuration must be an array.
 - A value read from the environment is checked as it is written, since the config file casts none of them. A whole
   number is an int, or a string written as one in base 10 (`300`, not `300s`, `3e2`, `300.0`, `-0`, one with a space
   around it or an empty value) and no larger than PHP holds. A switch (`gate.enabled`, `hierarchy.enabled`,
-  `rank.enabled` and `usage.enabled`) is true or false, which the environment gives for `true`, `false`, `(true)` and
-  `(false)`; `0`, `1`, `off` and `no` are refused.
+  `rank.enabled`, `usage.enabled`, `break_glass.enabled` and `break_glass.notes`) is true or false, which the
+  environment gives for `true`, `false`, `(true)` and `(false)`; `0`, `1`, `off` and `no` are refused.
 - Each table name is a plain identifier (a letter or an underscore, then letters, digits and underscores) with no
   schema before it, short enough that every index and key name the migrations build from it fits in 63 characters,
-  PostgreSQL's limit (from 33 to 51 characters, depending on the table), and the twelve names are distinct.
+  PostgreSQL's limit (from 33 to 51 characters, depending on the table), and the thirteen names are distinct.
 - `tables.prefix` is empty, or a lower-case letter, then lower-case letters, digits and underscores, of at most 16
   characters; null is refused. Each name it makes is checked as a name you set is: within its table's bound, which the
   longest prefix allowed keeps every default within, and distinct from the others, so a name you set that the prefix
@@ -387,12 +388,13 @@ is a boot for `authorization:check`, which reports every issue while the package
 A setting the package reads after boot is read through the same checks, so one changed at run time (by `config()->set()`
 in a test, a queue worker or an Octane request) is refused with the same exception when it is read, never read as its
 default, cast or skipped. That covers the policy limits, the query scoping limits, the bulk chunk size, the
-administration limits, the access reviews' limit, usage tracking, `cache.ttl` and `cache.prefix`, the three switches,
-the permission enums and providers, `application_access` (an entry for an application that is not a permission name,
-null among it, is refused rather than opening the application), `session.scopes`, `context.keys` and `context.sources`,
-the attribute providers and `grant_hooks`. A block on the way to a setting that is not an array is refused too, rather
-than read as one that leaves the setting out. A setting read on every check is read with a few array lookups and plain
-comparisons, so the checks add next to nothing to a request.
+administration limits, the access reviews' limit, usage tracking, the break-glass settings (through
+`Config\BreakGlassConfigValidator::read()`), `cache.ttl` and `cache.prefix`, the three switches, the permission enums
+and providers, `application_access` (an entry for an application that is not a permission name, null among it, is
+refused rather than opening the application), `session.scopes`, `context.keys` and `context.sources`, the attribute
+providers and `grant_hooks`. A block on the way to a setting that is not an array is refused too, rather than read as
+one that leaves the setting out. A setting read on every check is read with a few array lookups and plain comparisons,
+so the checks add next to nothing to a request.
 
 The names are checked after boot for their type only. A table name, a model class or `defaults.guard` that is not a
 string, or is empty, is refused with the same exception, and so is a `tables.prefix` that is not a string, a
@@ -3415,11 +3417,13 @@ reported as any preview check (see [Preview](#preview)).
   key pass, and its outcome: `held`, `failed`, `missing`, `null`, `wrong_type`, `unresolved`, `undecidable` or
   `invalid`), the keys found missing and every reference that could not be resolved, by key, on the statement that
   read it;
-- for an explained allow, where each grant came from: a permission granted to the principal or the identity, or
-  through a role, with the role held and each ancestor up to the role that carries it, and the tenant and application
-  of the grant; a policy attached to the grantee or to one of its roles, the same way; or a policy attached to the
-  resource, by its resource. A source that cannot say, a grantee whose `getPermissions()` or `getPolicies()` is its
-  own, a policy store or a policy resolver bound in place of the default, is `unavailable`, never guessed;
+- for an explained allow, where each grant came from: a permission granted to the principal or the identity, or through
+  a role, with the role held and each ancestor up to the role that carries it, and the tenant and application of the
+  grant; a policy attached to the grantee or to one of its roles, the same way; or a policy attached to the resource, by
+  its resource; a role held through a break-glass activation is named `break_glass_permission` or `break_glass_policy`,
+  with the activation's key under `activation`, never its note. A source that cannot say, a grantee whose
+  `getPermissions()` or `getPolicies()` is its own, a policy store or a policy resolver bound in place of the default,
+  is `unavailable`, never guessed;
 - for an explained check, what it asked: the action, the resource, the subject, its identity and any previewer, the
   scope it was asked in and the scope it was decided in.
 
@@ -4324,6 +4328,65 @@ hook refuses stops the import, with what was written before it kept.
   (the trait helpers and the console commands), are guaranteed to.
 - **Break-glass.** The emergency grant (AUTHZ-11.7) will grant through the same path, so its hook is never skipped
   either: `Hooks\WideningPhase` is the one call point every grant goes through.
+
+### Break-glass (not yet available)
+
+Break-glass is opt-in emergency access (AUTHZ-11.7): a principal with the break-glass right grants itself, or another
+person, a configured emergency role for a limited time, with a justification code from a configured list, reported
+every time and never needing prior approval. It ships over three releases, and stays switched off until the last,
+which brings its audit trail. This release adds the settings, the table and the resolution; nothing in the package
+creates or ends an activation yet, and `enabled` true is refused at boot.
+
+**The settings.** `config/authorization.php` holds a `break_glass` block, checked at boot like every other:
+
+```php
+'break_glass' => [
+    'enabled'         => env('AUTHORIZATION_BREAK_GLASS_ENABLED', false),
+    'max_minutes'     => env('AUTHORIZATION_BREAK_GLASS_MAX_MINUTES', 60),
+    'roles'           => [
+        'incident-responder' => ['max_minutes' => 30],
+        'database-admin'     => [],
+    ],
+    'justifications'  => ['incident', 'customer-escalation'],
+    'notes'           => env('AUTHORIZATION_BREAK_GLASS_NOTES', false),
+    'note_max_length' => env('AUTHORIZATION_BREAK_GLASS_NOTE_MAX_LENGTH', 500),
+],
+```
+
+- `enabled` is a switch, false by default. Until break-glass is available, true is refused with "break-glass is not
+  available until its audit trail ships; leave it disabled."
+- `max_minutes` is the longest any activation lasts, a whole number of at least 1. A longer request will be refused,
+  never shortened.
+- `roles` maps each emergency role, named as a role is named anywhere, to its own `max_minutes`: from 1 up to the
+  global maximum, or null or left out for the global maximum. A maximum above the global one is refused. Whether a
+  role of that name exists is checked when it is activated, never at boot.
+- `justifications` lists the codes an activation gives one of, each a lower-case letter, then lower-case letters,
+  digits, `.`, `_` and `-`, of at most 64 characters, each once. It may be empty only while break-glass is disabled.
+- `notes` says whether an activation may carry a free-text note, false by default, and `note_max_length` bounds it, a
+  whole number of at least 1 (500 by default). A note is personal data: it is never cached, logged, put on an event or
+  shown in an explanation.
+
+Any other key is refused, as is null for any setting but a role's `max_minutes`. `authorization:check` reports each
+setting on its own.
+
+**The record.** Each activation is a row of its own in `break_glass_activations` (`tables.break_glass`, which
+`tables.prefix` prefixes like every default name), created by the package's migration on its connection, beside any
+normal grant of the same role and never merged with it. It holds the role, the grantee, who activated it (or no one),
+the scope (the platform, or a tenant with or without its subtree, and an application or every application), the
+justification code, the note, when it was activated and when it expires (both UTC), and, if it ends early, when, by
+whom and why (`surrendered`, `revoked` or `expired`). `Models\BreakGlassActivation` reads and writes it. Run the
+package's migrations when you upgrade: the roles every check reads now include this table.
+
+**How it grants.** While an activation has not ended and its expiry is still to come, its role counts for the grantee
+exactly as a grant of the role in the activation's scope does, through the same resolution, cache and tenant chain:
+`check()`, `checkMany()`, `permissionsFor()`, `whereAuthorized()`, `hasRole()`, the `role:` middleware and Blade all
+see it, and denies, permission boundaries, guardrails and session caps still apply. The resolution cache never keeps
+it past its expiry, and a change saved through the model is seen on the next check. Only a human principal is
+counted: an activation naming a machine, or the identity behind a principal, grants nothing, and one naming half a
+tenant applies nowhere. An explanation names a grant that came through an activation as `break_glass_permission` or
+`break_glass_policy`, with the activation's key, and never the note.
+
+See [Break-glass](docs/design/break-glass.md) for the invariants and what the next two releases add.
 
 See [Grant scope](docs/design/grant-scope.md) for the design.
 
@@ -5428,6 +5491,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Grant scope](docs/design/grant-scope.md)                                                   | The identity directory, the scope query and the grant hooks   |
 | [Explanations](docs/design/explanations.md)                                                 | Explain mode, the `Explanation` and `authorization:why`       |
 | [Access reviews](docs/design/access-reviews.md)                                             | Grant routes, queries, rows, admission, paging and exports    |
+| [Break-glass](docs/design/break-glass.md)                                                   | Emergency access: settings, records, resolution and the plan  |
 
 ## Requirements
 

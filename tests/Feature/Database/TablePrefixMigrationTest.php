@@ -51,6 +51,7 @@ final class TablePrefixMigrationTest extends TestCase
         '2026_11_08_000001_add_access_review_indexes',
         '2026_11_09_000001_create_grant_usage_tables',
         '2026_11_11_000001_add_half_tenant_indexes',
+        '2026_11_12_000001_create_break_glass_activations_table',
     ];
 
     /**
@@ -108,7 +109,7 @@ final class TablePrefixMigrationTest extends TestCase
         TableConfigValidator::validate(config('authorization.tables'));
 
         foreach (\array_keys(TableConfigValidator::LENGTHS) as $key) {
-            $table = $key === 'guardrails' ? self::EXPLICIT : self::PREFIX . $key;
+            $table = $key === 'guardrails' ? self::EXPLICIT : self::PREFIX . TableNames::defaultName($key);
 
             self::assertSame($table, TableNames::get($key));
             self::assertTrue(Schema::hasTable($table), $table);
@@ -145,11 +146,13 @@ final class TablePrefixMigrationTest extends TestCase
 
         $references = \array_map(static fn (array $key): string => $key['foreign_table'], Schema::getForeignKeys(self::PREFIX . 'role_permissions'));
         $rails      = \array_map(static fn (array $key): string => $key['foreign_table'], Schema::getForeignKeys(self::EXPLICIT));
+        $glass      = \array_map(static fn (array $key): string => $key['foreign_table'], Schema::getForeignKeys(self::PREFIX . 'break_glass_activations'));
 
         \sort($references);
 
         self::assertSame([self::PREFIX . 'permissions', self::PREFIX . 'roles'], $references);
         self::assertSame([self::PREFIX . 'policies'], $rails);
+        self::assertSame([self::PREFIX . 'roles'], $glass);
     }
 
     /**
@@ -184,7 +187,7 @@ final class TablePrefixMigrationTest extends TestCase
 
         foreach (\array_keys(TableConfigValidator::LENGTHS) as $key) {
             self::assertFalse(Schema::hasTable(TableNames::get($key)), $key);
-            self::assertTrue(Schema::hasTable($key), $key);
+            self::assertTrue(Schema::hasTable(TableNames::defaultName($key)), $key);
         }
 
         foreach (self::MIGRATIONS as $file) {

@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -1243,6 +1244,43 @@ final class ResolutionCacheTest extends TestCase
         $this->permissions($cache);
 
         self::assertSame(5, $this->resolutions);
+    }
+
+    /**
+     * An instance read as an identity keeps its entries apart from those of the
+     * same grantee read as a subject, in the memo and the store alike, and a
+     * bump of the grantee's version, which a change to its activations makes,
+     * drops both.
+     *
+     * @return void
+     */
+    public function testAnIdentitysEntriesAreKeptApart(): void
+    {
+        $cache    = $this->request();
+        $identity = self::grantee();
+        $resolve  = fn (array $names): \Closure => fn (): Resolution => $this->resolve(\array_values($names));
+
+        BreakGlassActivations::markIdentity($identity);
+
+        self::assertSame(['posts:read'], $cache->rememberPermissions(self::grantee(), $resolve(['posts:read'])));
+        self::assertSame(['posts:list'], $cache->rememberPermissions($identity, $resolve(['posts:list'])));
+        self::assertSame(['posts:read'], $cache->rememberPermissions(self::grantee(), $resolve(['posts:edit'])));
+
+        $next = $this->request();
+
+        self::assertSame(['posts:list'], $next->rememberPermissions($identity, $resolve(['posts:edit'])));
+        self::assertSame(2, $this->resolutions);
+        self::assertTrue($this->store->has(PrincipalCacheKey::entry('authorization-test', 'identity-permissions', self::grantee())));
+
+        $keys = $next->versionKeys([], [self::grantee(), new Reference('user', 'user-2')]);
+
+        self::assertSame([$this->versions()->granteeKey(self::grantee()), $this->versions()->granteeKey(new Reference('user', 'user-2'))], $keys);
+
+        $next->invalidate($keys);
+
+        self::assertSame(['posts:edit'], $this->request()->rememberPermissions($identity, $resolve(['posts:edit'])));
+        self::assertSame(['posts:edit'], $this->request()->rememberPermissions(self::grantee(), $resolve(['posts:edit'])));
+        self::assertSame(4, $this->resolutions);
     }
 
     /**

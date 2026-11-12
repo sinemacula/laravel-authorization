@@ -74,6 +74,7 @@ final class SettingCatalogue
         'authorization.tables.guardrails'               => self::TABLE,
         'authorization.tables.grant_usage'              => self::TABLE,
         'authorization.tables.usage_coverage'           => self::TABLE,
+        'authorization.tables.break_glass'              => self::TABLE,
         'authorization.defaults.guard'                  => self::NAME,
         'authorization.permission_enums'                => self::CLASS_LIST,
         'authorization.permission_providers'            => self::CLASS_LIST,
@@ -114,6 +115,12 @@ final class SettingCatalogue
         'authorization.usage.connection'                => self::NAME,
         'authorization.usage.queue'                     => self::NAME,
         'authorization.usage.retention'                 => self::WHOLE_NUMBER,
+        'authorization.break_glass.enabled'             => self::SWITCH,
+        'authorization.break_glass.max_minutes'         => self::WHOLE_NUMBER,
+        'authorization.break_glass.roles'               => self::OPAQUE,
+        'authorization.break_glass.justifications'      => self::OPAQUE,
+        'authorization.break_glass.notes'               => self::SWITCH,
+        'authorization.break_glass.note_max_length'     => self::WHOLE_NUMBER,
         'authorization.grant_hooks'                     => self::CLASS_LIST,
     ];
 

@@ -91,4 +91,31 @@ final class GrantProvenanceTest extends TestCase
         self::assertNull($unknown->toArray()['grantee']);
         self::assertSame(['tenant' => null, 'application' => null], (new GrantProvenance(GrantSource::PERMISSION, 'p', null, false, [], true))->toArray()['scope']);
     }
+
+    /**
+     * A route through a break-glass activation carries the activation's key,
+     * kept by named(), and rendered by toArray() under `activation`; any other
+     * route carries none and renders no such key.
+     *
+     * @return void
+     */
+    public function testABreakGlassRouteCarriesItsActivation(): void
+    {
+        $user  = new Reference('user', '1');
+        $grant = new GrantProvenance(GrantSource::BREAK_GLASS_PERMISSION, 'posts:edit', $user, false, ['responder'], true, null, null, 'activation-1');
+
+        self::assertSame('activation-1', $grant->activation);
+        self::assertSame('activation-1', $grant->named('posts:*')->activation);
+        self::assertSame([
+            'source'     => 'break_glass_permission',
+            'grant'      => 'posts:edit',
+            'grantee'    => ['type' => 'user', 'id' => '1'],
+            'identity'   => false,
+            'roles'      => ['responder'],
+            'scope'      => ['tenant' => null, 'application' => null],
+            'activation' => 'activation-1',
+        ], $grant->toArray());
+        self::assertNull((new GrantProvenance(GrantSource::ROLE_PERMISSION, 'posts:edit'))->activation);
+        self::assertArrayNotHasKey('activation', (new GrantProvenance(GrantSource::ROLE_PERMISSION, 'posts:edit'))->toArray());
+    }
 }

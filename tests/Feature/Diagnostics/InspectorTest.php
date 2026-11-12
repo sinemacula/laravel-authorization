@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\TableConfigValidator;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Diagnostics\BootChecks;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
@@ -81,7 +82,7 @@ final class InspectorTest extends TestCase
         self::assertSame(\array_keys(SettingCatalogue::SETTINGS), \array_map(static fn (SettingRow $row): string => $row->path, $report->settings));
         self::assertSame($report->tables, $shape['tables']);
         self::assertSame('', $report->tables['prefix']);
-        self::assertSame(\array_keys(TableConfigValidator::LENGTHS), \array_column($report->tables['names'], 'name'));
+        self::assertSame(\array_map(TableNames::defaultName(...), \array_keys(TableConfigValidator::LENGTHS)), \array_column($report->tables['names'], 'name'));
         $contracts = \array_map(static fn (SeamRow $row): string => $row->contract, $report->seams);
 
         self::assertSame(Inspector::SEAMS, \array_slice($contracts, 0, \count(Inspector::SEAMS)));

@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
@@ -34,7 +35,7 @@ use Tests\TestCase;
 #[CoversTrait(ResolvesPivotExpiry::class)]
 final class ResolvesPivotExpiryTest extends TestCase
 {
-    use ActsAsTenant;
+    use ActivatesBreakGlass, ActsAsTenant;
 
     /**
      * Allow lazy loading again.
@@ -202,6 +203,30 @@ final class ResolvesPivotExpiryTest extends TestCase
         $this->expectExceptionObject(new \LogicException('The authorization grant service is not bound; register the package\'s service provider.'));
 
         $user->assignRole('editor');
+    }
+
+    /**
+     * The roles relation reads the rows it is given in place of its table, a
+     * live break-glass activation among them, in the current tenant alone,
+     * while the permissions relation reads its table.
+     *
+     * @return void
+     */
+    public function testTheRolesRelationReadsTheRowsItIsGiven(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $tenant = self::createTenant('t-1');
+
+        self::activate($user, self::emergencyRole());
+        self::activate($user, self::emergencyRole('posts:read', 'auditor'), ['tenant_type' => $tenant->getMorphClass(), 'tenant_id' => 't-1']);
+
+        self::assertSame(['responder'], $user->roles()->pluck('name')->all());
+        self::assertStringContainsString('union', $user->roles()->toSql());
+        self::assertStringNotContainsString('union', $user->permissions()->toSql());
+
+        $this->actAsTenant($tenant);
+
+        self::assertSame(['auditor', 'responder'], $user->roles()->orderBy('name')->pluck('name')->all());
     }
 
     /**

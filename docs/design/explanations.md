@@ -66,8 +66,10 @@ for a saved subject from the console.
    attachments is reported. A grantee whose `getPermissions()` or `getPolicies()` is its own, a policy store, a policy
    resolver bound in place of the default and a `withPolicies()` override cannot say where a grant came from: each is
    asked as an everyday check asks it, and its grant recorded as `unavailable`. A resource policy is named by the
-   resource it is attached to, its attachment's scope not recorded. A further check the administration stage makes is
-   never explained, so it never overwrites the check's own evidence.
+   resource it is attached to, its attachment's scope not recorded. A permission or policy of a role held through a
+   break-glass activation is `break_glass_permission` or `break_glass_policy`, with the activation's key under
+   `activation` and never its note (see [Break-glass](break-glass.md)). A further check the administration stage makes
+   is never explained, so it never overwrites the check's own evidence.
 
 7. **What it asked.** The batch adds to an explained decision's evidence an `ExplanationRequest`: the action, the
    resource's identifier, the subject, its identity and the previewer, the scope the check was asked in and the scope

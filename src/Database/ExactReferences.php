@@ -13,17 +13,17 @@ use Illuminate\Database\Schema\ColumnDefinition;
  * every database.
  *
  * A reference column holds a morph type, a key or an application: the tenant,
- * the grantee, the resource, an inline policy's owner, who made a grant, and
- * the application a grant holds in. The package compares references in PHP byte
- * for byte, and PostgreSQL and SQLite compare these columns the same way. MySQL
- * compares a column through its collation, and the usual defaults are
- * case-insensitive and pad trailing spaces, so a check, which matches grants,
- * attachments and owned records in SQL, would read a grant in tenant `org` in
- * tenant `ORG`, or a policy on record `abc` on record `abc `. On MySQL this
- * class gives each reference column `utf8mb4_0900_bin`, which compares bytes
- * and does not pad, so the database draws the line where the package does. The
- * other databases are left as they are, and so are every other column, names
- * and guards included.
+ * the grantee, the resource, an inline policy's owner, who made a grant, who
+ * ended a break-glass activation, and the application a grant holds in. The
+ * package compares references in PHP byte for byte, and PostgreSQL and SQLite
+ * compare these columns the same way. MySQL compares a column through its
+ * collation, and the usual defaults are case-insensitive and pad trailing
+ * spaces, so a check, which matches grants, attachments and owned records in
+ * SQL, would read a grant in tenant `org` in tenant `ORG`, or a policy on
+ * record `abc` on record `abc `. On MySQL this class gives each reference
+ * column `utf8mb4_0900_bin`, which compares bytes and does not pad, so the
+ * database draws the line where the package does. The other databases are left
+ * as they are, and so are every other column, names and guards included.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,6 +48,8 @@ final readonly class ExactReferences
         'owner_id',
         'granted_by_type',
         'granted_by_id',
+        'ended_by_type',
+        'ended_by_id',
         'application',
     ];
 

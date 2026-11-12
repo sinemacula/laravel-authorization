@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Database;
 
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use Illuminate\Database\Query\Builder;
 
 /**
  * A grantee's relation onto one kind of grant, comparing the grantee's key as
@@ -16,6 +17,12 @@ use Illuminate\Database\Eloquent\Relations\MorphToMany;
  * integer-keyed grantee fails there, and Laravel inlines integer keys into an
  * eager load as raw integers. This relation binds the key as a string, alone
  * and eager-loaded, on every database.
+ *
+ * Given the query of the rows to read in place of the grant table, the relation
+ * joins those rows under the table's name, so every constraint on the table's
+ * columns reads them as it reads the table; a write through the relation still
+ * goes to the table itself. The roles relation reads its role grants and the
+ * live break-glass activations this way (see `BreakGlassActivations`).
  *
  * @template TRelatedModel of \Illuminate\Database\Eloquent\Model
  * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model
@@ -29,6 +36,31 @@ use Illuminate\Database\Eloquent\Relations\MorphToMany;
  */
 final class GrantRelation extends MorphToMany
 {
+    /** @var \Illuminate\Database\Query\Builder|null The rows read in place of the grant table, or null for the table itself. */
+    private ?Builder $rows = null;
+
+    /**
+     * Read the rows given in place of the grant table, joined under the table's
+     * name in place of the table the relation was built joining; none leaves
+     * the table joined.
+     *
+     * @param  \Illuminate\Database\Query\Builder|null  $rows
+     * @return $this
+     */
+    public function readingRows(?Builder $rows): self
+    {
+        if ($rows === null) {
+            return $this;
+        }
+
+        $this->rows = $rows;
+
+        // The constructor's join of the grant table is its only one.
+        $this->query->getQuery()->joins = [];
+
+        return $this->performJoin();
+    }
+
     /**
      * Constrain an eager load to the grantees' grants, by their keys as
      * strings.
@@ -43,6 +75,25 @@ final class GrantRelation extends MorphToMany
 
         $this->whereInEager('whereIn', $this->getQualifiedForeignPivotKeyName(), $keys);
         $this->query->where($this->qualifyPivotColumn($this->morphType), $this->morphClass);
+    }
+
+    /**
+     * Join the grant table, or the rows read in place of it, under the table's
+     * name.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<TRelatedModel>|null  $query
+     * @return $this
+     */
+    #[\Override]
+    protected function performJoin($query = null): self
+    {
+        if ($this->rows === null) {
+            return parent::performJoin($query);
+        }
+
+        ($query ?? $this->query)->joinSub($this->rows, $this->table, $this->getQualifiedRelatedKeyName(), '=', $this->getQualifiedRelatedPivotKeyName());
+
+        return $this;
     }
 
     /**

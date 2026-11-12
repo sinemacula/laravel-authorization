@@ -11,14 +11,15 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * Boot-time validator for the `authorization.tables` config, run by
  * `ConfigValidator`.
  *
- * The block must be an array setting no key but the package's twelve tables
+ * The block must be an array setting no key but the package's thirteen tables
  * (N116). Each name it sets must be a plain SQL identifier: a letter or an
  * underscore, then letters, digits and underscores. A name qualified by a
  * schema (`schema.table`) is refused, as the migrations build the names of
  * their indexes and keys from the table's name, and a dot there would break
- * them. A name the block leaves out is the key's own, as the config file has
- * it; a name set to null is refused. The twelve names, those left out included,
- * must be distinct, compared whatever their case, since some databases fold it.
+ * them. A name the block leaves out is the table's default, as the config file
+ * has it (see `TableNames::defaultName()`); a name set to null is refused. The
+ * thirteen names, those left out included, must be distinct, compared whatever
+ * their case, since some databases fold it.
  *
  * Each name is bounded by its own length (`LENGTHS`): the migrations name each
  * index, unique index, primary key and foreign key of a table after the table,
@@ -38,20 +39,20 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * - `resource_policies`, `authorizable_boundaries`, `guardrails`:
  *   `_policy_id_foreign`, 18;
  * - `grant_usage`: `_grant_key_primary`, 18;
- * - `usage_coverage`: `_until_index`, 12.
+ * - `usage_coverage`: `_until_index`, 12;
+ * - `break_glass`: `_role_id_foreign`, Laravel's name for its foreign key, 16.
  *
  * Laravel puts the connection's table prefix before the names it builds, so the
  * bounds hold for a connection without one; a prefix shortens what is left for
  * the table's name by its own length.
  *
  * The block's own `prefix` is put before the name of every table left at its
- * default, the key's own (see `TableNames::isDefault()`), and before no name
- * set explicitly. It must be a string, empty or a lower-case letter, then
- * lower-case letters, digits and underscores, of at most `PREFIX_LENGTH`
- * characters; null is refused. Each name it makes is checked against its
- * table's bound, as a name set explicitly is, and refused under the prefix's
- * path, as the prefix made it too long, and the names it makes must be distinct
- * from the others.
+ * default (see `TableNames::isDefault()`), and before no name set explicitly.
+ * It must be a string, empty or a lower-case letter, then lower-case letters,
+ * digits and underscores, of at most `PREFIX_LENGTH` characters; null is
+ * refused. Each name it makes is checked against its table's bound, as a name
+ * set explicitly is, and refused under the prefix's path, as the prefix made it
+ * too long, and the names it makes must be distinct from the others.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -80,6 +81,7 @@ final class TableConfigValidator
         'guardrails'               => self::IDENTIFIER_LENGTH - 18,
         'grant_usage'              => self::IDENTIFIER_LENGTH - 18,
         'usage_coverage'           => self::IDENTIFIER_LENGTH - 12,
+        'break_glass'              => self::IDENTIFIER_LENGTH - 16,
     ];
 
     /** @var int The most characters the prefix may have. */
@@ -115,12 +117,12 @@ final class TableConfigValidator
         $named  = [];
 
         foreach (\array_keys(self::LENGTHS) as $key) {
-            $named = self::distinct($key, self::effective($key, ConfigBlock::entry($block, $key, $key), $prefix), $named);
+            $named = self::distinct($key, self::effective($key, ConfigBlock::entry($block, $key, TableNames::defaultName($key)), $prefix), $named);
         }
     }
 
     /**
-     * Return the keys the block may set: the prefix, then the twelve tables.
+     * Return the keys the block may set: the prefix, then the thirteen tables.
      *
      * @return list<string>
      */
@@ -161,8 +163,8 @@ final class TableConfigValidator
 
     /**
      * Return the name the table under the key takes: the name set, checked as
-     * `name()` checks it, when it is set explicitly, else the key's own with
-     * the prefix before it, checked by `prefixed()`.
+     * `name()` checks it, when it is set explicitly, else the table's default
+     * name with the prefix before it, checked by `prefixed()`.
      *
      * @param  string  $key
      * @param  mixed  $name
@@ -177,8 +179,8 @@ final class TableConfigValidator
     }
 
     /**
-     * Return the key's own name with the prefix before it, refusing it under
-     * the prefix's path when it is longer than the table's bound.
+     * Return the table's default name with the prefix before it, refusing it
+     * under the prefix's path when it is longer than the table's bound.
      *
      * @param  string  $key
      * @param  string  $prefix
@@ -188,15 +190,16 @@ final class TableConfigValidator
      */
     public static function prefixed(string $key, string $prefix): string
     {
-        $length = self::LENGTHS[$key] ?? ConfigBlock::refuseUnknownKey(self::KEY, $key, \array_keys(self::LENGTHS));
-        $name   = $prefix . $key;
+        $length  = self::LENGTHS[$key] ?? ConfigBlock::refuseUnknownKey(self::KEY, $key, \array_keys(self::LENGTHS));
+        $default = TableNames::defaultName($key);
+        $name    = $prefix . $default;
 
         if (\strlen($name) <= $length) {
             return $name;
         }
 
         $reason   = "prefix '{$prefix}' makes " . self::KEY . ".{$key} '{$name}', longer than {$length} characters, which leaves no room for the names of its indexes and keys.";
-        $expected = "a prefix of at most {$length} characters less the length of '{$key}'";
+        $expected = "a prefix of at most {$length} characters less the length of '{$default}'";
 
         throw new InvalidAuthorizationConfigException(self::KEY . '.' . TableNames::PREFIX, $reason, IssueCode::OUT_OF_RANGE, $expected, 'string');
     }

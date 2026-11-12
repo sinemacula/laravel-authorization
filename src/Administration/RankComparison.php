@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Subject;
@@ -50,7 +51,8 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  * is, so a screen and the service compare the same rows. A delegated change
  * reads the target's rank across the whole reach of the change instead (see
  * `rankAcross()`): the most senior rank the target holds anywhere the change
- * reaches counts.
+ * reaches counts, a role held through a live break-glass activation included, a
+ * machine's too, which can only make it more senior.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -148,12 +150,13 @@ final class RankComparison
     }
 
     /**
-     * Return the most senior rank among the roles the target holds live
-     * anywhere the grant scope reaches, or null when it holds no ranked role
-     * there, in one query on the write connection: its grants of every
-     * application for a grant to every application, else of that application
-     * and of every application; held platform-wide, or in a tenant of the reach
-     * (see `GrantReach`), every tenant for a platform-wide grant.
+     * Return the most senior rank among the roles the target holds live, by a
+     * role grant or a break-glass activation, anywhere the grant scope reaches,
+     * or null when it holds no ranked role there, in one query on the write
+     * connection: its grants of every application for a grant to every
+     * application, else of that application and of every application; held
+     * platform-wide, or in a tenant of the reach (see `GrantReach`), every
+     * tenant for a platform-wide grant.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $target
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
@@ -190,7 +193,7 @@ final class RankComparison
 
         $pivot = TableNames::get('authorizable_roles');
         $role  = new $class;
-        $query = $class::query()->withoutGlobalScopes()->useWritePdo()->join($pivot, $pivot . '.role_id', '=', $role->getQualifiedKeyName())
+        $query = $class::query()->withoutGlobalScopes()->useWritePdo()->joinSub(BreakGlassActivations::roleGrants(), $pivot, $pivot . '.role_id', '=', $role->getQualifiedKeyName())
             ->where(static function (Builder $query) use ($pivot, $holders): void {
                 foreach (self::byType($holders) as $type => $ids) {
                     $query->orWhere(static fn (Builder $held): Builder => $held->where($pivot . '.authorizable_type', $type)->whereIn($pivot . '.authorizable_id', $ids));

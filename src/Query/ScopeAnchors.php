@@ -25,8 +25,8 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * tenant, expiry or application, so they are never fewer than the tenants the
  * sources a check reads sit at:
  *
- * - the tenants of the grants, policies and boundaries of the subject and its
- *   identity;
+ * - the tenants of the grants, break-glass activations, policies and boundaries
+ *   of the subject and its identity;
  * - the tenants of the policies attached to the roles they hold anywhere, and
  *   to every role above those;
  * - the tenants owning those roles, and the permissions granted to the subject
@@ -78,10 +78,10 @@ final class ScopeAnchors
     }
 
     /**
-     * Return the tenants of the grants, policies and boundaries of the subject
-     * and its identity, of the policies attached to the roles they hold and
-     * every role above them, and of the owners of those roles and of the
-     * permissions granted.
+     * Return the tenants of the grants, break-glass activations, policies and
+     * boundaries of the subject and its identity, of the policies attached to
+     * the roles they hold, or hold through an activation, and every role above
+     * them, and of the owners of those roles and of the permissions granted.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @return list<list<\SineMacula\Laravel\Authorization\Support\Reference>>
@@ -90,7 +90,7 @@ final class ScopeAnchors
     {
         $grantees = self::granteesOf($subject);
         $isHeld   = static fn (Builder $query, string $table): Builder => self::whereGrantee($query, $table, $grantees);
-        $roles    = \array_keys(RoleGraph::reach(self::keysOf('authorizable_roles', 'role_id', $isHeld)));
+        $roles    = \array_keys(RoleGraph::reach([...self::keysOf('authorizable_roles', 'role_id', $isHeld), ...self::keysOf('break_glass', 'role_id', $isHeld)]));
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
         $roleClass = ModelClasses::get('role');
@@ -99,7 +99,7 @@ final class ScopeAnchors
         $direct      = self::keysOf('authorizable_permissions', 'permission_id', $isHeld);
         $inherited   = self::keysOf('role_permissions', 'permission_id', static fn (Builder $query, string $table): Builder => $query->whereIn("{$table}.role_id", $roles));
         $permissions = [...$direct, ...$inherited];
-        $grants      = ['authorizable_roles', 'authorizable_permissions', 'authorizable_policies', 'authorizable_boundaries'];
+        $grants      = ['authorizable_roles', 'break_glass', 'authorizable_permissions', 'authorizable_policies', 'authorizable_boundaries'];
         $byRoles     = static fn (Builder $query, string $table): Builder => $query->where("{$table}.authorizable_type", $roleType)->whereIn("{$table}.authorizable_id", $roles);
 
         return [

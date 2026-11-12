@@ -9,8 +9,10 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Feature\Stubs\RecordingLogger;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -145,6 +147,38 @@ final class ResolutionCacheTest extends TestCase
         self::assertSame(['posts:read'], $ann->getPermissions());
         self::assertCount(1, $cache->routesOf('permissions', $ann)?->routesFor('posts:read') ?? []);
         self::assertStringContainsString('discarding corrupt resolution-cache entry', $logger->messages()[0] ?? '');
+    }
+
+    /**
+     * An instance read as an identity keeps its routed entries, and the routes
+     * beside them, apart from those of the same grantee read as a subject, in
+     * the memo and the store alike, and each is read back under its own kind.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnIdentitysRoutesAreKeptApart(): void
+    {
+        $store    = Cache::store('array');
+        $ann      = self::identity('ann');
+        $identity = StubIdentity::query()->findOrFail('ann');
+
+        self::grants()->grantPermission($ann, self::permission('posts:read'));
+        BreakGlassActivations::markIdentity($identity);
+
+        $cache = $this->cache($store, true);
+
+        $identity->getPermissions();
+
+        self::assertNotNull($cache->routesOf('permissions', $identity));
+        self::assertNull($cache->routesOf('permissions', $ann));
+
+        $ann->getPermissions();
+
+        self::assertNotNull($cache->routesOf('permissions', $ann));
+        self::assertCount(2, self::entries($store));
+        self::assertCount(1, \array_filter(self::entries($store), static fn (string $key): bool => \str_starts_with($key, 'usage-test:identity-permissions-routed:')));
     }
 
     /**

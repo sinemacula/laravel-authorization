@@ -58,7 +58,8 @@ final class ScopeClasses
 {
     /** @var list<string> The authorization tables whose tenant columns a check matches sources by. */
     private const array TENANT_TABLES = [
-        'roles', 'permissions', 'policies', 'authorizable_roles', 'authorizable_permissions', 'authorizable_policies', 'resource_policies', 'authorizable_boundaries', 'guardrails',
+        'roles', 'permissions', 'policies', 'authorizable_roles', 'break_glass', 'authorizable_permissions', 'authorizable_policies', 'resource_policies',
+        'authorizable_boundaries', 'guardrails',
     ];
 
     /** @var int The most anchors when `authorization.query_scoping.max_anchors` is not set. */

@@ -97,21 +97,22 @@ return [
     | Each name must be a plain identifier (a letter or an underscore, then
     | letters, digits and underscores) with no schema before it, short enough
     | that every index and key name the migrations build from it fits in 63
-    | characters (33 to 51, depending on the table), and the twelve names must
-    | be distinct. A name left out is the key's own; null is refused.
+    | characters (33 to 51, depending on the table), and the thirteen names
+    | must be distinct. A name left out takes its default, the key's own but
+    | for `break_glass`, whose default is `break_glass_activations`; null is
+    | refused.
     |
     | `prefix` is put before the name of every table left at its default, so
-    | `app_` makes `roles` `app_roles`. A name is left at its default when it
-    | is the key's own, whether it is left out, left as the file has it, or
-    | set to the key's own name in the environment; a name that differs from
-    | the key's own is set explicitly, and is used as it is written, without
-    | the prefix. The prefix must be empty, or a lower-case letter, then
-    | lower-case letters, digits and underscores, of at most 16 characters,
-    | and every name it makes is checked as a name set explicitly is: within
-    | its table's bound, and distinct from the others. Null is refused. The
-    | migrations create the tables under the names the prefix makes, so set
-    | it before migrating; changing it later points the package at tables
-    | that do not exist.
+    | `app_` makes `roles` `app_roles`. A name is left at its default when it is
+    | the default, whether it is left out, left as the file has it, or set to
+    | the default in the environment; a name that differs from the default is
+    | set explicitly, and is used as it is written, without the prefix. The
+    | prefix must be empty, or a lower-case letter, then lower-case letters,
+    | digits and underscores, of at most 16 characters, and every name it makes
+    | is checked as a name set explicitly is: within its table's bound, and
+    | distinct from the others. Null is refused. The migrations create the
+    | tables under the names the prefix makes, so set it before migrating;
+    | changing it later points the package at tables that do not exist.
     |
     */
 
@@ -129,6 +130,7 @@ return [
         'guardrails'               => env('AUTHORIZATION_TABLE_GUARDRAILS', 'guardrails'),
         'grant_usage'              => env('AUTHORIZATION_TABLE_GRANT_USAGE', 'grant_usage'),
         'usage_coverage'           => env('AUTHORIZATION_TABLE_USAGE_COVERAGE', 'usage_coverage'),
+        'break_glass'              => env('AUTHORIZATION_TABLE_BREAK_GLASS', 'break_glass_activations'),
     ],
 
     /*
@@ -764,6 +766,43 @@ return [
         'connection' => env('AUTHORIZATION_USAGE_QUEUE_CONNECTION'),
         'queue'      => env('AUTHORIZATION_USAGE_QUEUE'),
         'retention'  => env('AUTHORIZATION_USAGE_RETENTION_DAYS', 400),
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Break-glass (not yet available)
+    |---------------------------------------------------------------------------
+    |
+    | Opt-in emergency access: a principal with the break-glass right grants
+    | itself, or another person, one of the emergency roles listed here for a
+    | limited time, with a justification code from the list. Nothing creates
+    | an activation yet, and `enabled` true is refused at boot until the audit
+    | trail ships: the settings are read and checked now so the next releases
+    | only switch them on.
+    |
+    | `enabled` is true or false, false by default. `max_minutes`, a whole
+    | number of at least 1 (60 by default), is the longest an activation may
+    | last. `roles` maps the name of each emergency role, as a role is named
+    | elsewhere in this file, to its settings: `max_minutes`, a whole number
+    | from 1 up to the global maximum, or null or left out for the global
+    | maximum; a role named here is looked up by name when it is activated,
+    | never at boot. `justifications` lists the codes an activation must give
+    | one of, each a lower-case identifier of at most 64 characters (letters,
+    | digits, `.`, `_` and `-`), each once; the list may be empty only while
+    | break-glass is disabled. `notes` says whether an activation may carry a
+    | free-text note, false by default, and `note_max_length`, a whole number
+    | of at least 1 (500 by default), bounds it; a note is personal data and
+    | is never cached, logged or put on an event.
+    |
+    */
+
+    'break_glass' => [
+        'enabled'         => env('AUTHORIZATION_BREAK_GLASS_ENABLED', false),
+        'max_minutes'     => env('AUTHORIZATION_BREAK_GLASS_MAX_MINUTES', 60),
+        'roles'           => [],
+        'justifications'  => [],
+        'notes'           => env('AUTHORIZATION_BREAK_GLASS_NOTES', false),
+        'note_max_length' => env('AUTHORIZATION_BREAK_GLASS_NOTE_MAX_LENGTH', 500),
     ],
 
     /*

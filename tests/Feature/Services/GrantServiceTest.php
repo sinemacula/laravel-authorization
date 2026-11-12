@@ -2012,7 +2012,7 @@ final class GrantServiceTest extends TestCase
         $before = self::expiries();
 
         DB::listen(static function (QueryExecuted $query): void {
-            if (\preg_match('/expires_at\W*\s*>/', $query->sql) !== 1) {
+            if (\str_contains($query->sql, 'break_glass') || \preg_match('/expires_at\W*\s*>/', $query->sql) !== 1) {
                 return;
             }
 

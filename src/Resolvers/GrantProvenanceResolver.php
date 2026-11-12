@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\GrantSource;
 use SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder;
 use SineMacula\Laravel\Authorization\Evaluation\GrantProvenance;
@@ -42,6 +43,10 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  * rows read, and each policy by its attachments, so a grant the cache still
  * holds that the rows no longer give, a stale entry say, is recorded as
  * `unavailable`, never guessed.
+ *
+ * A role held through a break-glass activation is named as such, with the
+ * activation's key, never its note (see `GrantSource::BREAK_GLASS_PERMISSION`
+ * and `BREAK_GLASS_POLICY`).
  *
  * Only a grantee whose grants the package's own traits resolve can say where a
  * grant came from: one whose `getPermissions()` or `getPolicies()` is its own,
@@ -446,7 +451,9 @@ final class GrantProvenanceResolver
 
     /**
      * Return the provenance of a grant read through a related model, with the
-     * tenant and application of the grant row it was read through.
+     * tenant and application of the grant row it was read through, and, for a
+     * role read through a break-glass activation, the route named as one with
+     * the activation's key.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\GrantSource  $source
      * @param  string  $grant
@@ -461,8 +468,14 @@ final class GrantProvenanceResolver
         /** @var \Illuminate\Database\Eloquent\Model $pivot */
         $pivot       = $granted->getRelation('pivot');
         $application = $pivot->getAttribute('application');
+        $activation  = BreakGlassActivations::activationOf($granted);
+        $route       = match (true) {
+            $activation === null                     => $source,
+            $source     === GrantSource::ROLE_POLICY => GrantSource::BREAK_GLASS_POLICY,
+            default                                  => GrantSource::BREAK_GLASS_PERMISSION,
+        };
 
-        return new GrantProvenance($source, $grant, $grantee, $isIdentity, $roles, true, Reference::tenantOf($pivot), \is_string($application) ? $application : null);
+        return new GrantProvenance($route, $grant, $grantee, $isIdentity, $roles, true, Reference::tenantOf($pivot), \is_string($application) ? $application : null, $activation);
     }
 
     /**

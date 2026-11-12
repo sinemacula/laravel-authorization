@@ -13,6 +13,7 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\RankComparison;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
@@ -22,6 +23,7 @@ use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleReach;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Concerns\ChecksGrantsByName;
 use Tests\Concerns\RefusesThePackage;
@@ -42,7 +44,7 @@ use Tests\TestCase;
 #[CoversTrait(HasRoles::class)]
 final class HasRolesTest extends TestCase
 {
-    use ChecksGrantExpiry, ChecksGrantsByName, RefusesThePackage;
+    use ActivatesBreakGlass, ChecksGrantExpiry, ChecksGrantsByName, RefusesThePackage;
 
     /**
      * Reset the clock.
@@ -376,6 +378,42 @@ final class HasRolesTest extends TestCase
     }
 
     /**
+     * A live break-glass activation is read through `roles()` as a grant of its
+     * role, beside a normal grant of it, with the activation's key on the
+     * pivot, null on the normal grant's; an instance read as an identity counts
+     * none, whether its loaded roles were read before or after.
+     *
+     * @return void
+     */
+    public function testAnActivationIsReadAsARoleGrantByAPrincipalAlone(): void
+    {
+        $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $role       = self::emergencyRole();
+        $activation = self::activate($user, $role);
+
+        $user->assignRole(Role::create(['name' => 'editor']));
+
+        $pivots = $user->roles()->orderBy('name')->get()->map(static fn (Role $held): array => [$held->name, BreakGlassActivations::activationOf($held)])->all();
+
+        self::assertSame([['editor', null], ['responder', $activation->id]], $pivots);
+        self::assertTrue($user->hasRole('responder'));
+        self::assertSame(['editor', 'responder'], self::sorted($user->getRoles()));
+
+        BreakGlassActivations::markIdentity($user);
+
+        self::assertFalse($user->hasRole('responder'));
+        self::assertTrue($user->hasRole('editor'));
+        self::assertSame(['editor'], $user->getRoles());
+
+        $fresh = StubIdentity::query()->findOrFail($user->id);
+
+        BreakGlassActivations::markIdentity($fresh);
+
+        self::assertFalse($fresh->hasRole('responder'));
+        self::assertSame(['editor'], $fresh->roles()->pluck('name')->all());
+    }
+
+    /**
      * Return the grant table the expiry check reads.
      *
      * @return string
@@ -576,5 +614,18 @@ final class HasRolesTest extends TestCase
         $user->assignRole(Role::create(['name' => 'on-call', 'guard' => 'web']), Carbon::parse($expiresAt));
 
         return $user;
+    }
+
+    /**
+     * Return the names sorted.
+     *
+     * @param  array<int, string>  $names
+     * @return list<string>
+     */
+    private static function sorted(array $names): array
+    {
+        \sort($names);
+
+        return $names;
     }
 }

@@ -10,6 +10,7 @@ use Illuminate\Database\Query\Builder as QueryBuilder;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
 use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
@@ -42,13 +43,15 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  * - as stored, on the write connection, outside every tenant scope, whatever
  *   their application and expiry, each held, attached or set in a tenant of the
  *   grant's reach (see `GrantReach`): the policies attached to the subject's
- *   principal and identity, and to every role either holds and the roles above
- *   them, the policies attached to any resource, the boundaries of the
- *   principal and the identity, and the guardrails; and, wherever they are,
- *   those of them that restrict everywhere, naming half a tenant (see
- *   `Support\TenantColumns`): a boundary or a guardrail stored that way, an
- *   attachment of a policy or a resource policy stored that way, and an
- *   attachment of a policy naming half a tenant.
+ *   principal and identity, and to every role either holds, or the principal
+ *   holds through a break-glass activation that counts for it (see
+ *   `BreakGlassActivations::isCounted()`), and the roles above them, the
+ *   policies attached to any resource, the boundaries of the principal and the
+ *   identity, and the guardrails; and, wherever they are, those of them that
+ *   restrict everywhere, naming half a tenant (see `Support\TenantColumns`): a
+ *   boundary or a guardrail stored that way, an attachment of a policy or a
+ *   resource policy stored that way, and an attachment of a policy naming half
+ *   a tenant.
  *
  * Exactly `authorization:guardrail.manage` is exempt from the guardrails, as
  * the guardrail stage exempts its check: no guardrail, one that cannot be read
@@ -207,9 +210,12 @@ final class PossessionLimits
             $grantees[] = Reference::of($side);
         }
 
+        $principal = $subject->subject;
+        $activated = $principal instanceof Model && BreakGlassActivations::isCounted($principal) ? [Reference::of($principal)] : [];
+
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $role */
         $role  = ModelClasses::get('role');
-        $roles = \array_keys(RoleGraph::reach(self::keys('authorizable_roles', 'role_id', $grantees, $reach)));
+        $roles = \array_keys(RoleGraph::reach([...self::keys('authorizable_roles', 'role_id', $grantees, $reach), ...self::keys('break_glass', 'role_id', $activated, $reach)]));
         $held  = [...$grantees, ...\array_map(static fn (string $key): Reference => new Reference((new $role)->getMorphClass(), $key), $roles)];
 
         $denied   = static fn (Builder $query, string $table): Builder => TenantColumns::whereDenyOnly($query, $table);

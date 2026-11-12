@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Support\RolePolicies;
 use SineMacula\Laravel\Authorization\Usage\GrantRoute;
 use SineMacula\Laravel\Authorization\Usage\GrantUsageKey;
 use SineMacula\Laravel\Authorization\Usage\RouteSources;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -38,7 +39,7 @@ use Tests\TestCase;
 #[CoversClass(RouteSources::class)]
 final class RouteSourcesTest extends TestCase
 {
-    use ReviewsAccess;
+    use ActivatesBreakGlass, ReviewsAccess;
 
     /**
      * Each permission is given by its direct grant and by each role of a held
@@ -186,6 +187,36 @@ final class RouteSourcesTest extends TestCase
         self::assertCount(22, $routes->routes);
         self::assertCount(20, $routes->names());
         self::assertSame($routes->routesFor('posts:p0')[1]->key, $routes->routesFor('posts:p19')[1]->key);
+    }
+
+    /**
+     * A role held through a break-glass activation is no stored grant, so no
+     * route starts from it: a permission it alone gives has none, and one a
+     * normal grant of the same role gives too has that grant's routes alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testNoRouteStartsFromAnActivation(): void
+    {
+        $responder = self::role('responder');
+        $editor    = self::role('editor');
+        $ann       = self::identity('ann');
+
+        $responder->givePermissionTo(self::permission('posts:delete'));
+        $editor->givePermissionTo(self::permission('posts:edit'));
+
+        self::activate($ann, $responder);
+        self::activate($ann, $editor);
+        self::grants()->grantRole($ann, $editor);
+
+        $routes = GrantResolver::permissions($ann->permissions(), $ann->roles(), new ResolutionPins(null, true))->routes ?? self::fail('No routes were kept.');
+
+        self::assertSame(['posts:edit'], $routes->names());
+        self::assertSame(self::rowKeys($ann, ['role_grant ann [editor] editor', 'role_permission ann [editor] posts:edit']), self::keysOf($routes->routesFor('posts:edit')));
+        self::assertSame([], $routes->routesFor('posts:delete'));
+        self::assertCount(1, $routes->grants);
     }
 
     /**

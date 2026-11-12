@@ -31,9 +31,9 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * its full path, rather than leaving its default in place. A key left out takes
  * its default; a key set to null is refused, except where null means off or
  * none: `connection`, `policy_store`, `cache.store`, `usage.connection`,
- * `usage.queue` and `log_channel`. Whole numbers and switches are read as the
- * environment writes them (N117): see `IntegerSetting` and
- * `SwitchConfigValidator`.
+ * `usage.queue`, a break-glass role's `max_minutes` and `log_channel`. Whole
+ * numbers and switches are read as the environment writes them (N117): see
+ * `IntegerSetting` and `SwitchConfigValidator`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,7 +47,7 @@ final class ConfigValidator
         'models', 'connection', 'tables', 'defaults', 'permission_enums', 'permission_providers', 'gate', 'log_channel', 'policy_store',
         'policies', 'query_scoping', 'bulk', 'context', 'attributes', 'subject_resolver', 'tenant_tree', 'identity_directory',
         'application_access', 'resource_tenant_resolver', 'requirement_checker', 'session', 'cache', 'hierarchy', 'rank',
-        'administration', 'reviews', 'usage', 'grant_hooks',
+        'administration', 'reviews', 'usage', 'break_glass', 'grant_hooks',
     ];
 
     /** @var array<string, class-string<\Illuminate\Database\Eloquent\Model>> The package model each `models.*` key must be or extend. */
@@ -99,6 +99,7 @@ final class ConfigValidator
 
         UsageConfigValidator::validate($usage);
         NamedEntryConfigValidator::queueConnection(\is_array($usage) ? ConfigBlock::entry($usage, 'connection', null) : null, $container);
+        BreakGlassConfigValidator::validate($given('break_glass'));
         GrantHookConfigValidator::validate($given('grant_hooks'));
     }
 

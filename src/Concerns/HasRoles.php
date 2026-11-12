@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -58,6 +59,13 @@ trait HasRoles // @phpstan-ignore trait.unused
      * `pivot` attribute, and the grant's timestamps are kept. Only the grants
      * that hold in the current tenant and application count.
      *
+     * A live break-glass activation of a role is read as a grant of the role in
+     * its scope, beside any role grant of the same role, with its key on the
+     * pivot under `break_glass_id` (null for a role grant), so every check
+     * reads the role it activates until it ends or expires (see
+     * `BreakGlassActivations`); a machine's activations, and those of an
+     * instance read as another subject's identity, are never read.
+     *
      * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
      *     $this, \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot, 'pivot'>
      */
@@ -67,8 +75,10 @@ trait HasRoles // @phpstan-ignore trait.unused
         $model = ModelClasses::get('role');
 
         $table = TableNames::get('authorizable_roles');
+        $rows  = BreakGlassActivations::roleGrants(BreakGlassActivations::isCounted($this));
 
-        return $this->authorizationGrantRelation($model, $table, 'role_id', AuthorizableRolePivot::class);
+        return $this->authorizationGrantRelation($model, $table, 'role_id', AuthorizableRolePivot::class, $rows)
+            ->withPivot(BreakGlassActivations::ACTIVATION);
     }
 
     /**
@@ -185,7 +195,10 @@ trait HasRoles // @phpstan-ignore trait.unused
      * Only roles granted in the current tenant, or platform-wide, count. They
      * are read once per model instance, under the tenant current then, as
      * Eloquent keeps any loaded relation; the tenant is held for a request or
-     * job, so a model read in that request or job sees its tenant.
+     * job, so a model read in that request or job sees its tenant. A role held
+     * through a break-glass activation counts as a role granted does, but not
+     * for an instance whose activations do not count (see
+     * `BreakGlassActivations::isCounted()`).
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  string|null  $guard
@@ -197,6 +210,10 @@ trait HasRoles // @phpstan-ignore trait.unused
 
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
         $roles = $this->authorizationLoadedGrants('roles');
+
+        if (!BreakGlassActivations::isCounted($this)) {
+            $roles = $roles->filter(static fn (Role $held): bool => BreakGlassActivations::activationOf($held) === null);
+        }
 
         foreach ($roles as $existing) {
             $named = $role instanceof Role ? $existing->is($role) : $existing->name === $role;

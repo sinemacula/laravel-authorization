@@ -188,7 +188,8 @@ final class CheckConfigurationCommandTest extends TestCase
             ['[table prefix] app_', '[table roles] authz_roles; set explicitly, so used as written', '[table permissions] app_permissions; the default, with the prefix'],
             \array_slice(self::starting($lines, '[table '), 0, 3),
         );
-        self::assertCount(13, self::starting($lines, '[table '));
+        self::assertCount(14, self::starting($lines, '[table '));
+        self::assertContains('[table break_glass] app_break_glass_activations; the default, with the prefix', $lines);
         /** @var array{prefix: string|null, names: list<array<string, mixed>>} $tables */
         $tables = $json['tables'];
 

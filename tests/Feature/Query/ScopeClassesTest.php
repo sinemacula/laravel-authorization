@@ -157,6 +157,26 @@ final class ScopeClassesTest extends TestCase
     }
 
     /**
+     * The tenant columns of the break-glass activations must compare bytes too,
+     * as a check matches an activation's tenant in SQL.
+     *
+     * @return void
+     */
+    public function testAnInexactActivationTableIsRefused(): void
+    {
+        $user = StubIdentity::create(['id' => 'u1']);
+
+        $this->app?->make(ConfigRepository::class)->set('authorization.tables.break_glass', 'scoped_folded_break_glass');
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+
+        $refusal = self::refusal($this->resolveRequest($user, new Reference(self::tenantType(), 'o1')));
+
+        self::assertSame([RefusalReason::COLUMN_COLLATION], $refusal->reasons());
+        self::assertSame('scoped_folded_break_glass.tenant_type', $refusal->refusals[0]->key);
+    }
+
+    /**
      * A grant at the organisation reaching its subtree, one at an account alone
      * and one at a sub-account each allow exactly the rows `check()` allows,
      * from the organisation, an account and the sibling organisation.

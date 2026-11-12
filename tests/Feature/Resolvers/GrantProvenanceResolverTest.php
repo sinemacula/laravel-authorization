@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Resolvers\GrantProvenanceResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Feature\Stubs\CustomGrantsIdentity;
 use Tests\Feature\Stubs\HiddenPolicy;
 use Tests\Feature\Stubs\StubIdentity;
@@ -50,6 +51,8 @@ use Tests\TestCase;
 #[CoversClass(GrantProvenanceResolver::class)]
 final class GrantProvenanceResolverTest extends TestCase
 {
+    use ActivatesBreakGlass;
+
     /**
      * A permission granted directly, in a tenant and an application, is held
      * with its grant row; the exact name wins over a pattern, as it does
@@ -658,6 +661,51 @@ final class GrantProvenanceResolverTest extends TestCase
         $this->expectException(InvalidPolicyDocumentException::class);
 
         GrantProvenanceResolver::policiesOf($user, new EvidenceRecorder);
+    }
+
+    /**
+     * A permission and a policy reached through a role held by a break-glass
+     * activation are named as break-glass routes with the activation's key,
+     * beside the routes through a normal grant of the same role, which are
+     * named as they always are; never the note.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleHeldThroughAnActivationIsNamedAsBreakGlass(): void
+    {
+        $user       = StubIdentity::create(['id' => 'user-1']);
+        $role       = self::emergencyRole('posts:edit');
+        $shared     = self::policy('shared');
+        $activation = self::activate($user, $role);
+
+        $role->attachPolicy($shared);
+
+        [$held, $grants] = GrantProvenanceResolver::permissionFor(new Subject($user, $user), 'posts:edit');
+
+        self::assertSame('posts:edit', $held);
+        self::assertEquals(
+            [new GrantProvenance(GrantSource::BREAK_GLASS_PERMISSION, 'posts:edit', Reference::of($user), false, ['responder'], true, null, null, $activation->id)],
+            $grants,
+        );
+
+        $user->assignRole($role);
+
+        $recorder = new EvidenceRecorder;
+
+        GrantProvenanceResolver::policiesOf(StubIdentity::query()->findOrFail('user-1'), $recorder);
+
+        $routes = $recorder->evidenceFor(Decision::allow(DecisionStage::ALLOW, [new StatementReference('shared', 0, $shared->id)]))->grants;
+
+        self::assertEqualsCanonicalizing(
+            [
+                new GrantProvenance(GrantSource::ROLE_POLICY, "shared[{$shared->id}]", Reference::of($user), false, ['responder'], true),
+                new GrantProvenance(GrantSource::BREAK_GLASS_POLICY, "shared[{$shared->id}]", Reference::of($user), false, ['responder'], true, null, null, $activation->id),
+            ],
+            $routes,
+        );
+        self::assertStringNotContainsString(self::NOTE, (string) \json_encode(\array_map(static fn (GrantProvenance $route): array => $route->toArray(), $routes)));
     }
 
     /**

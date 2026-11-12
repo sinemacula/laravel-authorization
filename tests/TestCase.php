@@ -342,6 +342,23 @@ abstract class TestCase extends OrchestraTestCase
             $schema->boolean('include_subtree')->default(true);
             $schema->string('application', 191)->nullable();
         });
+
+        Schema::create('scoped_folded_break_glass', static function (Blueprint $schema) use ($collation): void {
+            $schema->uuid('id')->primary();
+            $schema->uuid('role_id');
+
+            foreach (['authorizable_type', 'authorizable_id', 'granted_by_type', 'granted_by_id'] as $column) {
+                $schema->string($column, 191)->nullable();
+            }
+
+            $schema->string('tenant_type', 191)->collation((string) $collation)->nullable();
+            $schema->string('tenant_id', 191)->collation((string) $collation)->nullable();
+            $schema->boolean('include_subtree')->default(true);
+            $schema->string('application', 191)->nullable();
+            $schema->dateTime('activated_at');
+            $schema->dateTime('expires_at');
+            $schema->dateTime('ended_at')->nullable();
+        });
     }
 
     /**

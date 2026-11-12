@@ -21,8 +21,18 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  */
 final class PrincipalCacheKey
 {
-    /** @var list<string> The kinds of entry that hold policy documents, hydrated under the policy limits. */
-    private const array POLICY_KINDS = ['policies', 'policies-routed', 'boundaries', 'resource-policies', 'resource-type-policies', 'guardrails'];
+    /** @var list<string> The kinds of entry that hold policy documents, hydrated under the policy limits, an identity's included (see `BreakGlassActivations::kindFor()`). */
+    private const array POLICY_KINDS = [
+        'policies',
+        'policies-routed',
+        'boundaries',
+        'resource-policies',
+        'resource-type-policies',
+        'guardrails',
+        'identity-policies',
+        'identity-policies-routed',
+        'identity-boundaries',
+    ];
 
     /**
      * Return the key of the kind's persistent entry for the grantee under the

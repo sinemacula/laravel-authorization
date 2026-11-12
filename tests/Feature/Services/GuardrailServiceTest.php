@@ -470,7 +470,10 @@ final class GuardrailServiceTest extends TestCase
 
         self::assertIsInt($first);
         self::assertSame(
-            ['authorizable_roles', 'authorizable_permissions', 'authorizable_policies', 'authorizable_boundaries', 'guardrails', 'resource_policies', 'permissions'],
+            [
+                'authorizable_roles', 'break_glass_activations', 'authorizable_permissions', 'authorizable_policies', 'authorizable_boundaries', 'guardrails',
+                'resource_policies', 'permissions',
+            ],
             \array_column(\array_slice($locked, 0, $first), 0),
         );
     }

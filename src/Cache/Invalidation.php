@@ -27,11 +27,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 /**
  * Which version tokens a write bumps, read from the events it dispatches.
  *
- * - A grantee's grant, revocation or expiry change bumps the grantee. A policy
- *   attached to, detached from or expiring on a role also bumps the version
- *   every role's policy attachments share, which every entry of an identity's
- *   policies records, so the change reaches every holder of the role and of the
- *   roles below it.
+ * - A grantee's grant, revocation or expiry change bumps the grantee, and so
+ *   does a change to a break-glass activation naming it, which a write names by
+ *   its grantees rather than by an event. A policy attached to, detached from
+ *   or expiring on a role also bumps the version every role's policy
+ *   attachments share, which every entry of an identity's policies records, so
+ *   the change reaches every holder of the role and of the roles below it.
  * - A change to a role (its permissions or their expiry, its parent, its name,
  *   its owner) or its deletion bumps the role. Entries record every role they
  *   were built from, ancestors included, so the bump reaches every identity
@@ -63,15 +64,17 @@ final class Invalidation
     private const array PERMISSION_FIELDS = ['name', 'tenant_type', 'tenant_id'];
 
     /**
-     * Return the version keys the events bump, each once.
+     * Return the version keys the events bump, with those of the grantees whose
+     * grants changed without an event, each once.
      *
      * @param  \SineMacula\Laravel\Authorization\Cache\VersionedStore  $store
      * @param  list<\SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent>  $events
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\Reference>  $grantees
      * @return list<string>
      */
-    public static function keys(VersionedStore $store, array $events): array
+    public static function keys(VersionedStore $store, array $events, array $grantees = []): array
     {
-        $keys = [];
+        $keys = \array_map($store->granteeKey(...), $grantees);
 
         foreach ($events as $event) {
             $keys = [...$keys, ...self::keysFor($store, $event)];

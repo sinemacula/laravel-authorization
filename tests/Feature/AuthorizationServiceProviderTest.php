@@ -47,6 +47,7 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Diagnostics\ContainerState;
 use SineMacula\Laravel\Authorization\Diagnostics\DiagnosticMode;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\Origin;
@@ -237,6 +238,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             'authorization',
             AuthorizationManager::class,
             Previewing::class,
+            BreakGlassActivations::class,
         ];
 
         foreach ($abstracts as $abstract) {

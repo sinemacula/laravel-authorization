@@ -84,6 +84,7 @@ final class RootChecksTest extends TestCase
         self::assertSame([], $this->issues(['tables' => ['prefix' => 'app_', 'roles' => 'permissions']]));
         self::assertSame([['authorization.tables.permissions', 'duplicate']], $this->issues(['tables' => ['prefix' => 'x_', 'roles' => 'x_permissions']]));
         self::assertSame([['authorization.tables.prefixes', 'unknown_key']], $this->issues(['tables' => ['prefixes' => 'app_']]));
+        self::assertSame([['authorization.tables.break_glass', 'duplicate']], $this->issues(['tables' => ['prefix' => 'x_', 'roles' => 'x_break_glass_activations']]));
     }
 
     /**
