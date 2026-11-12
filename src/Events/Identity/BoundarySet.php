@@ -58,4 +58,15 @@ final readonly class BoundarySet extends BoundaryEvent
     ) {
         parent::__construct($operation, $grantee, $policy, $name, $scope);
     }
+
+    /**
+     * Return the stable identifier of the change: `identity.boundary.set`.
+     *
+     * @return string
+     */
+    #[\Override]
+    public function operation(): string
+    {
+        return 'identity.boundary.set';
+    }
 }

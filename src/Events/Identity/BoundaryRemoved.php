@@ -20,4 +20,16 @@ namespace SineMacula\Laravel\Authorization\Events\Identity;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class BoundaryRemoved extends BoundaryEvent {}
+final readonly class BoundaryRemoved extends BoundaryEvent
+{
+    /**
+     * Return the stable identifier of the change: `identity.boundary.removed`.
+     *
+     * @return string
+     */
+    #[\Override]
+    public function operation(): string
+    {
+        return 'identity.boundary.removed';
+    }
+}

@@ -2716,6 +2716,81 @@ operation, with its id, its actor and identity, whether it was trusted, any impe
 through a model outside the services is a trusted operation of its own with no actor. A change `forceSystem()` unlocked
 dispatches `SystemOverrideUsed`, naming the record, the change and the actor.
 
+#### Reading a change for an audit log
+
+Every change event also implements `SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation`, so an audit
+mapper typed against it reads each change through the same accessors, without reading the event's properties. The
+decision events and `SystemOverrideUsed` do not implement it:
+
+```php
+use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
+
+Event::listen(static function (AuthorizationMutation $event): void {
+    $event->operation();       // 'identity.role.assigned': the kind of change, stable and unique per event class
+    $event->subject();         // Reference to the record the change is about, or null
+    $event->tenant();          // Reference to the tenant it holds in, or that owns the record; null for the platform
+    $event->application();     // the application it holds in, or null for every application
+    $event->grantees();        // a Reference to every grantee whose access it changed, or none
+    $event->auditProperties(); // ['role' => 'role:3', 'name' => 'editor', 'scope.include_subtree' => true, ...]
+
+    // The call that made the change
+    $event->operationId();     // the call's id, shared by every event it dispatched and every decision made for it
+    $event->isTrusted();       // true for trusted system work, made without an acting context
+    $event->actor();           // Reference to the acting principal, the reference a trusted command names, or null
+    $event->actorIdentity();   // Reference to the identity behind the acting principal, or null
+    $event->impersonator();    // Reference to whoever was impersonating the acting subject, or null
+    $event->occurredAt();      // DateTimeImmutable: when the call was made, in UTC
+});
+```
+
+`auditProperties()` returns every other detail of the event, flat and serialisable: each key is the property's name in
+snake case, a scope, a document digest or the before and after of an update sit under dotted keys
+(`scope.include_subtree`, `document.digest`, `changes.before.name`), a reference is written as `type:id`, a date as an
+ISO 8601 string in UTC, and a list of references as a list of strings. It never holds a model, a closure or the
+operation: the call that made the change is read through the call accessors above. The grantee, the grantees and the
+tenant are left out, since the other accessors return them.
+
+The IP address and the user agent the call came from are deliberately absent: they are personal data, carried to the
+grant hook alone, so no accessor returns them and `auditProperties()` never holds them.
+
+| Event                              | `operation()`                        | `subject()`                          | `grantees()`                     |
+|------------------------------------|--------------------------------------|--------------------------------------|----------------------------------|
+| `Identity\RoleAssigned`            | `identity.role.assigned`             | the grantee                          | the grantee                      |
+| `Identity\RoleRevoked`             | `identity.role.revoked`              | the grantee                          | the grantee                      |
+| `Identity\RoleExpiryChanged`       | `identity.role.expiry_changed`       | the grantee                          | the grantee                      |
+| `Identity\RoleExpired`             | `identity.role.expired`              | the grantee                          | the grantee                      |
+| `Identity\PermissionGranted`       | `identity.permission.granted`        | the grantee                          | the grantee                      |
+| `Identity\PermissionRevoked`       | `identity.permission.revoked`        | the grantee                          | the grantee                      |
+| `Identity\PermissionExpiryChanged` | `identity.permission.expiry_changed` | the grantee                          | the grantee                      |
+| `Identity\PermissionExpired`       | `identity.permission.expired`        | the grantee                          | the grantee                      |
+| `Identity\PolicyAttached`          | `identity.policy.attached`           | the grantee                          | the grantee                      |
+| `Identity\PolicyDetached`          | `identity.policy.detached`           | the grantee                          | the grantee                      |
+| `Identity\PolicyExpiryChanged`     | `identity.policy.expiry_changed`     | the grantee                          | the grantee                      |
+| `Identity\PolicyExpired`           | `identity.policy.expired`            | the grantee                          | the grantee                      |
+| `Identity\BoundarySet`             | `identity.boundary.set`              | the grantee                          | the grantee                      |
+| `Identity\BoundaryRemoved`         | `identity.boundary.removed`          | the grantee                          | the grantee                      |
+| `Role\Created`                     | `role.created`                       | the role                             | none                             |
+| `Role\Updated`                     | `role.updated`                       | the role                             | none                             |
+| `Role\Deleted`                     | `role.deleted`                       | the role                             | every grantee that held it       |
+| `Role\PermissionGranted`           | `role.permission.granted`            | the role                             | the role                         |
+| `Role\PermissionRevoked`           | `role.permission.revoked`            | the role                             | the role                         |
+| `Role\PermissionExpiryChanged`     | `role.permission.expiry_changed`     | the role                             | the role                         |
+| `Role\PermissionExpired`           | `role.permission.expired`            | the role                             | the role                         |
+| `Permission\Created`               | `permission.created`                 | the permission                       | none                             |
+| `Permission\Updated`               | `permission.updated`                 | the permission                       | none                             |
+| `Permission\Deleted`               | `permission.deleted`                 | the permission                       | every grantee, then every role   |
+| `Policy\Created`                   | `policy.created`                     | the policy                           | none                             |
+| `Policy\Updated`                   | `policy.updated`                     | the policy                           | none                             |
+| `Policy\Deleted`                   | `policy.deleted`                     | the policy                           | every grantee it was attached to |
+| `Resource\PolicyAttached`          | `resource.policy.attached`           | the record, or null for a whole type | none                             |
+| `Resource\PolicyDetached`          | `resource.policy.detached`           | the record, or null for a whole type | none                             |
+| `Guardrail\GuardrailSet`           | `guardrail.set`                      | the tenant, or null for the platform | none                             |
+| `Guardrail\GuardrailRemoved`       | `guardrail.removed`                  | the tenant, or null for the platform | none                             |
+
+A grant, boundary, resource policy or guardrail event holds in its scope's tenant and application; a role, permission
+or policy event holds in the tenant that owns the record, and in no one application.
+
 `DecisionEvaluated` and `AuthorizationFailed` implement the marker too, but are dispatched when the decision is made,
 not after a commit: a denial is a fact even if the surrounding transaction rolls back. `DecisionEvaluated` is
 dispatched for every decision `check()` makes, and `AuthorizationFailed` when `authorize()` refuses. Both are

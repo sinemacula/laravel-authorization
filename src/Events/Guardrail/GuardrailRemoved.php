@@ -20,4 +20,16 @@ namespace SineMacula\Laravel\Authorization\Events\Guardrail;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class GuardrailRemoved extends GuardrailEvent {}
+final readonly class GuardrailRemoved extends GuardrailEvent
+{
+    /**
+     * Return the stable identifier of the change: `guardrail.removed`.
+     *
+     * @return string
+     */
+    #[\Override]
+    public function operation(): string
+    {
+        return 'guardrail.removed';
+    }
+}

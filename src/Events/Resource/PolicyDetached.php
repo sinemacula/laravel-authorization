@@ -20,4 +20,16 @@ namespace SineMacula\Laravel\Authorization\Events\Resource;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class PolicyDetached extends ResourcePolicyEvent {}
+final readonly class PolicyDetached extends ResourcePolicyEvent
+{
+    /**
+     * Return the stable identifier of the change: `resource.policy.detached`.
+     *
+     * @return string
+     */
+    #[\Override]
+    public function operation(): string
+    {
+        return 'resource.policy.detached';
+    }
+}

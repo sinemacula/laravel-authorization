@@ -4,7 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Role;
 
-use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
+use SineMacula\Laravel\Authorization\Events\Concerns\DescribesRecordChange;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -30,8 +31,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class Deleted implements AuthorizationEvent
+final readonly class Deleted implements AuthorizationMutation
 {
+    use DescribesRecordChange;
+
     /**
      * Create a new event instance.
      *
@@ -66,4 +69,37 @@ final readonly class Deleted implements AuthorizationEvent
         /** Every permission the role carried. */
         public array $permissions,
     ) {}
+
+    /**
+     * Return the stable identifier of the change: `role.deleted`.
+     *
+     * @return string
+     */
+    #[\Override]
+    public function operation(): string
+    {
+        return 'role.deleted';
+    }
+
+    /**
+     * Return the role the change is about.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\Reference
+     */
+    #[\Override]
+    public function subject(): Reference
+    {
+        return $this->role;
+    }
+
+    /**
+     * Return every grantee that held the role.
+     *
+     * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
+     */
+    #[\Override]
+    public function grantees(): array
+    {
+        return $this->grantees;
+    }
 }

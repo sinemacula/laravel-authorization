@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Events\Guardrail\GuardrailRemoved;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\AssertsAuditAccessors;
 
 /**
  * Unit tests for the event removing a guardrail dispatches.
@@ -23,6 +24,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 #[CoversClass(GuardrailRemoved::class)]
 final class GuardrailRemovedTest extends TestCase
 {
+    use AssertsAuditAccessors;
+
     /**
      * The event is a final readonly guardrail event carrying the operation, the
      * policy, its name and the platform scope it holds in.
@@ -43,5 +46,43 @@ final class GuardrailRemovedTest extends TestCase
         self::assertSame('platform-cap', $event->name);
         self::assertNull($event->scope->tenant);
         self::assertTrue($event->scope->includeSubtree);
+    }
+
+    /**
+     * The event about a platform guardrail has no subject or tenant, names no
+     * grantee, and reports the policy, its name and its reach as plain details.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testDescribesTheChangeForAnAuditMapper(): void
+    {
+        $event = new GuardrailRemoved(Operation::begin(), new Reference('policy', '9'), 'cap', GrantScope::platform());
+
+        self::assertDescribes($event, [
+            'operation'   => 'guardrail.removed',
+            'subject'     => null,
+            'tenant'      => null,
+            'application' => null,
+            'grantees'    => [],
+            'properties'  => ['policy' => 'policy:9', 'name' => 'cap', 'scope.include_subtree' => true],
+        ]);
+    }
+
+    /**
+     * The event reports the call that made the change, trusted or delegated,
+     * with or without an impersonator, and never its client.
+     *
+     * @return void
+     */
+    public function testDescribesTheCallForAnAuditMapper(): void
+    {
+        self::assertDescribesTheCall(static fn (Operation $operation): GuardrailRemoved => new GuardrailRemoved(
+            $operation,
+            new Reference('policy', '9'),
+            'cap',
+            GrantScope::platform(),
+        ));
     }
 }

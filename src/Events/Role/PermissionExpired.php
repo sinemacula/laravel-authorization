@@ -4,7 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Role;
 
-use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
+use SineMacula\Laravel\Authorization\Events\Concerns\DescribesRecordChange;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -27,8 +28,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class PermissionExpired implements AuthorizationEvent
+final readonly class PermissionExpired implements AuthorizationMutation
 {
+    use DescribesRecordChange;
+
     /**
      * Create a new event instance.
      *
@@ -63,4 +66,37 @@ final readonly class PermissionExpired implements AuthorizationEvent
         /** When the grant expired, in UTC. */
         public \DateTimeImmutable $expiredAt,
     ) {}
+
+    /**
+     * Return the stable identifier of the change: `role.permission.expired`.
+     *
+     * @return string
+     */
+    #[\Override]
+    public function operation(): string
+    {
+        return 'role.permission.expired';
+    }
+
+    /**
+     * Return the role the change is about.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\Reference
+     */
+    #[\Override]
+    public function subject(): Reference
+    {
+        return $this->role;
+    }
+
+    /**
+     * Return the role, whose permissions changed.
+     *
+     * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
+     */
+    #[\Override]
+    public function grantees(): array
+    {
+        return [$this->role];
+    }
 }

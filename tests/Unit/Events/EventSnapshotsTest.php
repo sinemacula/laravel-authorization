@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
@@ -30,6 +31,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 #[CoversNothing]
 final class EventSnapshotsTest extends TestCase
 {
+    /** @var list<string> The events that report a decision or an override, not a change to stored records. */
+    private const array NOT_MUTATIONS = ['DecisionEvaluated', 'AuthorizationFailed', 'SystemOverrideUsed'];
+
     /** @var list<class-string> The value objects an event may carry. */
     private const array VALUE_OBJECTS = [Operation::class, Reference::class, GrantScope::class, DocumentDigest::class, StatementReference::class];
 
@@ -55,7 +59,8 @@ final class EventSnapshotsTest extends TestCase
 
     /**
      * Every event class under `src/Events`, leaving out an abstract class that
-     * events of one kind share, which is never dispatched itself.
+     * events of one kind share, which is never dispatched itself, and a trait
+     * that gives events of one kind their audit accessors.
      *
      * @return iterable<string, array{class-string}>
      */
@@ -72,7 +77,9 @@ final class EventSnapshotsTest extends TestCase
             /** @var class-string $class */
             $class = 'SineMacula\Laravel\Authorization\Events\\' . \str_replace('/', '\\', $relative);
 
-            if ((new \ReflectionClass($class))->isAbstract()) {
+            $reflection = new \ReflectionClass($class);
+
+            if ($reflection->isAbstract() || $reflection->isTrait()) {
                 continue;
             }
 
@@ -138,6 +145,102 @@ final class EventSnapshotsTest extends TestCase
     }
 
     /**
+     * Every event but the decision events and the override event reports a
+     * change to stored records, so implements `AuthorizationMutation`; those
+     * three do not.
+     *
+     * @param  class-string  $class
+     * @return void
+     */
+    #[DataProvider('events')]
+    public function testEveryChangeEventIsAMutation(string $class): void
+    {
+        $name = (new \ReflectionClass($class))->getShortName();
+
+        self::assertSame(!\in_array($name, self::NOT_MUTATIONS, true), \is_subclass_of($class, AuthorizationMutation::class), "{$class} is misclassified.");
+    }
+
+    /**
+     * Every change event names its own operation identifier, dotted lower case
+     * words, unique among them all.
+     *
+     * @return void
+     */
+    public function testOperationIdentifiersAreUnique(): void
+    {
+        $operations = [];
+
+        foreach (self::mutations() as [$class]) {
+            $operations[$class] = self::sample($class)->operation();
+
+            self::assertMatchesRegularExpression('/^[a-z_]+(\.[a-z_]+)+$/', $operations[$class]);
+        }
+
+        self::assertCount(31, $operations);
+        self::assertSame(\array_values($operations), \array_values(\array_unique($operations)));
+    }
+
+    /**
+     * Every change event: every event but the decision events and the override
+     * event.
+     *
+     * @return iterable<string, array{class-string<\SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation>}>
+     */
+    public static function mutations(): iterable
+    {
+        foreach (self::events() as $name => [$class]) {
+            if (!\is_subclass_of($class, AuthorizationMutation::class)) {
+                continue;
+            }
+
+            yield $name => [$class];
+        }
+    }
+
+    /**
+     * Every change event's details are serialisable, unchanged through a JSON
+     * round trip, so they hold no object, and never include the operation.
+     *
+     * @param  class-string<\SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation>  $class
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    #[DataProvider('mutations')]
+    public function testAuditPropertiesAreFlatAndSerialisable(string $class): void
+    {
+        $properties = self::sample($class)->auditProperties();
+
+        self::assertNotSame([], $properties);
+        self::assertArrayNotHasKey('operation', $properties);
+        self::assertSame($properties, \json_decode(\json_encode($properties, JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * No change event reports the IP address or the user agent of the call that
+     * made it, though its operation carries them: neither through an accessor
+     * nor in its details.
+     *
+     * @param  class-string<\SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation>  $class
+     * @return void
+     */
+    #[DataProvider('mutations')]
+    public function testNoChangeEventReportsTheClient(string $class): void
+    {
+        $at       = new \DateTimeImmutable('2026-03-04T05:06:07Z');
+        $event    = self::sample($class, new Operation('op-client', new Reference('principal', '5'), $at, false, null, null, [], '203.0.113.9', 'Browser/1.0'));
+        $reported = [];
+
+        foreach ((new \ReflectionClass(AuthorizationMutation::class))->getMethods() as $method) {
+            $reported[$method->getName()] = (new \ReflectionMethod($event, $method->getName()))->invoke($event);
+        }
+
+        self::assertStringContainsString('203.0.113.9', \serialize($event));
+        self::assertStringNotContainsString('203.0.113.9', \serialize($reported));
+        self::assertStringNotContainsString('Browser/1.0', \serialize($reported));
+    }
+
+    /**
      * The value objects the events carry are snapshots of plain values too.
      *
      * @return void
@@ -147,6 +250,52 @@ final class EventSnapshotsTest extends TestCase
         foreach (self::VALUE_OBJECTS as $class) {
             self::assertSnapshot($class);
         }
+    }
+
+    /**
+     * Return an instance of the change event, made by the operation given or a
+     * new one, each other parameter given a sample of its type.
+     *
+     * @param  class-string<\SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation>  $class
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation|null  $operation
+     * @return \SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation
+     */
+    private static function sample(string $class, ?Operation $operation = null): AuthorizationMutation
+    {
+        $arguments = [];
+
+        foreach ((new \ReflectionMethod($class, '__construct'))->getParameters() as $parameter) {
+            $arguments[] = $parameter->getName() === 'operation' && $operation !== null ? $operation : self::sampleOf($parameter);
+        }
+
+        return new $class(...$arguments);
+    }
+
+    /**
+     * Return a sample of the parameter's type: a map of changes for `changes`,
+     * a list of references for any other array.
+     *
+     * @param  \ReflectionParameter  $parameter
+     * @return mixed
+     */
+    private static function sampleOf(\ReflectionParameter $parameter): mixed
+    {
+        $type    = $parameter->getType();
+        $samples = [
+            Operation::class          => Operation::begin(),
+            Reference::class          => new Reference('record', 'sample'),
+            GrantScope::class         => new GrantScope(new Reference('team', '7'), 'admin'),
+            DocumentDigest::class     => new DocumentDigest(1, 'abc'),
+            \DateTimeImmutable::class => new \DateTimeImmutable('2026-01-02T03:04:05Z'),
+            'string'                  => 'sample',
+            'bool'                    => true,
+            'array'                   => [new Reference('record', 'listed')],
+        ];
+
+        self::assertInstanceOf(\ReflectionNamedType::class, $type);
+        self::assertArrayHasKey($type->getName(), $samples, "\${$parameter->getName()} has no sample.");
+
+        return $parameter->getName() === 'changes' ? ['before' => ['name' => 'a'], 'after' => ['name' => 'b']] : $samples[$type->getName()];
     }
 
     /**

@@ -4,7 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Role;
 
-use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
+use SineMacula\Laravel\Authorization\Events\Concerns\DescribesRecordChange;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -29,8 +30,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class Updated implements AuthorizationEvent
+final readonly class Updated implements AuthorizationMutation
 {
+    use DescribesRecordChange;
+
     /**
      * Create a new event instance.
      *
@@ -61,4 +64,26 @@ final readonly class Updated implements AuthorizationEvent
         /** The changed fields, before and after the update. */
         public array $changes,
     ) {}
+
+    /**
+     * Return the stable identifier of the change: `role.updated`.
+     *
+     * @return string
+     */
+    #[\Override]
+    public function operation(): string
+    {
+        return 'role.updated';
+    }
+
+    /**
+     * Return the role the change is about.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\Reference
+     */
+    #[\Override]
+    public function subject(): Reference
+    {
+        return $this->role;
+    }
 }
