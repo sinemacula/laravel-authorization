@@ -71,6 +71,7 @@ use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\RefusesThePackage;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Concerns\WidensGrants;
 use Tests\Feature\Stubs\ApiGuardedUser;
@@ -99,8 +100,9 @@ use Tests\TestCase;
 #[CoversClass(SyncResult::class)]
 final class GrantServiceTest extends TestCase
 {
-    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals, ComparesReferences,
-        RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage, UsesAnAuthorizationConnection, WidensGrants;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals,
+        ComparesReferences, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage,
+        ReportsEveryDecision, UsesAnAuthorizationConnection, WidensGrants;
 
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
@@ -114,6 +116,8 @@ final class GrantServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->reportEveryDecision();
 
         Carbon::setTestNow(self::NOW);
     }

@@ -40,7 +40,7 @@ final class RoleExclusionsMigrationTest extends TestCase
     private const string CREATE_ROLES = '2026_04_14_000001_create_roles_table';
 
     /** @var string The migration under test. */
-    private const string CREATE_EXCLUSIONS = '2026_11_12_000001_create_role_exclusions_table';
+    private const string CREATE_EXCLUSIONS = '2026_11_12_000002_create_role_exclusions_table';
 
     /**
      * Point the package at custom table names and create those tables beside

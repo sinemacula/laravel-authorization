@@ -39,6 +39,7 @@ use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\RefusesThePackage;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -59,8 +60,8 @@ use Tests\TestCase;
 #[CoversClass(RoleExclusionService::class)]
 final class RoleExclusionServiceTest extends TestCase
 {
-    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, CatchesRefusals, ComparesReferences, ReadsDispatchedEvents, RecordsRowLocks,
-        RefusesThePackage;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, CatchesRefusals, ComparesReferences, ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage,
+        ReportsEveryDecision;
 
     /**
      * A pair is declared once whichever order its roles are given in, by name
@@ -291,6 +292,8 @@ final class RoleExclusionServiceTest extends TestCase
      */
     public function testADelegatedChangeLocksBothRolesBeforeItIsDecided(): void
     {
+        $this->reportEveryDecision();
+
         [$clerk, $auditor] = self::roles();
 
         $admin  = self::administrator();
@@ -531,6 +534,8 @@ final class RoleExclusionServiceTest extends TestCase
      */
     public function testADelegatedChangeIsDecidedUnderItsAction(): void
     {
+        $this->reportEveryDecision();
+
         [$clerk, $auditor] = self::roles();
 
         $nobody = self::administrator([], 'nobody', null);

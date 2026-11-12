@@ -7,8 +7,10 @@ namespace SineMacula\Laravel\Authorization\Events;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionReporting;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -28,6 +30,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * is not a preview, and `usedBreakGlass` is false until break-glass grants
  * arrive. The decision itself, with its trace, is not carried: a listener that
  * needs it reads `Authorization::lastDecision()`.
+ *
+ * Why the decision was reported, `reportedBecause()`, and whether its action is
+ * one of `events.decisions.sensitive_actions`, `isSensitiveAction()`, are set
+ * as it is dispatched (see `Evaluation\DecisionReporting`). An event made
+ * without a reason, by hand say, names the most specific reason its decision
+ * has, as though every setting were on, and no sensitive action.
  *
  * Decision events are dispatched when the decision is made, not after a commit,
  * since a denial is a fact even if the surrounding transaction rolls back.
@@ -57,6 +65,8 @@ abstract readonly class DecisionEvent implements AuthorizationEvent
      * @param  list<\SineMacula\Laravel\Authorization\Evaluation\StatementReference>  $statements
      * @param  bool  $usedBreakGlass
      * @param  list<string>  $keys
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport|null  $report
+     * @param  bool  $isSensitive
      */
     final public function __construct(
 
@@ -95,20 +105,35 @@ abstract readonly class DecisionEvent implements AuthorizationEvent
 
         /** The name of each context key the decision depended on, never its value. */
         public array $keys,
+
+        /** Why the decision was reported; null names the most specific reason it has. */
+        private ?DecisionReport $report = null,
+
+        /** Whether the action is one of the sensitive actions. */
+        private bool $isSensitive = false,
     ) {}
 
     /**
      * Return the event reporting the decision on the action and the resource,
-     * made with the provenance given.
+     * made with the provenance given, for the reason given, and saying whether
+     * the action is a sensitive one.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance  $provenance
      * @param  string  $action
      * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport|null  $report
+     * @param  bool  $isSensitive
      * @return static
      */
-    public static function of(DecisionProvenance $provenance, string $action, ?string $resource, Decision $decision): static
-    {
+    public static function of(
+        DecisionProvenance $provenance,
+        string $action,
+        ?string $resource,
+        Decision $decision,
+        ?DecisionReport $report = null,
+        bool $isSensitive = false,
+    ): static {
         return new static(
             $provenance->subject,
             $provenance->identity,
@@ -122,6 +147,8 @@ abstract readonly class DecisionEvent implements AuthorizationEvent
             $decision->statements,
             false,
             $decision->keys(),
+            $report,
+            $isSensitive,
         );
     }
 
@@ -133,5 +160,30 @@ abstract readonly class DecisionEvent implements AuthorizationEvent
     public function isAllowed(): bool
     {
         return $this->effect === DecisionEffect::ALLOW;
+    }
+
+    /**
+     * Return why the decision was reported: the most specific reason, in the
+     * order `DecisionReport` declares them, that applies to it and that the
+     * settings report.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport
+     */
+    public function reportedBecause(): DecisionReport
+    {
+        return $this->report
+            ?? DecisionReporting::everything()->reportOf($this->effect, $this->reason, $this->action, $this->previewer !== null)
+            ?? DecisionReport::ALL_ALLOWS;
+    }
+
+    /**
+     * Determine whether the action is one of
+     * `authorization.events.decisions.sensitive_actions`.
+     *
+     * @return bool
+     */
+    public function isSensitiveAction(): bool
+    {
+        return $this->isSensitive;
     }
 }

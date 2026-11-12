@@ -347,7 +347,9 @@ administration never grants anything it cannot justify.
    begins the operation (delegated, with the actor's principal, identity and the call's actions), and inside its
    transaction decides every change as the actor, each on its operation resource stamped with the operation's id.
 3. Each decision goes through every stage: the subject, the tenant (the intended tenant), the denies, the guardrails,
-   the boundaries, the session caps, the allows, then the administration stage. `DecisionEvaluated` reports it.
+   the boundaries, the session caps, the allows, then the administration stage. `DecisionEvaluated` reports it when
+   `events.decisions` selects it: a refusal by default, an allow only with `allows: all` or a listed sensitive action
+   (events.md invariant 14).
 4. Every change allowed, the service writes, and the change events are dispatched after commit, each carrying the
    operation, whose id the decisions named.
 

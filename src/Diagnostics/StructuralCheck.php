@@ -24,9 +24,10 @@ use SineMacula\Laravel\Authorization\Diagnostics\Checks\RootChecks;
  * Only the structural checks run (types, keys, that classes exist and implement
  * their contracts, that names name configured entries). The checks that build
  * what the configuration names, the context sources, the attribute providers,
- * the action catalogue a session scope is checked against and the cache store,
- * ran, and passed, as the application booted; they are listed as
- * `checked_at_boot` and never run again, so the check builds nothing.
+ * the action catalogue a session scope and a sensitive action are checked
+ * against and the cache store, ran, and passed, as the application booted; they
+ * are listed as `checked_at_boot` and never run again, so the check builds
+ * nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

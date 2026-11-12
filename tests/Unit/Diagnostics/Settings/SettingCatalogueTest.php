@@ -46,6 +46,10 @@ final class SettingCatalogueTest extends TestCase
         self::assertSame(SettingCatalogue::TABLE, SettingCatalogue::kindOf('authorization.tables.role_exclusions'));
         self::assertSame('table_prefix', SettingCatalogue::TABLE_PREFIX);
         self::assertSame(SettingCatalogue::OPAQUE, SettingCatalogue::kindOf('authorization.password'));
+        self::assertSame(SettingCatalogue::SWITCH, SettingCatalogue::kindOf('authorization.events.decisions.previews'));
+        self::assertSame(SettingCatalogue::NAME, SettingCatalogue::kindOf('authorization.events.decisions.allows'));
+        self::assertSame(SettingCatalogue::NAME_LIST, SettingCatalogue::kindOf('authorization.events.decisions.sensitive_actions'));
+        self::assertSame('names', SettingCatalogue::NAME_LIST);
     }
 
     /**

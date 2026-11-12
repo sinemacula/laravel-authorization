@@ -6,6 +6,7 @@ namespace Tests\Feature\Diagnostics\Checks;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Config\CacheConfigValidator;
+use SineMacula\Laravel\Authorization\Config\EventConfigValidator;
 use SineMacula\Laravel\Authorization\Config\PolicyConfigValidator;
 use SineMacula\Laravel\Authorization\Config\UsageConfigValidator;
 use SineMacula\Laravel\Authorization\Diagnostics\Checks\BlockChecks;
@@ -129,6 +130,82 @@ final class BlockChecksTest extends TestCase
 
         self::assertSame([], self::pathsAndCodes($this->check($least)));
         self::assertCount(\count(PolicyLimits::KEYS) + 7, \array_filter(self::pathsAndCodes($this->check($below)), static fn (array $issue): bool => $issue[1] === 'out_of_range'));
+    }
+
+    /**
+     * Each setting of the decision events is checked on its own, and each
+     * sensitive action on its own too, so every refused one is listed; a list
+     * of names that is not a list is refused once its entries pass.
+     *
+     * @return void
+     */
+    public function testEachDecisionEventSettingIsCheckedOnItsOwn(): void
+    {
+        $actions = 'authorization.events.decisions.sensitive_actions';
+
+        self::assertSame([
+            ['authorization.events.decisions.denials', 'invalid_type'],
+            ['authorization.events.decisions.previews', 'invalid_type'],
+            ['authorization.events.decisions.allows', 'invalid_value'],
+            [$actions . '.0', 'invalid_value'],
+            [$actions . '.2', 'invalid_type'],
+        ], self::pathsAndCodes($this->check(['events' => ['decisions' => [
+            'denials'                     => 'yes',
+            'insufficient_authentication' => true,
+            'previews'                    => null,
+            'allows'                      => 'some',
+            'sensitive_actions'           => ['posts:*', 'posts:delete', 3],
+        ]]])));
+        self::assertSame(
+            [['authorization.events.decisions.insufficient_authentication', 'invalid_type']],
+            self::pathsAndCodes($this->check(['events' => ['decisions' => ['insufficient_authentication' => 0]]])),
+        );
+        self::assertSame([[$actions, 'invalid_type']], self::pathsAndCodes($this->check(['events' => ['decisions' => ['sensitive_actions' => ['a' => 'posts:delete']]]])));
+        self::assertSame([[$actions, 'invalid_type']], self::pathsAndCodes($this->check(['events' => ['decisions' => ['sensitive_actions' => 'posts:delete']]])));
+        self::assertSame(
+            [['authorization.events.decision', 'unknown_key'], ['authorization.events.decisions.allow', 'unknown_key']],
+            self::pathsAndCodes($this->check(['events' => ['decisions' => ['allow' => 'all'], 'decision' => []]])),
+        );
+    }
+
+    /**
+     * A list of sensitive actions naming any, each passing, is left to the
+     * boot, which checks each is declared; an empty one, or one refused, is
+     * not.
+     *
+     * @return void
+     */
+    public function testTheSensitiveActionsAreLeftToTheBootWhenNamed(): void
+    {
+        $named = $this->check(['events' => ['decisions' => ['sensitive_actions' => ['posts:delete']]]]);
+
+        self::assertSame([], $named->issues);
+        self::assertSame(['authorization.events.decisions.sensitive_actions'], $named->checkedAtBoot);
+        self::assertSame([], $this->check(['events' => ['decisions' => ['sensitive_actions' => []]]])->checkedAtBoot);
+        self::assertSame([], $this->check(['events' => ['decisions' => ['sensitive_actions' => ['']]]])->checkedAtBoot);
+        self::assertSame([], $this->check(['events' => ['decisions' => ['sensitive_actions' => ['a' => 'posts:delete']]]])->checkedAtBoot);
+        self::assertSame([], $this->check([])->checkedAtBoot);
+    }
+
+    /**
+     * An events block, or a decision events' block, that is not an array is
+     * refused once, and what it holds is skipped, never checked.
+     *
+     * @return void
+     */
+    public function testARefusedEventsBlockSkipsItsSettings(): void
+    {
+        self::assertSame(
+            [['authorization.events', 'invalid_type'], ['authorization.events.decisions', 'skipped']],
+            self::pathsAndCodes($this->check(['events' => 'all'])),
+        );
+        self::assertSame(
+            [
+                ['authorization.events.decisions', 'invalid_type'],
+                ...\array_map(static fn (string $setting): array => ["authorization.events.decisions.{$setting}", 'skipped'], EventConfigValidator::SETTINGS),
+            ],
+            self::pathsAndCodes($this->check(['events' => ['decisions' => null]])),
+        );
     }
 
     /**

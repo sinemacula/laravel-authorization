@@ -48,7 +48,7 @@ final class TableConfigValidatorTest extends TestCase
         '2026_04_14_000010_create_guardrails_table',
         '2026_11_08_000001_add_access_review_indexes',
         '2026_11_09_000001_create_grant_usage_tables',
-        '2026_11_12_000001_create_role_exclusions_table',
+        '2026_11_12_000002_create_role_exclusions_table',
     ];
 
     /**

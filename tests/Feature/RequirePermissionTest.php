@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ChecksAccess;
+use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
@@ -45,10 +46,24 @@ use Tests\TestCase;
 #[CoversClass(AbstractAuthorizationMiddleware::class)]
 final class RequirePermissionTest extends TestCase
 {
-    use ChecksAccess;
+    use ChecksAccess, ReportsEveryDecision;
 
     /** @var string Action reused across the scenarios. */
     private const string ACTION = 'posts:update';
+
+    /**
+     * Report every decision, allows included: these tests observe the decisions
+     * each call makes.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->reportEveryDecision();
+    }
 
     /**
      * A held permission admits the request.

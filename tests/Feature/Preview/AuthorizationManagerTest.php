@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
@@ -95,9 +96,9 @@ final class AuthorizationManagerTest extends TestCase
 
     /**
      * Every decision about the target is reported as soon as it is made, in
-     * order, after its admission: the admission about the caller alone, each
-     * target decision with the target as its subject and the caller as its
-     * previewer, the last of a batch stored with both.
+     * order, as a preview, with the target as its subject and the caller as its
+     * previewer, the last of a batch stored with both; the admission, an allow
+     * about the caller alone, is not reported under the shipped settings.
      *
      * @return void
      *
@@ -117,14 +118,14 @@ final class AuthorizationManagerTest extends TestCase
         $events  = \array_slice(self::dispatchedEvents(DecisionEvaluated::class), $built);
         $actions = \array_map(static fn (DecisionEvaluated $event): string => $event->action, $events);
 
-        self::assertSame([PackagePermissions::SUBJECT_PREVIEW, 'posts:create', 'posts:delete'], $actions);
-        self::assertEquals(Reference::of($caller), $events[0]->subject);
-        self::assertNull($events[0]->previewer);
+        self::assertSame(0, $built);
+        self::assertSame(['posts:create', 'posts:delete'], $actions);
 
-        foreach ([$events[1], $events[2]] as $event) {
+        foreach ($events as $event) {
             self::assertEquals(Reference::of($target), $event->subject);
             self::assertEquals(Reference::of($target), $event->identity);
             self::assertEquals(Reference::of($caller), $event->previewer);
+            self::assertSame(DecisionReport::PREVIEW, $event->reportedBecause());
         }
 
         self::assertSame(DecisionReason::EXPLICIT_DENY, $manager->lastDecision()?->reason);
@@ -134,7 +135,8 @@ final class AuthorizationManagerTest extends TestCase
 
     /**
      * A preview listing reports each action it evaluates, naming both parties,
-     * but stores none of them: the last decision is still its admission.
+     * as a preview, but stores none of them: the last decision is still its
+     * admission, which the shipped settings do not report.
      *
      * @return void
      *
@@ -153,11 +155,13 @@ final class AuthorizationManagerTest extends TestCase
         $actions = \array_values(\array_unique(\array_map(static fn (PermissionDefinition $definition): string => $definition->name, $this->catalogue()->definitions())));
 
         self::assertSame(['posts:create'], $listed);
-        self::assertSame([PackagePermissions::SUBJECT_PREVIEW, ...$actions], \array_map(static fn (DecisionEvaluated $event): string => $event->action, $events));
+        self::assertSame(0, $built);
+        self::assertSame($actions, \array_map(static fn (DecisionEvaluated $event): string => $event->action, $events));
 
-        foreach (\array_slice($events, 1) as $event) {
+        foreach ($events as $event) {
             self::assertEquals(Reference::of($caller), $event->previewer);
             self::assertEquals(Reference::of($target), $event->subject);
+            self::assertSame(DecisionReport::PREVIEW, $event->reportedBecause());
         }
 
         self::assertTrue($manager->lastDecision()?->isAllowed());

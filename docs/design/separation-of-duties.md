@@ -148,7 +148,7 @@ to a role's parents; until then a grant made after a pair is declared is not ref
 - `Exclusions\ConflictReport`, `ExclusionConflict`, `ExclusionRoute`, `RoleExclusion` -- what the reads return.
 - `Exceptions\RoleExclusionConflictException`, `Exceptions\InvalidRoleExclusionException` -- the refusals.
 - `Events\Role\ExclusionEvent`, `ExclusionDeclared`, `ExclusionRemoved` -- the events.
-- `database/migrations/2026_11_12_000001_create_role_exclusions_table.php`, `Config\TableConfigValidator` -- storage.
+- `database/migrations/2026_11_12_000002_create_role_exclusions_table.php`, `Config\TableConfigValidator` -- storage.
 
 ## Authoritative Tests
 
