@@ -79,6 +79,27 @@ final class TableNames
     }
 
     /**
+     * Determine whether the prefix is one the package accepts for
+     * `tables.prefix`: empty, or a lower-case letter followed by lower-case
+     * letters, digits and underscores, of at most 16 characters, which every
+     * default table name has room for. It is the rule boot validation applies,
+     * for an installer to check a prefix before writing it.
+     *
+     * @param  string  $prefix
+     * @return bool
+     */
+    public static function isValidPrefix(string $prefix): bool
+    {
+        try {
+            TableConfigValidator::prefix($prefix);
+        } catch (InvalidAuthorizationConfigException) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Determine whether the name set under the key is the table's default, the
      * key's own name, and so takes the prefix, rather than a name set
      * explicitly.
