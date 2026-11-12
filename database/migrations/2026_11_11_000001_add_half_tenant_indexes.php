@@ -35,6 +35,7 @@ declare(strict_types = 1);
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 
 return new class extends Migration {
@@ -107,10 +108,7 @@ return new class extends Migration {
         $tables = [];
 
         foreach (self::TABLES as $key) {
-            /** @var string $table */
-            $table = config('authorization.tables.' . $key, $key);
-
-            $tables[] = $table;
+            $tables[] = TableNames::get($key);
         }
 
         return $tables;
