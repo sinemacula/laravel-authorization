@@ -33,7 +33,11 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
  * the right to run an access review (`Reviews\AccessReview`), decided on a
  * review resource (see `Reviews\ReviewResource`), and `review.export` the right
  * to export one, which needs both; exports come with a later part of the
- * reviews, so nothing asks for it yet.
+ * reviews, so nothing asks for it yet. `role-exclusion.declare` and
+ * `role-exclusion.remove` are the rights to declare and remove a pair of
+ * mutually exclusive roles (see `Services\RoleExclusionService`), decided on
+ * the pair's operation resource (see
+ * `Administration\OperationResource::exclusion()`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -145,6 +149,12 @@ final readonly class PackagePermissions implements PermissionProvider
     /** @var string The right to export an access review, which also needs the right to run it. */
     public const string REVIEW_EXPORT = 'authorization:review.export';
 
+    /** @var string The right to declare two roles mutually exclusive (AUTHZ-11.8). */
+    public const string ROLE_EXCLUSION_DECLARE = 'authorization:role-exclusion.declare';
+
+    /** @var string The right to remove a declared pair of mutually exclusive roles. */
+    public const string ROLE_EXCLUSION_REMOVE = 'authorization:role-exclusion.remove';
+
     /** @var string The category every package permission is filed under. */
     private const string CATEGORY = 'authorization';
 
@@ -185,6 +195,8 @@ final readonly class PackagePermissions implements PermissionProvider
         self::SUBJECT_PREVIEW             => 'Preview what a subject may do, without acting as it.',
         self::REVIEW_READ                 => 'Run an access review of who holds what.',
         self::REVIEW_EXPORT               => 'Export an access review.',
+        self::ROLE_EXCLUSION_DECLARE      => 'Declare two roles mutually exclusive.',
+        self::ROLE_EXCLUSION_REMOVE       => 'Remove a declared pair of mutually exclusive roles.',
     ];
 
     /**

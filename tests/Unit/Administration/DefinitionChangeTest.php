@@ -22,8 +22,9 @@ use SineMacula\Laravel\Authorization\Administration\DefinitionChange;
 final class DefinitionChangeTest extends TestCase
 {
     /**
-     * The change holds the record, the values and the document given, and
-     * proposes exactly the attributes among its values, a null one included.
+     * The change holds the record, the values, the document and the other role
+     * of a pair given, and proposes exactly the attributes among its values, a
+     * null one included.
      *
      * @return void
      */
@@ -36,6 +37,7 @@ final class DefinitionChangeTest extends TestCase
         self::assertSame($record, $change->record);
         self::assertSame(['name' => 'writer', 'parent' => null], $change->values);
         self::assertSame($document, $change->document);
+        self::assertNull($change->related);
         self::assertTrue($change->proposes('name'));
         self::assertTrue($change->proposes('parent'));
         self::assertFalse($change->proposes('rank'));
@@ -45,5 +47,9 @@ final class DefinitionChangeTest extends TestCase
         self::assertSame([], $bare->values);
         self::assertNull($bare->document);
         self::assertFalse($bare->proposes('name'));
+
+        $excluded = new class extends Model {};
+
+        self::assertSame($excluded, (new DefinitionChange($record, [], null, $excluded))->related);
     }
 }

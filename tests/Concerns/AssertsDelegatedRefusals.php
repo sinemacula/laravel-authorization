@@ -135,7 +135,7 @@ trait AssertsDelegatedRefusals
     {
         $tables = [
             'roles', 'permissions', 'policies', 'role_permissions', 'authorizable_roles', 'authorizable_permissions', 'authorizable_policies',
-            'authorizable_boundaries', 'resource_policies', 'guardrails',
+            'authorizable_boundaries', 'resource_policies', 'guardrails', 'role_exclusions',
         ];
         $rows = [];
 

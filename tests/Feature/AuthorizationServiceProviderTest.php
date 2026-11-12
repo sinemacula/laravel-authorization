@@ -93,6 +93,7 @@ use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
+use SineMacula\Laravel\Authorization\Services\RoleExclusionService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\DeclaredAbilities;
@@ -1324,6 +1325,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             ResourcePolicyService::class,
             BoundaryService::class,
             GuardrailService::class,
+            RoleExclusionService::class,
             ApplicationAccess::class,
             GrantScopeQuery::class,
             AccessReview::class,

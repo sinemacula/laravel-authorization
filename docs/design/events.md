@@ -40,6 +40,12 @@ carry references, names and ids, never a value the decision read, and are dispat
   `Guardrail\GuardrailEvent`, the abstract, readonly shape they share, which is never dispatched itself. They name no
   grantee, so they implement `AuthorizationEvent` alone; the cached guardrails are refreshed through the version every
   guardrail entry shares.
+- **Role exclusion events.** Under `Role\`: `ExclusionDeclared` and `ExclusionRemoved`, when two roles are declared
+  mutually exclusive or that pair is removed (AUTHZ-11.8), each with the pair's two roles and their names, the lower
+  key first, the tenant that owns the pair, and the actor in `operation`. Declaring a pair already declared, or
+  removing one that is not, dispatches nothing, and a role deleted takes its pairs with it unreported, its deletion
+  reported as `Deleted`. Both extend `Role\ExclusionEvent`, the abstract, readonly shape they share, and name no
+  grantee: a pair hands out nothing, and nothing cached reads it.
 - **Expiry events.** Under `Identity\`: `RoleExpired`, `PermissionExpired` and `PolicyExpired`, dispatched when
   `authorization:prune` removes an expired grant, with its expiry and an operation that names no actor (the sweep is
   system work).
@@ -133,21 +139,22 @@ carry references, names and ids, never a value the decision read, and are dispat
     through accessors rather than its properties: `operation()`, a stable identifier unique to the event class (such as
     `identity.role.assigned`, `role.permission.granted`, `policy.deleted`, `resource.policy.attached` or
     `guardrail.set`, listed in the README); `subject()`, the record the change is about (the grantee of a grant or
-    boundary event, the role, permission or policy written, the role of a role permission event, the resource record of
-    a resource policy event and the tenant of a guardrail event, null for a whole resource type or the platform);
-    `tenant()` and `application()`, the scope's for a grant, boundary, resource policy or guardrail event, the owning
-    tenant and no application for the others; `grantees()`, whose access the change altered (the grantee, the role of a
-    role permission event, the grantees a delete lists, a deleted permission's roles after them, else none); and
-    `auditProperties()`, every other property, flat and serialisable through `Support\AuditProperties`: snake case
-    keys, dotted keys for a scope, a digest or the before and after of an update, a reference as `type:id`, a date as
-    ISO 8601 in UTC. It never holds the operation, which carries the client, a model or a closure, and refuses any
-    object other than the package's value objects. The call that made the change is read from the event's operation
-    through `operationId()`, `isTrusted()`, `actor()`, `actorIdentity()`, `impersonator()` and `occurredAt()` (in UTC);
-    the call's IP address and user agent are personal data for the grant hook alone, so no accessor returns them. Each
-    family implements the accessors once: `Events\Concerns\DescribesGrantChange` for the grant and boundary events,
-    `Events\Concerns\DescribesRecordChange` for the record and role permission events, and the resource policy and
-    guardrail base classes for theirs, each reading the call through `Events\Concerns\DescribesOperation`; each event
-    class names its own identifier.
+    boundary event, the role, permission or policy written, the role of a role permission event, the pair's first role
+    of a role exclusion event, the resource record of a resource policy event and the tenant of a guardrail event, null
+    for a whole resource type or the platform); `tenant()` and `application()`, the scope's for a grant, boundary,
+    resource policy or guardrail event, the owning tenant and no application for the others; `grantees()`, whose access
+    the change altered (the grantee, the role of a role permission event, the grantees a delete lists, a deleted
+    permission's roles after them, else none); and `auditProperties()`, every other property, flat and serialisable
+    through `Support\AuditProperties`: snake case keys, dotted keys for a scope, a digest or the before and after of an
+    update, a reference as `type:id`, a date as ISO 8601 in UTC. It never holds the operation, which carries the client,
+    a model or a closure, and refuses any object other than the package's value objects. The call that made the change
+    is read from the event's operation through `operationId()`, `isTrusted()`, `actor()`, `actorIdentity()`,
+    `impersonator()` and `occurredAt()` (in UTC); the call's IP address and user agent are personal data for the grant
+    hook alone, so no accessor returns them. Each family implements the accessors once:
+    `Events\Concerns\DescribesGrantChange` for the grant and boundary events, `Events\Concerns\DescribesRecordChange`
+    for the record, role permission and role exclusion events, and the resource policy and guardrail base classes for
+    theirs, each reading the call through `Events\Concerns\DescribesOperation`; each event class names its own
+    identifier.
 
 ## Success Path
 
@@ -220,6 +227,7 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
   policy.
 - `Services\GuardrailService`: the guardrail events; `Support\PolicyGuardrails`: the refused edit and delete of a
   guardrail's policy.
+- `Services\RoleExclusionService`: the role exclusion events.
 - `Concerns\HasSystemProtection`: the override event.
 - `Console\Support\ActorOption`: the commands' `--actor`.
 
@@ -243,6 +251,8 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 - `GuardrailServiceTest`, `GuardrailSetTest`, `GuardrailRemovedTest`, `GuardrailEventTest`: the guardrail events and
   the shape they share, after commit and only for a change; `PolicyObserverTest`: a guardrail's policy refused editing
   and deletion.
+- `RoleExclusionServiceTest`, `ExclusionDeclaredTest`, `ExclusionRemovedTest`, `ExclusionEventTest`: the role exclusion
+  events and the shape they share, after commit and only for a change.
 - `GrantServiceTest`, `RoleServiceTest`, `PermissionServiceTest`, `PolicyServiceTest`, `RecordWriterTest`: the actor,
   the grantor columns, one operation id per call, rollback and the morph map.
 - `RoleObserverTest`, `PermissionObserverTest`, `PolicyObserverTest`, `RecordChangesTest`: the payloads, the deleted

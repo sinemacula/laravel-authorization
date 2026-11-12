@@ -25,7 +25,10 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * it, and, for each attachment reaching below its tenant, the tenants of the
  * grants read are found within its subtree together (see `settle()`). The
  * queries grow with the attachments' tenants alone, which the reviewed target
- * or the holder's roles fix. A pair nothing settled is asked of the tree, once.
+ * or the holder's roles fix. Pairs of a tenant and an ancestor, as the conflict
+ * report of exclusive roles weighs them, are settled with the subtrees of all
+ * their ancestors read in one query, a chunk of the pairs at a time (see
+ * `settleWithin()`). A pair nothing settled is asked of the tree, once.
  *
  * A grant query can also be limited to the rows that meet an attachment in SQL
  * (see `constrain()`), the attachment's chain bound and its subtree nested, so
@@ -41,6 +44,9 @@ final class TenantRelations
     /** @var int The most grant tenants one query of a subtree is asked about. */
     public const int CHUNK = 500;
 
+    /** @var int The most pairs of a tenant and an ancestor one query asks about: SQLite allows 500 terms in a compound select. */
+    public const int PAIRS = 250;
+
     /** @var string The column of a grant row naming its tenant's type. */
     private const string TENANT_TYPE = '.tenant_type';
 
@@ -49,6 +55,9 @@ final class TenantRelations
 
     /** @var string The name a subtree query is read under. */
     private const string SUBTREE = 'authorization_review_subtree';
+
+    /** @var string The column naming which ancestor's subtree a row was read from. */
+    private const string ANCESTOR = 'authorization_ancestor';
 
     /** @var array<string, list<\SineMacula\Laravel\Authorization\Support\Reference>> The chain of each tenant read, the tenant first, then its ancestors nearest first, by the tenant's key. */
     private array $chains = [];
@@ -112,6 +121,66 @@ final class TenantRelations
 
             $this->settleBelow($tenant, $tenants);
         }
+    }
+
+    /**
+     * Learn whether each tenant is within its ancestor, for pairs of a tenant
+     * and an ancestor, in one query for each chunk of the pairs not known yet,
+     * the subtrees of their ancestors read together; a tenant is within itself
+     * without a query, and, for a flat tree, within nothing else.
+     *
+     * @param  list<array{0: \SineMacula\Laravel\Authorization\Support\Reference, 1: \SineMacula\Laravel\Authorization\Support\Reference}>  $pairs
+     * @return void
+     *
+     * @throws \UnexpectedValueException
+     */
+    public function settleWithin(array $pairs): void
+    {
+        $pending = [];
+
+        foreach ($pairs as [$tenant, $ancestor]) {
+            $key = self::pair($tenant, $ancestor);
+
+            if (self::isSame($tenant, $ancestor)) {
+                $this->within[$key] = true;
+            }
+
+            if (isset($this->within[$key])) {
+                continue;
+            }
+
+            $pending[$key] = [$tenant, $ancestor];
+        }
+
+        $tree = TenantChain::tree();
+
+        foreach (\array_chunk($pending, self::PAIRS, true) as $chunk) {
+            $found = $tree instanceof FlatTenantTree ? [] : self::foundIn($tree, self::byAncestor($chunk));
+
+            foreach (\array_keys($chunk) as $key) {
+                $this->within[$key] = isset($found[$key]);
+            }
+        }
+    }
+
+    /**
+     * Determine whether the tenant is the ancestor or below it: from the
+     * tenant's chain when it was read, else from what was settled, else asking
+     * the tree, once for each pair.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $ancestor
+     * @return bool
+     */
+    public function isWithin(Reference $tenant, Reference $ancestor): bool
+    {
+        $chain = $this->chains[self::key($tenant)] ?? null;
+
+        if ($chain !== null) {
+            return \array_filter($chain, static fn (Reference $link): bool => self::isSame($link, $ancestor)) !== [];
+        }
+
+        return $this->within[self::pair($tenant, $ancestor)] ??= TenantChain::isWithin($tenant, $ancestor);
     }
 
     /**
@@ -205,45 +274,45 @@ final class TenantRelations
         $tree    = TenantChain::tree();
 
         foreach (\array_chunk($pending, self::CHUNK) as $chunk) {
-            $found = $tree instanceof FlatTenantTree ? [] : self::foundIn($tree, $ancestor, $chunk);
+            $found = $tree instanceof FlatTenantTree ? [] : self::foundIn($tree, [[$ancestor, $chunk]]);
 
             foreach ($chunk as $tenant) {
-                $this->within[self::pair($tenant, $ancestor)] = self::isSame($tenant, $ancestor) || isset($found[self::key($tenant)]);
+                $key = self::pair($tenant, $ancestor);
+
+                $this->within[$key] = self::isSame($tenant, $ancestor) || isset($found[$key]);
             }
         }
     }
 
     /**
-     * Return the keys of those of the tenants the ancestor's subtree selects,
-     * in one query, keyed by themselves. The subtree is nested in that query,
-     * which selects both its columns, so the database reports one the subtree
-     * lacks; a row read without both still throws, naming the tree, rather than
-     * guess the type or read a key as some other tenant's. Nothing in the
-     * review catches either, so the review stops with it, and
-     * `authorization:review` reports the exception's class.
+     * Return the pairs of a tenant and an ancestor whose tenant the ancestor's
+     * subtree selects, for each ancestor and the tenants asked about it, in one
+     * query, keyed by the pair. Each subtree is nested in that query, which
+     * selects both its columns, so the database reports one the subtree lacks;
+     * a row read without both still throws, naming the tree, rather than guess
+     * the type or read a key as some other tenant's. Nothing in the review
+     * catches either, so the review stops with it, and `authorization:review`
+     * reports the exception's class.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $ancestor
-     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $tenants
-     * @return array<string, string>
+     * @param  list<array{0: \SineMacula\Laravel\Authorization\Support\Reference, 1: list<\SineMacula\Laravel\Authorization\Support\Reference>}>  $groups
+     * @return array<string, true>
      *
      * @throws \UnexpectedValueException
      */
-    private static function foundIn(TenantTree $tree, Reference $ancestor, array $tenants): array
+    private static function foundIn(TenantTree $tree, array $groups): array
     {
-        $subtree = $tree->subtree($ancestor);
-        $query   = $subtree instanceof EloquentBuilder ? $subtree->toBase() : $subtree;
+        $arms  = \array_map(static fn (array $group, int $index): Builder => self::arm($tree, $group[0], $group[1], $index), $groups, \array_keys($groups));
+        $union = $arms[0];
 
-        if (!$query instanceof Builder) {
-            throw new \UnexpectedValueException('The tenant tree\'s subtree is not a query.');
+        foreach (\array_slice($arms, 1) as $arm) {
+            $union->unionAll($arm);
         }
-
-        $rows = self::among($query->newQuery()->fromSub($query, self::SUBTREE), self::SUBTREE, $tenants)
-            ->get([self::SUBTREE . self::TENANT_TYPE, self::SUBTREE . self::TENANT_ID]);
 
         $found = [];
 
-        foreach ($rows as $row) {
+        foreach ($union->get() as $row) {
+            /** @var array{authorization_ancestor: int|string, tenant_type?: mixed, tenant_id?: mixed} $columns */
             $columns = (array) $row;
             $type    = $columns['tenant_type'] ?? null;
             $id      = $columns['tenant_id']   ?? null;
@@ -255,12 +324,55 @@ final class TenantRelations
                 throw new \UnexpectedValueException($message);
             }
 
-            $key = self::key(new Reference((string) $type, (string) $id));
-
-            $found[$key] = $key;
+            $found[self::pair(new Reference((string) $type, (string) $id), $groups[(int) $columns[self::ANCESTOR]][0])] = true;
         }
 
         return $found;
+    }
+
+    /**
+     * Return the query of those of the tenants the ancestor's subtree selects,
+     * each row naming the ancestor by its index among those asked about.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $ancestor
+     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $tenants
+     * @param  int  $index
+     * @return \Illuminate\Database\Query\Builder
+     *
+     * @throws \UnexpectedValueException
+     */
+    private static function arm(TenantTree $tree, Reference $ancestor, array $tenants, int $index): Builder
+    {
+        $subtree = $tree->subtree($ancestor);
+        $query   = $subtree instanceof EloquentBuilder ? $subtree->toBase() : $subtree;
+
+        if (!$query instanceof Builder) {
+            throw new \UnexpectedValueException('The tenant tree\'s subtree is not a query.');
+        }
+
+        return self::among($query->newQuery()->fromSub($query, self::SUBTREE), self::SUBTREE, $tenants)
+            ->selectRaw('? as ' . self::ANCESTOR, [$index])
+            ->addSelect([self::SUBTREE . self::TENANT_TYPE, self::SUBTREE . self::TENANT_ID]);
+    }
+
+    /**
+     * Group the pairs of a tenant and an ancestor by the ancestor, each with
+     * the tenants asked about it.
+     *
+     * @param  array<string, array{0: \SineMacula\Laravel\Authorization\Support\Reference, 1: \SineMacula\Laravel\Authorization\Support\Reference}>  $pairs
+     * @return list<array{0: \SineMacula\Laravel\Authorization\Support\Reference, 1: list<\SineMacula\Laravel\Authorization\Support\Reference>}>
+     */
+    private static function byAncestor(array $pairs): array
+    {
+        $groups = [];
+
+        foreach ($pairs as [$tenant, $ancestor]) {
+            $groups[self::key($ancestor)][0]   = $ancestor;
+            $groups[self::key($ancestor)][1][] = $tenant;
+        }
+
+        return \array_values($groups);
     }
 
     /**
@@ -309,26 +421,6 @@ final class TenantRelations
                 $any->orWhere(static fn (Builder $row): Builder => $row->where($table . self::TENANT_TYPE, $type)->whereIn($table . self::TENANT_ID, $ids));
             }
         });
-    }
-
-    /**
-     * Determine whether the tenant is the ancestor or below it: from the
-     * tenant's chain when it was read, else from what was settled, else asking
-     * the tree, once for each pair.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $ancestor
-     * @return bool
-     */
-    private function isWithin(Reference $tenant, Reference $ancestor): bool
-    {
-        $chain = $this->chains[self::key($tenant)] ?? null;
-
-        if ($chain !== null) {
-            return \array_filter($chain, static fn (Reference $link): bool => self::isSame($link, $ancestor)) !== [];
-        }
-
-        return $this->within[self::pair($tenant, $ancestor)] ??= TenantChain::isWithin($tenant, $ancestor);
     }
 
     /**

@@ -97,8 +97,8 @@ return [
     | Each name must be a plain identifier (a letter or an underscore, then
     | letters, digits and underscores) with no schema before it, short enough
     | that every index and key name the migrations build from it fits in 63
-    | characters (33 to 51, depending on the table), and the twelve names must
-    | be distinct. A name left out is the key's own; null is refused.
+    | characters (33 to 51, depending on the table), and the thirteen names
+    | must be distinct. A name left out is the key's own; null is refused.
     |
     | `prefix` is put before the name of every table left at its default, so
     | `app_` makes `roles` `app_roles`. A name is left at its default when it
@@ -129,6 +129,7 @@ return [
         'guardrails'               => env('AUTHORIZATION_TABLE_GUARDRAILS', 'guardrails'),
         'grant_usage'              => env('AUTHORIZATION_TABLE_GRANT_USAGE', 'grant_usage'),
         'usage_coverage'           => env('AUTHORIZATION_TABLE_USAGE_COVERAGE', 'usage_coverage'),
+        'role_exclusions'          => env('AUTHORIZATION_TABLE_ROLE_EXCLUSIONS', 'role_exclusions'),
     ],
 
     /*

@@ -65,6 +65,28 @@ final class RoleChainsTest extends TestCase
     }
 
     /**
+     * The roles at or below the keys are listed each once, and none for no
+     * keys.
+     *
+     * @return void
+     */
+    public function testListsTheRolesAtOrBelowTheKeys(): void
+    {
+        [$top, $middle, $bottom, $other] = self::hierarchy();
+
+        $keys = RoleChains::descendants([self::key($middle), self::key($top), self::key($other)]);
+
+        \sort($keys);
+
+        $expected = [self::key($top), self::key($middle), self::key($bottom), self::key($other)];
+
+        \sort($expected);
+
+        self::assertSame($expected, $keys);
+        self::assertSame([], RoleChains::descendants([]));
+    }
+
+    /**
      * With the hierarchy disabled a chain is its role alone, and below a
      * carrier is the carrier alone.
      *

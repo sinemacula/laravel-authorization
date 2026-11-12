@@ -107,6 +107,43 @@ final class RoleChains
     }
 
     /**
+     * Return the keys of the roles and of every role below them, each once, in
+     * one recursive query on the write connection that ignores the tenant
+     * scope. `union` rather than `union all` drops a row already produced, so a
+     * cycle in the stored hierarchy ends the recursion.
+     *
+     * @param  list<string>  $keys
+     * @return list<string>
+     */
+    public static function descendants(array $keys): array
+    {
+        if ($keys === []) {
+            return [];
+        }
+
+        [$table, $key] = Definitions::tableOf(GrantTarget::ROLE);
+
+        $connection = AuthorizationConnection::connection();
+        $grammar    = $connection->getQueryGrammar();
+        $wrapped    = $grammar->wrapTable($table);
+        $column     = $grammar->wrap($key);
+        $parent     = $grammar->wrap('parent_id');
+        $below      = $grammar->wrap(self::BELOW);
+        $marks      = \implode(', ', \array_fill(0, \count($keys), '?'));
+
+        $rows = $connection->selectFromWriteConnection(
+            "with recursive {$below} ({$column}) as ("
+                . "select {$column} from {$wrapped} where {$column} in ({$marks})"
+                . " union select {$wrapped}.{$column} from {$wrapped}"
+                . " inner join {$below} on {$wrapped}.{$parent} = {$below}.{$column}"
+                . ") select {$column} from {$below}",
+            $keys,
+        );
+
+        return \array_map(strval(...), \array_column($rows, $key));
+    }
+
+    /**
      * Return the chain from the role up through the roles given, its parent
      * when the hierarchy is enabled and the parent is among them, then its
      * parent's, and so on.
@@ -178,43 +215,6 @@ final class RoleChains
         }
 
         return $roles;
-    }
-
-    /**
-     * Return the keys of the roles and of every role below them, each once, in
-     * one recursive query on the write connection that ignores the tenant
-     * scope. `union` rather than `union all` drops a row already produced, so a
-     * cycle in the stored hierarchy ends the recursion.
-     *
-     * @param  list<string>  $keys
-     * @return list<string>
-     */
-    private static function descendants(array $keys): array
-    {
-        if ($keys === []) {
-            return [];
-        }
-
-        [$table, $key] = Definitions::tableOf(GrantTarget::ROLE);
-
-        $connection = AuthorizationConnection::connection();
-        $grammar    = $connection->getQueryGrammar();
-        $wrapped    = $grammar->wrapTable($table);
-        $column     = $grammar->wrap($key);
-        $parent     = $grammar->wrap('parent_id');
-        $below      = $grammar->wrap(self::BELOW);
-        $marks      = \implode(', ', \array_fill(0, \count($keys), '?'));
-
-        $rows = $connection->selectFromWriteConnection(
-            "with recursive {$below} ({$column}) as ("
-                . "select {$column} from {$wrapped} where {$column} in ({$marks})"
-                . " union select {$wrapped}.{$column} from {$wrapped}"
-                . " inner join {$below} on {$wrapped}.{$parent} = {$below}.{$column}"
-                . ") select {$column} from {$below}",
-            $keys,
-        );
-
-        return \array_map(strval(...), \array_column($rows, $key));
     }
 
     /**

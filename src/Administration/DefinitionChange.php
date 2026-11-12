@@ -9,8 +9,9 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * The change to a definition an operation resource proposes, as values: the
  * role, permission or policy it creates, edits or deletes, the attributes it
- * proposes, and, for a policy given a new document, that document as it would
- * be stored. The administration stage weighs these (see
+ * proposes, for a policy given a new document, that document as it would be
+ * stored, and, for a pair of mutually exclusive roles declared or removed, the
+ * other role of the pair, as stored. The administration stage weighs these (see
  * `DefinitionConstraints`); policies read the same as the operation resource's
  * attributes, a document by its digest alone.
  *
@@ -25,6 +26,7 @@ final readonly class DefinitionChange
      * @param  \Illuminate\Database\Eloquent\Model  $record
      * @param  array<string, bool|float|int|string|null>  $values
      * @param  array<string, mixed>|null  $document
+     * @param  \Illuminate\Database\Eloquent\Model|null  $related
      */
     public function __construct(
 
@@ -36,6 +38,9 @@ final readonly class DefinitionChange
 
         /** The document a policy is given, as it would be stored; null for no new document, or one that cannot be read. */
         public ?array $document = null,
+
+        /** The other role a pair of mutually exclusive roles names, as stored; null for any other change. */
+        public ?Model $related = null,
     ) {}
 
     /**

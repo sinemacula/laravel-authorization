@@ -132,6 +132,34 @@ final class OperationResourceTest extends TestCase
     }
 
     /**
+     * A pair of mutually exclusive roles is a change to a definition decided in
+     * the tenant that owns the role given, under its action, never only
+     * narrowing, naming that role, and the other by its key and name among the
+     * proposed changes, which it holds as stored.
+     *
+     * @return void
+     */
+    public function testAPairOfExclusiveRolesIsDecidedWhereItsOwningRoleIs(): void
+    {
+        $owned    = Role::create(['name' => 'clerk', 'tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
+        $excluded = Role::create(['name' => 'auditor']);
+        $pair     = OperationResource::exclusion(PackagePermissions::ROLE_EXCLUSION_REMOVE, $owned, $excluded);
+
+        self::assertSame(PackagePermissions::ROLE_EXCLUSION_REMOVE, $pair->action);
+        self::assertEquals(new Reference('stub_tenant', 'tenant-a'), $pair->tenant);
+        self::assertFalse($pair->isNarrowing);
+        self::assertNull($pair->change);
+        self::assertSame('clerk', $pair->attributes()['role']);
+        self::assertSame($owned->id, $pair->attributes()['target_id']);
+        self::assertSame(['excluded' => $excluded->id, 'excluded_role' => 'auditor'], $pair->attributes()['change']);
+        self::assertSame($owned, $pair->definition?->record);
+        self::assertSame($excluded, $pair->definition->related);
+        self::assertSame(['excluded' => $excluded->id, 'excluded_role' => 'auditor'], $pair->definition->values);
+        self::assertNull($pair->definition->document);
+        self::assertNull(OperationResource::exclusion(PackagePermissions::ROLE_EXCLUSION_DECLARE, $excluded, $owned)->tenant);
+    }
+
+    /**
      * A record that is neither a role, a permission nor a policy is never named
      * under a kind, whatever name it has.
      *

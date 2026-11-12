@@ -394,6 +394,33 @@ final class DefinitionConstraintsTest extends TestCase
     }
 
     /**
+     * A pair of mutually exclusive roles is changed only from the tenant that
+     * owns it, and is weighed by the rank and scope rules of a role definition
+     * (see `ExcludedRoles`), never as an action no rule names.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPairOfExclusiveRolesIsWeighedAsARoleDefinition(): void
+    {
+        $tenant  = new Reference('tenant', 'a');
+        $owned   = Role::query()->withoutGlobalScopes()->create(['name' => 'clerk', 'rank' => 8, 'tenant_type' => $tenant->type, 'tenant_id' => $tenant->id]);
+        $junior  = Role::query()->create(['name' => 'auditor', 'rank' => 9]);
+        $senior  = Role::query()->create(['name' => 'director', 'rank' => 1]);
+        $declare = OperationResource::exclusion(Actions::ROLE_EXCLUSION_DECLARE, $owned, $junior);
+        $remove  = OperationResource::exclusion(Actions::ROLE_EXCLUSION_REMOVE, $owned, $junior);
+
+        foreach ([$declare, $remove] as $operation) {
+            self::assertSame(DecisionReason::ADMINISTRATION_OWNER, self::refusal($operation, null));
+            self::assertNull(self::refusal($operation, $tenant));
+        }
+
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::refusal(OperationResource::exclusion(Actions::ROLE_EXCLUSION_DECLARE, $junior, $senior), null));
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, self::refusal($remove, $tenant, self::refusing(Actions::ROLE_EXCLUSION_REMOVE)));
+    }
+
+    /**
      * Return why the operation is refused when its action is allowed, the actor
      * ranked 2, every further check allowed, unless another decides them, and
      * the grantable rights held, made from the tenant given.
