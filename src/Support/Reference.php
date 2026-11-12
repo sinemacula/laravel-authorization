@@ -29,6 +29,11 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
  * asked about and the resolution cache keys by, so a reference made from the
  * tenant, from its rows or by hand always names the same tenant.
  *
+ * Part of the stable API suite packages may use; breaking changes require a
+ * major version bump.
+ *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */

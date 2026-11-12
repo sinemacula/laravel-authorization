@@ -36,6 +36,11 @@ use SineMacula\Laravel\Authorization\Administration\ActingContext;
  * it dispatches, see the operation without them (`withoutClient()`), and they
  * are never put in a cache key, a decision event, a log or a stored row.
  *
+ * Part of the stable API suite packages may use; breaking changes require a
+ * major version bump.
+ *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
