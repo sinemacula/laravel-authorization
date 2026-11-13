@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
+use SineMacula\Laravel\Authorization\Enums\MutationOperation;
+
 /**
  * Dispatched when a grantee surrenders its break-glass activation before it
  * expires (AUTHZ-11.7). The operation's actor is the grantee.
@@ -29,6 +31,6 @@ final readonly class BreakGlassSurrendered extends BreakGlassEnded
     #[\Override]
     public function operation(): string
     {
-        return 'identity.break_glass.surrendered';
+        return MutationOperation::IDENTITY_BREAK_GLASS_SURRENDERED->value;
     }
 }

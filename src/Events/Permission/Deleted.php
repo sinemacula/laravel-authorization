@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Permission;
 
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
+use SineMacula\Laravel\Authorization\Enums\MutationOperation;
 use SineMacula\Laravel\Authorization\Events\Concerns\DescribesRecordChange;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -77,7 +78,7 @@ final readonly class Deleted implements AuthorizationMutation
     #[\Override]
     public function operation(): string
     {
-        return 'permission.deleted';
+        return MutationOperation::PERMISSION_DELETED->value;
     }
 
     /**

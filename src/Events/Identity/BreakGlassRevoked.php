@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
+use SineMacula\Laravel\Authorization\Enums\MutationOperation;
+
 /**
  * Dispatched when a break-glass activation is revoked before it expires
  * (AUTHZ-11.7). The operation's actor is the revoker, or no one for a trusted
@@ -30,6 +32,6 @@ final readonly class BreakGlassRevoked extends BreakGlassEnded
     #[\Override]
     public function operation(): string
     {
-        return 'identity.break_glass.revoked';
+        return MutationOperation::IDENTITY_BREAK_GLASS_REVOKED->value;
     }
 }

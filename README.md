@@ -2955,6 +2955,9 @@ grant hook alone, so no accessor returns them and `auditProperties()` never hold
 | `Role\ExclusionDeclared`           | `role.exclusion.declared`            | the pair's first role                | none                             |
 | `Role\ExclusionRemoved`            | `role.exclusion.removed`             | the pair's first role                | none                             |
 
+The table's `operation()` values are the cases of `SineMacula\Laravel\Authorization\Enums\MutationOperation`, so a
+mapper can match on the enum, as in `MutationOperation::tryFrom($event->operation())`.
+
 A grant, boundary, resource policy or guardrail event holds in its scope's tenant and application; a role, permission
 or policy event holds in the tenant that owns the record, and a role exclusion event in the tenant that owns the pair,
 each in no one application.

@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
+use SineMacula\Laravel\Authorization\Enums\MutationOperation;
 use SineMacula\Laravel\Authorization\Events\Concerns\DescribesGrantChange;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -75,6 +76,6 @@ final readonly class PolicyExpiryChanged implements IdentityEvent
     #[\Override]
     public function operation(): string
     {
-        return 'identity.policy.expiry_changed';
+        return MutationOperation::IDENTITY_POLICY_EXPIRY_CHANGED->value;
     }
 }

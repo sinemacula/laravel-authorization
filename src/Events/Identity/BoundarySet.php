@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
+use SineMacula\Laravel\Authorization\Enums\MutationOperation;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -67,6 +68,6 @@ final readonly class BoundarySet extends BoundaryEvent
     #[\Override]
     public function operation(): string
     {
-        return 'identity.boundary.set';
+        return MutationOperation::IDENTITY_BOUNDARY_SET->value;
     }
 }

@@ -238,6 +238,7 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 
 - `Contracts\AuthorizationEvent`, `Contracts\AuthorizationMutation`, `Contracts\IdentityEvent` and the classes under
   `Events\`.
+- `Enums\MutationOperation`: every change event's `operation()` value.
 - `Events\Concerns\DescribesGrantChange`, `Events\Concerns\DescribesRecordChange`, `Events\Concerns\DescribesOperation`
   and `Support\AuditProperties`: the audit accessors, the call accessors and the flat details.
 - `Events\DecisionEvent`: the decision payload; `Evaluation\DecisionProvenance`: who a decision was about and where;

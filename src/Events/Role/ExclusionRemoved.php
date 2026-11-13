@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Role;
 
+use SineMacula\Laravel\Authorization\Enums\MutationOperation;
+
 /**
  * Dispatched once a pair of mutually exclusive roles is removed (AUTHZ-11.8),
  * by the role exclusion service; removing a pair that was not declared
@@ -30,6 +32,6 @@ final readonly class ExclusionRemoved extends ExclusionEvent
     #[\Override]
     public function operation(): string
     {
-        return 'role.exclusion.removed';
+        return MutationOperation::ROLE_EXCLUSION_REMOVED->value;
     }
 }
