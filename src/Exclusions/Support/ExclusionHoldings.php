@@ -417,10 +417,11 @@ final readonly class ExclusionHoldings
     }
 
     /**
-     * Read the live grants of the roles, and the live break-glass activations
-     * of them as the grants they stand for (see `BreakGlassActivations`), in
-     * every tenant and application, a chunk of the roles at a time, under a
-     * shared lock when asked.
+     * Read the live grants of the roles, and the unexpired break-glass
+     * activations of them as the grants they stand for, in every tenant and
+     * application, a chunk of the roles at a time, under a shared lock when
+     * asked. An activation counts while break-glass is disabled, since it
+     * grants again once break-glass is enabled (N141).
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  list<string>  $roles
@@ -436,7 +437,7 @@ final readonly class ExclusionHoldings
         foreach (\array_chunk($roles, GrantRows::CHUNK) as $chunk) {
             $queries = [
                 $run->live(GrantRows::of(GrantTarget::ROLE), $table)->whereIn($table . '.' . GrantTarget::ROLE->column(), $chunk),
-                BreakGlassActivations::live(AuthorizationConnection::connection()->table($activations), $activations, Carbon::instance($run->now))
+                BreakGlassActivations::unexpired(AuthorizationConnection::connection()->table($activations), $activations, Carbon::instance($run->now))
                     ->useWritePdo()
                     ->select(self::ACTIVATION_COLUMNS)
                     ->whereIn('role_id', $chunk),

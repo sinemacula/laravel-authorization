@@ -121,20 +121,22 @@ conflicts it would create (BL-71b).
       is weighed as holding the new parent and every role above it. A parent a pair touches is weighed only inside a
       transaction on the package's connection, which `setParent()` opens, so the check's locks hold to the save; a
       model saved outside one is refused with `LogicException`, and one no pair touches is saved as before;
-    - a break-glass activation, through `ExclusionGuard::assertActivatable()` (the grantee, the role, and the scope
-      with its application), which the activation path calls before it writes (BL-70b; whichever of the two merges
-      second wires the call). A live activation is itself a holding (`BreakGlassActivations::live()`), read beside the
-      grants by every check and so by every write weighed and every report; one naming a machine counts for nothing,
-      and an identity's never reaches its principals, as a check reads them.
+    - a break-glass activation, through `ExclusionGuard::assertActivatable()` (the grantee, the role, and the scope with
+      its application), which `BreakGlassService::activate()` calls before it writes, once it has locked the role's row
+      shared, in a grant's lock order (invariant 12). An activation not ended or expired is itself a holding, even while
+      break-glass is switched off, since it grants again once it is switched on (N141;
+      `BreakGlassActivations::unexpired()`), read beside the grants by every check and so by every write weighed and every
+      report; one naming a machine counts for nothing, and an identity's never reaches its principals, as a check reads
+      them.
     A role's owner never changes (`OwnerChangedException`), and no write moves a grant to another tenant or
     application, so neither is checked. The refusal is `RoleExclusionConflictException::written()`, carrying the
     report of the first pair the write would create a conflict for, in the pairs' order, keeping only the conflicts
     one of the write's own routes takes part in (`ExclusionWrite::makes()`), so a conflict already stored never
     refuses an unrelated write. There is no override: trusted calls are refused as delegated ones are.
 
-12. **One check, under a declaration's locks.** Before a grant is written, the pairs touching the roles it hands
-    out, or any role above them, are found by walking up from them a level a query (`RoleExclusionTable::touching()`):
-    each level's roles are read under a shared lock, so on MySQL each parent is the one last committed rather than the
+12. **One check, under a declaration's locks.** Before a grant is written, the pairs touching the roles it hands out, or
+    any role above them, are found by walking up from them a level a query (`RoleExclusionTable::touching()`): each
+    level's roles are read under a shared lock, so on MySQL each parent is the one last committed rather than the
     snapshot's, with the lowest-keyed pair naming each locked for update in the same query. When the walk finds one, one
     more query locks every pair naming a walked role for update, in key order, and returns the pairs the write is
     weighed against. No pair row is ever locked shared, so no write waits to turn a shared lock into an exclusive one. A
@@ -148,13 +150,22 @@ conflicts it would create (BL-71b).
     walk. Two writes that could together create a conflict for a pair each walk up to one of its roles (a parent change
     from the new parent), so both lock the pair's row for update before either writes, whatever other pairs their roles
     are in: two grants of one role, of the two roles of a pair or of roles below them, a grant and a parent change, and
-    two parent changes. They never both commit: the second waits for the first and is weighed against what it
-    committed, unless the database refuses one as a deadlock. Two writes that each hand out one role with no parent
-    never deadlock on the pairs, since each locks the lowest-keyed pair naming its role first. Writes whose walks climb
-    several levels or hand out several roles can lock pair rows in different orders, and a write racing a declaration or
-    a parent change, whose role locks are taken top down while the walk climbs, can be refused as a deadlock. The
-    package tries such a write again only in a transaction it opened; in one the application opened, it throws
-    `TransactionConflictException` for the application to retry. A parent is weighed before it is saved, as
+    two parent changes. They never both commit: the second waits for the first and is weighed against what it committed,
+    unless the database refuses one as a deadlock. An activation takes its locks in a grant's order: its role shared
+    (`BreakGlassService::lockRole()`, which refuses a role deleted meanwhile and makes a deletion wait), then the pairs
+    for update in the walk, then the report's shared reads. Two trusted activations of one role so share its lock, and a
+    trusted activation queues on the pair with a grant or an activation of the pair's other role; an update lock on its
+    role would deadlock with that write, which locks the pair and then reads the role shared for its report. Two trusted
+    writes that each hand out one role with no parent, grants and activations alike, never deadlock on the pairs, since
+    each locks its role shared and then the lowest-keyed pair naming it. A write can still be refused as a deadlock when
+    the writes climb several levels or hand out several roles, which can lock pair rows in different orders; when a
+    delegated write, whose pins lock its role for update (`DependencyPins`) before the walk, races a write of the pair's
+    other role; when a write races a declaration or a parent change, whose role locks are taken top down while the walk
+    climbs; and when it races the deletion of the other role of one of its pairs, which locks that role before its
+    cascade reaches the pair. Only a delegated call (`ConflictRetries::run()`) is tried again: in a transaction the
+    package opened, or thrown as `TransactionConflictException` in one the application opened. A trusted call
+    (`OperationScope::trusted()`), `setParent()` without an actor and the commands among them, and a model saved
+    directly throw the database's deadlock error for the caller to retry. A parent is weighed before it is saved, as
     `ExclusionWrite::reparented()` overlays it, once the pairs touching the new parent and its ancestors are found, the
     role and every role below it locked for update; an activation is weighed as a live one beside the stored grants and
     activations (`ExclusionWrite::proposed()`).
@@ -209,7 +220,8 @@ conflicts it would create (BL-71b).
 - `Exclusions\Support\ExclusionGuard`, `Exclusions\Support\ExclusionWrite` -- the check of a write and its overlay.
 - `Services\Support\GrantChange::isWidening()`, `Services\Support\RoleExclusionTable::touching()` -- which writes are
   weighed and the pairs they touch.
-- `Services\GrantService`, `Services\Support\SyncPlan`, `Observers\RoleObserver` -- where writes are weighed.
+- `Services\GrantService`, `Services\Support\SyncPlan`, `Observers\RoleObserver`, `Services\BreakGlassService` -- where
+  writes are weighed.
 - `Reviews\Support\RoleChains::descendants()`, `Reviews\Support\TenantRelations::settleWithin()` -- the bounded reads.
 - `Exclusions\ConflictReport`, `ExclusionConflict`, `ExclusionRoute`, `RoleExclusion` -- what the reads return.
 - `Exceptions\RoleExclusionConflictException`, `Exceptions\InvalidRoleExclusionException` -- the refusals.
@@ -246,6 +258,10 @@ conflicts it would create (BL-71b).
   outside a transaction; break-glass and live activations; the pairs' read and the locks; a pair and a parent
   committed by another session after the grant's first read, and grants of a pair's roles, grants of roles in
   overlapping pairs and a parent change behind a grant queueing (MySQL and PostgreSQL).
+- `Services\BreakGlassServiceTest` (Feature) -- an activation refused beside a grant or a live activation of the
+  other role, trusted and delegated, and made where the reaches do not overlap; two activations of one role sharing
+  its lock, and an activation racing a grant or an activation of the other role, started once the first holds its role
+  lock, queueing on the pair whichever runs first, in forked processes (MySQL and PostgreSQL).
 - `Exclusions\Support\ExclusionWriteTest` (Unit), `Services\GrantChangeTest` (Feature) -- which conflicts a write
   creates, and which grant writes widen.
 - `Performance\ExclusionGuardQueryBudgetTest` -- a grant no pair touches, new, re-armed or with a later or earlier

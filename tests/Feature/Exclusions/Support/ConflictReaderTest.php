@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\StubIdentity;
@@ -46,7 +47,7 @@ use Tests\TestCase;
 #[CoversClass(ConflictReader::class)]
 final class ConflictReaderTest extends TestCase
 {
-    use ComparesReferences, RecordsRowLocks;
+    use ActivatesBreakGlass, ComparesReferences, RecordsRowLocks;
 
     /** @var string The type of the stub tenants. */
     private const string TENANT = 'stub_tenant';

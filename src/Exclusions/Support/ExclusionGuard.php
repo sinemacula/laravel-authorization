@@ -143,8 +143,11 @@ final class ExclusionGuard
     /**
      * Refuse a break-glass activation of the role for the grantee in the scope
      * when it would create a conflict, weighed as a live activation beside the
-     * stored grants and activations. The activation path calls it before it
-     * writes.
+     * stored grants and activations. `BreakGlassService::activate()` calls it
+     * holding the role's shared lock, so the role, the pair and the report's
+     * rows are locked in a grant's order; the update lock a delegated call's
+     * pins take on the role can still deadlock with a write of the pair's other
+     * role.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role

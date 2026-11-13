@@ -1472,8 +1472,9 @@ with `RoleExclusionConflictException`, trusted or delegated, with no override (N
   every holder of the role, and of every role below it, is weighed as holding the new parent and its ancestors. A
   parent a pair touches must be saved inside a transaction on the package's connection, as `setParent()` saves it, so
   the check's locks hold until the save commits; a model saved outside one is refused with `LogicException`.
-- **Break-glass.** An activation of a role is weighed as a live grant of it (`ExclusionGuard::assertActivatable()`),
-  and a live activation counts as a holding for every other write, as it does for every check.
+- **Break-glass.** `BreakGlassService::activate()` weighs an activation as a live grant of its role once the role's
+  row is locked shared. An activation not ended or expired counts as a holding for every other write, even while
+  break-glass is switched off, since it grants again once break-glass is switched on.
 - **Commands.** `authorization:grant` prints the refusal and fails; `authorization:migrate-spatie` stops at the refused
   grant, keeping what it imported before it, as for any failed grant.
 
@@ -1487,19 +1488,25 @@ try {
 }
 ```
 
-The refusal carries the report of the conflicts the write would create, never one already stored, references and
-scopes only, and nothing is written: the grant, or the parent, is rolled back and no event is dispatched. A delegated
-write is decided first, so an actor not allowed it is refused as such; a grant hook has already run by then, since
-hooks run before the package takes any lock. A write is weighed under the locks a declaration takes, so a grant and a
-declaration racing each other never both commit. Two writes that could together create a conflict for a pair, such as
-grants of its two roles or a grant and a parent change, both lock the pair's row before either writes, whatever other
-pairs their roles are in, so they never both commit: the second waits and is weighed against what the first committed.
-The database can still refuse one as a deadlock when the writes climb several levels of parents or hand out several
-roles, or when a write races a declaration or a parent change; the package tries it again only in a transaction it
-opened, and in one the application opened throws `TransactionConflictException` for it to retry. A grant no pair
-touches costs one query for each level of its role's ancestry, its own included, so one for a role with no parent; one
-a pair touches costs one more to lock the pairs, then reads the report in a fixed number of queries however many hold
-the roles. See [docs/design/separation-of-duties.md](docs/design/separation-of-duties.md).
+The refusal carries the report of the conflicts the write would create, never one already stored, references and scopes
+only, and nothing is written: the grant, or the parent, is rolled back and no event is dispatched. A delegated write is
+decided first, so an actor not allowed it is refused as such; a grant hook has already run by then, since hooks run
+before the package takes any lock. A write is weighed under the locks a declaration takes, so a grant and a declaration
+racing each other never both commit. Two writes that could together create a conflict for a pair, such as grants of its
+two roles, a grant and an activation of them or a grant and a parent change, both lock the pair's row before either
+writes, whatever other pairs their roles are in, so they never both commit: the second waits and is weighed against what
+the first committed. An activation locks its role, then the pair, then the holdings it reads, as a grant does: shared,
+unless a delegated call has already locked it for update, so two trusted activations of one role share the role's lock
+and a trusted activation queues on the pair with a write of the pair's other role instead of deadlocking with it. The
+database can still refuse a write as a deadlock when the writes climb several levels of parents or hand out several
+roles, when a delegated write, which locks its role for update before the pair, races a write of the pair's other role,
+or when a write races a declaration, a parent change or the deletion of the other role of one of its pairs. Only a
+delegated call, made with an acting context, is tried again: in a transaction the package opened, or thrown as
+`TransactionConflictException` in one the application opened. A trusted call, `setParent()` without an actor and the
+commands among them, and a model saved directly throw the database's deadlock error for the caller to retry. A grant no
+pair touches costs one query for each level of its role's ancestry, its own included, so one for a role with no parent;
+one a pair touches costs one more to lock the pairs, then reads the report in a fixed number of queries however many
+hold the roles. See [docs/design/separation-of-duties.md](docs/design/separation-of-duties.md).
 
 ### Session caps and machines
 
@@ -4623,6 +4630,9 @@ $breakGlass->revoke($activation, $actor);    // by a holder of the revoke right
   role's maximum (never shortened), a justification not listed, a note while `notes` is false or one longer than
   `note_max_length` characters, and a scope naming half a tenant. An unknown role throws `UnknownRoleException`, an
   unsaved grantee `InvalidGranteeException`, and a role is held to its owner and guard as a grant of it is.
+- An activation that would leave the grantee holding both roles of a pair of mutually exclusive roles where their
+  reach overlaps is refused with `RoleExclusionConflictException`, trusted or delegated, and nothing is written (see
+  [Separation of duties](#separation-of-duties)).
 - The grant hooks are asked about an activation as about a grant of its role in its scope until its expiry, and a
   hook's refusal refuses it. A delegated call locks what a delegated role grant locks, in the same order.
 - `surrender()` is for the grantee alone, acting as itself; anyone else is refused, as is the grantee while

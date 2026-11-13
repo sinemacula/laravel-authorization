@@ -333,6 +333,31 @@ final class BreakGlassActivationsTest extends TestCase
     }
 
     /**
+     * The unexpired activations are those not ended and not expired, whether
+     * break-glass is switched on or off.
+     *
+     * @return void
+     */
+    public function testTheUnexpiredActivationsIgnoreTheSwitch(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $role = self::emergencyRole();
+        $kept = self::activate($user, $role)->getKey();
+
+        self::activate($user, $role, ['ended_at' => Carbon::now()->subMinute()]);
+        self::activate($user, $role, ['expires_at' => Carbon::now()->subMinute()]);
+
+        $unexpired = static fn (): array => BreakGlassActivations::unexpired(DB::table('break_glass_activations'), 'break_glass_activations')->pluck('id')->all();
+
+        self::assertSame([$kept], $unexpired());
+
+        self::switchBreakGlass(false);
+
+        self::assertSame([$kept], $unexpired());
+        self::assertSame(0, BreakGlassActivations::live(DB::table('break_glass_activations'), 'break_glass_activations')->count());
+    }
+
+    /**
      * Whether break-glass is enabled is read once a request or job, when the
      * record is built: while it is off, no live activation is a role grant row,
      * none is live and no grantee's count; a change to the setting is read by

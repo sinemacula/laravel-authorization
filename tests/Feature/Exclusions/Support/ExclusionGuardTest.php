@@ -27,6 +27,7 @@ use SineMacula\Laravel\Authorization\Services\RoleExclusionService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
@@ -54,7 +55,7 @@ use Tests\TestCase;
 #[CoversClass(ExclusionGuard::class)]
 final class ExclusionGuardTest extends TestCase
 {
-    use ActsAsAdministrator, CatchesRefusals, ComparesReferences, ReadsDispatchedEvents, RecordsRowLocks;
+    use ActivatesBreakGlass, ActsAsAdministrator, CatchesRefusals, ComparesReferences, ReadsDispatchedEvents, RecordsRowLocks;
 
     /** @var string The type of the stub tenants. */
     private const string TENANT = 'stub_tenant';
@@ -406,8 +407,8 @@ final class ExclusionGuardTest extends TestCase
 
     /**
      * A live break-glass activation is weighed as a holding: a grant of the
-     * other role, and an activation of it, are refused while it lasts, and
-     * allowed once it has ended.
+     * other role, and an activation of it, are refused while it lasts, even
+     * with break-glass switched off, and allowed once it has ended.
      *
      * @return void
      *
@@ -417,14 +418,19 @@ final class ExclusionGuardTest extends TestCase
     {
         [$clerk, $auditor] = self::declared();
 
-        $user = StubIdentity::query()->create(['id' => 'user']);
+        $user  = StubIdentity::query()->create(['id' => 'user']);
+        $grant = static fn () => self::grants()->grantRole($user, $auditor);
 
         self::activate($clerk, $user);
 
-        self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf(static fn () => self::grants()->grantRole($user, $auditor)));
+        self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf($grant));
         $activation = static fn () => ExclusionGuard::assertActivatable(Reference::of($user), $auditor, GrantScope::platform());
 
         self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf($activation));
+
+        self::switchBreakGlass(false);
+
+        self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf($grant));
 
         DB::table('break_glass_activations')->update(['ended_at' => Carbon::now()->subMinute()]);
 

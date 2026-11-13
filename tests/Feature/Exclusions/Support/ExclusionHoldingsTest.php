@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Reviews\Support\TenantRelations;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RecordsRowLocks;
@@ -38,7 +39,7 @@ use Tests\TestCase;
 #[CoversClass(ExclusionHoldings::class)]
 final class ExclusionHoldingsTest extends TestCase
 {
-    use ActsAsTenant, ComparesReferences, RecordsRowLocks;
+    use ActivatesBreakGlass, ActsAsTenant, ComparesReferences, RecordsRowLocks;
 
     /**
      * Given a write, the holdings are read as it would leave them: a role given

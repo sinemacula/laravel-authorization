@@ -124,14 +124,19 @@ This note records the invariants the first two releases fix, so the last extends
     scope until its expiry (`Hooks\WideningPhase`, a `ProposedGrant` under `authorization:role.grant`), before any
     lock, and checked again after the locks; a hook's refusal refuses it. A delegated activation or end locks the
     actor's authority, then the grantee's rows and the role (`DependencyPins`), as a delegated role grant does, and
-    every activation locks the role's row before it writes, so a deletion of the role either waits and takes the
+    every activation locks the role's row shared before it writes, so a deletion of the role either waits and takes the
     activation with it or refuses it as `UnknownRoleException`; a revocation of the right or another activation
     meanwhile has a delegated call tried again.
 
-14. **One place decides whether the grantee may hold the role.** `BreakGlassService::assertHoldable()`, called under
-    the locks just before the write, holds the role to what a grant of it is held to (its owner's tenant and below,
-    the grantee's guard). Separation of duties (BL-71b) extends it with the exclusion check; this release checks no
-    exclusion.
+14. **The grantee must be able to hold the role.** `BreakGlassService::assertHoldable()` holds the role to what a grant
+    of it is held to (its owner's tenant and below, the grantee's guard). Once the role's row is locked shared,
+    `ExclusionGuard::assertActivatable()` refuses an activation that would leave the grantee holding both roles of a
+    declared pair where their reach overlaps with `RoleExclusionConflictException` (see [separation of
+    duties](separation-of-duties.md)). The activation so locks its role, then the pair, then the rows the report reads,
+    in a grant's order: two trusted activations of one role share the role's lock, and a trusted one racing a grant or
+    an activation of its pair's other role queues on the pair. An update lock on the role would deadlock with that
+    write, which locks the pair and then reads the role shared; a delegated activation has taken one through its pins,
+    as a delegated grant has, so it can still be refused as a deadlock there (see invariant 12 of separation of duties).
 
 ## Success Path
 
@@ -149,7 +154,7 @@ This note records the invariants the first two releases fix, so the last extends
 - `enabled` true, a role's maximum above the global one, an unknown key, a malformed code, a duplicate code, or a value
   written loosely is refused at boot under its path, and by `read()` after boot.
 - An activation breaking a limit is refused before anything is written, each with its reason; a hook's refusal, a
-  refused right or a role deleted meanwhile leaves nothing written either.
+  refused right, a role deleted meanwhile or a conflict with a pair of exclusive roles leaves nothing written either.
 - Switching `enabled` off stops every activation at once from the next request or job; switching it on counts them
   again.
 - An activation that has ended, or expired, grants nothing; one of a machine, of an identity, or naming half a tenant
@@ -185,7 +190,7 @@ This note records the invariants the first two releases fix, so the last extends
 - `Support\SubjectGrants`, `Cache\ResolutionCache`, `Cache\PrincipalCacheKey` -- the identity marked, its entries
   kept apart, and the entries of either state of the switch kept apart.
 - `Services\BreakGlassService`, `Enums\BreakGlassRefusal`, `Exceptions\BreakGlassRefusedException` -- the write path,
-  its refusals, and `assertHoldable()`, the seam BL-71b extends.
+  its refusals, and `assertHoldable()` and the exclusion check under the role's lock.
 - `Support\PackagePermissions`, `Administration\OperationResource::breakGlass()`,
   `Administration\OperationConstraints` -- the three rights and how a delegated call is weighed.
 - `Query\ScopeAnchors`, `Query\ScopeClasses` -- the activations' tenants among the anchors, compared as bytes.
@@ -211,7 +216,10 @@ This note records the invariants the first two releases fix, so the last extends
   to the grantee impersonated) and revocation, ending twice, a normal grant untouched, the grant hooks, the rights
   decided in the activation's scope, the locks a role grant takes and each end takes, a conflict on every try refused
   under its right, and the races with a role's deletion, a revocation of the right, a second activation and a hook's
-  coverage, on SQLite, PostgreSQL and MySQL.
+  coverage, on SQLite, PostgreSQL and MySQL; an activation refused by a pair of exclusive roles, on SQLite,
+  PostgreSQL and MySQL; and, in forked processes on PostgreSQL and MySQL, two activations of one role sharing its lock
+  while a deletion of it waits, and an activation racing a grant or an activation of its pair's other role queueing on
+  the pair.
 - `Database\BreakGlassActivationsTest`, `ResolutionCacheTest`, `Query\ScopeAnchorsTest` (Feature) -- the switch: none
   counts while it is off, in the next request and a fresh container, from the memo and the store, and every one again
   once it is on.
@@ -224,6 +232,6 @@ This note records the invariants the first two releases fix, so the last extends
 
 ## Change Triggers
 
-Update this note when the write path, its rights or its refusals change, when separation of duties extends
-`assertHoldable()` (BL-71b), when `AVAILABLE` changes or the lifecycle events, reviews or attribution land (BL-70c), or
-when an activation starts or stops counting anywhere a role grant counts.
+Update this note when the write path, its rights or its refusals change, when the exclusion check moves relative to the
+role's lock, when `AVAILABLE` changes or the lifecycle events, reviews or attribution land (BL-70c), or when an
+activation starts or stops counting anywhere a role grant counts.
