@@ -375,13 +375,14 @@ final class GrantRoleCommandTest extends TestCase
     {
         $clerk   = Role::query()->create(['name' => 'clerk', 'guard' => 'web']);
         $auditor = Role::query()->create(['name' => 'auditor', 'guard' => 'web']);
-        $user    = StubIdentity::create(['id' => 'a1a1a1a1-0000-0000-0000-000000000003']);
+        $id      = 'a1a1a1a1-0000-0000-0000-000000000003';
+        $user    = StubIdentity::create(['id' => $id]);
 
         $user->assignRole($clerk);
 
         RoleExclusionService::instance()?->declare($clerk, $auditor);
 
-        $exitCode = Artisan::call('authorization:grant', ['identity' => StubIdentity::class . ':' . $user->getKey(), 'role' => 'auditor']);
+        $exitCode = Artisan::call('authorization:grant', ['identity' => StubIdentity::class . ':' . $id, 'role' => 'auditor']);
 
         self::assertSame(1, $exitCode);
         self::assertSame(
