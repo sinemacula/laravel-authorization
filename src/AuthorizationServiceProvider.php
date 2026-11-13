@@ -76,6 +76,7 @@ use SineMacula\Laravel\Authorization\Reviews\AccessReview;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
+use SineMacula\Laravel\Authorization\Services\BreakGlassService;
 use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
@@ -657,10 +658,11 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
     /**
      * Bind the management services that own every write of a role, permission,
-     * policy, grant, resource policy attachment, permission boundary, guardrail
-     * or pair of mutually exclusive roles, and the services that answer factual
-     * questions about grants: application access, the grant scope query and the
-     * access reviews. They hold no state, so each is a singleton.
+     * policy, grant, resource policy attachment, permission boundary,
+     * guardrail, pair of mutually exclusive roles or break-glass activation,
+     * and the services that answer factual questions about grants: application
+     * access, the grant scope query and the access reviews. They hold no state,
+     * so each is a singleton.
      *
      * @return void
      */
@@ -675,6 +677,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             BoundaryService::class,
             GuardrailService::class,
             RoleExclusionService::class,
+            BreakGlassService::class,
             ApplicationAccess::class,
             GrantScopeQuery::class,
             AccessReview::class,

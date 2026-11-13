@@ -88,6 +88,7 @@ use SineMacula\Laravel\Authorization\Reviews\AccessReview;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
+use SineMacula\Laravel\Authorization\Services\BreakGlassService;
 use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
@@ -1358,6 +1359,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             BoundaryService::class,
             GuardrailService::class,
             RoleExclusionService::class,
+            BreakGlassService::class,
             ApplicationAccess::class,
             GrantScopeQuery::class,
             AccessReview::class,

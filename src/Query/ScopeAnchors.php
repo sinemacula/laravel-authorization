@@ -9,6 +9,7 @@ use Illuminate\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Subject;
@@ -82,15 +83,17 @@ final class ScopeAnchors
      * boundaries of the subject and its identity, of the policies attached to
      * the roles they hold, or hold through an activation, and every role above
      * them, and of the owners of those roles and of the permissions granted.
+     * Activations are read only while break-glass is enabled.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @return list<list<\SineMacula\Laravel\Authorization\Support\Reference>>
      */
     private static function grantTenantsOf(Subject $subject): array
     {
-        $grantees = self::granteesOf($subject);
-        $isHeld   = static fn (Builder $query, string $table): Builder => self::whereGrantee($query, $table, $grantees);
-        $roles    = \array_keys(RoleGraph::reach([...self::keysOf('authorizable_roles', 'role_id', $isHeld), ...self::keysOf('break_glass', 'role_id', $isHeld)]));
+        $grantees  = self::granteesOf($subject);
+        $isHeld    = static fn (Builder $query, string $table): Builder => self::whereGrantee($query, $table, $grantees);
+        $activated = BreakGlassActivations::isEnabled() ? $isHeld : static fn (Builder $query): Builder => $query->whereRaw(QueryAuthorizer::NO_ROW);
+        $roles     = \array_keys(RoleGraph::reach([...self::keysOf('authorizable_roles', 'role_id', $isHeld), ...self::keysOf('break_glass', 'role_id', $activated)]));
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
         $roleClass = ModelClasses::get('role');
@@ -99,11 +102,17 @@ final class ScopeAnchors
         $direct      = self::keysOf('authorizable_permissions', 'permission_id', $isHeld);
         $inherited   = self::keysOf('role_permissions', 'permission_id', static fn (Builder $query, string $table): Builder => $query->whereIn("{$table}.role_id", $roles));
         $permissions = [...$direct, ...$inherited];
-        $grants      = ['authorizable_roles', 'break_glass', 'authorizable_permissions', 'authorizable_policies', 'authorizable_boundaries'];
-        $byRoles     = static fn (Builder $query, string $table): Builder => $query->where("{$table}.authorizable_type", $roleType)->whereIn("{$table}.authorizable_id", $roles);
+        $grants      = [
+            'authorizable_roles'       => $isHeld,
+            'break_glass'              => $activated,
+            'authorizable_permissions' => $isHeld,
+            'authorizable_policies'    => $isHeld,
+            'authorizable_boundaries'  => $isHeld,
+        ];
+        $byRoles = static fn (Builder $query, string $table): Builder => $query->where("{$table}.authorizable_type", $roleType)->whereIn("{$table}.authorizable_id", $roles);
 
         return [
-            ...\array_map(static fn (string $table): array => self::tenantsOf($table, $isHeld), $grants),
+            ...\array_map(self::tenantsOf(...), \array_keys($grants), $grants),
             self::tenantsOf('authorizable_policies', $byRoles),
             self::tenantsOf('roles', static fn (Builder $query, string $table): Builder => $query->whereIn("{$table}.id", $roles)),
             self::tenantsOf('permissions', static fn (Builder $query, string $table): Builder => $query->whereIn("{$table}.id", $permissions)),

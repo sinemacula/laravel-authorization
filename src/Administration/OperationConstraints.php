@@ -48,6 +48,11 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *    and a change to a resource's policies by what it changes alone, which the
  *    owner rule never weighs (N79) (see `DefinitionConstraints`).
  *
+ * A break-glass activation or its end is weighed by the scope rule alone:
+ * holding the right across the reach is the gate, so neither rank, self nor
+ * what the role hands out is weighed (N140), while denies, boundaries,
+ * guardrails and caps still apply to what the activated role grants.
+ *
  * The constraints of a change to a subject, in order:
  *
  * - **scope** (N79): a change that may widen authority is refused as
@@ -185,9 +190,11 @@ final class OperationConstraints
             return DefinitionConstraints::refusal($operation, $resource, $checks);
         }
 
+        $breakGlass   = [PackagePermissions::BREAK_GLASS_ACTIVATE, PackagePermissions::BREAK_GLASS_GRANT, PackagePermissions::BREAK_GLASS_REVOKE];
+        $isBreakGlass = \in_array($operation->action, $breakGlass, true);
+
         return self::scope($operation, $change, $resource, $checks)
-            ?? self::rank($operation, $change, $resource, $checks)
-            ?? self::widening($operation, $change, $resource, $checks);
+            ?? ($isBreakGlass ? null : self::rank($operation, $change, $resource, $checks) ?? self::widening($operation, $change, $resource, $checks));
     }
 
     /**

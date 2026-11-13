@@ -6,16 +6,20 @@ namespace Tests\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Stores break-glass activations as a test needs them, through the model, since
- * nothing in the package creates one yet: an emergency role carrying an action,
- * and an activation of it for a grantee, platform-wide and live for half an
- * hour unless the columns say otherwise, with a note no output may show.
+ * Stores break-glass activations as a test needs them, through the model: an
+ * emergency role carrying an action, and an activation of it for a grantee,
+ * platform-wide and live for half an hour unless the columns say otherwise,
+ * with a note no output may show. Break-glass is switched on before each test,
+ * as it is unavailable otherwise.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,6 +30,35 @@ trait ActivatesBreakGlass
 {
     /** @var string The note every activation carries, which nothing may show. */
     protected const string NOTE = 'Paged at 3am by the on-call lead';
+
+    /**
+     * Switch break-glass on before the test.
+     *
+     * @return void
+     */
+    protected function setUpActivatesBreakGlass(): void
+    {
+        self::switchBreakGlass(true);
+    }
+
+    /**
+     * Switch break-glass on or off with the settings given, as the next request
+     * or job would read it, `responder` listed with the global maximum and
+     * `incident` the one code unless the settings say otherwise.
+     *
+     * @param  bool  $isEnabled
+     * @param  array<string, mixed>  $settings
+     * @return void
+     */
+    protected static function switchBreakGlass(bool $isEnabled, array $settings = []): void
+    {
+        BreakGlassConfigValidator::$isAvailable = true;
+
+        config()->set('authorization.break_glass', ['enabled' => $isEnabled, 'roles' => ['responder' => []], 'justifications' => ['incident'], ...$settings]);
+
+        app()->forgetInstance(BreakGlassActivations::class);
+        app()->forgetInstance(ResolutionCache::class);
+    }
 
     /**
      * Store an activation of the role for the grantee through the model,

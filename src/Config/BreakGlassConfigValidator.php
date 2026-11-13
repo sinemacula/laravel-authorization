@@ -17,7 +17,8 @@ use SineMacula\Laravel\Authorization\Models\Role;
  *
  * - `enabled`: whether break-glass is on, a boolean, false by default. True is
  *   refused while `AVAILABLE` is false: break-glass is not available until its
- *   audit trail ships, and that release flips the constant;
+ *   audit trail ships, and that release flips the constant. The package's tests
+ *   accept it through `$isAvailable`, which nothing else sets;
  * - `max_minutes`: the longest an activation may last, in minutes, a whole
  *   number of at least 1, 60 by default;
  * - `roles`: the emergency roles, each role's name mapped to its settings, an
@@ -40,6 +41,8 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * null is refused, but for a role's `max_minutes`. Any other key, in the block
  * or a role's settings, is refused, naming its path (N116). The same checks
  * refuse a setting changed after boot when it is read (see `read()`).
+ *
+ * @managed-static
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -77,6 +80,9 @@ final class BreakGlassConfigValidator
 
     /** @var string What a justification code is expected to be. */
     private const string CODE_SHAPE = 'a lower-case letter, then lower-case letters, digits, ".", "_" and "-", of at most 64 characters';
+
+    /** @var bool Whether `enabled` true is accepted: `AVAILABLE`, set true only by the package's own tests. */
+    public static bool $isAvailable = self::AVAILABLE;
 
     /**
      * Validate the supplied `break_glass` config, throwing on the first
@@ -137,16 +143,16 @@ final class BreakGlassConfigValidator
      * boolean, and true while break-glass is not available.
      *
      * @param  mixed  $enabled
-     * @param  bool  $isAvailable
+     * @param  bool|null  $isAvailable
      * @return bool
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    public static function enabled(mixed $enabled, bool $isAvailable = self::AVAILABLE): bool
+    public static function enabled(mixed $enabled, ?bool $isAvailable = null): bool
     {
         $enabled = self::isSwitchedOn('enabled', $enabled);
 
-        if ($enabled && !$isAvailable) {
+        if ($enabled && !($isAvailable ?? self::$isAvailable)) {
             throw new InvalidAuthorizationConfigException(self::KEY . '.enabled', self::UNAVAILABLE, IssueCode::INVALID_VALUE, 'false', 'bool');
         }
 
