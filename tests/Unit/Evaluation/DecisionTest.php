@@ -481,6 +481,39 @@ final class DecisionTest extends TestCase
     }
 
     /**
+     * A decision names no activation until it is given some; withActivations()
+     * keeps each once, sorted, and everything else, an empty list changing
+     * nothing; withStep(), withFreshness() and withEvidence() keep them.
+     *
+     * @return void
+     */
+    public function testActivationsAreKeptAcrossTheDecision(): void
+    {
+        $step      = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, 'posts:read');
+        $evidence  = new DecisionEvidence([GrantProvenance::unavailable('posts:read')]);
+        $freshness = new RequirementFreshness('session-1');
+        $decision  = Decision::allow(DecisionStage::ALLOW, [new StatementReference('p', 0)], [$step])->withFreshness($freshness, ['multifactor'])->withEvidence($evidence);
+        $named     = $decision->withActivations(['b', 'a', 'b']);
+
+        self::assertSame([], $decision->activations);
+        self::assertSame($decision, $decision->withActivations([]));
+        self::assertSame(['a', 'b'], $named->activations);
+        self::assertSame(['b'], $named->withActivations(['b'])->activations);
+        self::assertSame($decision->effect, $named->effect);
+        self::assertSame($decision->reason, $named->reason);
+        self::assertSame($decision->stage, $named->stage);
+        self::assertSame($decision->statements, $named->statements);
+        self::assertSame($decision->trace, $named->trace);
+        self::assertSame($decision->requirements, $named->requirements);
+        self::assertSame($freshness, $named->freshness);
+        self::assertSame($evidence, $named->evidence);
+        self::assertSame(['multifactor'], $named->requirementsRead);
+        self::assertSame(['a', 'b'], $named->withStep(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED))->activations);
+        self::assertSame(['a', 'b'], $named->withFreshness(new RequirementFreshness('session-1'))->activations);
+        self::assertSame(['a', 'b'], $named->withEvidence(new DecisionEvidence)->activations);
+    }
+
+    /**
      * The keys also hold every `${…}` reference a statement it assessed names,
      * after the condition keys of its step, each once.
      *

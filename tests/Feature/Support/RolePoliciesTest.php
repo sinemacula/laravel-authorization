@@ -30,6 +30,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\InheritedPolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RolePolicies;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\NonMorphRolesGrantee;
 use Tests\Feature\Stubs\StubIdentity;
@@ -53,7 +54,7 @@ use Tests\TestCase;
 #[CoversClass(RolePolicies::class)]
 final class RolePoliciesTest extends TestCase
 {
-    use ActsAsTenant;
+    use ActivatesBreakGlass, ActsAsTenant;
 
     /**
      * Start the clock.
@@ -568,6 +569,58 @@ final class RolePoliciesTest extends TestCase
         $unstable = RolePolicies::heldThrough($user->roles()->get(), $user->roles(), new ResolutionPins($store, true));
 
         self::assertSame([[$policy->id], null, false], [$unstable->keys, $unstable->chains, $unstable->stable]);
+    }
+
+    /**
+     * A role read through a break-glass activation is read by role, naming the
+     * activation behind each policy whose allows count that it or a role above
+     * it gives, also when the hierarchy moves meanwhile; a policy counting for
+     * its denies alone, and a role grant, name none.
+     *
+     * @return void
+     */
+    public function testAnActivatedRoleNamesItsActivationBehindItsPolicies(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $parent  = Role::create(['name' => 'publisher']);
+        $role    = Role::create(['name' => 'responder', 'parent_id' => $parent->id]);
+        $granted = Role::create(['name' => 'editor']);
+        $policy  = self::policy('publishers');
+        $half    = self::policy('half');
+        $editors = self::policy('editors');
+
+        $parent->attachPolicy($policy);
+        DB::table('authorizable_policies')->insert(['policy_id' => $half->id, 'authorizable_type' => $role->getMorphClass(), 'authorizable_id' => $role->id, 'tenant_id' => 'o1']);
+        $granted->attachPolicy($editors);
+        $user->assignRole($granted);
+
+        self::assertSame([], RolePolicies::heldThrough($user->roles()->get(), $user->roles(), new ResolutionPins)->activations);
+
+        $activation = self::activate($user, $role);
+        $inherited  = RolePolicies::heldThrough($user->roles()->get(), $user->roles(), new ResolutionPins);
+
+        self::assertEqualsCanonicalizing([$policy->id, $half->id, $editors->id], $inherited->keys);
+        self::assertSame([$policy->id => [$activation->id]], $inherited->activations);
+        self::assertTrue($inherited->stable);
+
+        DB::table('roles')->where('id', $role->id)->update(['parent_id' => null]);
+
+        $moved = false;
+        $store = new VersionedStore(new Repository(self::onPin(static function (array $keys) use (&$moved, $role, $parent): void {
+            if ($moved || !\in_array('authz:version:role:' . $role->id, $keys, true)) {
+                return;
+            }
+
+            $moved = true;
+
+            DB::table('roles')->where('id', $role->id)->update(['parent_id' => $parent->id]);
+        })), 'authz');
+
+        $unstable = RolePolicies::heldThrough($user->roles()->get(), $user->roles(), new ResolutionPins($store));
+
+        self::assertFalse($unstable->stable);
+        self::assertNull($unstable->chains);
+        self::assertSame([$policy->id => [$activation->id]], $unstable->activations);
     }
 
     /**

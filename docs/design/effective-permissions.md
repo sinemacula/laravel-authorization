@@ -45,11 +45,11 @@ action through the one decision path rather than computing allows less denies, a
 
 6. **Introspection records nothing (N70).** The batch is made with both `isDispatching` and `isStoring` false, two
    switches on the shared path rather than a copy of the decision loop: it stores no last decision and dispatches no
-   `DecisionEvaluated`; `AuthorizationFailed` is never dispatched since nothing is authorized. Break-glass reporting
-   (BL-70, AUTHZ-15.3's "always") must define how it treats introspection when it is built: either exempt a listing, as
-   this note does today, or report the break-glass allows a listing relies on. A preview's listing is the one exception
-   (N86): it dispatches each action's `DecisionEvaluated` while `events.decisions.previews` is on, naming both parties,
-   and still stores none of them (see [Preview](preview.md)).
+   `DecisionEvaluated`; `AuthorizationFailed` is never dispatched since nothing is authorized. A listing is exempt from
+   break-glass reporting too (N142): an action it lists through a break-glass activation is reported by no event. A
+   preview's listing is the one exception (N86): it dispatches each action's `DecisionEvaluated` while
+   `events.decisions.previews` is on, naming both parties, and an allow that used break-glass whatever the settings,
+   with `usedBreakGlass` set, and still stores none of them (see [Preview](preview.md)).
 
 7. **Generic and resource-specific listings differ.** A listing with no resource answers the resource-less check, so an
    allow limited by `resources` or by a resource's attributes does not list its action; a listing for one resource
@@ -121,5 +121,5 @@ request recorded before.
 ## Change Triggers
 
 - Listing anything the catalogue does not declare, or computing a listing from allows and denies, breaks invariant 1.
-- A listing that records or reports a decision breaks invariant 6; break-glass reporting (BL-70) must revisit it.
+- A listing that records or reports a decision breaks invariant 6.
 - An enumeration contract for custom action catalogues would widen invariant 1's source and must keep it exact.

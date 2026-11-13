@@ -2980,7 +2980,8 @@ Event::listen(static function (DecisionEvaluated $event): void {
     $event->effect;         // DecisionEffect::ALLOW or DecisionEffect::DENY; $event->isAllowed() reads it
     $event->reason;         // the DecisionReason of a denial, or null for an allow
     $event->statements;     // the StatementReference of each statement that decided it (see below)
-    $event->usedBreakGlass; // whether a break-glass grant allowed it; false until break-glass grants arrive
+    $event->usedBreakGlass; // whether a grant that allowed it came through a live break-glass activation
+    $event->activations;    // the key of each such activation, sorted, never its note; [] when it used none
     $event->keys;           // the context keys it read, such as ['resource.status', 'input.reason'], never their values
     $event->reportedBecause();   // the DecisionReport it was reported for, such as DecisionReport::DENIAL
     $event->isSensitiveAction(); // whether its action is one of events.decisions.sensitive_actions
@@ -3029,8 +3030,15 @@ is reported, in this order: `BREAK_GLASS`, `PREVIEW`, `INSUFFICIENT_AUTHENTICATI
 `ALL_ALLOWS`. A preview's denial is therefore reported as `PREVIEW` while `previews` is on, and as `DENIAL` while it is
 off and `denials` is on; an allow of a sensitive action is `SENSITIVE_ACTION` with `allows` set to `all` as well, and is
 not reported with `allows` set to `none`. `isSensitiveAction()` says whether the action is listed, whatever the reason
-it was reported for, so an audit mapper can record the allows of sensitive actions alone. A break-glass allow is to be
-reported whatever the settings, as `BREAK_GLASS`, once break-glass grants arrive; until then no decision uses one.
+it was reported for, so an audit mapper can record the allows of sensitive actions alone.
+
+An allow that used break-glass is always reported, whatever these settings say, `allows` set to `none` included, as
+`BREAK_GLASS`. An allow used break-glass when a permission covering the action, or a policy whose statement allowed it,
+is carried by a role the subject holds through a live activation, directly or through the role's ancestors, even when a
+normal grant gives it too, or when a resource policy allowed it through a role selector naming such a role and no
+selector names the subject itself; its event sets `usedBreakGlass` and lists the activations' keys under `activations`,
+as `Authorization::lastDecision()->activations` does. A denial never used break-glass, nor does a decision about a
+machine, one allowed by an identity's grants, or any decision while break-glass is switched off.
 
 `sensitive_actions` names catalogue actions exactly, with no wildcard: each is letters, digits and `_ - : .`, and must
 be declared by the package or by your permission enums or providers. Whether each is declared is checked at boot, as the
@@ -3413,8 +3421,9 @@ Gate.
 **It records nothing.** Listing is introspection, not a check: it records no last decision and dispatches no
 `DecisionEvaluated` and no `AuthorizationFailed`. On a preview, each action's `DecisionEvaluated` is dispatched while
 `events.decisions.previews` is on, as it is by default, naming both parties, though none is stored, and the preview's
-admission is recorded and reported as any check (see [Preview](#preview)). Break-glass grants, when they arrive, will
-define how a listing that relies on one is reported.
+admission is recorded and reported as any check (see [Preview](#preview)). An action listed through a break-glass
+activation is reported by no event either, except on a preview, whose listing reports it whatever the settings, with
+`usedBreakGlass` set.
 
 **Held permissions and their requirements.** `heldPermissionsFor()` takes the same arguments as `permissionsFor()` and
 lists the same actions, in the same order, through the same path, each as a
@@ -4604,7 +4613,9 @@ see it, and denies, permission boundaries, guardrails and session caps still app
 it past its expiry, and a change saved through the model is seen on the next check. Only a human principal is
 counted: an activation naming a machine, or the identity behind a principal, grants nothing, and one naming half a
 tenant applies nowhere. An explanation names a grant that came through an activation as `break_glass_permission` or
-`break_glass_policy`, with the activation's key, and never the note.
+`break_glass_policy`, with the activation's key, and never the note. A decision an activation allowed names its key,
+and its `DecisionEvaluated` is dispatched whatever the settings (see [Which decisions are
+reported](#which-decisions-are-reported)).
 
 **Activating and ending.** `Services\BreakGlassService` writes and ends activations:
 

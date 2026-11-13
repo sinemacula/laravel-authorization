@@ -551,7 +551,7 @@ final class ReviewRunTest extends TestCase
 
         return \array_map(
             static fn (GrantRow $row): string => $row->grantee->id,
-            GrantRows::all(GrantRows::ordered($run->live(GrantRows::held($run, GrantTarget::ROLE), $table), $table, 'role_id'), 'role'),
+            GrantRows::all(GrantRows::ordered($run->live(GrantRows::of(GrantTarget::ROLE), $table), $table, 'role_id'), 'role'),
         );
     }
 }

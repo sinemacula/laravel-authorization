@@ -149,16 +149,32 @@ This note records the invariants they fix.
     overwritten nor reported. One naming half a tenant is recorded and counted with no event. `--pretend` counts
     them, and `PruneResult::$activations` reports how many.
 
-16. **Listings count a live activation (N143).** The grant scope query (`Services\GrantScopeQuery`, through
+16. **A decision names the activations behind it (N142).** An allow used break-glass when a permission of the
+    principal's that covers the action, or a policy whose statement allowed it, is carried by a role the principal
+    holds through a live activation, directly or through the role's ancestry, or when a resource policy's statement
+    allowed it through a role selector naming such a role and no selector names the subject itself; one held through
+    a role grant as well still counts, so an emergency use is never hidden. The decision names the key of each such
+    activation, sorted (`Decision::$activations`), and its event says `usedBreakGlass` and carries them as
+    `activations`, never the note. A denial, a decision of a machine or of an identity's grants, and any decision
+    while break-glass is disabled name none. The resolution reads which activation is behind each permission, policy
+    and role key from the rows it already reads, by role only when a role came through an activation
+    (`BreakGlassActivations::behind()`); while break-glass is enabled the resolution cache keeps them beside the entry
+    (`ResolutionCache::activationsOf()`), and the pipeline notes the principal's as they resolve, before the scope a
+    resource's policies or guardrails are read in empties the memo (`BreakGlassAttribution`). Naming them costs no
+    query, and a principal holding no activation is resolved as before. `DecisionEvaluated` reports such an allow
+    whatever `events.decisions` says (`DecisionReport::BREAK_GLASS`), a preview's listing included; a listing that
+    dispatches nothing reports none.
+
+17. **Listings count a live activation (N143).** The grant scope query (`Services\GrantScopeQuery`, through
     `Support\GrantRoots`) counts a live activation (`BreakGlassActivations::live()`) as a grant of its role in its
     scope, as a check does: `forIdentity()` its principals', `hasGrantIn()` the principal's, never an identity's or a
     machine's, and `granteesReaching()` and `granteesWithin()` list the grantee of every live activation but a
     machine's, once beside any grant, in the same one query. None counts while break-glass is disabled.
 
-17. **The widening counts none.** Whether a grant widens what an identity holds (`Hooks\WideningClassifier`) reads
+18. **The widening counts none.** Whether a grant widens what an identity holds (`Hooks\WideningClassifier`) reads
     role grants alone: an activation is never a grant already held, so a grant beside one widens as without it.
 
-18. **Reviews list every unexpired activation (N143).** The access reviews (`Reviews\Support\GrantRows::held()`, read
+19. **Reviews list every unexpired activation (N143).** The access reviews (`Reviews\Support\GrantRows::held()`, read
     by `HolderRoutes`, `HoldingRoutes` and `StoredRows`, through `RoleChains` and `RoleCarriers` as a grant is) list
     every activation not ended or expired at the review's instant, whatever the switch, since it grants again once
     break-glass is enabled, as for separation of duties (N141): a row of its own beside any grant of the same role,
@@ -166,11 +182,11 @@ This note records the invariants they fix.
     `break_glass { activation, justification }`, never the note. A machine's, or one naming half a tenant, is listed
     as such a grant is; an identity's never reaches a principal's holdings. Its `usage` is `unknown`.
 
-19. **Usage never counts one.** Grant usage tracking starts no route from an activation (`Usage\RouteSources`), so
+20. **Usage never counts one.** Grant usage tracking starts no route from an activation (`Usage\RouteSources`), so
     its use is never a role grant's, and `Usage\UsagePruner` matches usage against the grant tables alone, so an
     activation keeps no use alive.
 
-20. **A role's deletion reports its activations.** `Enums\GrantTarget::holders()` lists the grantees of a role's
+21. **A role's deletion reports its activations.** `Enums\GrantTarget::holders()` lists the grantees of a role's
     activations not ended or expired, which the deletion deletes, beside its grantees, each once, so
     `Role\Deleted::grantees()` names them. `Services\GrantPruner` never deletes an activation, a grantee that no
     longer exists included: it only records an expiry (invariant 15).
@@ -182,7 +198,8 @@ This note records the invariants they fix.
 2. An administrator holding `authorization:break-glass.grant` activates the role for a principal in a tenant with its
    subtree for 60 minutes through `BreakGlassService::activate()`, which writes a row of `break_glass_activations`.
 3. A check in that tenant, or below it, reads the role through the principal's `roles()`, and allows what the role's
-   permissions allow, unless a deny, a cap or a guardrail refuses it; a check anywhere else does not.
+   permissions allow, unless a deny, a cap or a guardrail refuses it; a check anywhere else does not. Each such allow
+   names the activation, and its `DecisionEvaluated` is dispatched whatever the settings, with `usedBreakGlass` set.
 4. The principal surrenders it, or an hour later the cached resolution has lapsed, and the next check allows nothing
    through the activation.
 
@@ -227,9 +244,19 @@ This note records the invariants they fix.
 - `Reviews\Support\GrantRows::held()`, `GrantRow`, `RowCollector`, `ReviewRow`, `ReviewUsage` -- the reviews.
 - `Enums\GrantTarget::holders()`, `Events\Role\Deleted` -- a role's deletion.
 - `Usage\UsagePruner` -- usage matched against the grant tables alone.
+- `Evaluation\BreakGlassAttribution`, `Evaluation\Decision::$activations`, `Database\BreakGlassActivations::behind()`,
+  `Cache\ResolutionCache::activationsOf()`, `Evaluation\DecisionReporting` -- the activations an allow names, and its
+  report.
 
 ## Authoritative Tests
 
+- `Evaluation\BreakGlassAttributionTest` (Feature) -- the activations an allow names through a permission, a pattern
+  beside a direct grant, an ancestor's permission, a policy statement and a resource policy's role selector, on
+  another tenant's resource, a role held both ways, two activations, a denial, the switch off, a machine and an
+  identity, the memo, the store and an explanation, and the report through a check, a bulk check, a listing and a
+  preview's listing; `DecisionPipelineTest`, `DecisionReportingTest`, `DecisionEventTest`, `DecisionEvaluatedTest`,
+  `AuthorizationFailedTest`, `GrantResolverTest`, `RolePoliciesTest`, `PrincipalSelectorsTest`,
+  `ResolutionCacheTest` -- each part on its own.
 - `BreakGlassConfigValidatorTest`, `ConfigValidatorTest`, `Diagnostics\Checks\BlockChecksTest` (Feature) -- every
   setting's default, type, bound and unknown key, `enabled` accepted, the role maximums and the codes required once
   enabled.
@@ -265,7 +292,6 @@ This note records the invariants they fix.
   `Resolvers\GrantProvenanceResolverTest`, `Usage\RouteSourcesTest`, `BreakGlassActivationObserverTest`,
   `Models\BreakGlassActivationTest`, `Administration\PossessionLimitsTest`, `Administration\RankComparisonTest`,
   `Administration\AffectedHoldersTest`, `Administration\AuthorityRowsTest` (Feature) -- each part on its own.
-
 - `Support\GrantRootsTest`, `Services\GrantScopeQueryTest`, `Hooks\WideningClassifierTest` (Feature) -- live,
   ended, expired, disabled, machine and identity activations in the answers and the lists, and none in the widening.
 - `Reviews\Support\HolderRoutesTest`, `HoldingRoutesTest`, `StoredRowsTest`, `GrantRowsTest`, `RowCollectorTest`,
@@ -279,5 +305,6 @@ This note records the invariants they fix.
 ## Change Triggers
 
 Update this note when the write path, its rights, its refusals or its events change, when the exclusion check moves
-relative to the role's lock, when the prune stops recording an expiry, when a reader of role grants starts or stops
-reading activations, or when an activation starts or stops counting anywhere a role grant counts.
+relative to the role's lock, when the prune stops recording an expiry, when what a decision names or reports of an
+activation changes, when a reader of role grants starts or stops reading activations, or when an activation starts or
+stops counting anywhere a role grant counts.

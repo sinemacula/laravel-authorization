@@ -111,8 +111,8 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   per activation in its own table, an activation live until it ends or expires, read through the role grant path so
   every check sees its role in its scope, human principals alone (never a machine or an identity), its changes seen on
   the next check, its route named in an explanation without its note, activation, surrender and revocation, their
-  lifecycle events and the expiry `authorization:prune` records, and how the grantee listings, the access reviews and
-  a role's deletion show an activation.
+  lifecycle events and the expiry `authorization:prune` records, the activations a decision names and reports, and how
+  the grantee listings, the access reviews and a role's deletion show an activation.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

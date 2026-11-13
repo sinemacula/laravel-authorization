@@ -17,6 +17,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\PrincipalCacheKey;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Cache\ResolutionMemo;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
@@ -1316,6 +1317,141 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * While break-glass is enabled, the activations behind a grantee's
+     * permissions are named as the resolution last kept or read found them:
+     * from the memo, even once the resolution lapsed, from the store in a later
+     * request, and replaced by a resolution that names none; an identity's are
+     * kept apart. While it is disabled, or without its record, none is named.
+     *
+     * @return void
+     */
+    public function testTheActivationsBehindAnEntryAreNamedAsItWasLastRead(): void
+    {
+        $behind  = ['posts:read' => ['activation-1']];
+        $resolve = fn (?int $expiresIn, array $activations): \Closure => function () use ($expiresIn, $activations): Resolution {
+            $this->resolutions++;
+
+            return new Resolution(['posts:read'], $expiresIn, true, null, $activations);
+        };
+
+        $this->switchBreakGlass(true);
+
+        $cache    = $this->request();
+        $identity = self::grantee();
+
+        $cache->rememberPermissions(self::grantee(), $resolve(null, $behind));
+
+        self::assertSame($behind, $cache->activationsOf('permissions', self::grantee()));
+        self::assertSame([], $cache->activationsOf('policies', self::grantee()));
+        self::assertSame([], $this->request()->activationsOf('permissions', self::grantee()));
+
+        $next = $this->request();
+
+        $next->rememberPermissions(self::grantee(), $resolve(null, []));
+
+        self::assertSame($behind, $next->activationsOf('permissions', self::grantee()));
+        self::assertSame(1, $this->resolutions);
+
+        $lapsing = $this->request();
+
+        $lapsing->rememberPermissions(new Reference('user', 'user-2'), $resolve(1, $behind));
+
+        self::assertSame($behind, $lapsing->activationsOf('permissions', new Reference('user', 'user-2')));
+
+        $lapsing->rememberPermissions(new Reference('user', 'user-2'), $resolve(null, []));
+
+        self::assertSame([], $lapsing->activationsOf('permissions', new Reference('user', 'user-2')));
+        self::assertSame(3, $this->resolutions);
+
+        BreakGlassActivations::markIdentity($identity);
+
+        self::assertSame([], $next->activationsOf('permissions', $identity));
+        self::assertSame([], (new ResolutionCache($this->store, 300, 'authorization-test'))->activationsOf('permissions', self::grantee()));
+
+        $this->switchBreakGlass(false);
+
+        $off = $this->request();
+
+        $off->rememberPermissions(self::grantee(), $resolve(null, $behind));
+
+        self::assertSame([], $off->activationsOf('permissions', self::grantee()));
+    }
+
+    /**
+     * The activations behind an entry are kept beside it only while break-glass
+     * is enabled, and only for a grantee's permissions, policies and role keys,
+     * kept or read from the store; any other kind keeps none.
+     *
+     * @return void
+     */
+    public function testOnlyTheAttributedKindsKeepActivationsWhileEnabled(): void
+    {
+        $behind  = ['activation-1'];
+        $resolve = static fn (string $grant): \Closure => static fn (): Resolution => new Resolution([$grant], null, true, null, [$grant => $behind]);
+
+        $this->switchBreakGlass(false);
+
+        $off = $this->request();
+
+        $off->rememberPermissions(self::grantee(), $resolve('posts:read'));
+
+        self::assertNull(self::keptActivations($off, 'permissions'));
+
+        $this->switchBreakGlass(true);
+
+        $cache = $this->request();
+
+        $cache->rememberRoles(self::grantee(), $resolve('editor'));
+        $cache->rememberRoleKeys(self::grantee(), $resolve('role-1'));
+        $cache->rememberPermissions(self::grantee(), static fn (): Resolution => new Resolution(['posts:read'], null, true));
+
+        self::assertNull(self::keptActivations($cache, 'roles'));
+        self::assertSame([['role-1' => $behind]], self::keptActivations($cache, 'role-keys'));
+        self::assertSame([[]], self::keptActivations($cache, 'permissions'));
+
+        $next = $this->request();
+
+        self::assertSame(['editor'], $next->rememberRoles(self::grantee(), $resolve('unread')));
+        self::assertSame(['role-1'], $next->rememberRoleKeys(self::grantee(), $resolve('unread')));
+        self::assertNull(self::keptActivations($next, 'roles'));
+        self::assertSame([['role-1' => $behind]], self::keptActivations($next, 'role-keys'));
+    }
+
+    /**
+     * Stored activations that are not lists of keys by grant make the entry
+     * corrupt: it is written to the log channel and resolved again.
+     *
+     * @return void
+     */
+    public function testUnreadableActivationsAreResolvedAgain(): void
+    {
+        $this->switchBreakGlass(true);
+
+        $logger  = $this->recordLogs();
+        $resolve = function (): Resolution {
+            $this->resolutions++;
+
+            return new Resolution(['posts:read'], null, true, null, ['posts:read' => ['activation-1']]);
+        };
+
+        $this->request()->rememberPermissions(self::grantee(), $resolve);
+
+        $key   = 'authorization-test:break-glass:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every';
+        $entry = $this->store->get($key);
+        self::assertIsArray($entry);
+        self::assertSame(['posts:read' => ['activation-1']], $entry['activations']);
+
+        $this->store->put($key, [...$entry, 'activations' => ['posts:read' => 'activation-1']], 60);
+
+        $cache = $this->request();
+
+        self::assertSame(['posts:read'], $cache->rememberPermissions(self::grantee(), $resolve));
+        self::assertSame(2, $this->resolutions);
+        self::assertSame(["Authorization: discarding corrupt resolution-cache entry '{$key}' — Cached activations are not a list of keys."], $logger->messages());
+        self::assertSame(['posts:read' => ['activation-1']], $cache->activationsOf('permissions', self::grantee()));
+    }
+
+    /**
      * Switch break-glass on or off for the requests that follow.
      *
      * @param  bool  $isEnabled
@@ -1401,6 +1537,23 @@ final class ResolutionCacheTest extends TestCase
         $this->app?->instance(ResolutionCache::class, $cache);
 
         return $cache;
+    }
+
+    /**
+     * Return what the cache's memo keeps of the activations behind the
+     * grantee's entry of the kind, or null when it keeps nothing.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionCache  $cache
+     * @param  string  $kind
+     * @return array<mixed>|null
+     */
+    private static function keptActivations(ResolutionCache $cache, string $kind): ?array
+    {
+        $memo = (new \ReflectionProperty($cache, 'memo'))->getValue($cache);
+
+        self::assertInstanceOf(ResolutionMemo::class, $memo);
+
+        return $memo->get('activations:' . $kind . ':' . PrincipalCacheKey::for(self::grantee()));
     }
 
     /**

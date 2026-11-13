@@ -50,8 +50,7 @@ abstract class TestCase extends OrchestraTestCase
 
     /**
      * Clear Testbench's shared compiled-view cache once per phpunit process,
-     * put break-glass back to unavailable, then let every test write a policy
-     * naming any action.
+     * then let every test write a policy naming any action.
      *
      * Blade compiles anonymous templates (including those passed to
      * `Blade::render()`) into

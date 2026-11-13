@@ -12,6 +12,7 @@ use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
@@ -53,6 +54,11 @@ use SineMacula\Laravel\Authorization\Usage\RouteSources;
  * same queries, each also reading where its grants were made and when; a
  * resolution whose hierarchy moved while it ran says none.
  *
+ * A role held through a break-glass activation has each permission and policy
+ * it gives named with the activation's key (N142), read by role in the same
+ * queries as for the routes, so a decision can name the activations behind it;
+ * a grantee holding none is resolved as it was before.
+ *
  * @phpstan-type PolicyGrants \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, covariant \Illuminate\Database\Eloquent\Model, *>
  * @phpstan-type RoleGrants \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, covariant \Illuminate\Database\Eloquent\Model, *>
  *
@@ -91,6 +97,9 @@ final class GrantResolver
      * seen; the roles are then read afresh, and the resolution is marked
      * unstable, so it is kept for the request or job alone and never stored.
      *
+     * A role held through a break-glass activation has its key and each key
+     * above it named with the activation's key (N142).
+     *
      * @param  RoleGrants  $grants
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \SineMacula\Laravel\Authorization\Cache\Resolution<string>
@@ -105,9 +114,12 @@ final class GrantResolver
 
         $pins->roles(\array_keys($reach));
 
-        $within = RoleGraph::keysWithin($reach, $keys);
+        $within = RoleGraph::chainsWithin($reach, $keys);
+        $chains = $within ?? RoleGraph::chainsOf(self::rolesAfresh($grants, $keys));
+        $found  = \array_values(\array_unique(RoleGraph::keysOf($chains)));
+        $behind = BreakGlassActivations::behind($held, $chains, \array_combine($found, \array_map(static fn (string $key): array => [$key], $found)));
 
-        return new Resolution(\array_values(\array_unique($within ?? RoleGraph::keysHeldBy(self::rolesAfresh($grants, $keys)))), self::expiresIn(null, $held), $within !== null);
+        return new Resolution($found, self::expiresIn(null, $held), $within !== null, null, $behind);
     }
 
     /**
@@ -130,23 +142,34 @@ final class GrantResolver
 
         $pins->roles(\array_keys($reach));
 
-        $chains = $pins->isRouting() ? RoleGraph::chainsWithin($reach, $keys) : null;
-        $within = match (true) {
-            !$pins->isRouting() => RoleGraph::permissionsWithin($reach, $keys),
-            $chains === null    => null,
-            default             => RoleGraph::carriedWithin($chains),
+        $isByRole = $pins->isRouting() || BreakGlassActivations::isAnyActivated($held);
+        $chains   = $isByRole ? RoleGraph::chainsWithin($reach, $keys) : null;
+        $within   = match (true) {
+            !$isByRole       => RoleGraph::permissionsWithin($reach, $keys),
+            $chains === null => null,
+            default          => RoleGraph::carriedWithin($chains),
         };
 
-        $inherited = $within ?? RoleGraph::permissionsHeldBy(self::rolesAfresh($roles, $keys));
+        $inherited = $within;
+
+        // A hierarchy that moved is read afresh, by role while an activation is
+        // to be named.
+        if ($inherited === null) {
+            $fresh     = self::rolesAfresh($roles, $keys);
+            $chains    = $isByRole ? RoleGraph::chainsOf($fresh) : null;
+            $inherited = $chains === null ? RoleGraph::permissionsHeldBy($fresh) : RoleGraph::carriedWithin($chains);
+        }
 
         /** @var list<string> $names */
-        $names = $granted->pluck('name')->all();
+        $names   = $granted->pluck('name')->all();
+        $carried = \array_map(static fn (array $permissions): array => \array_column($permissions, 'name'), $inherited->byRole ?? []);
 
         return new Resolution(
             \array_values(\array_unique([...$names, ...$inherited->names])),
             self::expiresIn($inherited->expiresIn, $granted, $held),
             $within !== null,
-            $chains === null ? null : RouteSources::permissions($direct->getParent(), $granted, $held, $chains, $inherited),
+            $within === null || $chains === null || !$pins->isRouting() ? null : RouteSources::permissions($direct->getParent(), $granted, $held, $chains, $inherited),
+            $chains === null ? [] : BreakGlassActivations::behind($held, $chains, $carried),
         );
     }
 
@@ -211,7 +234,7 @@ final class GrantResolver
         $placed = \array_filter($own, static fn (array $row): bool => !TenantColumns::isHalf($row['tenant_type'], $row['tenant_id']));
         $routes = $pins->isRouting() ? RouteSources::policies($grants->getParent(), $placed, $held, $inherited) : null;
 
-        return new Resolution($policies, GrantExpiry::nearest($inherited->expiresIn, \array_column($own, 'expires_at')), $inherited->stable, $routes);
+        return new Resolution($policies, GrantExpiry::nearest($inherited->expiresIn, \array_column($own, 'expires_at')), $inherited->stable, $routes, $inherited->activations);
     }
 
     /**

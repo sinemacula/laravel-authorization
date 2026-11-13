@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Evaluation;
 
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
@@ -13,6 +14,7 @@ use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionEvidence;
@@ -28,6 +30,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -54,6 +57,7 @@ use Tests\Concerns\PreviewsSubjects;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubSessionPolicySource;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\SuspendableIdentity;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
@@ -464,6 +468,61 @@ final class DecisionPipelineTest extends TestCase
 
         self::assertSame(DecisionReason::ADMINISTRATION_OWNER, $decide()->reason);
         self::assertTrue(TenantScope::within($tenant, null, $decide)->isAllowed());
+    }
+
+    /**
+     * An allow through a role held by a break-glass activation names it, by a
+     * permission held or by a statement of the role's policy, also on another
+     * tenant's resource, whose policies and guardrails are read in its own
+     * scope, and once the administration stage lets the allow through; a policy
+     * override with the same key names none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAllowNamesTheActivationsBehindIt(): void
+    {
+        $user    = StubIdentity::create(['id' => 'responder-1']);
+        $subject = new Subject($user, $user);
+        $role    = Role::create(['name' => 'responder']);
+        $policy  = self::stored('deleting', [['effect' => 'allow', 'actions' => ['posts:delete']]]);
+
+        config(['authorization.rank.enabled' => false]);
+        config()->set('authorization.break_glass', ['enabled' => true, 'roles' => ['responder' => []], 'justifications' => ['incident']]);
+
+        foreach ([BreakGlassActivations::class, ResolutionCache::class] as $abstract) {
+            $this->app?->forgetInstance($abstract);
+        }
+
+        $role->givePermission(Permission::create(['name' => 'authorization:*']));
+        $role->givePermission(Permission::create(['name' => 'posts:delete']));
+        $role->attachPolicy($policy);
+
+        $activation = BreakGlassActivation::query()->create([
+            'role_id'           => $role->id,
+            'authorizable_type' => $user->getMorphClass(),
+            'authorizable_id'   => 'responder-1',
+            'justification'     => 'incident',
+            'activated_at'      => Carbon::now(),
+            'expires_at'        => Carbon::now()->addMinutes(30),
+        ]);
+
+        $pipeline = $this->pipeline();
+        $revoke   = OperationResource::revoke(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), $role, GrantScope::platform());
+        $admitted = $pipeline->decide($subject, PackagePermissions::ROLE_REVOKE, $revoke->actedBy(new Reference('support', '9'))->toResourceReference(), []);
+        $override = $pipeline->withPolicies([self::allowing('posts:delete')->withId($policy->id)])->decide($subject, 'posts:delete', null, []);
+        $foreign  = $pipeline->decide($subject, 'posts:delete', ResourceReference::record('document', '7', new Reference(StubTenant::class, 'tenant-b')), []);
+
+        self::assertSame([$activation->id], $pipeline->decide($subject, PackagePermissions::ROLE_GRANT, null, [])->activations);
+        self::assertSame([$activation->id], $pipeline->decide($subject, 'posts:delete', null, [])->activations);
+        self::assertTrue($admitted->isAllowed());
+        self::assertEquals(new TraceEntry(DecisionStage::ADMINISTRATION, TraceOutcome::SATISFIED), $admitted->trace[\count($admitted->trace) - 1]);
+        self::assertSame([$activation->id], $admitted->activations);
+        self::assertTrue($override->isAllowed());
+        self::assertSame([], $override->activations);
+        self::assertNotSame([], $foreign->statements);
+        self::assertSame([$activation->id], $foreign->activations);
     }
 
     /**

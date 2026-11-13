@@ -11,9 +11,8 @@ namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
  * A decision may have several of these reasons at once, a preview's denial of a
  * sensitive action say; the event names the most specific one the settings
  * report, in the order the cases are declared: a break-glass allow, a preview,
- * insufficient authentication, a denial, a sensitive action, then any allow.
- * Break-glass allows are reported whatever the settings once break-glass grants
- * arrive; until then no decision is reported as one.
+ * insufficient authentication, a denial, a sensitive action, then any allow. An
+ * allow that used break-glass is reported whatever the settings.
  *
  * Part of the SemVer-stable event API; a case is never removed or renamed
  * without a major version bump.
@@ -25,7 +24,7 @@ namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
  */
 enum DecisionReport: string
 {
-    /** A break-glass grant allowed the check. */
+    /** A grant that came through a live break-glass activation allowed the check. */
     case BREAK_GLASS = 'break_glass';
 
     /** The decision was made through a preview, for its previewer. */

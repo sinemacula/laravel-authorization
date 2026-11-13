@@ -5,11 +5,13 @@ declare(strict_types = 1);
 namespace Tests\Feature\Usage;
 
 use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
+use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
@@ -179,6 +181,41 @@ final class ResolutionCacheTest extends TestCase
         self::assertNotNull($cache->routesOf('permissions', $ann));
         self::assertCount(2, self::entries($store));
         self::assertCount(1, \array_filter(self::entries($store), static fn (string $key): bool => \str_starts_with($key, 'usage-test:identity-permissions-routed:')));
+    }
+
+    /**
+     * A tracked resolution of a role read through a break-glass activation
+     * keeps the activation beside its routed entry, read back under the routed
+     * kind.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheActivationsBehindARoutedEntryAreNamed(): void
+    {
+        $store = Cache::store('array');
+        $ann   = self::identity('ann');
+        $role  = self::role('responder');
+
+        $role->givePermissionTo(self::permission('posts:read'));
+
+        config()->set('authorization.break_glass', ['enabled' => true, 'justifications' => ['incident']]);
+        $this->app?->forgetInstance(BreakGlassActivations::class);
+
+        $activation = BreakGlassActivation::query()->create([
+            'role_id'           => $role->id,
+            'authorizable_type' => $ann->getMorphClass(),
+            'authorizable_id'   => 'ann',
+            'justification'     => 'incident',
+            'activated_at'      => Carbon::now(),
+            'expires_at'        => Carbon::now()->addMinutes(30),
+        ]);
+        $cache = $this->cache($store, true);
+
+        self::assertSame(['posts:read'], $ann->getPermissions());
+        self::assertNotNull($cache->routesOf('permissions', $ann));
+        self::assertSame(['posts:read' => [$activation->id]], $cache->activationsOf('permissions', $ann));
     }
 
     /**

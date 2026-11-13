@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -99,11 +100,13 @@ final class RolePolicies
      * The nearest expiry counts the identity's grants of the roles as well as
      * the roles' attachments, since a policy stops applying when either lapses.
      *
-     * A resolution tracking grant usage (see `ResolutionPins::isRouting()`)
-     * reads, in the same queries, the chain of each role held and the role each
-     * attachment is to, so it can say which route each policy came through.
+     * A resolution tracking grant usage (see `ResolutionPins::isRouting()`), or
+     * one holding a role through a break-glass activation, reads, in the same
+     * queries, the chain of each role held and the role each attachment is to,
+     * so it can say which route each policy came through, and which activations
+     * are behind it (see `BreakGlassActivations::behind()`).
      *
-     * @param  \Illuminate\Database\Eloquent\Collection<int, covariant \Illuminate\Database\Eloquent\Model>  $held
+     * @param  \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role>  $held
      * @param  RoleGrants  $roles
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
      * @return \SineMacula\Laravel\Authorization\Support\InheritedPolicies
@@ -120,25 +123,29 @@ final class RolePolicies
 
         $pins->roles(\array_keys($reach));
 
-        $chains = $pins->isRouting() ? RoleGraph::chainsWithin($reach, $keys) : null;
-        $within = match (true) {
-            !$pins->isRouting() => RoleGraph::keysWithin($reach, $keys),
-            $chains === null    => null,
-            default             => RoleGraph::keysOf($chains),
+        $isByRole = $pins->isRouting() || BreakGlassActivations::isAnyActivated($held);
+        $chains   = $isByRole ? RoleGraph::chainsWithin($reach, $keys) : null;
+        $within   = match (true) {
+            !$isByRole       => RoleGraph::keysWithin($reach, $keys),
+            $chains === null => null,
+            default          => RoleGraph::keysOf($chains),
         };
+        $fresh  = $within === null ? RoleGraph::chainsOf(self::afresh($roles, $keys)) : null;
         $type   = $roles->getRelated()->getMorphClass();
-        $rows   = self::attachments($type, $within ?? self::afresh($roles, $keys), $pins->isRouting() ? [...$columns, 'authorizable_id'] : $columns);
+        $rows   = self::attachments($type, $within ?? RoleGraph::keysOf($fresh ?? []), $isByRole ? [...$columns, 'authorizable_id'] : $columns);
         $grants = $rows === [] ? [] : $held->map(static fn (Model $role): mixed => self::grantExpiry($role))->all();
         $placed = \array_values(\array_filter($rows, static fn (array $row): bool => !TenantColumns::isHalf($row['tenant_type'] ?? null, $row['tenant_id'] ?? null)));
         $found  = \array_values(\array_filter(\array_column($rows, 'policy_id'), \is_string(...)));
+        $byRole = $isByRole ? self::byRole($placed) : [];
 
         return new InheritedPolicies(
             $found,
             GrantExpiry::nearest(GrantExpiry::nearest(null, \array_column($rows, 'expires_at')), $grants),
             $within !== null,
             $chains,
-            $pins->isRouting() ? self::byRole($placed) : [],
+            $byRole,
             \array_values(\array_diff($found, \array_filter(\array_column($placed, 'policy_id'), \is_string(...)))),
+            $isByRole ? BreakGlassActivations::behind($held, $chains ?? $fresh ?? [], $byRole) : [],
         );
     }
 
@@ -207,22 +214,17 @@ final class RolePolicies
     }
 
     /**
-     * Return the keys of the held roles and their ancestors, reading the roles
-     * and their hierarchy afresh, for a resolution whose hierarchy moved while
-     * it ran.
+     * Return the held roles read afresh, for a resolution whose hierarchy moved
+     * while it ran.
      *
      * @param  RoleGrants  $roles
      * @param  list<string>  $keys
-     * @return list<string>
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     * @return list<\SineMacula\Laravel\Authorization\Models\Role>
      */
     private static function afresh(MorphToMany $roles, array $keys): array
     {
-        /** @var list<\SineMacula\Laravel\Authorization\Models\Role> $fresh */
-        $fresh = $roles->getRelated()->newQuery()->useWritePdo()->whereKey($keys)->get()->all();
-
-        return RoleGraph::keysHeldBy($fresh);
+        /** @var list<\SineMacula\Laravel\Authorization\Models\Role> */
+        return $roles->getRelated()->newQuery()->useWritePdo()->whereKey($keys)->get()->all();
     }
 
     /**

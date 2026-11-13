@@ -8,11 +8,9 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
-use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRow;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRows;
 use SineMacula\Laravel\Authorization\Reviews\Support\Keyset;
-use SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun;
 use Tests\Concerns\ReviewsAccess;
 use Tests\TestCase;
 
@@ -72,7 +70,7 @@ final class KeysetTest extends TestCase
         }
 
         $table   = GrantTarget::ROLE->table();
-        $ordered = static fn (): Builder => GrantRows::ordered(GrantRows::held(ReviewRun::of(ReviewScope::everywhere()), GrantTarget::ROLE), $table, 'role_id');
+        $ordered = static fn (): Builder => GrantRows::ordered(GrantRows::of(GrantTarget::ROLE), $table, 'role_id');
         $all     = GrantRows::page($ordered(), 'role', 1000);
         $keys    = \array_map(static fn (GrantRow $row): string => $row->key(), $all);
 
