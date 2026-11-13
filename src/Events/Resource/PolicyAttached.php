@@ -4,8 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Resource;
 
-use SineMacula\Laravel\Authorization\Enums\MutationOperation;
-
 /**
  * Dispatched when a policy is attached to a resource, a record or a whole
  * resource type (AUTHZ-7.3), or an attachment of it changes its reach.
@@ -32,6 +30,6 @@ final readonly class PolicyAttached extends ResourcePolicyEvent
     #[\Override]
     public function operation(): string
     {
-        return MutationOperation::RESOURCE_POLICY_ATTACHED->value;
+        return 'resource.policy.attached';
     }
 }

@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Policy;
 
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
-use SineMacula\Laravel\Authorization\Enums\MutationOperation;
 use SineMacula\Laravel\Authorization\Events\Concerns\DescribesRecordChange;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -81,7 +80,7 @@ final readonly class Updated implements AuthorizationMutation
     #[\Override]
     public function operation(): string
     {
-        return MutationOperation::POLICY_UPDATED->value;
+        return 'policy.updated';
     }
 
     /**

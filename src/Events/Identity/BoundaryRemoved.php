@@ -4,8 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
-use SineMacula\Laravel\Authorization\Enums\MutationOperation;
-
 /**
  * Dispatched when a grantee's permission boundary is removed in a scope
  * (AUTHZ-7.4), by the boundary service or once the grantee is deleted.
@@ -32,6 +30,6 @@ final readonly class BoundaryRemoved extends BoundaryEvent
     #[\Override]
     public function operation(): string
     {
-        return MutationOperation::IDENTITY_BOUNDARY_REMOVED->value;
+        return 'identity.boundary.removed';
     }
 }

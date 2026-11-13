@@ -4,8 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Guardrail;
 
-use SineMacula\Laravel\Authorization\Enums\MutationOperation;
-
 /**
  * Dispatched when a policy is set as a guardrail on a tenant or on the platform
  * (AUTHZ-7.6), by the guardrail service.
@@ -31,6 +29,6 @@ final readonly class GuardrailSet extends GuardrailEvent
     #[\Override]
     public function operation(): string
     {
-        return MutationOperation::GUARDRAIL_SET->value;
+        return 'guardrail.set';
     }
 }

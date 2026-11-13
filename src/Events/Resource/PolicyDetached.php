@@ -4,8 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Resource;
 
-use SineMacula\Laravel\Authorization\Enums\MutationOperation;
-
 /**
  * Dispatched when a policy is detached from a resource, a record or a whole
  * resource type (AUTHZ-7.3), in one scope.
@@ -32,6 +30,6 @@ final readonly class PolicyDetached extends ResourcePolicyEvent
     #[\Override]
     public function operation(): string
     {
-        return MutationOperation::RESOURCE_POLICY_DETACHED->value;
+        return 'resource.policy.detached';
     }
 }

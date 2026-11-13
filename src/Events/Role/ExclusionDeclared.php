@@ -4,8 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Role;
 
-use SineMacula\Laravel\Authorization\Enums\MutationOperation;
-
 /**
  * Dispatched once two roles are declared mutually exclusive (AUTHZ-11.8), by
  * the role exclusion service; declaring a pair already declared dispatches
@@ -31,6 +29,6 @@ final readonly class ExclusionDeclared extends ExclusionEvent
     #[\Override]
     public function operation(): string
     {
-        return MutationOperation::ROLE_EXCLUSION_DECLARED->value;
+        return 'role.exclusion.declared';
     }
 }

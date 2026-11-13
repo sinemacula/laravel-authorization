@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
-use SineMacula\Laravel\Authorization\Enums\MutationOperation;
 use SineMacula\Laravel\Authorization\Events\Concerns\DescribesGrantChange;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -72,6 +71,6 @@ final readonly class RoleExpired implements IdentityEvent
     #[\Override]
     public function operation(): string
     {
-        return MutationOperation::IDENTITY_ROLE_EXPIRED->value;
+        return 'identity.role.expired';
     }
 }

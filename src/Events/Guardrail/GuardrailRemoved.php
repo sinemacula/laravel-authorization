@@ -4,8 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Guardrail;
 
-use SineMacula\Laravel\Authorization\Enums\MutationOperation;
-
 /**
  * Dispatched when a guardrail is removed from a tenant or from the platform
  * (AUTHZ-7.6), by the guardrail service.
@@ -32,6 +30,6 @@ final readonly class GuardrailRemoved extends GuardrailEvent
     #[\Override]
     public function operation(): string
     {
-        return MutationOperation::GUARDRAIL_REMOVED->value;
+        return 'guardrail.removed';
     }
 }
