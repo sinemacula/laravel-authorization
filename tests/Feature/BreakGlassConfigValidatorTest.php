@@ -269,6 +269,26 @@ final class BreakGlassConfigValidatorTest extends TestCase
     }
 
     /**
+     * The tests' seam starts as `AVAILABLE` before every boot, and set true
+     * lets `enabled` be true at boot and when read, unless a call says
+     * break-glass is unavailable.
+     *
+     * @return void
+     */
+    public function testTheTestSeamLetsBreakGlassBeEnabled(): void
+    {
+        self::assertSame(BreakGlassConfigValidator::AVAILABLE, BreakGlassConfigValidator::$isAvailable);
+
+        BreakGlassConfigValidator::$isAvailable = true;
+
+        config()->set(self::KEY, ['enabled' => true, 'justifications' => ['incident']]);
+
+        self::assertTrue(BreakGlassConfigValidator::enabled(true));
+        self::assertTrue(BreakGlassConfigValidator::read()['enabled']);
+        self::assertSame([self::KEY . '.enabled', 'invalid_value', 'false', 'bool'], self::refusedSetting(static fn () => BreakGlassConfigValidator::enabled(true, false)));
+    }
+
+    /**
      * The justification codes must list at least one code once break-glass is
      * enabled, and may list none while it is disabled; each code is checked on
      * its own, against those listed before it.

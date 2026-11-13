@@ -16,6 +16,7 @@ use function Orchestra\Testbench\load_migration_paths;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
 
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use Tests\Feature\Stubs\PermissiveActionCatalogue;
@@ -50,7 +51,8 @@ abstract class TestCase extends OrchestraTestCase
 
     /**
      * Clear Testbench's shared compiled-view cache once per phpunit process,
-     * then let every test write a policy naming any action.
+     * put break-glass back to unavailable, then let every test write a policy
+     * naming any action.
      *
      * Blade compiles anonymous templates (including those passed to
      * `Blade::render()`) into
@@ -76,6 +78,8 @@ abstract class TestCase extends OrchestraTestCase
 
             self::$viewCacheCleared = true;
         }
+
+        BreakGlassConfigValidator::$isAvailable = BreakGlassConfigValidator::AVAILABLE;
 
         parent::setUp();
 

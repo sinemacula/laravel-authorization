@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
+use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
@@ -1281,6 +1282,53 @@ final class ResolutionCacheTest extends TestCase
         self::assertSame(['posts:edit'], $this->request()->rememberPermissions($identity, $resolve(['posts:edit'])));
         self::assertSame(['posts:edit'], $this->request()->rememberPermissions(self::grantee(), $resolve(['posts:edit'])));
         self::assertSame(4, $this->resolutions);
+    }
+
+    /**
+     * A cache built while break-glass is enabled keeps its persistent entries
+     * under a namespace of their own, sharing the versions, so a request in
+     * either state never reads an entry the other built, and a bump drops both.
+     *
+     * @return void
+     */
+    public function testEntriesBuiltWhileBreakGlassIsEnabledAreKeptApart(): void
+    {
+        $resolve = fn (array $names): \Closure => fn (): Resolution => $this->resolve(\array_values($names));
+
+        self::assertSame(['posts:read'], $this->request()->rememberPermissions(self::grantee(), $resolve(['posts:read'])));
+
+        $this->switchBreakGlass(true);
+
+        $enabled = $this->request();
+
+        self::assertSame(['posts:list'], $enabled->rememberPermissions(self::grantee(), $resolve(['posts:list'])));
+        self::assertSame(['posts:list'], $this->request()->rememberPermissions(self::grantee(), $resolve(['posts:edit'])));
+        self::assertTrue($this->store->has(PrincipalCacheKey::entry('authorization-test:break-glass', 'permissions', self::grantee())));
+
+        $this->switchBreakGlass(false);
+
+        self::assertSame(['posts:read'], $this->request()->rememberPermissions(self::grantee(), $resolve(['posts:edit'])));
+        self::assertSame(2, $this->resolutions);
+
+        $enabled->invalidate($enabled->versionKeys([], [self::grantee()]));
+
+        self::assertSame(['posts:edit'], $this->request()->rememberPermissions(self::grantee(), $resolve(['posts:edit'])));
+        self::assertSame(3, $this->resolutions);
+    }
+
+    /**
+     * Switch break-glass on or off for the requests that follow.
+     *
+     * @param  bool  $isEnabled
+     * @return void
+     */
+    private function switchBreakGlass(bool $isEnabled): void
+    {
+        BreakGlassConfigValidator::$isAvailable = true;
+
+        config()->set('authorization.break_glass', ['enabled' => $isEnabled, 'justifications' => ['incident']]);
+
+        $this->app?->forgetInstance(BreakGlassActivations::class);
     }
 
     /**

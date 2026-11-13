@@ -61,6 +61,9 @@ final class PackagePermissionsTest extends TestCase
         'authorization:review.export',
         'authorization:role-exclusion.declare',
         'authorization:role-exclusion.remove',
+        'authorization:break-glass.activate',
+        'authorization:break-glass.grant',
+        'authorization:break-glass.revoke',
     ];
 
     /**
@@ -134,6 +137,9 @@ final class PackagePermissionsTest extends TestCase
             PackagePermissions::REVIEW_EXPORT,
             PackagePermissions::ROLE_EXCLUSION_DECLARE,
             PackagePermissions::ROLE_EXCLUSION_REMOVE,
+            PackagePermissions::BREAK_GLASS_ACTIVATE,
+            PackagePermissions::BREAK_GLASS_GRANT,
+            PackagePermissions::BREAK_GLASS_REVOKE,
         ]);
         self::assertSame('Preview what a subject may do, without acting as it.', (new PackagePermissions)->permissions()[32]->description);
         self::assertSame('Set and remove guardrails from above the scope they cap.', (new PackagePermissions)->permissions()[21]->description);
@@ -141,6 +147,9 @@ final class PackagePermissionsTest extends TestCase
         self::assertSame('Export an access review.', (new PackagePermissions)->permissions()[34]->description);
         self::assertSame('Declare two roles mutually exclusive.', (new PackagePermissions)->permissions()[35]->description);
         self::assertSame('Remove a declared pair of mutually exclusive roles.', (new PackagePermissions)->permissions()[36]->description);
+        self::assertSame('Activate an emergency role for oneself.', (new PackagePermissions)->permissions()[37]->description);
+        self::assertSame('Activate an emergency role for another person.', (new PackagePermissions)->permissions()[38]->description);
+        self::assertSame('End another\'s break-glass activation.', (new PackagePermissions)->permissions()[39]->description);
     }
 
     /**

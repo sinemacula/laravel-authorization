@@ -20,9 +20,10 @@ administration never grants anything it cannot justify.
    `boundary.set`, `boundary.remove`, `guardrail.manage`, `resource-policy.attach`, `resource-policy.detach`,
    `role.read`, `permission.read`, `policy.read`, `permission.grantable`, `policy.grantable`, `administration.self`,
    `administration.impersonated`, `administration.unbounded`, `role-exclusion.declare` and `role-exclusion.remove`,
-   the last two weighed by the owner rule and by `Administration\ExcludedRoles` (see
-   [Separation of duties](separation-of-duties.md)). The right to manage guardrails was
-   `authorization:guardrails:manage`; it is renamed, with no alias, since the package is unreleased.
+   these two weighed by the owner rule and by `Administration\ExcludedRoles` (see
+   [Separation of duties](separation-of-duties.md)), and `break-glass.activate`, `break-glass.grant` and
+   `break-glass.revoke`, weighed by the scope rule alone (see [Break-glass](break-glass.md)). The right to manage
+   guardrails was `authorization:guardrails:manage`; it is renamed, with no alias, since the package is unreleased.
 
 2. **Trusted or delegated, never in between (N75, in this release).** A management service call without an acting
    context is trusted system work: nothing is decided, and its operation is marked trusted with no actor. A call with

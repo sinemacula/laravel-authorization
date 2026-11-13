@@ -170,6 +170,30 @@ final readonly class OperationResource implements AuthorizableResource
     }
 
     /**
+     * Return the operation resource of a break-glass activation of the role for
+     * the grantee in the scope until the expiry, under
+     * `authorization:break-glass.activate` or `.grant`, or of its end, under
+     * `.revoke`, which can only narrow. It names what a grant of the role
+     * names, so the right is decided in the activation's tenant and
+     * application, and the stage weighs no rank, self or possession rule for it
+     * (see `OperationConstraints`).
+     *
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return self
+     */
+    public static function breakGlass(string $action, Reference $grantee, Role $role, GrantScope $scope, ?\DateTimeInterface $expiresAt = null): self
+    {
+        $change     = new OperationChange($grantee, $role, $scope, $expiresAt);
+        $attributes = [...self::grantAttributes($grantee, $role, $scope), 'expires_at' => $change->expiresAt?->format(\DATE_ATOM)];
+
+        return new self($action, $action === PackagePermissions::BREAK_GLASS_REVOKE, $scope->tenant, $attributes, $change);
+    }
+
+    /**
      * Return the operation resource of a change to a definition: creating,
      * renaming, updating, re-parenting or deleting a role, permission or
      * policy, with the proposed change, each value a scalar or null, and, for a

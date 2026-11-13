@@ -47,8 +47,9 @@ use Tests\TestCase;
  * or ended one, one naming half a tenant, a machine's and an identity's grant
  * nothing; a normal grant of the same role is untouched; denies, boundaries and
  * guardrails still apply; the cache entry lapses at the activation's expiry and
- * a change made through the model is seen on the next check; and an explanation
- * names the route as break-glass with the activation's key, never its note.
+ * a change made through the model is seen on the next check; switching
+ * break-glass off stops every activation at once; and an explanation names the
+ * route as break-glass with the activation's key, never its note.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -296,6 +297,73 @@ final class BreakGlassActivationsTest extends TestCase
     }
 
     /**
+     * Switching break-glass off stops every live activation at once in the next
+     * request, and in a fresh container, whatever the memo or the store kept,
+     * while the rows stay; switching it back on counts them again.
+     *
+     * @return void
+     */
+    public function testSwitchingBreakGlassOffStopsEveryActivation(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $subject = new Subject($user, $user);
+
+        self::activate($user, self::emergencyRole());
+
+        $warm = $this->manager($subject);
+
+        self::assertTrue($warm->can(self::ACTION));
+        self::assertTrue($warm->can(self::ACTION));
+
+        self::switchBreakGlass(false);
+
+        self::assertFalse($this->manager($subject)->can(self::ACTION));
+        self::assertFalse(StubIdentity::query()->findOrFail('user-1')->hasRole('responder'));
+        self::assertSame(1, DB::table('break_glass_activations')->count());
+
+        self::switchBreakGlass(true);
+
+        self::assertTrue($this->manager($subject)->can(self::ACTION));
+
+        config()->set('authorization.break_glass.enabled', false);
+
+        $this->app?->forgetScopedInstances();
+
+        self::assertFalse($this->manager($subject)->can(self::ACTION));
+    }
+
+    /**
+     * Whether break-glass is enabled is read once a request or job, when the
+     * record is built: while it is off, no live activation is a role grant row,
+     * none is live and no grantee's count; a change to the setting is read by
+     * the next request.
+     *
+     * @return void
+     */
+    public function testTheSwitchIsReadOnceARequest(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-1']);
+        $table = 'break_glass_activations';
+
+        self::activate($user, self::emergencyRole());
+
+        config()->set('authorization.break_glass.enabled', false);
+
+        self::assertTrue(BreakGlassActivations::isEnabled());
+        self::assertTrue(BreakGlassActivations::isCounted($user));
+        self::assertCount(1, BreakGlassActivations::roleGrants()->get());
+        self::assertSame(1, BreakGlassActivations::live(DB::table($table), $table)->count());
+
+        self::switchBreakGlass(false);
+
+        self::assertFalse(BreakGlassActivations::isEnabled());
+        self::assertFalse(BreakGlassActivations::isCounted($user));
+        self::assertCount(0, BreakGlassActivations::roleGrants()->get());
+        self::assertSame(0, BreakGlassActivations::live(DB::table($table), $table)->count());
+        self::assertSame(1, DB::table($table)->count());
+    }
+
+    /**
      * An activation naming a machine, or the identity behind a principal,
      * grants nothing, the principal's own activation and the identity's normal
      * grant reaching the principal still; one naming half a tenant applies
@@ -447,11 +515,12 @@ final class BreakGlassActivationsTest extends TestCase
 
     /**
      * Without the record bound, as outside the package's request or job, no
-     * instance is marked and every activation of a person counts.
+     * instance is marked and no activation counts, as break-glass cannot be
+     * read as enabled.
      *
      * @return void
      */
-    public function testNothingIsMarkedWithoutTheRecordBound(): void
+    public function testNothingIsMarkedOrCountedWithoutTheRecordBound(): void
     {
         $identity = StubIdentity::create(['id' => 'person-1']);
 
@@ -461,7 +530,8 @@ final class BreakGlassActivationsTest extends TestCase
 
         self::assertNull(BreakGlassActivations::instance());
         self::assertFalse(BreakGlassActivations::isIdentity($identity));
-        self::assertTrue(BreakGlassActivations::isCounted($identity));
+        self::assertFalse(BreakGlassActivations::isEnabled());
+        self::assertFalse(BreakGlassActivations::isCounted($identity));
     }
 
     /**

@@ -188,7 +188,8 @@ final class ScopeAnchorsTest extends TestCase
      * The tenant of every break-glass activation of the subject or its identity
      * is read, whatever its expiry, with the owners of the role it activates
      * and of the roles above, and the tenants of their policies and
-     * permissions; another's activation is not.
+     * permissions; another's activation is not, and none while break-glass is
+     * disabled.
      *
      * @return void
      *
@@ -212,5 +213,9 @@ final class ScopeAnchorsTest extends TestCase
         [$sources] = ScopeAnchors::read(new Subject($user, $user), (new ScopedPost)->getMorphClass(), true);
 
         self::assertEqualsCanonicalizing(['activated', 'role-owner', 'role-policy', 'permission'], \array_map(static fn (Reference $tenant): string => $tenant->id, $sources));
+
+        self::switchBreakGlass(false);
+
+        self::assertSame([], ScopeAnchors::read(new Subject($user, $user), (new ScopedPost)->getMorphClass(), true)[0]);
     }
 }
