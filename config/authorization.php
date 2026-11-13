@@ -776,10 +776,9 @@ return [
     |
     | Opt-in emergency access: a principal with the break-glass right grants
     | itself, or another person, one of the emergency roles listed here for a
-    | limited time, with a justification code from the list. Nothing creates
-    | an activation yet, and `enabled` true is refused at boot until the audit
-    | trail ships: the settings are read and checked now so the next releases
-    | only switch them on.
+    | limited time, with a justification code from the list, through
+    | `Services\BreakGlassService`. `enabled` true is refused at boot until the
+    | audit trail ships, and while `enabled` is false no activation counts.
     |
     | `enabled` is true or false, false by default. `max_minutes`, a whole
     | number of at least 1 (60 by default), is the longest an activation may

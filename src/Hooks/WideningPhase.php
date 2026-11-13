@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 /**
  * The grant hook phase of a grant call (AUTHZ-11.3, N80): the one call point
  * every grant that may widen an identity's scope goes through, trusted and
- * delegated alike, and the one break-glass (AUTHZ-11.7) will go through.
+ * delegated alike, a break-glass activation (AUTHZ-11.7) included.
  *
  * A grant call runs its work in the call's transaction (`OperationScope::run`)
  * and, before it reads or locks anything else, hands `before()` a non-locking

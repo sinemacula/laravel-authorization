@@ -17,12 +17,12 @@ use SineMacula\Laravel\Authorization\Observers\BreakGlassActivationObserver;
  * activation of an emergency role for one principal, for a limited time, its
  * own record beside any normal grant of the same role.
  *
- * Nothing in the package creates or ends an activation yet; the activation and
- * revocation API comes with a later release, and break-glass stays disabled
- * until its audit trail ships. A live activation, one not ended whose expiry is
- * still to come, grants its role in its scope through the grantee's `roles()`
- * relation (see `Database\BreakGlassActivations`), and every change made
- * through this model bumps the versions a grant to its grantee bumps (see
+ * `Services\BreakGlassService` creates and ends activations, and break-glass
+ * stays disabled until its audit trail ships. A live activation, one not ended
+ * whose expiry is still to come, grants its role in its scope through the
+ * grantee's `roles()` relation while break-glass is enabled (see
+ * `Database\BreakGlassActivations`), and every change made through this model
+ * bumps the versions a grant to its grantee bumps (see
  * `BreakGlassActivationObserver`), so the next check sees it.
  *
  * The note is personal data: it is hidden from the model's array and JSON

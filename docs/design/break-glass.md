@@ -6,22 +6,24 @@ Break-glass is opt-in emergency access (AUTHZ-11.7, N133): a principal with the 
 another person, a configured emergency role for a configured maximum time, with a justification code from a configured
 list. It arrives in three releases (N138), and stays switched off until the third:
 
-1. **Storage, configuration and resolution** (this release, BL-70a): the `break_glass` settings, validated at boot; the
-   activations table and its model; and the resolution that reads a live activation as a grant of its role. Nothing in
-   the package creates or ends an activation yet, so the feature is inert.
-2. **Activation and revocation** (BL-70b): the API that activates, surrenders and revokes, its rights, its limits, the
-   grant hooks and its concurrency.
+1. **Storage, configuration and resolution** (BL-70a): the `break_glass` settings, validated at boot; the activations
+   table and its model; and the resolution that reads a live activation as a grant of its role.
+2. **Activation and revocation** (BL-70b): the service that activates, surrenders and revokes, its rights, its limits,
+   the grant hooks and its concurrency, and the switch that stops every activation at once.
 3. **Expiry, reviews and attribution** (BL-70c): the lifecycle events, the access reviews of activations, the
    attribution of decisions to the activation behind them, and the switch that lets `enabled` be true.
 
-This note records the invariants the first release fixes, so the next two extend them rather than change them.
+This note records the invariants the first two releases fix, so the last extends them rather than changes them.
 
 ## Invariants
 
 1. **Off until its audit trail ships.** `break_glass.enabled` is a switch, false by default, read from
    `AUTHORIZATION_BREAK_GLASS_ENABLED` as written, never cast. While `Config\BreakGlassConfigValidator::AVAILABLE` is
    false, true is refused at boot, under `authorization.break_glass.enabled`, with the reason "break-glass is not
-   available until its audit trail ships; leave it disabled." BL-70c flips that one constant; nothing else reads it.
+   available until its audit trail ships; leave it disabled." BL-70c flips that one constant. The package's tests
+   enable break-glass through `BreakGlassConfigValidator::$isAvailable`, an internal static that starts as `AVAILABLE`
+   and that `Tests\TestCase` puts back before every boot; no production path sets it, and BL-70c removes it with the
+   constant.
 
 2. **The settings fail closed (N116, N117).** The block sets only `enabled`, `max_minutes`, `roles`, `justifications`,
    `notes` and `note_max_length`; any other key is refused under its own path, and so is a key a role's entry sets
@@ -86,20 +88,70 @@ This note records the invariants the first release fixes, so the next two extend
    route from an activation, so its use never counts as the use of a role grant. The note is hidden from the model's
    array and JSON forms, and is never cached, logged or put on an event.
 
+10. **Off means none counts (N139).** While `enabled` is false no activation counts anywhere, at once, and the rows
+    stay: `BreakGlassActivations::isCounted()` counts none, `live()` reads none, so the roles relation, delegated
+    administration (possession limits, rank, affected holders, authority rows) and `ScopeAnchors` read none either.
+    Whether break-glass is on is read through `BreakGlassConfigValidator::read()` once a request or job, when the
+    container builds the scoped `BreakGlassActivations` (`isEnabled()`), never once a check; without that record,
+    none counts. The resolution cache built in the same request or job keeps its persistent entries under
+    `{prefix}:break-glass` while break-glass is on and under `{prefix}` while it is off, sharing the version tokens, so
+    an entry that counted an activation never reaches a request in which none counts, nor the reverse; the memo lasts
+    no longer than the request whose state it was built in, and its hit costs what it did.
+
+11. **The write path.** `Services\BreakGlassService` writes every activation and ends it, through the model, so the
+    observer bumps the grantee's versions (invariant 8). `activate()` refuses with `BreakGlassRefusedException`, its
+    `BreakGlassRefusal` naming why, while break-glass is disabled, for a machine or a model read as another subject's
+    identity, a role not listed, minutes below 1 or above the role's maximum (never shortened), a justification not
+    listed, a note while `notes` is false or one longer than `note_max_length` characters, and a scope naming half a
+    tenant; an unknown role throws `UnknownRoleException` and an unsaved grantee `InvalidGranteeException`. It writes
+    `activated_at` now and `expires_at` now plus the minutes, in UTC, the acting principal as the granter (none for a
+    trusted call), the scope (a platform-wide one always reaching below) and the application. `surrender()` ends an
+    activation for its grantee alone, acting as itself and not impersonated (`NOT_GRANTEE` otherwise), and `revoke()`
+    for a holder of the revoke right or a trusted call; either records `ended_at`, `ended_by` and `end_reason`, and
+    either may end an activation while break-glass is disabled. Each returns how many it ended, as a revocation does:
+    one already ended or expired changes nothing and returns 0. No event is dispatched and nothing else is recorded: the
+    lifecycle events are BL-70c's.
+
+12. **Holding the right is the gate (N140).** A delegated activation is decided through `check()` (D22) on
+    `OperationResource::breakGlass()`, in the activation's tenant and application, under
+    `authorization:break-glass.activate` for the actor itself or `authorization:break-glass.grant` for another, and a
+    delegated end under `authorization:break-glass.revoke`. The administration stage weighs them by the scope rule
+    alone (`OperationConstraints`): the actor must hold the right across the activation's reach, an end only narrows,
+    and neither rank, the self rule nor what the role hands out is weighed. Denies, boundaries, guardrails and caps
+    still apply to what the activated role grants. A trusted call skips the right and none of the other refusals.
+
+13. **Hooks and locks as a grant.** The grant hooks are asked about an activation as about a grant of its role in its
+    scope until its expiry (`Hooks\WideningPhase`, a `ProposedGrant` under `authorization:role.grant`), before any
+    lock, and checked again after the locks; a hook's refusal refuses it. A delegated activation or end locks the
+    actor's authority, then the grantee's rows and the role (`DependencyPins`), as a delegated role grant does, and
+    every activation locks the role's row before it writes, so a deletion of the role either waits and takes the
+    activation with it or refuses it as `UnknownRoleException`; a revocation of the right or another activation
+    meanwhile has a delegated call tried again.
+
+14. **One place decides whether the grantee may hold the role.** `BreakGlassService::assertHoldable()`, called under
+    the locks just before the write, holds the role to what a grant of it is held to (its owner's tenant and below,
+    the grantee's guard). Separation of duties (BL-71b) extends it with the exclusion check; this release checks no
+    exclusion.
+
 ## Success Path
 
-1. An application lists `incident-responder` under `break_glass.roles` and `incident` under `justifications`, leaving
-   `enabled` false; boot accepts it.
-2. A row of `break_glass_activations` names a principal, the role, a tenant with its subtree, and an expiry an hour
-   away (BL-70b will write it; until then only tests write one, through the model).
+1. An application lists `incident-responder` under `break_glass.roles` and `incident` under `justifications`; once
+   break-glass is available, `enabled` true is accepted at boot.
+2. An administrator holding `authorization:break-glass.grant` activates the role for a principal in a tenant with its
+   subtree for 60 minutes through `BreakGlassService::activate()`, which writes a row of `break_glass_activations`.
 3. A check in that tenant, or below it, reads the role through the principal's `roles()`, and allows what the role's
    permissions allow, unless a deny, a cap or a guardrail refuses it; a check anywhere else does not.
-4. An hour later the cached resolution has lapsed, and the next check allows nothing through the activation.
+4. The principal surrenders it, or an hour later the cached resolution has lapsed, and the next check allows nothing
+   through the activation.
 
 ## Failure / Edge Cases
 
 - `enabled` true, a role's maximum above the global one, an unknown key, a malformed code, a duplicate code, or a value
   written loosely is refused at boot under its path, and by `read()` after boot.
+- An activation breaking a limit is refused before anything is written, each with its reason; a hook's refusal, a
+  refused right or a role deleted meanwhile leaves nothing written either.
+- Switching `enabled` off stops every activation at once from the next request or job; switching it on counts them
+  again.
 - An activation that has ended, or expired, grants nothing; one of a machine, of an identity, or naming half a tenant
   grants nothing anywhere.
 - A normal grant of the same role and an activation are separate: ending the activation leaves the grant's access, and
@@ -107,17 +159,13 @@ This note records the invariants the first release fixes, so the next two extend
 - The roles relation reads a table the activations migration creates: an application upgrading the package runs its
   migrations before serving checks, as for any table the package adds.
 
-## Plan for BL-70b and BL-70c
+## Plan for BL-70c
 
-- **BL-70b.** Activation, surrender and revocation through a service, as trusted or delegated calls: the two rights
-  (for oneself, for another), the configured roles and their maximums, the justification codes, the note within
-  `note_max_length` when `notes` allows one, human principals alone, half-tenant rows refused at write, grant hooks
-  and separation of duties (BL-71), and the concurrency of the other grant writes.
 - **BL-70c.** The activated, surrendered, revoked and expired events (the granted event carries the justification
   code, the role, the grantee, the granter and the expiry, never the note), the reviews of activations, the
   attribution of a decision to the activation behind it (from the pivot's `break_glass_id`), break-glass reporting on
-  decision events (BL-72), and `AVAILABLE` flipped to true. What lists or reviews holdings reads role grants alone
-  until then, and BL-70c decides how each shows an activation:
+  decision events (BL-72), and `AVAILABLE` flipped to true, with the tests' seam `$isAvailable` removed. What lists
+  or reviews holdings reads role grants alone until then, and BL-70c decides how each shows an activation:
   - the grantee listings and the grant scope query (`Support\GrantRoots`, `Services\GrantScopeQuery`), and the
     widening a grant hook is asked about, which therefore never counts an activation as a grant already held;
   - the access reviews (`Reviews\Support\ReviewRun`, `StoredRows`, `HolderRoutes`, `HoldingRoutes`, `RoleChains`,
@@ -128,14 +176,18 @@ This note records the invariants the first release fixes, so the next two extend
 
 ## Implementation Anchors
 
-- `Config\BreakGlassConfigValidator` -- the block's checks, `read()`, and `AVAILABLE`.
+- `Config\BreakGlassConfigValidator` -- the block's checks, `read()`, `AVAILABLE` and the tests' `$isAvailable`.
 - `Config\TableNames::DEFAULTS`, `Config\TableConfigValidator::LENGTHS` -- the table's default name and its bound.
 - `database/migrations/2026_11_12_000001_create_break_glass_activations_table.php` -- the table.
 - `Models\BreakGlassActivation`, `Observers\BreakGlassActivationObserver` -- the record and its version bumps.
 - `Database\BreakGlassActivations`, `Database\GrantRelation::readingRows()`, `Concerns\HasRoles::roles()` -- the rows
-  the roles relation reads, who counts, and the identity marks.
-- `Support\SubjectGrants`, `Cache\ResolutionCache`, `Cache\PrincipalCacheKey` -- the identity marked and its entries
-  kept apart.
+  the roles relation reads, who counts, the switch read once a request, and the identity marks.
+- `Support\SubjectGrants`, `Cache\ResolutionCache`, `Cache\PrincipalCacheKey` -- the identity marked, its entries
+  kept apart, and the entries of either state of the switch kept apart.
+- `Services\BreakGlassService`, `Enums\BreakGlassRefusal`, `Exceptions\BreakGlassRefusedException` -- the write path,
+  its refusals, and `assertHoldable()`, the seam BL-71b extends.
+- `Support\PackagePermissions`, `Administration\OperationResource::breakGlass()`,
+  `Administration\OperationConstraints` -- the three rights and how a delegated call is weighed.
 - `Query\ScopeAnchors`, `Query\ScopeClasses` -- the activations' tenants among the anchors, compared as bytes.
 - `Administration\PossessionLimits`, `Administration\RankComparison`, `Administration\AffectedHolders`,
   `Administration\AuthorityRows` -- delegated administration weighing an activation.
@@ -154,6 +206,17 @@ This note records the invariants the first release fixes, so the next two extend
 - `Database\BreakGlassActivationsMigrationTest`, `Database\TablePrefixMigrationTest`, `TableConfigValidatorTest`
   (Feature) -- the table under an explicit name and under the prefix, every built name within 63 characters, on
   SQLite, PostgreSQL and MySQL, and dropped cleanly.
+- `Services\BreakGlassServiceTest` (Feature) -- every refusal, trusted and delegated activations for oneself and for
+  another, the exact expiry and the granter, the role granted in the scope alone, surrender (refused to anyone else and
+  to the grantee impersonated) and revocation, ending twice, a normal grant untouched, the grant hooks, the rights
+  decided in the activation's scope, the locks a role grant takes and each end takes, a conflict on every try refused
+  under its right, and the races with a role's deletion, a revocation of the right, a second activation and a hook's
+  coverage, on SQLite, PostgreSQL and MySQL.
+- `Database\BreakGlassActivationsTest`, `ResolutionCacheTest`, `Query\ScopeAnchorsTest` (Feature) -- the switch: none
+  counts while it is off, in the next request and a fresh container, from the memo and the store, and every one again
+  once it is on.
+- `Administration\OperationConstraintsTest`, `Administration\OperationResourceTest` (Feature),
+  `Support\PackagePermissionsTest` (Unit) -- the rights, their resource and the scope rule alone.
 - `HasRolesTest`, `SubjectGrantsTest`, `ResolutionCacheTest`, `Query\ScopeAnchorsTest`, `Query\ScopeClassesTest`,
   `Resolvers\GrantProvenanceResolverTest`, `Usage\RouteSourcesTest`, `BreakGlassActivationObserverTest`,
   `Models\BreakGlassActivationTest`, `Administration\PossessionLimitsTest`, `Administration\RankComparisonTest`,
@@ -161,6 +224,6 @@ This note records the invariants the first release fixes, so the next two extend
 
 ## Change Triggers
 
-Update this note when an activation is created or ended by the package (BL-70b), when `AVAILABLE` changes or the
-lifecycle events, reviews or attribution land (BL-70c), or when an activation starts or stops counting anywhere a role
-grant counts.
+Update this note when the write path, its rights or its refusals change, when separation of duties extends
+`assertHoldable()` (BL-71b), when `AVAILABLE` changes or the lifecycle events, reviews or attribution land (BL-70c), or
+when an activation starts or stops counting anywhere a role grant counts.

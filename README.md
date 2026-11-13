@@ -1748,6 +1748,7 @@ writes them and a policy naming them validates:
 | `boundary.set`, `boundary.remove`                                                  | A permission boundary set, replaced or removed                       |
 | `guardrail.manage`                                                                 | A guardrail set or removed, from above the scope it caps             |
 | `role-exclusion.declare`, `role-exclusion.remove`                                  | A pair of mutually exclusive roles declared or removed               |
+| `break-glass.activate`, `break-glass.grant`, `break-glass.revoke`                  | A break-glass activation for oneself or another, or its end          |
 | `resource-policy.attach`, `resource-policy.detach`                                 | A policy attached to or detached from a record or a resource type    |
 | `role.read`, `permission.read`, `policy.read`                                      | Reading and listing through the services; not decided yet            |
 | `permission.grantable`, `policy.grantable`                                         | Delegating a permission, or one version of a policy, not held        |
@@ -4532,16 +4533,16 @@ hook refuses stops the import, with what was written before it kept.
 - **Raw writes.** A raw Eloquent write on the package's models, pivots or tables is a trusted integration surface, as
   it is for delegated administration, and runs no hook. Only the grant service's calls, and everything built on them
   (the trait helpers and the console commands), are guaranteed to.
-- **Break-glass.** The emergency grant (AUTHZ-11.7) will grant through the same path, so its hook is never skipped
-  either: `Hooks\WideningPhase` is the one call point every grant goes through.
+- **Break-glass.** An activation (AUTHZ-11.7) is asked about as a grant of its role in its scope until its expiry,
+  through the same `Hooks\WideningPhase`, so its hook is never skipped either.
 
 ### Break-glass (not yet available)
 
 Break-glass is opt-in emergency access (AUTHZ-11.7): a principal with the break-glass right grants itself, or another
 person, a configured emergency role for a limited time, with a justification code from a configured list, reported
 every time and never needing prior approval. It ships over three releases, and stays switched off until the last,
-which brings its audit trail. This release adds the settings, the table and the resolution; nothing in the package
-creates or ends an activation yet, and `enabled` true is refused at boot.
+which brings its audit trail. The settings, the table, the resolution and the service that activates and ends an
+activation are here; `enabled` true is still refused at boot.
 
 **The settings.** `config/authorization.php` holds a `break_glass` block, checked at boot like every other:
 
@@ -4592,7 +4593,50 @@ counted: an activation naming a machine, or the identity behind a principal, gra
 tenant applies nowhere. An explanation names a grant that came through an activation as `break_glass_permission` or
 `break_glass_policy`, with the activation's key, and never the note.
 
-See [Break-glass](docs/design/break-glass.md) for the invariants and what the next two releases add.
+**Activating and ending.** `Services\BreakGlassService` writes and ends activations:
+
+```php
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Services\BreakGlassService;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
+
+$breakGlass = app(BreakGlassService::class);
+$actor      = ActingContext::current();
+$scope      = new GrantScope(Reference::of($tenant)); // the tenant and its subtree, every application
+
+$activation = $breakGlass->activate($user, 'incident-responder', $scope, 20, 'incident', actor: $actor);
+
+$breakGlass->surrender($activation, $actor); // by the grantee alone
+$breakGlass->revoke($activation, $actor);    // by a holder of the revoke right
+```
+
+- `activate()` writes a record of its own, live from now for exactly the minutes given (in UTC), naming the acting
+  principal as its granter, or no one for a trusted call. A platform-wide scope reaches every tenant.
+- The rights are `authorization:break-glass.activate` (for oneself), `authorization:break-glass.grant` (for another)
+  and `authorization:break-glass.revoke` (to end another's), decided through `check()` in the activation's tenant and
+  application, across its reach. Holding the right is enough: the rank, self and possession rules of a role grant do
+  not apply, while denies, boundaries, guardrails and caps still limit what the role grants. A call with no acting
+  context is trusted and skips the right, but none of the limits below.
+- Each limit refuses with `BreakGlassRefusedException`, whose `getReason()` names it: break-glass disabled, a machine
+  or a model read as another subject's identity, a role not listed under `roles`, minutes below 1 or above the
+  role's maximum (never shortened), a justification not listed, a note while `notes` is false or one longer than
+  `note_max_length` characters, and a scope naming half a tenant. An unknown role throws `UnknownRoleException`, an
+  unsaved grantee `InvalidGranteeException`, and a role is held to its owner and guard as a grant of it is.
+- The grant hooks are asked about an activation as about a grant of its role in its scope until its expiry, and a
+  hook's refusal refuses it. A delegated call locks what a delegated role grant locks, in the same order.
+- `surrender()` is for the grantee alone, acting as itself; anyone else is refused, as is the grantee while
+  impersonated. `revoke()` needs the revoke right, or a trusted call. Each returns how many it ended: an activation
+  already ended or expired changes nothing and returns 0.
+- No event is dispatched yet: the lifecycle events arrive with the audit trail.
+
+**Switching it off.** While `enabled` is false no activation counts anywhere, at once: checks, listings, query scopes
+and delegated administration all read none, and the rows stay for audit. The setting is read once a request or job,
+and the resolution cache keeps what it resolved while break-glass was on apart from what it resolved while off, so
+switching it either way is seen on the next request. `activate()` refuses while it is off; an activation can still
+be ended.
+
+See [Break-glass](docs/design/break-glass.md) for the invariants and what the last release adds.
 
 See [Grant scope](docs/design/grant-scope.md) for the design.
 

@@ -37,7 +37,11 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
  * `role-exclusion.remove` are the rights to declare and remove a pair of
  * mutually exclusive roles (see `Services\RoleExclusionService`), decided on
  * the pair's operation resource (see
- * `Administration\OperationResource::exclusion()`).
+ * `Administration\OperationResource::exclusion()`). `break-glass.activate`,
+ * `break-glass.grant` and `break-glass.revoke` are the rights to activate an
+ * emergency role for oneself, to activate one for another, and to end another's
+ * activation (see `Services\BreakGlassService`): holding the right is enough,
+ * so the stage weighs no rank, self or possession rule for them (N140).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -155,6 +159,15 @@ final readonly class PackagePermissions implements PermissionProvider
     /** @var string The right to remove a declared pair of mutually exclusive roles. */
     public const string ROLE_EXCLUSION_REMOVE = 'authorization:role-exclusion.remove';
 
+    /** @var string The right to activate an emergency role for oneself (AUTHZ-11.7). */
+    public const string BREAK_GLASS_ACTIVATE = 'authorization:break-glass.activate';
+
+    /** @var string The right to activate an emergency role for another person. */
+    public const string BREAK_GLASS_GRANT = 'authorization:break-glass.grant';
+
+    /** @var string The right to end another's break-glass activation. */
+    public const string BREAK_GLASS_REVOKE = 'authorization:break-glass.revoke';
+
     /** @var string The category every package permission is filed under. */
     private const string CATEGORY = 'authorization';
 
@@ -197,6 +210,9 @@ final readonly class PackagePermissions implements PermissionProvider
         self::REVIEW_EXPORT               => 'Export an access review.',
         self::ROLE_EXCLUSION_DECLARE      => 'Declare two roles mutually exclusive.',
         self::ROLE_EXCLUSION_REMOVE       => 'Remove a declared pair of mutually exclusive roles.',
+        self::BREAK_GLASS_ACTIVATE        => 'Activate an emergency role for oneself.',
+        self::BREAK_GLASS_GRANT           => 'Activate an emergency role for another person.',
+        self::BREAK_GLASS_REVOKE          => 'End another\'s break-glass activation.',
     ];
 
     /**

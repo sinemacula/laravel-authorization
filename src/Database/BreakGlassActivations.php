@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 
@@ -34,6 +35,13 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
  * identity (see `markIdentity()`), counts for nothing, and one naming half a
  * tenant applies nowhere, as a grant row naming one does not (see
  * `TenantChain::grants()`). The note an activation carries is never read here.
+ *
+ * While `break_glass.enabled` is false no activation counts anywhere (N139):
+ * not through the roles relation, nor where delegated administration or the
+ * query scopes read the table, and the rows stay for audit. Whether it is on is
+ * read once a request or job, when the container builds the record (see
+ * `isEnabled()`), never once a check, so the resolution cache, built with it,
+ * keeps the entries of either state apart.
  *
  * Whether a model stands as an identity is marked on the instance, for the
  * request or job (the service provider binds the record with `scoped()`), so
@@ -70,16 +78,34 @@ final class BreakGlassActivations
         'granted_by_id',
     ];
 
+    /** @var bool Whether break-glass is enabled for the request or job. */
+    public readonly bool $isEnabled;
+
     /** @var \WeakMap<object, true> The instances read as a subject's separate identity in the request or job. */
     private \WeakMap $identities;
 
     /**
-     * Create the record of the instances read as an identity in a request or
-     * job, which the container holds for its length (see `scoped()`).
+     * Create the record of a request or job, which the container holds for its
+     * length (see `scoped()`): whether break-glass is enabled, read through the
+     * checks the boot runs, and the instances read as an identity.
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
     public function __construct()
     {
+        $this->isEnabled  = BreakGlassConfigValidator::read()['enabled'];
         $this->identities = new \WeakMap;
+    }
+
+    /**
+     * Determine whether break-glass is enabled for the request or job; never
+     * without the package's record of it.
+     *
+     * @return bool
+     */
+    public static function isEnabled(): bool
+    {
+        return self::instance()->isEnabled ?? false;
     }
 
     /**
@@ -113,7 +139,8 @@ final class BreakGlassActivations
 
     /**
      * Limit the query to the activations of the table that are live at the
-     * instant given, else now: not ended, and expiring after it.
+     * instant given, else now: not ended, and expiring after it; to none while
+     * break-glass is disabled.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $table
@@ -122,19 +149,24 @@ final class BreakGlassActivations
      */
     public static function live(Builder $query, string $table, ?Carbon $now = null): Builder
     {
+        if (!self::isEnabled()) {
+            $query->whereRaw('1 = 0');
+        }
+
         return $query->whereNull($table . '.ended_at')->where($table . '.expires_at', '>', $now ?? Carbon::now('UTC'));
     }
 
     /**
-     * Determine whether the grantee's activations count: never a machine's, nor
-     * those of an instance read as another subject's identity.
+     * Determine whether the grantee's activations count: never while
+     * break-glass is disabled, nor a machine's, nor those of an instance read
+     * as another subject's identity.
      *
      * @param  object  $grantee
      * @return bool
      */
     public static function isCounted(object $grantee): bool
     {
-        return !$grantee instanceof AuthorizableMachine && !self::isIdentity($grantee);
+        return self::isEnabled() && !$grantee instanceof AuthorizableMachine && !self::isIdentity($grantee);
     }
 
     /**

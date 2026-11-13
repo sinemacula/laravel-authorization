@@ -70,6 +70,32 @@ final class OperationResourceTest extends TestCase
     }
 
     /**
+     * A break-glass activation names what a grant of its role names, under its
+     * action, never only narrowing; its end only narrows.
+     *
+     * @return void
+     */
+    public function testABreakGlassActivationNamesWhatAGrantOfItsRoleNames(): void
+    {
+        $role      = Role::create(['name' => 'responder']);
+        $user      = new Reference('user', '1');
+        $scope     = new GrantScope(new Reference('stub_tenant', 'tenant-a'), 'admin', false);
+        $expiry    = Carbon::parse('2026-07-02 14:00:00', 'Europe/Paris');
+        $activated = OperationResource::breakGlass(PackagePermissions::BREAK_GLASS_GRANT, $user, $role, $scope, $expiry);
+        $grant     = OperationResource::grant(PackagePermissions::BREAK_GLASS_GRANT, $user, $role, $scope, $expiry);
+        $ended     = OperationResource::breakGlass(PackagePermissions::BREAK_GLASS_REVOKE, $user, $role, $scope);
+
+        self::assertSame(PackagePermissions::BREAK_GLASS_GRANT, $activated->action);
+        self::assertFalse($activated->isNarrowing);
+        self::assertSame($scope->tenant, $activated->tenant);
+        self::assertSame($grant->attributes(), $activated->attributes());
+        self::assertSame($role, $activated->change?->target);
+        self::assertSame('2026-07-02T12:00:00+00:00', $activated->attributes()['expires_at']);
+        self::assertTrue($ended->isNarrowing);
+        self::assertArrayNotHasKey('expires_at', $ended->attributes());
+    }
+
+    /**
      * A key a grant does not name, an application or an expiry, is left out.
      *
      * @return void

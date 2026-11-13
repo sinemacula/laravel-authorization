@@ -777,6 +777,40 @@ final class OperationConstraintsTest extends TestCase
     }
 
     /**
+     * A break-glass activation is weighed by the scope rule alone (N140): an
+     * unranked actor activates a senior role for a senior peer, or for itself,
+     * asking nothing but its own right again across the reach, and is refused
+     * only where that right does not reach; ending one only narrows, so it asks
+     * nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABreakGlassActivationIsWeighedByItsScopeAlone(): void
+    {
+        $allowed = Decision::allow(DecisionStage::ALLOW);
+        $actor   = self::user('admin');
+        $peer    = Reference::of(self::senior('peer'));
+        $chief   = Role::query()->where('name', 'chief')->firstOrFail();
+        $tenant  = new GrantScope(new Reference('tenant', 'a'), null, false);
+        $granted = OperationResource::breakGlass(PackagePermissions::BREAK_GLASS_GRANT, $peer, $chief, $tenant)->toResourceReference();
+        $self    = OperationResource::breakGlass(PackagePermissions::BREAK_GLASS_ACTIVATE, Reference::of($actor), $chief, $tenant)->toResourceReference();
+        $ended   = OperationResource::breakGlass(PackagePermissions::BREAK_GLASS_REVOKE, $peer, $chief, $tenant)->toResourceReference();
+        $checks  = $this->checks($actor, static fn (): Decision => $allowed);
+
+        self::assertTrue(self::weigh(PackagePermissions::BREAK_GLASS_GRANT, $granted, $checks)->isAllowed());
+        self::assertTrue(self::weigh(PackagePermissions::BREAK_GLASS_ACTIVATE, $self, $checks)->isAllowed());
+        self::assertSame([PackagePermissions::BREAK_GLASS_GRANT, PackagePermissions::BREAK_GLASS_ACTIVATE], \array_column($this->asked, 0));
+        self::assertTrue(self::weigh(PackagePermissions::BREAK_GLASS_REVOKE, $ended, $this->checks($actor, self::unexpected(...)))->isAllowed());
+
+        $refusing = $this->checks($actor, static fn (): Decision => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, self::weigh(PackagePermissions::BREAK_GLASS_GRANT, $granted, $refusing)->reason);
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::weigh(PackagePermissions::ROLE_GRANT, self::grantOf($peer, $chief, $tenant), $checks)->reason);
+    }
+
+    /**
      * Weigh an allowed decision of the action on the operation through the
      * stage.
      *
@@ -966,6 +1000,19 @@ final class OperationConstraintsTest extends TestCase
         $permission = Permission::query()->firstOrCreate(['name' => 'posts:edit']);
 
         return OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $grantee, $permission, GrantScope::platform());
+    }
+
+    /**
+     * Return the reference to a grant of the role to the grantee in the scope.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @return \SineMacula\Laravel\Authorization\Support\ResourceReference
+     */
+    private static function grantOf(Reference $grantee, Role $role, GrantScope $scope): ResourceReference
+    {
+        return OperationResource::grant(PackagePermissions::ROLE_GRANT, $grantee, $role, $scope)->toResourceReference();
     }
 
     /**

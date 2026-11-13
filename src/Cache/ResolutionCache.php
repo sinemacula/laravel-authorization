@@ -32,6 +32,12 @@ use SineMacula\Laravel\Authorization\Usage\RouteMap;
  * next check in every worker, on any store. A hit costs two reads of the store
  * and no query.
  *
+ * A cache built while break-glass is enabled keeps its persistent entries under
+ * a namespace of their own, so an entry that counted an activation never
+ * reaches a request or job in which none counts, nor the reverse; the version
+ * tokens are shared, and the memo, which lasts no longer than the state it was
+ * built in, is keyed as ever.
+ *
  * Every entry, in either tier, lives no longer than the nearest expiry of a
  * grant it counts and never longer than the configured maximum. The memo lasts
  * one request or job (the service provider binds the cache with `scoped()`) and
@@ -54,6 +60,9 @@ final readonly class ResolutionCache
     /** @var \SineMacula\Laravel\Authorization\Cache\VersionedStore|null Persistent tier; null keeps the memo only. */
     private ?VersionedStore $store;
 
+    /** @var string The prefix of every persistent entry's key: the namespace, with the break-glass state it was built in. */
+    private string $entries;
+
     /**
      * Create a new cache instance.
      *
@@ -71,17 +80,18 @@ final readonly class ResolutionCache
         /** The longest any entry lives, in seconds. */
         private int $ttl = 300,
 
-        /** Namespace prefix for every key written by this cache. */
-        private string $prefix = 'authorization',
+        // Namespace prefix for every key written by this cache.
+        string $prefix = 'authorization',
 
         /** Whether grant usage is tracked, so a grantee's permissions and policies are kept with the routes of the grants behind them. */
         private bool $isTrackingUsage = false,
 
-        /** The request's record of the instances read as an identity; null keeps every grantee's entries under its kind. */
+        /** The request's break-glass state and instances read as an identity; null keeps every entry as break-glass disabled. */
         private ?BreakGlassActivations $activations = null,
     ) {
-        $this->memo  = new ResolutionMemo(static fn (): string => TenantScope::scopeKey());
-        $this->store = $store === null ? null : new VersionedStore($store, $prefix);
+        $this->memo    = new ResolutionMemo(static fn (): string => TenantScope::scopeKey());
+        $this->store   = $store === null ? null : new VersionedStore($store, $prefix);
+        $this->entries = ($activations->isEnabled ?? false) ? $prefix . ':break-glass' : $prefix;
     }
 
     /**
@@ -247,7 +257,7 @@ final readonly class ResolutionCache
                 continue;
             }
 
-            $stored[] = [$id, $memoKey, PrincipalCacheKey::entry($this->prefix, 'resource-policies', $record)];
+            $stored[] = [$id, $memoKey, PrincipalCacheKey::entry($this->entries, 'resource-policies', $record)];
         }
 
         $entries = $this->store?->entries(\array_column($stored, 2)) ?? [];
@@ -523,7 +533,7 @@ final readonly class ResolutionCache
         $memoKey = $kind . ':' . PrincipalCacheKey::for($grantee);
 
         /** @var list<mixed>|null $memoised */
-        $memoised = $this->memo->get($memoKey) ?? $this->read($memoKey, PrincipalCacheKey::entry($this->prefix, $kind, $grantee), $decode);
+        $memoised = $this->memo->get($memoKey) ?? $this->read($memoKey, PrincipalCacheKey::entry($this->entries, $kind, $grantee), $decode);
 
         if ($memoised !== null) {
             return $memoised;
@@ -577,7 +587,7 @@ final readonly class ResolutionCache
             return $resolution->value;
         }
 
-        $key   = PrincipalCacheKey::entry($this->prefix, $kind, $grantee);
+        $key   = PrincipalCacheKey::entry($this->entries, $kind, $grantee);
         $entry = [
             'versions' => $pins->tokens(),
             'value'    => $encode === null ? $resolution->value : \array_map($encode, $resolution->value),
