@@ -24,13 +24,18 @@ scope, the hook contract and its binding, and where the hook runs in a grant cal
    a policy that only denies included. Roles are not expanded: a role's root is where it was granted. A row
    `LiveGrants` reads as expired is no grant, nor is an inline policy attached to a grantee it does not belong to
    (`InlinePolicies::attachedToTheirGrantee()`), which no check applies. Boundaries and guardrails cap grants and are
-   never read. A grant's root is the tenant its row names, or the platform for a row naming none.
+   never read. A grant's root is the tenant its row names, or the platform for a row naming none. A live break-glass
+   activation (`BreakGlassActivations::live()`) is a grant of its role in its scope for the answers and the lists
+   (N143), as a check reads it: none while break-glass is disabled, none of a machine, and an identity's reaches none
+   of its principals, so `forIdentity()` counts its principals' activations and `hasGrantIn()` the principal's alone.
+   The widening (invariant 10) never counts one.
 
 3. **One reader.** `Support\GrantRoots` reads the grantees' roots from the three grant tables in one `UNION ALL` query
    on the write connection (AUTHZ-12.4), across every tenant and application, matching each grantee by its exact morph
    type and key, each grantee once. It shares the predicates the decision path uses rather than copying them:
    `LiveGrants::only()` for expiry, `TenantChain::grants()` for applicability and `GrantApplications::only()` for the
-   application. An empty list of grantees runs no query.
+   application. An empty list of grantees runs no query. Given the grantees whose activations count, it reads their
+   live activations in the same query, as role grant rows.
 
 4. **Containment.** A root is within when it is the tenant or below it in the bound tree. For `FlatTenantTree` that is
    the tenant's own pair; any other tree's `subtree()` query is nested whole inside the grant query, never loaded, so
@@ -79,7 +84,8 @@ scope, the hook contract and its binding, and where the hook runs in a grant cal
     (`NEW_TENANT`: a new tenant, a sibling or an ancestor of one held), and when it reaches below its tenant where none
     of those grants reached below (`NEW_SUBTREE`). It is read with `GrantRoots::appliesIn()`, over the identity, the
     grantee and every listed principal, in every application. `Narrowing` is not the trigger: a permission added to a
-    role is no grant to an identity, and a grant to a role is never classified.
+    role is no grant to an identity, and a grant to a role is never classified. A break-glass activation is never a
+    grant already held here (N143): a grant beside one widens as it would without it.
 
 11. **When in doubt, the hook.** An incomplete directory (`INCOMPLETE_DIRECTORY`) or a tree that cannot be read
     (`UNREADABLE_TREE`) makes an evaluated grant widen. The identity is resolved through the subject resolver's
@@ -181,7 +187,9 @@ scope, the hook contract and its binding, and where the hook runs in a grant cal
     principal or identity, and whoever holds the role is listed through their own grant of it. A named application
     counts the grants made for it or for every application, as `hasGrantIn()` does; none counts every grant. Each
     grantee is listed once, ordered by type and then key byte by byte, in PHP (`Reference::sorted()`), so every database
-    lists them alike. Each list is one `UNION` query over the three grant tables on the write connection, plus the
+    lists them alike. A machine's activation lists no one, and a grantee holding both a grant and an activation is
+    listed once. Each list is one `UNION` query over the three grant tables and the activations on the write
+    connection, plus the
     tree's read of the ancestors for `granteesReaching()`, and refuses first while the package is not healthy. A list
     cannot say `unknown`, so a tree that throws is thrown, a subtree on another connection than the package's is refused
     with `UnexpectedValueException`, and a subtree query that fails as it runs is thrown as its `QueryException` once

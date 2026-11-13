@@ -42,7 +42,8 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * when it reaches below its tenant where none of those grants reached below
  * before. The identity's principals are those the identity directory lists
  * (N81), and the grants are read by the grant scope query's reader, in every
- * application, on the write connection.
+ * application, on the write connection. A break-glass activation is never a
+ * grant already held here, so a grant beside one is classified as without it.
  *
  * When in doubt, the grant widens: an incomplete list of principals, or a tree
  * that cannot be read, is a reason of its own. An identity that cannot be

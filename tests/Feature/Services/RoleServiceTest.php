@@ -31,6 +31,7 @@ use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
+use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -40,6 +41,7 @@ use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Services\SyncResult;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\AssertsDelegatedRefusals;
@@ -72,7 +74,7 @@ use Tests\TestCase;
 #[CoversClass(RoleService::class)]
 final class RoleServiceTest extends TestCase
 {
-    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals,
+    use ActivatesBreakGlass, ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals,
         ComparesReferences, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage,
         ReportsEveryDecision, UsesAnAuthorizationConnection;
 
@@ -1136,6 +1138,32 @@ final class RoleServiceTest extends TestCase
         Event::assertDispatched(RoleDeleted::class, static fn (RoleDeleted $event): bool => $event->operation->actor === null
             && $event->operation->actions                                                                            === [PackagePermissions::ROLE_DELETE]
             && self::keysOf($event->grantees)                                                                        === ['user:1']);
+    }
+
+    /**
+     * Deleting a role reports the grantees of its activations not ended or
+     * expired beside those of its grants, each once, and deletes the
+     * activations with it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDeletingARoleReportsTheGranteesOfItsActivations(): void
+    {
+        $role = self::role('responder');
+
+        app(GrantService::class)->grantRole(new Reference('user', '1'), $role);
+        self::activate(new Reference('user', '1'), $role);
+        self::activate(new Reference('user', '2'), $role);
+        self::activate(new Reference('user', '3'), $role, ['ended_at' => now()]);
+
+        Event::fake([RoleDeleted::class]);
+
+        self::service()->delete('responder');
+
+        Event::assertDispatched(RoleDeleted::class, static fn (RoleDeleted $event): bool => self::keysOf($event->grantees()) === ['user:1', 'user:2']);
+        self::assertSame(0, BreakGlassActivation::query()->count());
     }
 
     /**

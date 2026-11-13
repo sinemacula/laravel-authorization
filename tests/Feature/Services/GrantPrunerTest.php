@@ -639,6 +639,41 @@ final class GrantPrunerTest extends TestCase
     }
 
     /**
+     * The activations of a grantee that no longer exists are never removed, nor
+     * counted among its grants: a live one is left as it is, and one that
+     * expired has its expiry recorded on its row, while the grantee's role
+     * grant is revoked.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testKeepsTheActivationsOfGranteesThatAreGone(): void
+    {
+        $role = self::emergencyRole();
+        $gone = StubIdentity::create(['id' => 'user-gone']);
+
+        $gone->assignRole($role);
+
+        $live    = self::activate($gone, $role);
+        $expired = self::activate($gone, $role, ['expires_at' => Carbon::now()->subMinute()]);
+
+        DB::table('stub_identities')->where('id', 'user-gone')->delete();
+
+        Event::fake();
+
+        self::assertSame([1, 1], [self::pruner()->prune(1000, true)->orphaned, self::pruner()->prune(1000, true)->activations]);
+
+        $result = self::pruner()->prune(1000);
+
+        self::assertSame([1, 1], [$result->orphaned, $result->activations]);
+        self::assertSame(0, DB::table('authorizable_roles')->count());
+        self::assertSame(2, BreakGlassActivation::query()->count());
+        self::assertNull(BreakGlassActivation::query()->findOrFail($live->id)->ended_at);
+        self::assertSame('expired', BreakGlassActivation::query()->findOrFail($expired->id)->end_reason);
+    }
+
+    /**
      * Once the package refuses, pruning refuses by its own guard, pretending or
      * not, before it reads or deletes anything.
      *

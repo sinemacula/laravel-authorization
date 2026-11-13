@@ -15,7 +15,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * Who holds a role, a permission or a policy in a review's scope (N93), one row
  * for each route, the grantee of the stored grant being the holder:
  *
- * - a direct grant of the target;
+ * - a direct grant of the target, or for a role, a break-glass activation of it
+ *   not ended or expired, a row of its own (see `GrantRows::held()`);
  * - for a role, a grant of a role below it, which inherits it;
  * - for a permission, a grant of a role that carries it, or of a role below
  *   one, through every such role, each its own route;
@@ -338,7 +339,8 @@ final class HolderRoutes
     }
 
     /**
-     * Return a query of the live grants of the kind in the review's scope.
+     * Return a query of the live grants of the kind in the review's scope,
+     * with, for roles, the activations not ended or expired.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
@@ -348,6 +350,6 @@ final class HolderRoutes
     {
         $table = $kind->table();
 
-        return $run->live($run->constrain(GrantRows::of($kind), $table), $table);
+        return $run->live($run->constrain(GrantRows::held($run, $kind), $table), $table);
     }
 }

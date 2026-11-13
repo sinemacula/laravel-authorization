@@ -5,7 +5,11 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Reviews\Support;
 
 use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Carbon;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 
 /**
@@ -21,6 +25,12 @@ use SineMacula\Laravel\Authorization\Enums\GrantTarget;
  * whatever its number; one subject's holdings are read whole by design (see
  * `HoldingRoutes`), their grantees a chunk at a time (see `CHUNK`), so no
  * query's bindings grow with the principals an identity has.
+ *
+ * A review reads role grants together with the break-glass activations not
+ * ended or expired at its instant, whether break-glass is enabled or not, since
+ * one grants again once it is (see `held()`): each activation a row of its own,
+ * ordered after a grant of the same role to the same grantee in the same scope,
+ * and after each other by key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,6 +51,9 @@ final class GrantRows
     /** @var list<string> The columns of a grant row read beside its target and grantee, each under its own name. */
     private const array COLUMNS = ['tenant_type', 'tenant_id', 'include_subtree', 'application', 'expires_at', 'created_at', 'updated_at', 'granted_by_type', 'granted_by_id'];
 
+    /** @var int The parts of a position naming a stored row's grantee and scope, before its activation's key. */
+    private const int SCOPE_PARTS = 9;
+
     /**
      * Return a query of the rows of the grant table of the kind, each with its
      * target's key, its grantee and every column a review reads.
@@ -50,14 +63,46 @@ final class GrantRows
      */
     public static function of(GrantTarget $target): Builder
     {
-        $table   = $target->table();
-        $columns = [$table . '.' . $target->column() . ' as target_id', $table . self::GRANTEE_TYPE . ' as grantee_type', $table . self::GRANTEE_ID . ' as grantee_id'];
+        return self::select(AuthorizationConnection::connection()->table($target->table())->useWritePdo(), $target);
+    }
 
-        foreach (self::COLUMNS as $column) {
-            $columns[] = $table . '.' . $column;
+    /**
+     * Return a query of the rows of the grant table of the kind as `of()` reads
+     * them, and, for roles, of the break-glass activations not ended or expired
+     * at the run's instant beside them, each as a role grant row with its key
+     * and justification code, both null on a grant's row, read under the role
+     * grant table's name.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $target
+     * @return \Illuminate\Database\Query\Builder
+     */
+    public static function held(ReviewRun $run, GrantTarget $target): Builder
+    {
+        if ($target !== GrantTarget::ROLE) {
+            return self::of($target);
         }
 
-        return AuthorizationConnection::connection()->table($table)->useWritePdo()->select($columns);
+        $connection  = AuthorizationConnection::connection();
+        $table       = $target->table();
+        $activations = TableNames::get('break_glass');
+        $grammar     = $connection->getQueryGrammar();
+        $columns     = ['role_id', 'authorizable_type', 'authorizable_id', ...self::COLUMNS];
+        $nulls       = new ComposedExpression('null as ' . $grammar->wrap(BreakGlassActivations::ACTIVATION) . ', null as ' . $grammar->wrap('justification'));
+
+        $activated = BreakGlassActivations::unexpired($connection->table($activations), $activations, Carbon::instance($run->now))->select([
+            ...\array_map(static fn (string $column): string => match ($column) {
+                'created_at', 'updated_at' => 'activated_at as ' . $column,
+                default                    => $column,
+            }, $columns),
+            'id as ' . BreakGlassActivations::ACTIVATION,
+            'justification',
+        ]);
+
+        $rows = $connection->table($table)->select($columns)->addSelect($nulls)->unionAll($activated);
+
+        return self::select($connection->query()->fromSub($rows, $table)->useWritePdo(), $target)
+            ->addSelect([$table . '.' . BreakGlassActivations::ACTIVATION, $table . '.justification']);
     }
 
     /**
@@ -113,7 +158,8 @@ final class GrantRows
     /**
      * Order a grant query in the review's order: by its target first when
      * asked, then by its grantee's type and key, its tenant's, its application
-     * and its reach, then by its target when asked to be last, so the order is
+     * and its reach, for role grants then by the break-glass activation's key
+     * (see `held()`), then by its target when asked to be last, so the order is
      * total over the rows a grant table can hold; a query of one target, which
      * it matches exactly, is not ordered by the target at all (null), so an
      * index leading with the target and the grantee serves the order.
@@ -137,6 +183,10 @@ final class GrantRows
         ReviewOrder::by($query, $table . '.application', true);
 
         $query->orderBy($table . '.include_subtree');
+
+        if ($table === GrantTarget::ROLE->table()) {
+            ReviewOrder::by($query, $table . '.' . BreakGlassActivations::ACTIVATION, true);
+        }
 
         return $isTargetFirst === false ? ReviewOrder::by($query, $table . '.' . $target) : $query;
     }
@@ -205,7 +255,8 @@ final class GrantRows
     /**
      * Limit a grant query ordered as `ordered()` orders it to the rows after
      * the position, or at it too when asked (see `Keyset`), the target first,
-     * last or, for a query of one target, left out, as the query is ordered.
+     * last or, for a query of one target, left out, as the query is ordered;
+     * the activation's key a position holds is read only for role grants.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $table
@@ -227,6 +278,12 @@ final class GrantRows
             [$table . '.application', Keyset::TAGGED],
             [$table . '.include_subtree', Keyset::FLAG],
         ];
+
+        if ($table === GrantTarget::ROLE->table()) {
+            $columns[] = [$table . '.' . BreakGlassActivations::ACTIVATION, Keyset::TAGGED];
+        } else {
+            \array_splice($position, ($isTargetFirst === true ? 1 : 0) + self::SCOPE_PARTS, 2);
+        }
 
         $column  = [$table . '.' . $target, Keyset::TEXT];
         $columns = match ($isTargetFirst) {
@@ -308,5 +365,25 @@ final class GrantRows
     public static function edgeAt(array $key): array
     {
         return [$key[RowCollector::TARGET] ?? null, $key[RowCollector::STORED + 1] ?? null];
+    }
+
+    /**
+     * Select from the query the target's key, the grantee and every column a
+     * review reads of a grant of the kind.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $target
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private static function select(Builder $query, GrantTarget $target): Builder
+    {
+        $table   = $target->table();
+        $columns = [$table . '.' . $target->column() . ' as target_id', $table . self::GRANTEE_TYPE . ' as grantee_type', $table . self::GRANTEE_ID . ' as grantee_id'];
+
+        foreach (self::COLUMNS as $column) {
+            $columns[] = $table . '.' . $column;
+        }
+
+        return $query->select($columns);
     }
 }

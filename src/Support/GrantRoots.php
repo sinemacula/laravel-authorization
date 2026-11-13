@@ -8,13 +8,16 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Administration\DependencyPins;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Enums\GrantScopeStatus;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionHoldings;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 
 /**
@@ -30,6 +33,11 @@ use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
  * no check applies (see `InlinePolicies`). Boundaries and guardrails are
  * constraints on grants, not grants, and are never read. A grant's root is the
  * tenant its row names, or the platform for a row naming none.
+ *
+ * The live break-glass activations of the grantees named as activated are read
+ * as the role grants they stand for (see `BreakGlassActivations::live()`), so
+ * none while break-glass is disabled, and none of a machine, as a check reads
+ * them; `appliesUnderLock()` reads grants alone.
  *
  * The grantees are matched by their exact morph type and key, so two grantees
  * sharing a key under different types are never confused. Every read is on the
@@ -59,20 +67,20 @@ final readonly class GrantRoots
     /** @var array<string, \SineMacula\Laravel\Authorization\Support\Reference> The grantees, each once, by their type and key. */
     private array $grantees;
 
+    /** @var array<string, \SineMacula\Laravel\Authorization\Support\Reference> The grantees whose activations count, each once, no machine among them. */
+    private array $activated;
+
     /**
-     * Create a new reader of the grantees' grant roots.
+     * Create a new reader of the grantees' grant roots, and of the live
+     * activations of those given as activated.
      *
      * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $grantees
+     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $activated
      */
-    public function __construct(array $grantees)
+    public function __construct(array $grantees, array $activated = [])
     {
-        $unique = [];
-
-        foreach ($grantees as $grantee) {
-            $unique[\serialize([$grantee->type, $grantee->id])] = $grantee;
-        }
-
-        $this->grantees = $unique;
+        $this->grantees  = self::unique($grantees);
+        $this->activated = self::unique(\array_filter($activated, static fn (Reference $grantee): bool => !ExclusionHoldings::isMachine($grantee)));
     }
 
     /**
@@ -201,7 +209,7 @@ final readonly class GrantRoots
         $connection = AuthorizationConnection::connection();
 
         foreach (GrantTarget::cases() as $target) {
-            $rows = $this->rowsOf($connection, $target, static function (Builder $query, string $table) use ($chain): void {
+            $rows = $this->grantsOf($connection, $target, static function (Builder $query, string $table) use ($chain): void {
                 $chain->grants($query, $table);
             });
 
@@ -215,8 +223,9 @@ final readonly class GrantRoots
 
     /**
      * Return the query of the grantees' live grant rows that meet the
-     * condition, from every grant table, each marked by whether it names half a
-     * tenant, on the write connection.
+     * condition, from every grant table, and of the activated grantees' live
+     * activations that do, each marked by whether it names half a tenant, on
+     * the write connection.
      *
      * @param  \Closure(\Illuminate\Database\Query\Builder, string): void  $constrain
      * @return \Illuminate\Database\Query\Builder
@@ -227,8 +236,14 @@ final readonly class GrantRoots
         $union      = null;
 
         foreach (GrantTarget::cases() as $target) {
-            $rows  = $this->rowsOf($connection, $target, $constrain);
+            $rows  = $this->grantsOf($connection, $target, $constrain);
             $union = $union === null ? $rows : $union->unionAll($rows);
+        }
+
+        if ($this->activated !== []) {
+            $activations = TableNames::get('break_glass');
+
+            $union->unionAll(BreakGlassActivations::live(self::rowsOf($connection, $activations, $this->activated, $constrain), $activations));
         }
 
         return $connection->query()->fromSub($union, self::ROOTS)->useWritePdo();
@@ -244,9 +259,26 @@ final readonly class GrantRoots
      * @param  \Closure(\Illuminate\Database\Query\Builder, string): void  $constrain
      * @return \Illuminate\Database\Query\Builder
      */
-    private function rowsOf(Connection $connection, GrantTarget $target, \Closure $constrain): Builder
+    private function grantsOf(Connection $connection, GrantTarget $target, \Closure $constrain): Builder
     {
-        $table   = $target->table();
+        $table = $target->table();
+        $query = LiveGrants::only(self::rowsOf($connection, $table, $this->grantees, $constrain), $table);
+
+        return $target === GrantTarget::POLICY ? InlinePolicies::attachedToTheirGrantee($query, $table) : $query;
+    }
+
+    /**
+     * Return the query of the rows of the table naming one of the grantees that
+     * meet the condition, each marked by whether it names half a tenant.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $table
+     * @param  array<string, \SineMacula\Laravel\Authorization\Support\Reference>  $grantees
+     * @param  \Closure(\Illuminate\Database\Query\Builder, string): void  $constrain
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private static function rowsOf(Connection $connection, string $table, array $grantees, \Closure $constrain): Builder
+    {
         $grammar = $connection->getQueryGrammar();
         $type    = $grammar->wrap($table . '.' . self::TENANT_TYPE);
         $id      = $grammar->wrap($table . '.' . self::TENANT_ID);
@@ -255,23 +287,34 @@ final readonly class GrantRoots
             ->from($table)
             ->addSelect(new ComposedExpression("case when {$type} is null and {$id} is null then 0 when {$type} is null or {$id} is null then 1 else 0 end as is_unreadable"));
 
-        $query->where(function (Builder $grantees) use ($table): void {
-            foreach ($this->grantees as $grantee) {
-                $grantees->orWhere(static function (Builder $pair) use ($table, $grantee): void {
+        $query->where(static function (Builder $any) use ($table, $grantees): void {
+            foreach ($grantees as $grantee) {
+                $any->orWhere(static function (Builder $pair) use ($table, $grantee): void {
                     $pair->where($table . '.authorizable_type', $grantee->type)->where($table . '.authorizable_id', $grantee->id);
                 });
             }
         });
 
-        LiveGrants::only($query, $table);
-
-        if ($target === GrantTarget::POLICY) {
-            InlinePolicies::attachedToTheirGrantee($query, $table);
-        }
-
         $constrain($query, $table);
 
         return $query;
+    }
+
+    /**
+     * Return the references, each once, by their type and key.
+     *
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\Reference>  $references
+     * @return array<string, \SineMacula\Laravel\Authorization\Support\Reference>
+     */
+    private static function unique(array $references): array
+    {
+        $unique = [];
+
+        foreach ($references as $reference) {
+            $unique[\serialize([$reference->type, $reference->id])] = $reference;
+        }
+
+        return $unique;
     }
 
     /**

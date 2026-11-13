@@ -31,6 +31,12 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageKey;
  *   or a changed reach overwrites it. A trusted write names no actor, so no
  *   actor's review lists it; a revoked row is gone.
  *
+ * The roles granted are read with the break-glass activations not ended or
+ * expired at the review's instant, each a row of its own (see
+ * `GrantRows::held()`): one expiring within the window, or one the actor
+ * activated, is listed, and an unused review lists each as `unknown`, since its
+ * use is never tracked.
+ *
  * A role edge holds no scope of its own: in a review of what applies in a
  * tenant, it is listed when the tenant sees both its role and its permission;
  * in a review rooted within a tenant, when its role is owned there or below. A
@@ -317,7 +323,7 @@ final class StoredRows
     private static function grants(ReviewRun $run, GrantTarget $kind, ?bool $isToRole, string $role, \Closure $condition): Builder
     {
         $table = $kind->table();
-        $query = $run->visible($run->constrain(GrantRows::of($kind), $table), $kind, $table . '.' . $kind->column());
+        $query = $run->visible($run->constrain(GrantRows::held($run, $kind), $table), $kind, $table . '.' . $kind->column());
 
         $condition($query, $table);
 

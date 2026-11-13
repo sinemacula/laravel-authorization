@@ -31,8 +31,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * `isPast()`), and the source of the last row's kind resumes from its stored
  * row (see `resumeAt()`). A sort key holds, in this order, the kind's position
  * (index 0), the target's type and key (1 and 2, `TARGET`), the stored row's
- * grantee and scope as `GrantRow::orderKey()` gives them (3 to 11, `STORED`),
- * then the route (12 on, `ROUTE`, see `routeKey()`): the first role of its
+ * grantee and scope as `GrantRow::orderKey()` gives them (3 to 13, `STORED`),
+ * then the route (14 on, `ROUTE`, see `routeKey()`): the first role of its
  * chain and how many roles the chain runs through, then the keys of the rows it
  * rests on. A chain runs from one role up through its parents, so its first
  * role and its length name it among the routes of one stored row, and a sort
@@ -53,7 +53,7 @@ final class RowCollector
     public const int STORED = 3;
 
     /** @var int The index in a sort key where the route begins. */
-    public const int ROUTE = 12;
+    public const int ROUTE = 14;
 
     /** @var list<array{key: list<bool|int|string|null>, row: \SineMacula\Laravel\Authorization\Reviews\ReviewRow}> The rows collected, each with its sort key, in the order collected. */
     private array $entries = [];
@@ -171,6 +171,7 @@ final class RowCollector
             $times,
             $start->grantedBy,
             $this->stateOf($start, $rows),
+            breakGlass: $start->breakGlass,
         );
 
         if ($this->keeps !== null && !($this->keeps)($row)) {

@@ -69,8 +69,9 @@ still left out.
    values, never a name, email, description, document or value. Its shape is `version: 1`: `row_key`, `subject`,
    `grantee`, `target`, `source_kind`, `source_key`, `origin_scope`, `via_identity`, `role_path`, `supporting_grants`,
    `created_at`, `updated_at`, `expires_at`, `route_expires_at`, `granted_by`, `grant_state`, `subject_state` and
-   `usage` (invariant 27), then `action_evidence` on the rows of a review of holdings filtered by an action, and only
-   there (invariant 28); every other review's rows keep this shape. A stored row's key is built from the columns that
+   `usage` (invariant 27), then `break_glass` on a route starting from a break-glass activation, and only there
+   (invariant 29), then `action_evidence` on the rows of a review of holdings filtered by an action, and only there
+   (invariant 28); every other review's rows keep this shape. A stored row's key is built from the columns that
    make it unique (target, grantee, tenant and application; role and permission for an edge), each part length-prefixed
    so no two lists of parts share one. A subject is `inactive` when it, or the identity of a resolved subject, reports
    itself inactive or is deleted softly, `unknown` when its record is gone or its type names no model, read one query
@@ -98,14 +99,14 @@ still left out.
    The same holds for holders, holdings, expiries and an actor's grants, each following its scope selection.
 
 8. **One total order (`Reviews\Support\ReviewOrder`).** By source kind (in `SourceKind`'s declared order), target,
-   grantee, origin scope and route (the first role of its chain, how many roles the chain runs through, then the keys
-   of the rows it rests on: a chain runs up through one parent at a time, so these name a route among those of its
-   stored row), each nullable component tagged so the platform comes before a tenant and every application before a
-   named one, every string compared byte for byte: SQLite through its binary collation, PostgreSQL through `C`, MySQL
-   as binary strings, PHP through `strcmp()`. A reference column is compared as it is stored wherever that is already
-   byte for byte (bare on MySQL, whose reference columns are `utf8mb4_0900_bin`; only collated `C` on PostgreSQL), so
-   an index on it serves the order; any other column is cast. The same rows come in the same order on every supported
-   database.
+   grantee, origin scope, the break-glass activation's key (none first, invariant 29) and route (the first role of its
+   chain, how many roles the chain runs through, then the keys of the rows it rests on: a chain runs up through one
+   parent at a time, so these name a route among those of its stored row), each nullable component tagged so the
+   platform comes before a tenant and every application before a named one, every string compared byte for byte: SQLite
+   through its binary collation, PostgreSQL through `C`, MySQL as binary strings, PHP through `strcmp()`. A reference
+   column is compared as it is stored wherever that is already byte for byte (bare on MySQL, whose reference columns are
+   `utf8mb4_0900_bin`; only collated `C` on PostgreSQL), so an index on it serves the order; any other column is cast.
+   The same rows come in the same order on every supported database.
 
 9. **Bounded, on the writer, no query per holder.** A review returns at most its limit (`authorization.reviews.limit`,
    1000 by default and validated at boot as a whole number of at least 1, or `withLimit()`), reading at least one more
@@ -349,6 +350,17 @@ still left out.
     last decision is recorded and no event dispatched; `check()` decides the operation. The row keeps `version: 1`,
     since the package is unreleased.
 
+29. **Break-glass activations (N143).** Every break-glass activation not ended or expired at the review's instant is
+    reviewed as a holding of its role in its scope, whether break-glass is enabled or not, since it grants again once
+    it is (N141): holders, holdings, expiries, an actor's grants and the unused review read the role grants together
+    with these activations (`GrantRows::held()`), each a row of its own beside any grant of the same role in the same
+    scope, with its own `source_key`, its activation as `created_at`, its expiry as `expires_at` and its granter as
+    `granted_by`, and its routes through the roles above it and what they carry as a grant's. Its rows carry
+    `break_glass { activation, justification }`, never the note, and their `usage` is always `unknown`, since an
+    activation's use is never tracked. A machine's activation, or one naming half a tenant, is listed as such a grant
+    is; in principal mode an identity's activation is left out, since it never reaches a principal through the
+    identity. The row keeps `version: 1`, since the package is unreleased.
+
 ## Success Path
 
 ```php
@@ -452,6 +464,8 @@ tracking covered the whole window and `unknown` where it did not.
   coverage and pruning.
 - `Reviews\Support\ReviewUsage`, `Reviews\RowUsage`, `Reviews\Enums\UsageStatus`, `StoredRows::unused()` -- the
   `usage` field and the unused review.
+- `Reviews\Support\GrantRows::held()`, `GrantRow::$breakGlass`, `ReviewRow::$breakGlass` -- break-glass activations
+  read beside the role grants, and the `break_glass` field.
 - `Reviews\Support\ActionRoutes`, `Reviews\Support\ActionStatements`, `Reviews\ActionEvidence`,
   `Reviews\Enums\EvidenceKind`, `Reviews\Enums\ReachKind`, `ReviewQuery::forAction()`, `RowCollector::narrow()` --
   where a subject holds an action, and the `action_evidence` field.
@@ -519,10 +533,16 @@ tracking covered the whole window and `unknown` where it did not.
   identity mode, compact reach, a role's policy reaching the overlap, half-named rows, a page of its limit of
   matching rows in bounded queries, and nothing decided or dispatched.
 
+- `Reviews\Support\HolderRoutesTest`, `HoldingRoutesTest`, `StoredRowsTest`, `GrantRowsTest`, `RowCollectorTest`
+  (Feature), `ReviewRowTest`, `GrantRowTest` (Unit), `Usage\ReviewUsageTest` (Feature) -- activations beside a grant
+  of the same role, live, ended, expired, while break-glass is disabled and a machine's, never the note, an identity's
+  left out in principal mode, ordered and paged as rows of their own, and their use unknown.
+
 ## Change Triggers
 
 - A change to the row shape or the sort key bumps `ReviewRow::VERSION`, which refuses every cursor issued before it;
-  while the package is unreleased, an optional key added to the row (`usage`, `action_evidence`) keeps `version: 1`.
+  while the package is unreleased, an optional key added to the row (`usage`, `break_glass`, `action_evidence`), or
+  the activation's key added to the sort key, keeps `version: 1`.
 - A snapshot export, or a CSV adapter (N97), would be a mode or sink of its own beside the live JSON Lines.
 - A new path that decides without acting on the decision (an introspection or a dry run) must keep its pipeline
   untracked, as previews, explanations, listings, scoped queries and reviews are.

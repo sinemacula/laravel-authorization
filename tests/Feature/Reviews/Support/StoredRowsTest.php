@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRow;
 use SineMacula\Laravel\Authorization\Reviews\Support\StoredRows;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ReviewsAccess;
 use Tests\TestCase;
@@ -37,7 +38,7 @@ use Tests\TestCase;
 #[CoversClass(StoredRows::class)]
 final class StoredRowsTest extends TestCase
 {
-    use ActsAsAdministrator, ReviewsAccess;
+    use ActivatesBreakGlass, ActsAsAdministrator, ReviewsAccess;
 
     /**
      * Freeze the clock at the start of 2030, in UTC.
@@ -218,6 +219,48 @@ final class StoredRowsTest extends TestCase
 
         foreach ([1, 2, 4] as $size) {
             self::assertSame($whole, \array_map(self::describe(...), self::pagedThrough($query, $size)['rows']), "by {$size}");
+        }
+    }
+
+    /**
+     * A break-glass activation not ended or expired is listed as a role grant
+     * of its own beside a grant of the same role, whether break-glass is
+     * enabled or not: by its expiry, by its granter, and as an unused grant,
+     * never its note; an ended one never is, and pages read each row once.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testActivationsAreListedAsRowsOfTheirOwn(): void
+    {
+        self::keyCursors();
+
+        $at    = new Carbon('2030-01-01 00:30:00', 'UTC');
+        $actor = new Reference('user', 'writer');
+        $ann   = self::identity('ann');
+        $role  = self::role('responder');
+        $by    = ['granted_by_type' => $actor->type, 'granted_by_id' => $actor->id];
+
+        self::grants()->grantRole($ann, $role, $at);
+        DB::table('authorizable_roles')->update($by);
+        self::activate($ann, $role, $by);
+        self::activate(self::identity('bob'), $role, [...$by, 'ended_at' => Carbon::now()]);
+        self::switchBreakGlass(false);
+
+        $queries = [
+            ReviewQuery::expiring(ReviewScope::everywhere(), $at->copy()->subMinute(), $at->copy()->addMinute()),
+            ReviewQuery::grantedBy($actor, ReviewScope::everywhere()),
+            ReviewQuery::unused(ReviewScope::everywhere(), new Carbon('2029-01-01 00:00:00', 'UTC')),
+        ];
+
+        foreach ($queries as $query) {
+            $result = self::trusted($query);
+
+            self::assertSame(['role_grant ann [responder] responder', 'role_grant ann [responder] responder (break-glass)'], self::described($result));
+            self::assertSame(['activation', 'justification'], \array_keys($result->rows[1]->breakGlass ?? []));
+            self::assertStringNotContainsString(self::NOTE, (string) \json_encode($result->rows[1]->toArray()));
+            self::assertSame(self::described($result), \array_map(self::describe(...), self::pagedThrough($query, 1)['rows']));
         }
     }
 

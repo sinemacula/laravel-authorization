@@ -27,7 +27,10 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  * the grantee and as `via_identity`; a sibling principal's never are. In
  * identity mode they are the identity's and those of every principal the
  * identity directory lists, each row naming its actual grantee, and the review
- * is incomplete when the directory says its list may leave one out.
+ * is incomplete when the directory says its list may leave one out. The roles
+ * granted are read with the break-glass activations not ended or expired (see
+ * `GrantRows::held()`), but for an identity's in principal mode, since an
+ * activation never reaches a principal through its identity.
  *
  * One subject's grants are read whole, then sorted into the review's order: in
  * a fixed number of queries for a principal, and for an identity a chunk of its
@@ -93,6 +96,7 @@ final class HoldingRoutes
     private static function throughRoles(ReviewRun $run, RowCollector $rows, Reference $subject, array $grantees, ?Reference $via): void
     {
         $grants = self::grantsOf($run, GrantTarget::ROLE, $grantees);
+        $grants = \array_values(\array_filter($grants, static fn (GrantRow $grant): bool => $grant->breakGlass === null || !self::isThrough($grant, $via)));
         $chains = RoleChains::above($run, \array_values(\array_unique(\array_map(static fn (GrantRow $grant): string => $grant->targetId, $grants))));
         $roles  = \array_values(\array_unique(\array_merge([], ...\array_values($chains))));
 
@@ -144,10 +148,10 @@ final class HoldingRoutes
     }
 
     /**
-     * Return the grantees' live grants of the kind in the review's scope, of
-     * definitions the reviewed tenant sees, a policy's only where an inline
-     * policy is attached to its own grantee, read a chunk of the grantees at a
-     * time.
+     * Return the grantees' live grants of the kind in the review's scope, with
+     * their activations for roles, of definitions the reviewed tenant sees, a
+     * policy's only where an inline policy is attached to its own grantee, read
+     * a chunk of the grantees at a time.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
@@ -159,7 +163,8 @@ final class HoldingRoutes
         $table = $kind->table();
 
         return GrantRows::allOf($grantees, static function (array $chunk) use ($run, $kind, $table): Builder {
-            $query = $run->visible(GrantRows::grantedTo($run->live($run->constrain(GrantRows::of($kind), $table), $table), $table, $chunk), $kind, $table . '.' . $kind->column());
+            $held  = $run->live($run->constrain(GrantRows::held($run, $kind), $table), $table);
+            $query = $run->visible(GrantRows::grantedTo($held, $table, $chunk), $kind, $table . '.' . $kind->column());
 
             return $kind === GrantTarget::POLICY ? InlinePolicies::attachedToTheirGrantee($query, $table) : $query;
         }, $kind->value);

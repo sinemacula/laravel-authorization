@@ -12,15 +12,19 @@ use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
+use SineMacula\Laravel\Authorization\Reviews\Enums\GrantState;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
+use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Reviews\Support\HolderRoutes;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ReviewsAccess;
+use Tests\Feature\Stubs\StubMachine;
 use Tests\TestCase;
 
 /**
@@ -40,7 +44,7 @@ use Tests\TestCase;
 #[CoversClass(HolderRoutes::class)]
 final class HolderRoutesTest extends TestCase
 {
-    use ReviewsAccess;
+    use ActivatesBreakGlass, ReviewsAccess;
 
     /**
      * A role is held by its grantees directly, and by the grantees of every
@@ -67,6 +71,81 @@ final class HolderRoutesTest extends TestCase
         ], self::described(self::trusted(ReviewQuery::holders($admin, ReviewScope::everywhere()))));
 
         self::assertSame(['role_grant ann [admin] admin'], self::described(self::trusted(ReviewQuery::holders($admin, ReviewScope::everywhere(), true))));
+    }
+
+    /**
+     * A break-glass activation not ended or expired holds its role, whether
+     * break-glass is enabled or not, as a row of its own beside a grant of the
+     * same role, a machine's too, and so the roles above it and what they
+     * carry; it shows its key, justification code, expiry and granter, never
+     * its note, and pages as the grants do. One naming half a tenant is listed
+     * as malformed, as such a grant is.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActivationHoldsItsRoleBesideAGrant(): void
+    {
+        $admin  = self::role('admin');
+        $editor = self::role('editor', $admin);
+        $ann    = self::identity('ann');
+        $policy = self::policy('audit');
+
+        $admin->givePermissionTo(self::permission('posts:edit'));
+        self::grants()->attachPolicy($admin, $policy);
+        self::grants()->grantRole($ann, $editor);
+
+        $live = self::activate($ann, $editor, ['granted_by_type' => 'admin', 'granted_by_id' => '1']);
+
+        self::activate(self::identity('bob'), $editor, ['ended_at' => Carbon::now()]);
+        self::activate(self::identity('cat'), $editor, ['expires_at' => Carbon::now()->subSecond()]);
+        self::activate(StubMachine::query()->create(['id' => 'robot']), $editor);
+        self::switchBreakGlass(false);
+
+        $held = self::trusted(ReviewQuery::holders($editor, ReviewScope::everywhere()));
+
+        self::assertSame(
+            ['role_grant ann [editor] editor', 'role_grant ann [editor] editor (break-glass)', 'role_grant robot [editor] editor (break-glass)'],
+            self::described($held),
+        );
+        self::assertSame([
+            'role_inherited ann [editor>admin] admin',
+            'role_inherited ann [editor>admin] admin (break-glass)',
+            'role_inherited robot [editor>admin] admin (break-glass)',
+        ], self::described(self::trusted(ReviewQuery::holders($admin, ReviewScope::everywhere()))));
+        self::assertSame([
+            'role_permission ann [editor>admin] posts:edit',
+            'role_permission ann [editor>admin] posts:edit (break-glass)',
+            'role_permission robot [editor>admin] posts:edit (break-glass)',
+        ], self::described(self::trusted(ReviewQuery::holders(self::named('posts:edit'), ReviewScope::everywhere()))));
+        self::assertSame([
+            'role_policy ann [editor>admin] audit',
+            'role_policy ann [editor>admin] audit (break-glass)',
+            'role_policy robot [editor>admin] audit (break-glass)',
+        ], self::described(self::trusted(ReviewQuery::holders($policy, ReviewScope::everywhere()))));
+
+        $row = $held->rows[1]->toArray();
+
+        self::assertSame(['activation' => $live->id, 'justification' => 'incident'], $row['break_glass']);
+        self::assertSame([$live->expires_at->utc()->format('Y-m-d\TH:i:s\Z'), ['type' => 'admin', 'id' => '1']], [$row['expires_at'], $row['granted_by']]);
+        self::assertStringNotContainsString(self::NOTE, (string) \json_encode(\array_map(static fn ($row): array => $row->toArray(), $held->rows)));
+
+        self::activate(self::identity('dan'), $editor, ['tenant_type' => 'tenant']);
+
+        $rows = self::trusted(ReviewQuery::holders($editor, ReviewScope::everywhere()))->rows;
+        $half = \array_values(\array_filter($rows, static fn (ReviewRow $row): bool => $row->subject->id === 'dan'));
+
+        self::assertCount(4, $rows);
+        self::assertSame([GrantState::MALFORMED, true], [$half[0]->grantState, $half[0]->breakGlass !== null]);
+
+        self::keyCursors();
+
+        foreach ([$editor, $admin, self::named('posts:edit'), $policy] as $target) {
+            $query = ReviewQuery::holders($target, ReviewScope::everywhere());
+
+            self::assertSame(self::described(self::trusted($query)), \array_map(self::describe(...), self::pagedThrough($query, 1)['rows']));
+        }
     }
 
     /**

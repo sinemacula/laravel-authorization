@@ -123,7 +123,6 @@ final class BlockChecksTest extends TestCase
             self::pathsAndCodes($this->check(['break_glass' => ['max_minutes' => '30', 'roles' => ['responder' => ['max_minutes' => 30]], 'justifications' => ['incident']]])),
         );
         self::assertSame([
-            ["{$path}.enabled", 'invalid_value'],
             ["{$path}.roles.responder", 'invalid_type'],
             ["{$path}.roles.auditor.max_minutes", 'out_of_range'],
             ["{$path}.roles.on call", 'invalid_value'],
@@ -143,9 +142,10 @@ final class BlockChecksTest extends TestCase
             self::pathsAndCodes($this->check(['break_glass' => ['max_minutes' => '1h', 'roles' => ['responder' => 5], 'justifications' => [], 'enabled' => false]])),
         );
         self::assertSame(
-            [["{$path}.enabled", 'invalid_value'], ["{$path}.justifications", 'invalid_value']],
+            [["{$path}.justifications", 'invalid_value']],
             self::pathsAndCodes($this->check(['break_glass' => ['enabled' => true]])),
         );
+        self::assertSame([], self::pathsAndCodes($this->check(['break_glass' => ['enabled' => true, 'justifications' => ['incident']]])));
         self::assertSame(
             [["{$path}.enabled", 'invalid_type'], ["{$path}.roles", 'invalid_type']],
             self::pathsAndCodes($this->check(['break_glass' => ['enabled' => 1, 'roles' => 'responder']])),

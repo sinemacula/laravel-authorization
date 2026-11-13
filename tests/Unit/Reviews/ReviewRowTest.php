@@ -194,6 +194,45 @@ final class ReviewRowTest extends TestCase
     }
 
     /**
+     * A route starting from a break-glass activation shows its key and
+     * justification code under `break_glass`, before what gives the action, and
+     * keeps them when given its subject's state, its use and what gives the
+     * action; any other row has no such key at all.
+     *
+     * @return void
+     */
+    public function testARouteFromAnActivationShowsIt(): void
+    {
+        $row        = self::row();
+        $breakGlass = ['activation' => 'a1', 'justification' => 'incident'];
+        $evidence   = new ActionEvidence('posts:edit', EvidenceKind::PERMISSION, PolicyEffect::ALLOW, new OriginScope(null, null, null, true));
+        $activated  = new ReviewRow(
+            $row->rowKey,
+            $row->subject,
+            $row->grantee,
+            $row->target,
+            $row->sourceKind,
+            $row->sourceKey,
+            $row->originScope,
+            $row->viaIdentity,
+            $row->rolePath,
+            $row->supportingGrants,
+            $row->times,
+            $row->grantedBy,
+            $row->grantState,
+            breakGlass: $breakGlass,
+        );
+        $given = $activated->withSubjectState(SubjectState::ACTIVE)->withUsage(RowUsage::unknown())->withEvidence($evidence);
+        $shape = $given->toArray();
+
+        self::assertArrayNotHasKey('break_glass', $row->toArray());
+        self::assertSame($breakGlass, $activated->toArray()['break_glass']);
+        self::assertSame('break_glass', \array_key_last($activated->toArray()));
+        self::assertSame($breakGlass, $given->breakGlass);
+        self::assertSame(['break_glass', 'action_evidence'], \array_slice(\array_keys($shape), -2));
+    }
+
+    /**
      * Return a row with every field set.
      *
      * @return \SineMacula\Laravel\Authorization\Reviews\ReviewRow
