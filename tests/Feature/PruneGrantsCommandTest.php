@@ -9,10 +9,12 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\PruneGrantsCommand;
+use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -27,9 +29,12 @@ use Tests\TestCase;
 #[CoversClass(PruneGrantsCommand::class)]
 final class PruneGrantsCommandTest extends TestCase
 {
+    use ActivatesBreakGlass;
+
     /** @var string What the command reports it removed, after its verb. */
     private const string SUMMARY = '1 expired grant(s), 1 grant(s) of grantees that no longer exist, 1 boundar(ies) of grantees that no longer exist,'
-        . ' 1 inline polic(ies) of grantees that no longer exist and 1 resource polic(ies) attached to records that no longer exist.';
+        . ' 1 inline polic(ies) of grantees that no longer exist and 1 resource polic(ies) attached to records that no longer exist;'
+        . ' %s the expiry of 1 break-glass activation(s).';
 
     /**
      * Reset the clock.
@@ -61,7 +66,8 @@ final class PruneGrantsCommandTest extends TestCase
      * The command removes expired grants, the grants, boundaries and inline
      * policies of grantees that are gone, and the resource policies of records
      * that are gone, and says how many, counting the boundaries apart from the
-     * grants; pretending says how many it would remove.
+     * grants, and records the expiry of an activation that expired without
+     * ending; pretending says how many it would remove and record.
      *
      * @return void
      */
@@ -69,7 +75,10 @@ final class PruneGrantsCommandTest extends TestCase
     {
         Carbon::setTestNow('2026-07-01 12:00:00');
 
-        StubIdentity::create(['id' => 'user-1'])->assignRole(Role::create(['name' => 'editor']), Carbon::parse('2026-07-01 11:00:00'));
+        $user = StubIdentity::create(['id' => 'user-1'])->assignRole(Role::create(['name' => 'editor']), Carbon::parse('2026-07-01 11:00:00'));
+
+        self::activate($user, self::emergencyRole(), ['expires_at' => Carbon::parse('2026-07-01 11:30:00')]);
+
         $gone = StubIdentity::create(['id' => 'user-2'])->assignRole(Role::create(['name' => 'viewer']));
 
         $gone->createInlinePolicy('mine', ['version' => 1, 'statements' => []]);
@@ -79,11 +88,13 @@ final class PruneGrantsCommandTest extends TestCase
         DB::table('stub_identities')->where('id', 'user-2')->delete();
 
         self::assertSame(0, Artisan::call('authorization:prune', ['--pretend' => true]));
-        self::assertSame('Would prune ' . self::SUMMARY . "\n", Artisan::output());
+        self::assertSame('Would prune ' . \sprintf(self::SUMMARY, 'would record') . "\n", Artisan::output());
         self::assertSame(2, DB::table('authorizable_roles')->count());
+        self::assertNull(BreakGlassActivation::query()->value('ended_at'));
 
         self::assertSame(0, Artisan::call('authorization:prune', ['--chunk' => '1']));
-        self::assertSame('Pruned ' . self::SUMMARY . "\n", Artisan::output());
+        self::assertSame('Pruned ' . \sprintf(self::SUMMARY, 'recorded') . "\n", Artisan::output());
+        self::assertSame(['expired'], BreakGlassActivation::query()->pluck('end_reason')->all());
         self::assertSame(0, DB::table('authorizable_roles')->count());
         self::assertSame(0, DB::table('resource_policies')->count());
         self::assertSame(0, DB::table('authorizable_boundaries')->count());

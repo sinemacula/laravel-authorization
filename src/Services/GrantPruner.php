@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
+use SineMacula\Laravel\Authorization\Services\Support\ExpiredActivations;
 use SineMacula\Laravel\Authorization\Services\Support\ExpiredSweep;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
@@ -42,6 +43,10 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  * grantee still exists and keeps its grants and its boundaries. A grantee type
  * that names no model class is skipped and reported, so a missing morph map
  * entry never removes grants or boundaries.
+ *
+ * A break-glass activation that expired without ending is never removed: its
+ * expiry is recorded on its row and reported with `BreakGlassExpired` (see
+ * `ExpiredActivations`).
  *
  * The inline policies of a grantee that no longer exists are deleted too, each
  * through the model so it is reported as deleted and its attachments go with it
@@ -105,9 +110,11 @@ final readonly class GrantPruner
     ) {}
 
     /**
-     * Remove the expired grants, the boundaries, grants and inline policies of
-     * grantees that no longer exist, and the resource policy attachments of
-     * records that no longer exist, or, pretending, only count them.
+     * Remove the expired grants, record the expiry of the break-glass
+     * activations that expired without ending, remove the boundaries, grants
+     * and inline policies of grantees that no longer exist, and the resource
+     * policy attachments of records that no longer exist, or, pretending, only
+     * count them.
      *
      * @param  int  $chunk
      * @param  bool  $pretend
@@ -119,7 +126,8 @@ final readonly class GrantPruner
     {
         PackageState::guardCurrent();
 
-        $expired = self::removeExpired($chunk, $pretend);
+        $expired     = self::removeExpired($chunk, $pretend);
+        $activations = ExpiredActivations::record($chunk, $pretend);
 
         [$orphans, $unresolved]  = self::orphans($chunk);
         [$orphaned, $boundaries] = $this->removeOrphaned($orphans, $pretend);
@@ -138,7 +146,7 @@ final readonly class GrantPruner
             $attachments += $pretend ? self::countAttachments($record) : $this->resourcePolicies->detachAll(ResourceReference::record($record->type, $record->id));
         }
 
-        return new PruneResult($expired, $orphaned, $inline, \array_values($unresolved + $unowned), $attachments, \array_values($unplaced), $boundaries);
+        return new PruneResult($expired, $orphaned, $inline, \array_values($unresolved + $unowned), $activations, $attachments, \array_values($unplaced), $boundaries);
     }
 
     /**

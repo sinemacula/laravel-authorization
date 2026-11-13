@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Services;
 
 /**
- * What `GrantPruner::prune()` removed, or, pretending, would remove.
+ * What `GrantPruner::prune()` removed or recorded, or, pretending, would.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -19,6 +19,7 @@ final readonly class PruneResult
      * @param  int  $orphaned
      * @param  int  $inlinePolicies
      * @param  list<string>  $unresolvedTypes
+     * @param  int  $activations
      * @param  int  $resourcePolicies
      * @param  list<string>  $unresolvedResourceTypes
      * @param  int  $boundaries
@@ -36,6 +37,9 @@ final readonly class PruneResult
 
         /** The grantee types that name no model class, whose grants, boundaries and inline policies were left. */
         public array $unresolvedTypes,
+
+        /** The break-glass activations whose expiry was recorded, each kept. */
+        public int $activations,
 
         /** The resource policy attachments removed because the record they are attached to no longer exists. */
         public int $resourcePolicies = 0,
