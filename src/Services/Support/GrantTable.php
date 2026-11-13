@@ -336,17 +336,17 @@ final readonly class GrantTable extends ExpiringGrants
     }
 
     /**
-     * Read the expiry of the row in the scope under a row lock.
+     * Read the expiry and the reach of the row in the scope under a row lock.
      *
      * @param  string  $id
-     * @return \Illuminate\Support\Carbon|null
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
      */
     #[\Override]
-    protected function lockedExpiry(string $id): ?Carbon
+    protected function lockedRow(string $id): GrantChange
     {
-        $row = $this->inScope()->where($this->column, $id)->lockForUpdate()->sole(['expires_at']);
+        $row = $this->inScope()->where($this->column, $id)->lockForUpdate()->sole(['expires_at', 'include_subtree']);
 
-        return UtcDateTime::toUtc($row->expires_at);
+        return new GrantChange(GrantOutcome::UNCHANGED, UtcDateTime::toUtc($row->expires_at), (bool) $row->include_subtree);
     }
 
     /**
@@ -380,27 +380,13 @@ final readonly class GrantTable extends ExpiringGrants
      */
     private function withReach(string $id, GrantChange $change): GrantChange
     {
-        if ($change->outcome !== GrantOutcome::UNCHANGED || $this->reachesBelow($id) === $this->includeSubtree) {
+        if ($change->outcome !== GrantOutcome::UNCHANGED || $change->previousReach === $this->includeSubtree) {
             return $change;
         }
 
         $this->writeExpiry($id, $change->previousExpiresAt);
 
         return new GrantChange(GrantOutcome::REACH_CHANGED, $change->previousExpiresAt);
-    }
-
-    /**
-     * Determine whether the held row in the scope reaches the tenants below its
-     * tenant.
-     *
-     * @param  string  $id
-     * @return bool
-     */
-    private function reachesBelow(string $id): bool
-    {
-        // A locking read, as the expiry's: on MySQL a plain read would see the
-        // transaction's snapshot rather than the row it has just locked.
-        return (bool) $this->inScope()->where($this->column, $id)->lockForUpdate()->value('include_subtree');
     }
 
     /**

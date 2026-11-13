@@ -42,8 +42,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * (AUTHZ-11.3) run before any lock the package takes for it, never under the
  * locks of the rows already imported. The grants are therefore not one atomic
  * write: a grant that fails, or that a hook refuses, stops the import, and the
- * roles, permissions and grants written before it stay. Run the command outside
- * any transaction of your own, so each grant's own transaction is the outermost
+ * roles, permissions and grants written before it stay; so does a grant that
+ * would leave someone holding both roles of a pair already declared, refused
+ * with `RoleExclusionConflictException`. Run the command outside any
+ * transaction of your own, so each grant's own transaction is the outermost
  * one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

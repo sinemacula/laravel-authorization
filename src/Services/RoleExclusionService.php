@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
 use SineMacula\Laravel\Authorization\Exclusions\ConflictReport;
 use SineMacula\Laravel\Authorization\Exclusions\RoleExclusion;
 use SineMacula\Laravel\Authorization\Exclusions\Support\ConflictReader;
+use SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionGuard;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Reviews\Support\Definitions;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -59,10 +60,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * and nothing is written or removed: an administrator resolves each conflict,
  * by revoking a grant or narrowing its reach, then declares the pair again. The
  * report is read under the locks the declaration writes under, both roles' rows
- * locked first, so a delegated grant of either, whose concurrency protocol
+ * locked first, then every role below them, so a grant of any of them, which
  * locks the role it grants, waits for it, and each row it reads is read under a
  * lock, so it is the row as last committed whatever snapshot the transaction
- * reads.
+ * reads. Once declared, every grant, re-parenting and break-glass activation is
+ * weighed against the pair (see `Exclusions\Support\ExclusionGuard`).
  *
  * Each write takes the acting context making the call as `$actor`: null for
  * trusted system work (N75), else a delegated change (AUTHZ-11.1), decided as
@@ -270,7 +272,8 @@ final readonly class RoleExclusionService
     /**
      * Declare the pair, owned by the tenant given or the platform, unless
      * someone holds both its roles where their reach overlaps, which refuses it
-     * with the conflict report, and return what changed.
+     * with the conflict report, read once every role below the pair's is
+     * locked, and return what changed.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Services\Support\RoleExclusionTable  $table
@@ -284,6 +287,8 @@ final readonly class RoleExclusionService
      */
     private function declared(Operation $operation, RoleExclusionTable $table, ExclusionPair $pair, ?Reference $owner): GrantOutcome
     {
+        ExclusionGuard::lockBelow([$pair->first->id, $pair->second->id]);
+
         $report = $this->reader()->read([$pair->references()], true)[0];
 
         if (!$report->isEmpty()) {

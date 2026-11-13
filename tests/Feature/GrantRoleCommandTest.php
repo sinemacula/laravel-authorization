@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Console\GrantRoleCommand;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\RoleExclusionService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -360,6 +361,34 @@ final class GrantRoleCommandTest extends TestCase
         self::assertSame(0, $exitCode);
         self::assertSame("{$identity} already holds role 'editor'.", \trim(Artisan::output()));
         Event::assertNotDispatched(RoleAssigned::class);
+    }
+
+    /**
+     * A grant that would hold both roles of a declared pair fails with the
+     * refusal's message and writes nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testFailsOnAGrantHoldingBothRolesOfAPair(): void
+    {
+        $clerk   = Role::query()->create(['name' => 'clerk', 'guard' => 'web']);
+        $auditor = Role::query()->create(['name' => 'auditor', 'guard' => 'web']);
+        $user    = StubIdentity::create(['id' => 'a1a1a1a1-0000-0000-0000-000000000003']);
+
+        $user->assignRole($clerk);
+
+        RoleExclusionService::instance()?->declare($clerk, $auditor);
+
+        $exitCode = Artisan::call('authorization:grant', ['identity' => StubIdentity::class . ':' . $user->id, 'role' => 'auditor']);
+
+        self::assertSame(1, $exitCode);
+        self::assertSame(
+            'Roles \'clerk\' and \'auditor\' are mutually exclusive: the write would leave 1 holder holding both where their reach overlaps.',
+            \trim(Artisan::output()),
+        );
+        self::assertSame(0, DB::table('authorizable_roles')->where('role_id', $auditor->id)->count());
     }
 
     /**

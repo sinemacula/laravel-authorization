@@ -43,6 +43,7 @@ use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
+use SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException;
 use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -54,6 +55,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\RoleExclusionService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Services\SyncResult;
@@ -163,6 +165,40 @@ final class GrantServiceTest extends TestCase
         Event::assertDispatchedTimes(RoleAssigned::class, 1);
         Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => self::refersTo($event->grantee, $user) && self::refersTo($event->role, $role));
         Event::assertNotDispatched(RoleExpiryChanged::class);
+    }
+
+    /**
+     * A role grant that would hold both roles of a declared pair is refused
+     * once it is written, after its grant hook ran, leaving no row and
+     * dispatching nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleGrantHoldingBothRolesOfAPairIsRefused(): void
+    {
+        $this->closureTree();
+
+        [, [$principal]] = $this->principals();
+
+        $clerk   = self::role('clerk');
+        $auditor = self::role('auditor');
+
+        self::service()->grantRole($principal, $clerk, tenant: self::tenant('acct1'));
+
+        RoleExclusionService::instance()?->declare($clerk, $auditor);
+
+        $hook = $this->hook();
+
+        Event::fake([RoleAssigned::class]);
+
+        $refusal = self::refusalOf(static fn () => self::service()->grantRole($principal, $auditor, tenant: self::tenant('org1')));
+
+        self::assertInstanceOf(RoleExclusionConflictException::class, $refusal);
+        self::assertCount(1, $hook->widenings);
+        self::assertSame(0, DB::table('authorizable_roles')->where('role_id', $auditor->id)->count());
+        Event::assertNotDispatched(RoleAssigned::class);
     }
 
     /**

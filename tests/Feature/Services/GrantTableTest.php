@@ -165,6 +165,24 @@ final class GrantTableTest extends TestCase
     }
 
     /**
+     * A rewritten expiry reports the reach the row had before it was written
+     * with the writer's.
+     *
+     * @return void
+     */
+    public function testARewriteReportsTheReachTheRowHad(): void
+    {
+        $role  = self::role();
+        $other = self::role('viewer');
+
+        self::table(tenant: self::tenant(), includeSubtree: false)->grant($role->id, null);
+        self::table(tenant: self::tenant())->grant($other->id, null);
+
+        self::assertFalse(self::table(tenant: self::tenant())->grant($role->id, Carbon::parse('2026-07-02 12:00:00'))->previousReach);
+        self::assertTrue(self::table(tenant: self::tenant())->grant($other->id, Carbon::parse('2026-07-02 12:00:00'))->previousReach);
+    }
+
+    /**
      * The reach of each held row in the scope is read by key, and a row in
      * another scope or not held is left out.
      *
@@ -484,7 +502,7 @@ final class GrantTableTest extends TestCase
     }
 
     /**
-     * A held grant's expiry, and then its reach, are read back under a row lock
+     * A held grant's expiry and reach are read back together under one row lock
      * on the grant table.
      *
      * @return void
@@ -498,12 +516,8 @@ final class GrantTableTest extends TestCase
 
         $locks = $this->recordRowLocks();
 
-        $table->grant($role->id, null);
-
-        self::assertSame([
-            ['authorizable_roles', ['stub_identity', 'user-1', $role->id]],
-            ['authorizable_roles', ['stub_identity', 'user-1', $role->id]],
-        ], $locks->getArrayCopy());
+        self::assertSame(GrantOutcome::UNCHANGED, $table->grant($role->id, null)->outcome);
+        self::assertSame([['authorizable_roles', ['stub_identity', 'user-1', $role->id]]], $locks->getArrayCopy());
     }
 
     /**

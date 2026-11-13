@@ -515,7 +515,8 @@ final class RoleServiceTest extends TestCase
 
     /**
      * Setting a parent locks the role and the parent first, in key order, and
-     * outside the tenant scope.
+     * outside the tenant scope, before the cycle walk and the pairs' check walk
+     * up from the parent.
      *
      * @return void
      */
@@ -533,7 +534,7 @@ final class RoleServiceTest extends TestCase
 
         self::service()->setParent($role, $parent);
 
-        self::assertSame([['roles', $ids], ['roles', [$parent->id]]], $locks->getArrayCopy());
+        self::assertSame([['roles', $ids], ['roles', [$parent->id]], ['roles', [$parent->id]]], self::roleLocks($locks));
     }
 
     /**

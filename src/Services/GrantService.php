@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
+use SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionGuard;
 use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
 use SineMacula\Laravel\Authorization\Hooks\WideningPhase;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -147,6 +148,17 @@ use SineMacula\Laravel\Authorization\Support\RoleReach;
  * `TransactionConflictException`. A widening grant made inside another
  * management call's work is refused with `NestedGrantException`, and one whose
  * identity cannot be resolved with `UnresolvableRecipientException`.
+ *
+ * Once a role is granted, re-armed, widened below its tenant or given a later
+ * expiry, a sync's included, and before any event is dispatched, the call is
+ * weighed against the pairs of mutually exclusive roles touching its roles,
+ * read before it writes, trusted or delegated alike (AUTHZ-11.8, see
+ * `Exclusions\Support\ExclusionGuard`): a write that would leave someone
+ * holding both roles of a declared pair where their reach overlaps throws
+ * `RoleExclusionConflictException`, carrying the report of the conflicts it
+ * would create, and the call is rolled back. A delegated change is decided
+ * before it is weighed, so an actor not allowed it is refused as such, and the
+ * grant hook, which runs before any lock, has been called by then.
  *
  * A grantee is an identity or a role: a policy attached to a role applies to
  * whoever holds the role, within both grants' scopes, and to whoever holds a
@@ -543,7 +555,11 @@ final class GrantService
 
             $hooks->assertCovers(static fn (): array => [ProposedGrant::of($kind, $model, $scope, $expiresAt)]);
 
-            $change = GrantChanges::table($kind, $reference, $operation->actor, $scope)->grant(GrantChanges::key($model), $expiresAt);
+            $key    = GrantChanges::key($model);
+            $pairs  = ExclusionGuard::pairsFor($kind, [$key]);
+            $change = GrantChanges::table($kind, $reference, $operation->actor, $scope)->grant($key, $expiresAt);
+
+            ExclusionGuard::assertGranted($pairs, $reference, [[$key, $scope, $change, $expiresAt]]);
 
             OperationScope::dispatch(...$kind->changeEvents($operation, $reference, $model, $scope, $change, $expiresAt));
 

@@ -106,7 +106,7 @@ final class RoleExclusionQueryBudgetTest extends TestCase
 
         self::service()->declare($clerk, $auditor);
 
-        $this->holders(1, 5, $acting, $auditor);
+        self::stored(1, 5, $acting, $auditor);
 
         $one = self::queriesOf(static fn (): array => self::service()->conflictsForAll());
 
@@ -116,7 +116,7 @@ final class RoleExclusionQueryBudgetTest extends TestCase
         self::service()->declare($payer, $keeper);
         self::service()->declare($auditor, $payer);
 
-        $this->holders(6, 10, $acting, $auditor);
+        self::stored(6, 10, $acting, $auditor);
 
         $three = self::queriesOf(static fn (): array => self::service()->conflictsForAll());
 
@@ -170,6 +170,36 @@ final class RoleExclusionQueryBudgetTest extends TestCase
 
             app(GrantService::class)->grantRole($holder, $first, tenant: new Reference('org', 'parent'));
             app(GrantService::class)->grantRole($holder, $second, tenant: new Reference('org', 'child'));
+        }
+    }
+
+    /**
+     * Create the holders numbered from and to, each holding the first role at
+     * the parent tenant, reaching below it, and the second in the child, their
+     * grants written past the grant service, as grants made before a pair was
+     * declared are.
+     *
+     * @param  int  $from
+     * @param  int  $to
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $first
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $second
+     * @return void
+     */
+    private static function stored(int $from, int $to, Role $first, Role $second): void
+    {
+        foreach (\range($from, $to) as $number) {
+            $holder = StubIdentity::query()->create(['id' => 'holder-' . $number]);
+
+            foreach ([[$first, 'parent'], [$second, 'child']] as [$role, $tenant]) {
+                DB::table('authorizable_roles')->insert([
+                    'role_id'           => $role->id,
+                    'authorizable_type' => $holder->getMorphClass(),
+                    'authorizable_id'   => $holder->getKey(),
+                    'tenant_type'       => 'org',
+                    'tenant_id'         => $tenant,
+                    'include_subtree'   => true,
+                ]);
+            }
         }
     }
 

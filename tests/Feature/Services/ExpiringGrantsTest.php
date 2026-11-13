@@ -8,10 +8,14 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\ExpiringGrants;
+use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Services\Support\RolePermissionTable;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\TestCase;
 
 /**
@@ -115,7 +119,25 @@ final class ExpiringGrantsTest extends TestCase
         self::assertSame(GrantOutcome::EXPIRY_CHANGED, $forever->outcome);
         self::assertSame(GrantOutcome::EXPIRY_CHANGED, $dated->outcome);
         self::assertNull($dated->previousExpiresAt);
+        self::assertNull($dated->previousReach);
         self::assertSame(['2026-07-04 12:00:00'], self::expiries());
+    }
+
+    /**
+     * A write of a held row reports the reach its table read with the expiry,
+     * whether it rewrote the row or left it; a stored row reports none.
+     *
+     * @return void
+     */
+    public function testAWriteOfAHeldRowReportsTheReachItsTableRead(): void
+    {
+        $role  = Role::query()->create(['name' => 'editor']);
+        $table = GrantChanges::table(GrantTarget::ROLE, new Reference('user', '1'), null, new GrantScope(new Reference('tenant', 'a'), null, false));
+
+        self::assertNull($table->grant($role->id, Carbon::parse(self::NOW))->previousReach);
+        self::assertFalse($table->grant($role->id, null)->previousReach);
+        self::assertFalse($table->grant($role->id, null)->previousReach);
+        self::assertFalse($table->rearm($role->id, Carbon::parse(self::NOW)->addDay(), Carbon::parse(self::NOW))->previousReach);
     }
 
     /**

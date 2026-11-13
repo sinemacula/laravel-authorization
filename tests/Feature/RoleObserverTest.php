@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\ParentGuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
+use SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHasChildrenException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -25,6 +26,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\RoleExclusionService;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -33,6 +35,7 @@ use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\CustomRole;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -289,7 +292,8 @@ final class RoleObserverTest extends TestCase
     }
 
     /**
-     * The walk locks each ancestor it reads, in order up the chain.
+     * The walk locks each ancestor it reads, in order up the chain, and the
+     * pairs' check then walks the chain again under shared locks.
      *
      * @return void
      */
@@ -304,12 +308,12 @@ final class RoleObserverTest extends TestCase
         $role->parent_id = $parent->id;
         $role->save();
 
-        self::assertSame([['roles', [$parent->id]], ['roles', [$root->id]]], $locks->getArrayCopy());
+        self::assertSame([['roles', [$parent->id]], ['roles', [$root->id]], ['roles', [$parent->id]], ['roles', [$root->id]]], self::roleLocks($locks));
     }
 
     /**
      * A chain that names an ancestor no row answers, as a parent key written
-     * past the foreign key would, ends the walk there without an error.
+     * past the foreign key would, ends each walk there without an error.
      *
      * @return void
      */
@@ -322,7 +326,31 @@ final class RoleObserverTest extends TestCase
 
         (new RoleObserver)->saving($role);
 
-        self::assertSame([['roles', ['00000000-0000-4000-8000-000000000000']]], $locks->getArrayCopy());
+        self::assertSame([['roles', ['00000000-0000-4000-8000-000000000000']], ['roles', ['00000000-0000-4000-8000-000000000000']]], self::roleLocks($locks));
+    }
+
+    /**
+     * A parent that would let a holder of the role hold both roles of a
+     * declared pair is refused before the role is saved.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAParentThatWouldHoldBothRolesOfAPairIsRefused(): void
+    {
+        $clerk   = Role::query()->create(['name' => 'clerk']);
+        $auditor = Role::query()->create(['name' => 'auditor']);
+        $intern  = Role::query()->create(['name' => 'intern']);
+        $user    = StubIdentity::query()->create(['id' => 'user']);
+
+        GrantService::instance()?->grantRole($user, $clerk);
+        GrantService::instance()?->grantRole($user, $intern);
+        RoleExclusionService::instance()?->declare($clerk, $auditor);
+
+        $intern->parent_id = $auditor->id;
+
+        self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf(static fn () => (new RoleObserver)->saving($intern)));
     }
 
     /**

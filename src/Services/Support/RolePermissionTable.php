@@ -9,6 +9,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
+use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
@@ -68,12 +69,12 @@ final readonly class RolePermissionTable extends ExpiringGrants
      * Read the expiry of the role's grant of the permission under a row lock.
      *
      * @param  string  $id
-     * @return \Illuminate\Support\Carbon|null
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
      */
     #[\Override]
-    protected function lockedExpiry(string $id): ?Carbon
+    protected function lockedRow(string $id): GrantChange
     {
-        return UtcDateTime::toUtc($this->row($id)->lockForUpdate()->sole(['expires_at'])->expires_at);
+        return new GrantChange(GrantOutcome::UNCHANGED, UtcDateTime::toUtc($this->row($id)->lockForUpdate()->sole(['expires_at'])->expires_at));
     }
 
     /**

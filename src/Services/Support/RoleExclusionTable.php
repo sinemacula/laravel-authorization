@@ -8,11 +8,14 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
+use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exclusions\RoleExclusion;
+use SineMacula\Laravel\Authorization\Reviews\Support\Definitions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -166,6 +169,42 @@ final readonly class RoleExclusionTable
     }
 
     /**
+     * Return every pair naming one of the roles with the keys or, while the
+     * hierarchy is enabled, a role above one of them, which its holders hold
+     * too, ordered by their roles' keys; read only when the walk up the roles
+     * finds one (see `ancestry()`), locked for update in key order, so two
+     * writes that could together create a conflict for a pair queue on its row,
+     * and on MySQL they are the pairs as last committed.
+     *
+     * @param  string  $roleType
+     * @param  list<string>  $keys
+     * @return list<\SineMacula\Laravel\Authorization\Exclusions\RoleExclusion>
+     */
+    public function touching(string $roleType, array $keys): array
+    {
+        [$roles, $isPaired] = $this->ancestry($keys);
+
+        if (!$isPaired) {
+            return [];
+        }
+
+        $query = $this->connection->table($this->table)
+            ->useWritePdo()
+            ->where(static fn (Builder $named): Builder => $named->whereIn('role_id', $roles)->orWhereIn('excluded_role_id', $roles))
+            ->orderBy('role_id')
+            ->orderBy('excluded_role_id')
+            ->lockForUpdate();
+
+        $pairs = [];
+
+        foreach ($query->get() as $row) {
+            $pairs[] = self::exclusionOf((array) $row, $roleType);
+        }
+
+        return $pairs;
+    }
+
+    /**
      * Return the pair a row holds, its roles of the type given.
      *
      * @param  array<string, mixed>  $columns
@@ -203,5 +242,56 @@ final readonly class RoleExclusionTable
     private function pair(string $role, string $excluded): Builder
     {
         return $this->connection->table($this->table)->where('role_id', $role)->where('excluded_role_id', $excluded);
+    }
+
+    /**
+     * Return the keys of the roles and, while the hierarchy is enabled, of
+     * every role above them, and whether a pair names any of them, in one read
+     * of each level up the chains outside the tenant scope: the roles under a
+     * shared lock, so on MySQL each parent is the one last committed rather
+     * than the transaction's snapshot's, and the first pair naming each, in key
+     * order, under a lock for update, never a shared one, which a write could
+     * not then take for update without deadlocking another.
+     *
+     * @param  list<string>  $keys
+     * @return array{0: list<string>, 1: bool}
+     */
+    private function ancestry(array $keys): array
+    {
+        [$table, $key] = Definitions::tableOf(GrantTarget::ROLE);
+
+        $exclusions = $this->table;
+        $role       = $table . '.' . $key;
+        $hierarchy  = SwitchConfigValidator::isEnabled('hierarchy');
+        $paired     = $this->connection->table($exclusions)
+            ->selectRaw('1')
+            ->where(static fn (Builder $pair): Builder => $pair->whereColumn($exclusions . '.role_id', $role)->orWhereColumn($exclusions . '.excluded_role_id', $role))
+            ->orderBy($exclusions . '.role_id')
+            ->orderBy($exclusions . '.excluded_role_id')
+            ->limit(1)
+            ->lockForUpdate();
+        $read     = [];
+        $isPaired = false;
+
+        while ($keys !== []) {
+            $rows = $this->connection->table($table)->useWritePdo()->whereIn($key, $keys)->select('parent_id')->selectSub($paired, 'paired')->sharedLock()->get();
+            $read = [...$read, ...$keys];
+            $keys = [];
+
+            foreach ($rows as $row) {
+                /** @var array{parent_id: int|string|null, paired: mixed} $columns */
+                $columns  = (array) $row;
+                $isPaired = $isPaired || $columns['paired'] !== null;
+                $parent   = $columns['parent_id'];
+
+                if (!$hierarchy || $parent === null || \in_array((string) $parent, $read, true)) {
+                    continue;
+                }
+
+                $keys[] = (string) $parent;
+            }
+        }
+
+        return [$read, $isPaired];
     }
 }

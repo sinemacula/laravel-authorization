@@ -27,6 +27,11 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
  * carries the actor in its event, and its row records it. Without it the grant
  * is trusted system work and records no actor (N75).
  *
+ * A grant that would leave the identity, or a principal of it, holding both
+ * roles of a declared pair where their reach overlaps is refused, trusted or
+ * not: the command writes the refusal's message and fails, as for any other
+ * refusal, and nothing is written.
+ *
  * The role name is looked up within the tenant scope, like any other query: a
  * tenant-owned role is found only when the application's subject resolver
  * resolves its tenant in the console, and then ranks before a platform-wide

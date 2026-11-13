@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Services\Support;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
+use SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionGuard;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -137,7 +138,10 @@ final readonly class SyncPlan
      * each in the scope written and a changed reach with the expiry kept, and
      * the keys of each outcome, keyed by outcome. A row decided as held live
      * (the keys given) that the write changes throws
-     * `DependencyChangedException`, so the call is tried again.
+     * `DependencyChangedException`, so the call is tried again. The pairs of
+     * mutually exclusive roles touching the targets are read before the first
+     * is written, and once every target is written the roles granted, re-armed
+     * or widened are weighed against them (see `ExclusionGuard`).
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
@@ -147,11 +151,16 @@ final readonly class SyncPlan
      * @return array{list<\SineMacula\Laravel\Authorization\Contracts\IdentityEvent>, array<string, list<string>>}
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     * @throws \UnexpectedValueException
      */
     public function write(Operation $operation, Reference $grantee, ?\DateTimeInterface $expiresAt, Carbon $now, array $live): array
     {
         $events  = [];
         $changed = [];
+        $written = [];
+        $pairs   = ExclusionGuard::pairsFor($this->kind, \array_keys($this->keep));
 
         foreach ($this->keep as $model) {
             $id     = GrantChanges::key($model);
@@ -165,7 +174,10 @@ final readonly class SyncPlan
             }
 
             $changed[$change->outcome->value][] = $id;
+            $written[]                          = [$id, $this->scopeOf($id), $change, $change->expiryAfter($expiresAt)];
         }
+
+        ExclusionGuard::assertGranted($pairs, $grantee, $written);
 
         return [$events, $changed];
     }

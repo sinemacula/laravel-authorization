@@ -12,13 +12,16 @@ use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
+use SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Services\Support\GrantTable;
+use SineMacula\Laravel\Authorization\Services\Support\RoleExclusionTable;
 use SineMacula\Laravel\Authorization\Services\Support\SyncPlan;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\CatchesRefusals;
 use Tests\TestCase;
 
 /**
@@ -35,6 +38,8 @@ use Tests\TestCase;
 #[CoversClass(SyncPlan::class)]
 final class SyncPlanTest extends TestCase
 {
+    use CatchesRefusals;
+
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
 
@@ -208,6 +213,36 @@ final class SyncPlanTest extends TestCase
         $this->expectException(DependencyChangedException::class);
 
         $moved->write(Operation::begin(), self::grantee(), null, Carbon::now('UTC'), [$role->id]);
+    }
+
+    /**
+     * Once every kept key is written, the roles granted are weighed against the
+     * pairs of mutually exclusive roles: a plan granting both roles of a
+     * declared pair is refused, and one leaving both as they are held, here as
+     * the refused write left them outside any transaction, is not.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheRolesWrittenAreWeighedAgainstThePairs(): void
+    {
+        [$clerk, $auditor] = [self::role('clerk'), self::role('auditor')];
+
+        $written = new GrantScope(self::tenant());
+        $pair    = [$clerk->id, $auditor->id];
+
+        \sort($pair);
+
+        RoleExclusionTable::of()->declare($pair[0], $pair[1], null);
+
+        $plan = new SyncPlan(GrantTarget::ROLE, $written, self::table($written), [$clerk->id => $clerk, $auditor->id => $auditor]);
+
+        $write = static fn (): array => $plan->write(Operation::begin(), self::grantee(), null, Carbon::now('UTC'), []);
+
+        self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf($write));
+
+        self::assertSame([[], ['unchanged' => [$clerk->id, $auditor->id]]], $write());
     }
 
     /**

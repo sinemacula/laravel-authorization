@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\RoleExclusionTable;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\RecordsRowLocks;
+use Tests\Fixtures\LockModeRecordingGrammar;
 use Tests\TestCase;
 
 /**
@@ -188,6 +189,94 @@ final class RoleExclusionTableTest extends TestCase
     }
 
     /**
+     * The pairs touching roles are those naming one of them or, while the
+     * hierarchy is enabled, a role above one, read under a shared lock in the
+     * pairs' order; a pair naming only roles below or beside them is left out.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testListsThePairsTouchingRolesOrTheRolesAboveThem(): void
+    {
+        $top    = Role::query()->create(['name' => 'top']);
+        $middle = Role::query()->create(['name' => 'middle', 'parent_id' => $top->id]);
+        $bottom = Role::query()->create(['name' => 'bottom', 'parent_id' => $middle->id]);
+        $aside  = Role::query()->create(['name' => 'aside']);
+        $other  = Role::query()->create(['name' => 'other']);
+        $table  = RoleExclusionTable::of();
+        $pairs  = [[$top->id, $aside->id], [$bottom->id, $other->id], [$aside->id, $other->id], [$middle->id, $other->id]];
+
+        foreach ($pairs as $pair) {
+            \sort($pair);
+
+            $table->declare($pair[0], $pair[1], null);
+        }
+
+        $named = static fn (array $listed): array => \array_map(static fn (RoleExclusion $pair): array => [$pair->role->id, $pair->excludedRole->id], $listed);
+        $sort  = static function (array $pairs): array {
+            $pairs = \array_map(static function (array $pair): array {
+                \sort($pair);
+
+                return $pair;
+            }, $pairs);
+
+            \sort($pairs);
+
+            return $pairs;
+        };
+
+        self::assertSame($sort([[$top->id, $aside->id], [$middle->id, $other->id]]), $named($table->touching('role', [$middle->id])));
+        self::assertSame('role', $table->touching('role', [$middle->id])[0]->role->type);
+        self::assertSame(['role_exclusions', 'roles'], $this->lockedTables(static fn (): array => $table->touching('role', [$middle->id])));
+        self::assertSame([], $table->touching('role', []));
+
+        config(['authorization.hierarchy.enabled' => false]);
+
+        self::assertSame($sort([[$middle->id, $other->id]]), $named($table->touching('role', [$middle->id])));
+        self::assertSame([], $table->touching('role', [Role::query()->create(['name' => 'idle'])->id]));
+    }
+
+    /**
+     * The roles are walked up one level a query, the roles under a shared lock
+     * and the first pair naming each, in key order, for update, past a role
+     * with no parent beside them, and the pairs are read for update only when
+     * the walk finds one; a stored cycle ends the walk.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testWalksUpALevelAQueryAndReadsThePairsOnlyWhenOneIsFound(): void
+    {
+        $lone = (new Role)->forceFill(['id' => '00000000-0000-4000-8000-000000000001', 'name' => 'lone']);
+
+        $lone->save();
+
+        $top    = Role::query()->create(['name' => 'top']);
+        $middle = Role::query()->create(['name' => 'middle', 'parent_id' => $top->id]);
+        $bottom = Role::query()->create(['name' => 'bottom', 'parent_id' => $middle->id]);
+        $table  = RoleExclusionTable::of();
+        $walk   = static fn (): array => self::queriesOf(static fn (): array => $table->touching('role', [$bottom->id]));
+
+        self::assertSame([[$bottom->id], [$middle->id], [$top->id]], \array_column($walk(), 1));
+
+        $table->declare(...self::sorted($top->id, Role::query()->create(['name' => 'aside'])->id));
+
+        $queries = $walk();
+
+        self::assertCount(4, $queries);
+        self::assertCount(1, $table->touching('role', [$lone->id, $bottom->id]));
+        self::assertMatchesRegularExpression('/order by \S+\.\S+role_id\S* asc, \S+\.\S+excluded_role_id\S* asc limit 1/', $queries[0][0]);
+        self::assertMatchesRegularExpression('/^select \* from [`"]role_exclusions[`"]/', $queries[3][0]);
+        self::assertSame([[true, 'role_exclusions'], [false, 'roles'], [true, 'role_exclusions']], self::lockModesOf(static fn (): array => $table->touching('role', [$top->id])));
+
+        DB::table('roles')->where('id', $top->id)->update(['parent_id' => $bottom->id]);
+
+        self::assertCount(1, $table->touching('role', [$bottom->id]));
+    }
+
+    /**
      * The writer reads and writes the table the configuration names, on the
      * package's connection.
      *
@@ -205,6 +294,76 @@ final class RoleExclusionTableTest extends TestCase
 
         self::assertCount(1, $queries);
         self::assertStringContainsString('renamed_exclusions', $queries[0]['query']);
+    }
+
+    /**
+     * Return the queries the call ran, each its SQL and bindings.
+     *
+     * @param  \Closure(): mixed  $call
+     * @return list<array{0: string, 1: list<mixed>}>
+     */
+    private static function queriesOf(\Closure $call): array
+    {
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        $call();
+
+        $queries = \array_map(static fn (array $query): array => [$query['query'], \array_values($query['bindings'])], DB::getQueryLog());
+
+        DB::disableQueryLog();
+
+        return $queries;
+    }
+
+    /**
+     * Return each lock the call took, in order: whether it was for update, and
+     * the table it locked, the one each lock clause's query reads from.
+     *
+     * @param  \Closure(): mixed  $call
+     * @return list<array{0: bool, 1: string}>
+     */
+    private static function lockModesOf(\Closure $call): array
+    {
+        $connection = DB::connection();
+        $locks      = new \ArrayObject;
+
+        if ($connection->getDriverName() === 'sqlite') {
+            $connection->setQueryGrammar(new LockModeRecordingGrammar($connection, $locks));
+        } else {
+            DB::listen(static function (QueryExecuted $query) use ($locks): void {
+                \preg_match_all('/ (for update|for share|lock in share mode)/i', $query->sql, $clauses, \PREG_OFFSET_CAPTURE);
+
+                foreach ($clauses[1] as [$clause, $offset]) {
+                    \preg_match_all('/\bfrom\s+[`"]?(\w+)/i', \substr($query->sql, 0, $offset), $tables);
+
+                    $locks->append([(string) \end($tables[1]), \strtolower($clause) === 'for update', []]);
+                }
+            });
+        }
+
+        try {
+            $call();
+        } finally {
+            $connection->useDefaultQueryGrammar();
+        }
+
+        /** @var list<array{0: string, 1: bool, 2: list<mixed>}> $taken */
+        $taken = $locks->getArrayCopy();
+
+        return \array_map(static fn (array $lock): array => [$lock[1], $lock[0]], $taken);
+    }
+
+    /**
+     * Return the two keys in the pair's order, the lower first.
+     *
+     * @param  string  $one
+     * @param  string  $other
+     * @return array{0: string, 1: string, 2: null}
+     */
+    private static function sorted(string $one, string $other): array
+    {
+        return \strcmp($one, $other) < 0 ? [$one, $other, null] : [$other, $one, null];
     }
 
     /**

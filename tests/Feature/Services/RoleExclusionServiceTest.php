@@ -283,6 +283,29 @@ final class RoleExclusionServiceTest extends TestCase
     }
 
     /**
+     * A declaration locks every role below the pair's with them, in key order,
+     * so a grant of any of them waits for it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADeclarationLocksTheRolesBelowThePairs(): void
+    {
+        [$clerk, $auditor] = self::roles();
+
+        $junior = Role::query()->create(['name' => 'junior', 'parent_id' => $auditor->id]);
+        $locks  = $this->recordRowLocks();
+        $keys   = [$clerk->id, $auditor->id, $junior->id];
+
+        \sort($keys);
+
+        self::service()->declare($clerk, $auditor);
+
+        self::assertContains(['roles', $keys], self::roleLocks($locks));
+    }
+
+    /**
      * A delegated declaration or removal locks both roles' rows before it is
      * decided, under the concurrency protocol of delegated administration.
      *
@@ -597,7 +620,7 @@ final class RoleExclusionServiceTest extends TestCase
      * The pairs are listed in their canonical order, every one or those naming
      * a role, each with its owner, who declared it and when; the report of a
      * pair is read whether or not it is declared, and the report of every pair
-     * finds a conflict a grant made after the pair left behind.
+     * finds a conflict a grant written past the guard left behind.
      *
      * @return void
      *
@@ -624,9 +647,16 @@ final class RoleExclusionServiceTest extends TestCase
         self::assertNotNull($pair->createdAt);
         self::assertTrue(self::service()->conflicts($clerk, $payer)->isEmpty());
 
-        self::grants()->grantRole($user, $clerk);
-        self::grants()->grantRole($user, $payer);
-        self::grants()->grantRole($user, $auditor, application: 'admin');
+        // Written past the guard, as grants made before the pairs were.
+        foreach ([[$clerk, null], [$payer, null], [$auditor, 'admin']] as [$role, $application]) {
+            DB::table('authorizable_roles')->insert([
+                'role_id'           => $role->id,
+                'authorizable_type' => $user->getMorphClass(),
+                'authorizable_id'   => 'user',
+                'include_subtree'   => true,
+                'application'       => $application,
+            ]);
+        }
 
         $reports = self::service()->conflictsForAll();
 
