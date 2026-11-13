@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
@@ -17,8 +18,10 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\DecidesOnAttributeValues;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -35,7 +38,7 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationFailed::class)]
 final class AuthorizationFailedTest extends TestCase
 {
-    use DecidesOnAttributeValues, ReadsDispatchedEvents;
+    use ActivatesBreakGlass, DecidesOnAttributeValues, ReadsDispatchedEvents;
 
     /**
      * A refusal by `authorize()` whose conditions read attribute values and a
@@ -70,6 +73,39 @@ final class AuthorizationFailedTest extends TestCase
         self::assertSame(DecisionEffect::DENY, $failed[0]->effect);
         self::assertSame(['resource.status', 'subject.department', 'input.reason'], $failed[0]->keys);
         self::assertCarriesNoValue($failed[0]);
+    }
+
+    /**
+     * A refusal while the subject holds a live break-glass activation used no
+     * break-glass and names no activation.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    public function testARefusalNeverUsedBreakGlass(): void
+    {
+        $user = StubIdentity::create(['id' => 'responder-1']);
+
+        self::activate($user, self::emergencyRole());
+
+        Event::fake([AuthorizationFailed::class]);
+
+        try {
+            Authorization::for($user)->authorize('posts:delete');
+
+            self::fail('The check is refused.');
+        } catch (AuthorizationException $exception) {
+            self::assertSame(DecisionReason::NO_MATCH, $exception->getReason());
+        }
+
+        $failed = self::dispatchedEvents(AuthorizationFailed::class);
+
+        self::assertTrue(Authorization::for($user)->can('posts:create'));
+        self::assertCount(1, $failed);
+        self::assertFalse($failed[0]->usedBreakGlass);
+        self::assertSame([], $failed[0]->activations);
+        self::assertSame(DecisionReport::DENIAL, $failed[0]->reportedBecause());
     }
 
     /**

@@ -10,10 +10,12 @@ list. It arrives in three releases (N138), and stays switched off until the thir
    table and its model; and the resolution that reads a live activation as a grant of its role.
 2. **Activation and revocation** (BL-70b): the service that activates, surrenders and revokes, its rights, its limits,
    the grant hooks and its concurrency, and the switch that stops every activation at once.
-3. **Expiry, reviews and attribution** (BL-70c): the lifecycle events, the access reviews of activations, the
-   attribution of decisions to the activation behind them, and the switch that lets `enabled` be true.
+3. **Expiry and reviews** (BL-70c): the lifecycle events, the access reviews of activations, and the switch that lets
+   `enabled` be true.
 
-This note records the invariants the first two releases fix, so the last extends them rather than changes them.
+The attribution of a decision to the activations behind it, and its report on the decision events, arrive beside them
+(BL-72b, N142). This note records the invariants fixed so far, so the last release extends them rather than changes
+them.
 
 ## Invariants
 
@@ -138,6 +140,22 @@ This note records the invariants the first two releases fix, so the last extends
     write, which locks the pair and then reads the role shared; a delegated activation has taken one through its pins,
     as a delegated grant has, so it can still be refused as a deadlock there (see invariant 12 of separation of duties).
 
+15. **A decision names the activations behind it (N142).** An allow used break-glass when a permission of the
+    principal's that covers the action, or a policy whose statement allowed it, is carried by a role the principal
+    holds through a live activation, directly or through the role's ancestry, or when a resource policy's statement
+    allowed it through a role selector naming such a role and no selector names the subject itself; one held through
+    a role grant as well still counts, so an emergency use is never hidden. The decision names the key of each such
+    activation, sorted (`Decision::$activations`), and its event says `usedBreakGlass` and carries them as
+    `activations`, never the note. A denial, a decision of a machine or of an identity's grants, and any decision
+    while break-glass is disabled name none. The resolution reads which activation is behind each permission, policy
+    and role key from the rows it already reads, by role only when a role came through an activation
+    (`BreakGlassActivations::behind()`); while break-glass is enabled the resolution cache keeps them beside the entry
+    (`ResolutionCache::activationsOf()`), and the pipeline notes the principal's as they resolve, before the scope a
+    resource's policies or guardrails are read in empties the memo (`BreakGlassAttribution`). Naming them costs no
+    query, and a principal holding no activation is resolved as before. `DecisionEvaluated` reports such an allow
+    whatever `events.decisions` says (`DecisionReport::BREAK_GLASS`), a preview's listing included; a listing that
+    dispatches nothing reports none.
+
 ## Success Path
 
 1. An application lists `incident-responder` under `break_glass.roles` and `incident` under `justifications`; once
@@ -145,7 +163,8 @@ This note records the invariants the first two releases fix, so the last extends
 2. An administrator holding `authorization:break-glass.grant` activates the role for a principal in a tenant with its
    subtree for 60 minutes through `BreakGlassService::activate()`, which writes a row of `break_glass_activations`.
 3. A check in that tenant, or below it, reads the role through the principal's `roles()`, and allows what the role's
-   permissions allow, unless a deny, a cap or a guardrail refuses it; a check anywhere else does not.
+   permissions allow, unless a deny, a cap or a guardrail refuses it; a check anywhere else does not. Each such allow
+   names the activation, and its `DecisionEvaluated` is dispatched whatever the settings, with `usedBreakGlass` set.
 4. The principal surrenders it, or an hour later the cached resolution has lapsed, and the next check allows nothing
    through the activation.
 
@@ -167,9 +186,8 @@ This note records the invariants the first two releases fix, so the last extends
 ## Plan for BL-70c
 
 - **BL-70c.** The activated, surrendered, revoked and expired events (the granted event carries the justification
-  code, the role, the grantee, the granter and the expiry, never the note), the reviews of activations, the
-  attribution of a decision to the activation behind it (from the pivot's `break_glass_id`), break-glass reporting on
-  decision events (BL-72), and `AVAILABLE` flipped to true, with the tests' seam `$isAvailable` removed. What lists
+  code, the role, the grantee, the granter and the expiry, never the note), the reviews of activations, and
+  `AVAILABLE` flipped to true, with the tests' seam `$isAvailable` removed. What lists
   or reviews holdings reads role grants alone until then, and BL-70c decides how each shows an activation:
   - the grantee listings and the grant scope query (`Support\GrantRoots`, `Services\GrantScopeQuery`), and the
     widening a grant hook is asked about, which therefore never counts an activation as a grant already held;
@@ -198,9 +216,19 @@ This note records the invariants the first two releases fix, so the last extends
   `Administration\AuthorityRows` -- delegated administration weighing an activation.
 - `Resolvers\GrantProvenanceResolver`, `Evaluation\GrantProvenance`, `Evaluation\Enums\GrantSource` -- the route named.
 - `Usage\RouteSources` -- no route from an activation.
+- `Evaluation\BreakGlassAttribution`, `Evaluation\Decision::$activations`, `Database\BreakGlassActivations::behind()`,
+  `Cache\ResolutionCache::activationsOf()`, `Evaluation\DecisionReporting` -- the activations an allow names, and its
+  report.
 
 ## Authoritative Tests
 
+- `Evaluation\BreakGlassAttributionTest` (Feature) -- the activations an allow names through a permission, a pattern
+  beside a direct grant, an ancestor's permission, a policy statement and a resource policy's role selector, on
+  another tenant's resource, a role held both ways, two activations, a denial, the switch off, a machine and an
+  identity, the memo, the store and an explanation, and the report through a check, a bulk check, a listing and a
+  preview's listing; `DecisionPipelineTest`, `DecisionReportingTest`, `DecisionEventTest`, `DecisionEvaluatedTest`,
+  `AuthorizationFailedTest`, `GrantResolverTest`, `RolePoliciesTest`, `PrincipalSelectorsTest`,
+  `ResolutionCacheTest` -- each part on its own.
 - `BreakGlassConfigValidatorTest`, `ConfigValidatorTest`, `Diagnostics\Checks\BlockChecksTest` (Feature) -- every
   setting's default, type, bound and unknown key, `enabled` refused, the role maximums and the codes required once
   enabled.
@@ -233,5 +261,5 @@ This note records the invariants the first two releases fix, so the last extends
 ## Change Triggers
 
 Update this note when the write path, its rights or its refusals change, when the exclusion check moves relative to the
-role's lock, when `AVAILABLE` changes or the lifecycle events, reviews or attribution land (BL-70c), or when an
-activation starts or stops counting anywhere a role grant counts.
+role's lock, when `AVAILABLE` changes or the lifecycle events or reviews land (BL-70c), when what a decision names or
+reports of an activation changes, or when an activation starts or stops counting anywhere a role grant counts.

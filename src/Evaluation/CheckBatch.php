@@ -80,13 +80,15 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * batch that does neither decides its checks the same way, through the same
  * stages, but records nothing: the last decision is left untouched and no
  * `DecisionEvaluated` is dispatched. `permissionsFor()` lists a subject's
- * actions through one, since listing them is introspection, not a check (N70);
- * the break-glass reporting of BL-70 is to define how it treats it. A batch may
+ * actions through one, since listing them is introspection, not a check (N70),
+ * so an allow it lists that used break-glass is reported by none. A batch may
  * also dispatch without storing, leaving the last decision untouched while each
  * decision the settings report is dispatched, or store without dispatching. A
  * preview's listing dispatches without storing (N86): each action it evaluates
  * is reported as the settings select (every one while `previews` is on), naming
- * both parties, and the last decision is left untouched.
+ * both parties, and the last decision is left untouched; an allow that used
+ * break-glass is reported whatever the settings, with `usedBreakGlass` set, as
+ * any decision that dispatches is (N142).
  *
  * The checks of a preview are made with its previewer, which every decision's
  * provenance, and so its event and the last decision, names beside the subject

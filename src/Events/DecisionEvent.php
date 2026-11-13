@@ -18,8 +18,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * `DecisionEvaluated` and `AuthorizationFailed` report it: the subject and its
  * identity, the previewer of a preview, the action, the resource, the tenant
  * and application the decision was made in, its effect and reason code, the
- * statements that decided it, whether it used a break-glass grant, and the
- * context keys it depended on.
+ * statements that decided it, whether it used a break-glass grant and the
+ * activations behind it, and the context keys it depended on.
  *
  * A snapshot of references, names and ids, never a model, the caller's context,
  * a session, or a condition or attribute value: the keys are names alone. The
@@ -27,8 +27,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * included, and are never filled from the authenticated user. The tenant and
  * the application are the scope the decision was made in, never read from the
  * subject (see `DecisionProvenance`). The previewer is null for a decision that
- * is not a preview, and `usedBreakGlass` is false until break-glass grants
- * arrive. The decision itself, with its trace, is not carried: a listener that
+ * is not a preview. An allow used break-glass when a grant that allowed it came
+ * through a live activation, whether or not another grant gave it too, and
+ * names the key of each such activation, never its note (N142); a denial never
+ * did. The decision itself, with its trace, is not carried: a listener that
  * needs it reads `Authorization::lastDecision()`.
  *
  * Why the decision was reported, `reportedBecause()`, and whether its action is
@@ -64,6 +66,7 @@ abstract readonly class DecisionEvent implements AuthorizationEvent
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null  $reason
      * @param  list<\SineMacula\Laravel\Authorization\Evaluation\StatementReference>  $statements
      * @param  bool  $usedBreakGlass
+     * @param  list<string>  $activations
      * @param  list<string>  $keys
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport|null  $report
      * @param  bool  $isSensitive
@@ -100,8 +103,11 @@ abstract readonly class DecisionEvent implements AuthorizationEvent
         /** The statements that decided it, each by its policy's name, the stored policy's key, its index, its sid and, for a resource policy, the resource it is attached to, in the order assessed. */
         public array $statements,
 
-        /** Whether a break-glass grant allowed the check; false until break-glass grants arrive. */
+        /** Whether a grant that allowed the check came through a live break-glass activation. */
         public bool $usedBreakGlass,
+
+        /** The key of each break-glass activation behind the allow, once each, sorted; none when it used no break-glass. */
+        public array $activations,
 
         /** The name of each context key the decision depended on, never its value. */
         public array $keys,
@@ -145,7 +151,8 @@ abstract readonly class DecisionEvent implements AuthorizationEvent
             $decision->effect,
             $decision->reason,
             $decision->statements,
-            false,
+            $decision->activations !== [],
+            $decision->activations,
             $decision->keys(),
             $report,
             $isSensitive,
@@ -172,7 +179,7 @@ abstract readonly class DecisionEvent implements AuthorizationEvent
     public function reportedBecause(): DecisionReport
     {
         return $this->report
-            ?? DecisionReporting::everything()->reportOf($this->effect, $this->reason, $this->action, $this->previewer !== null)
+            ?? DecisionReporting::everything()->reportOf($this->effect, $this->reason, $this->action, $this->previewer !== null, $this->usedBreakGlass)
             ?? DecisionReport::ALL_ALLOWS;
     }
 

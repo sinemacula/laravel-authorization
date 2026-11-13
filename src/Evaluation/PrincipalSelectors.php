@@ -69,13 +69,37 @@ final class PrincipalSelectors
      */
     public function isNamedByAny(array $selectors): bool
     {
-        if (\array_intersect_key($this->readReferences(), \array_flip($selectors)) !== []) {
+        if ($this->isNamedByReference($selectors)) {
             return true;
         }
 
         $roles = self::roleKeysOf($selectors);
 
         return $roles !== [] && \array_intersect_key($this->roles ??= $this->readRoles(), $roles) !== [];
+    }
+
+    /**
+     * Return the keys of the roles the selectors name, or none when one of them
+     * names the subject by reference, so the roles are not what names it.
+     *
+     * @param  array<int, string>  $selectors
+     * @return list<string>
+     */
+    public function rolesNaming(array $selectors): array
+    {
+        return $this->isNamedByReference($selectors) ? [] : \array_keys(self::roleKeysOf($selectors));
+    }
+
+    /**
+     * Determine whether any of the selectors names the subject's principal or
+     * identity by reference.
+     *
+     * @param  array<int, string>  $selectors
+     * @return bool
+     */
+    private function isNamedByReference(array $selectors): bool
+    {
+        return \array_intersect_key($this->readReferences(), \array_flip($selectors)) !== [];
     }
 
     /**

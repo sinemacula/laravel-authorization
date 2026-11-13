@@ -817,10 +817,10 @@ return [
     | (the default), which reports the allows of the actions listed in
     | `sensitive_actions` alone, `all`, which reports every allow, or `none`.
     | Each setting reports its kind of decision on its own, and an event says
-    | why it was reported with `reportedBecause()`. A break-glass allow is to
-    | be reported whatever these settings once break-glass grants arrive.
-    | `AuthorizationFailed` is dispatched for every refusal `authorize()`
-    | throws, whatever these settings.
+    | why it was reported with `reportedBecause()`. An allow that used
+    | break-glass is reported whatever these settings, `allows: none`
+    | included, as `break_glass`. `AuthorizationFailed` is dispatched for
+    | every refusal `authorize()` throws, whatever these settings.
     |
     | `sensitive_actions` lists action names exactly as the catalogue
     | declares them, with no wildcard; each must be declared by the package

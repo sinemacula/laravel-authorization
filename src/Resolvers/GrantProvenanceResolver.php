@@ -181,7 +181,7 @@ final class GrantProvenanceResolver
         $resolve = static function () use ($grantee, $isIdentity, &$sources): Resolution {
             $sources = self::permissionSources($grantee, $isIdentity);
 
-            return self::unkept(\array_map(\strval(...), \array_keys($sources)));
+            return self::unkept(\array_map(\strval(...), \array_keys($sources)), self::activationsOf($sources));
         };
 
         $held = HeldPermissions::match(ResolutionCache::instance()?->rememberPermissions($grantee, $resolve) ?? $resolve()->value, $action);
@@ -261,7 +261,7 @@ final class GrantProvenanceResolver
             $whole      = [];
             $provenance = self::policyProvenance($grantee, $grants, $isIdentity, $whole);
 
-            return self::unkept(self::hydrated($grants, \array_map(\strval(...), \array_keys($provenance)), $whole));
+            return self::unkept(self::hydrated($grants, \array_map(\strval(...), \array_keys($provenance)), $whole), self::activationsOf($provenance));
         };
 
         $policies = ResolutionCache::instance()?->rememberPolicies($grantee, $resolve) ?? $resolve()->value;
@@ -533,16 +533,36 @@ final class GrantProvenanceResolver
      * Return what an explained check read on a cold cache as a resolution the
      * cache keeps nowhere: unstable, so the store is never written, and lapsing
      * at once, so the memo never serves it, since the check read the rows for
-     * where each grant came from rather than as a resolution reads them.
+     * where each grant came from rather than as a resolution reads them. The
+     * activations behind each grant are kept with it, so the check names them.
      *
      * @template TValue
      *
      * @param  list<TValue>  $value
+     * @param  array<string, list<string>>  $activations
      * @return \SineMacula\Laravel\Authorization\Cache\Resolution<TValue>
      */
-    private static function unkept(array $value): Resolution
+    private static function unkept(array $value, array $activations): Resolution
     {
-        return new Resolution($value, 0, false);
+        return new Resolution($value, 0, false, null, $activations);
+    }
+
+    /**
+     * Return the keys of the break-glass activations behind each grant, by its
+     * name or key, from where each came from.
+     *
+     * @param  array<array-key, list<\SineMacula\Laravel\Authorization\Evaluation\GrantProvenance>>  $sources
+     * @return array<string, list<string>>
+     */
+    private static function activationsOf(array $sources): array
+    {
+        $activations = [];
+
+        foreach ($sources as $grant => $routes) {
+            $activations[(string) $grant] = \array_values(\array_filter(\array_map(static fn (GrantProvenance $route): ?string => $route->activation, $routes), \is_string(...)));
+        }
+
+        return $activations;
     }
 
     /**

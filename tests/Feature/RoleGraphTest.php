@@ -405,6 +405,28 @@ final class RoleGraphTest extends TestCase
     }
 
     /**
+     * The chain of each role is its key, then each ancestor's from its parent
+     * up to the root, as the paths run; with the hierarchy disabled, the role's
+     * alone.
+     *
+     * @return void
+     */
+    public function testTheChainsRunFromTheRoleUp(): void
+    {
+        $root   = Role::create(['name' => 'root']);
+        $parent = Role::create(['name' => 'parent', 'parent_id' => $root->id]);
+        $child  = Role::create(['name' => 'child', 'parent_id' => $parent->id]);
+        $alone  = Role::create(['name' => 'alone']);
+
+        self::assertSame([$child->id => [$child->id, $parent->id, $root->id], $alone->id => [$alone->id]], RoleGraph::chainsOf([$child, $alone]));
+        self::assertSame([], RoleGraph::chainsOf([]));
+
+        config(['authorization.hierarchy.enabled' => false]);
+
+        self::assertSame([$child->id => [$child->id]], RoleGraph::chainsOf([$child]));
+    }
+
+    /**
      * The permissions each role carries are read in one query, keyed by the
      * role, a grant that has expired left out; no role reads nothing.
      *

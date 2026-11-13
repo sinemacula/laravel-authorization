@@ -295,6 +295,25 @@ final class PrincipalSelectorsTest extends TestCase
     }
 
     /**
+     * The roles the selectors name are those of their role selectors, read
+     * without a query, and none once a selector names the subject by reference.
+     *
+     * @return void
+     */
+    public function testTheRolesNamingTheSubjectAreNoneOnceItIsNamedByReference(): void
+    {
+        $user      = StubIdentity::create(['id' => 'user-1']);
+        $selectors = new PrincipalSelectors(new Subject($user));
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        self::assertSame(['editor', 'admin'], $selectors->rolesNaming(['role:editor', 'other:1', 'role:admin']));
+        self::assertSame([], $selectors->rolesNaming(['role:editor', $user->getMorphClass() . ':user-1']));
+        self::assertSame([], DB::getQueryLog());
+    }
+
+    /**
      * Determine whether any of the selectors names the subject, through a new
      * set of its selectors.
      *

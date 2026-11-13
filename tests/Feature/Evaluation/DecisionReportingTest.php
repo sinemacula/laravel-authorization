@@ -279,6 +279,37 @@ final class DecisionReportingTest extends TestCase
     }
 
     /**
+     * An allow that used break-glass is reported whatever the settings, every
+     * one off and `allows` set to `none` included, as break-glass before every
+     * other reason, a preview's and a sensitive action's included, and its
+     * event says so and names the activations; one that did not is reported as
+     * the settings say.
+     *
+     * @return void
+     */
+    public function testABreakGlassAllowIsReportedWhateverTheSettings(): void
+    {
+        $nothing  = new DecisionReporting(false, false, false, DecisionReporting::NONE, [self::SENSITIVE]);
+        $previews = new DecisionReporting(sensitiveActions: [self::SENSITIVE]);
+        $preview  = new DecisionProvenance(new Reference('user', '1'), null, new Reference('user', '2'));
+        $allow    = Decision::allow(DecisionStage::ALLOW);
+        $used     = $allow->withActivations(['activation-1']);
+
+        self::assertSame(DecisionReport::BREAK_GLASS, $nothing->reportOf(DecisionEffect::ALLOW, null, self::ORDINARY, false, true));
+        self::assertSame(DecisionReport::BREAK_GLASS, $previews->reportOf(DecisionEffect::ALLOW, null, self::SENSITIVE, true, true));
+        self::assertSame(DecisionReport::PREVIEW, $previews->reportOf(DecisionEffect::ALLOW, null, self::SENSITIVE, true));
+        self::assertNull($nothing->evaluated($preview, self::SENSITIVE, null, $allow));
+
+        $event = $nothing->evaluated($preview, self::ORDINARY, null, $used);
+
+        self::assertInstanceOf(DecisionEvaluated::class, $event);
+        self::assertSame(DecisionReport::BREAK_GLASS, $event->reportedBecause());
+        self::assertTrue($event->usedBreakGlass);
+        self::assertSame(['activation-1'], $event->activations);
+        self::assertFalse($event->isSensitiveAction());
+    }
+
+    /**
      * A refusal is made into its `AuthorizationFailed` whatever the settings,
      * for the reason it has with every setting on, saying whether its action is
      * sensitive.
