@@ -112,7 +112,7 @@ final readonly class GrantRow
         $origin     = $roleType === null ? self::originOf($columns) : null;
         $scope      = $origin   === null ? null : new GrantScope($origin->tenant(), $origin->application, $origin->includeSubtree);
         $activation = $text(BreakGlassActivations::ACTIVATION);
-        $breakGlass = $activation === null ? null : ['activation' => $activation, 'justification' => (string) $text('justification')];
+        $breakGlass = $activation === null ? null : ['activation' => $activation, 'justification' => $text('justification') ?? ''];
 
         return new self($source, (string) $text('target_id'), $grantee, $scope, $times, self::pair($text('granted_by_type'), $text('granted_by_id')), $origin, $breakGlass);
     }

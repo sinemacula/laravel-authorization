@@ -45,8 +45,8 @@ final class GrantRowTest extends TestCase
 
     /**
      * A break-glass activation read as a role grant row carries its key and
-     * justification code, and is keyed by its own key and ordered after a grant
-     * of the same role in the same scope.
+     * justification code, empty when none is read, and is keyed by its own key
+     * and ordered after a grant of the same role in the same scope.
      *
      * @return void
      */
@@ -63,6 +63,7 @@ final class GrantRowTest extends TestCase
         self::assertSame(['user', '42', 0, '', 0, '', 0, '', true, 1, 'a1'], $activation->orderKey());
         self::assertSame(-1, ReviewOrder::compare($grant->orderKey(), $activation->orderKey()));
         self::assertSame($activation->key(), $activation->supporting()->sourceKey);
+        self::assertSame(['activation' => 'a2', 'justification' => ''], GrantRow::from((object) ['target_id' => 'r1', 'break_glass_id' => 'a2'], 'role')->breakGlass);
     }
 
     /**

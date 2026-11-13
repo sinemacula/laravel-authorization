@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Enums\GrantPresence;
 use SineMacula\Laravel\Authorization\Enums\GrantScopeStatus;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -1218,10 +1219,35 @@ final class GrantScopeQueryTest extends TestCase
     }
 
     /**
+     * A subject named by a reference holds its own live activation; one that
+     * cannot be named is unknown, and an instance read as an identity holds
+     * none of its own.
+     *
+     * @return void
+     */
+    public function testOnlyANamedPrincipalHoldsItsOwnActivation(): void
+    {
+        $this->tree();
+
+        $principal = self::identity('principal');
+        $named     = Reference::of($principal);
+
+        self::grant($principal, 'activation', self::tenant('acct1'));
+
+        self::assertSame(GrantPresence::PRESENT, self::scopes()->hasGrantIn(new Subject($named, $named), self::tenant('acct1')));
+        self::assertSame(GrantPresence::UNKNOWN, self::scopes()->hasGrantIn(new Subject(new \stdClass, $principal), self::tenant('acct1')));
+
+        BreakGlassActivations::markIdentity($principal);
+
+        self::assertSame(GrantPresence::ABSENT, self::scopes()->hasGrantIn(new Subject($principal, $principal), self::tenant('acct1')));
+    }
+
+    /**
      * The grantees of live break-glass activations are listed as the grantees
      * of grants of their roles in their scopes, each once beside a grant; an
      * ended or expired one, a machine's, and any while break-glass is disabled
-     * are not, and each list still reads in one query.
+     * are not, a grantee read after a machine's still is, and each list still
+     * reads in one query.
      *
      * @return void
      */
@@ -1231,17 +1257,23 @@ final class GrantScopeQueryTest extends TestCase
         $this->holders('activation');
 
         $machine = new StubMachine(['id' => 'machine']);
+        $second  = new StubSecondIdentity(['id' => 'second']);
         $role    = self::emergencyRole();
 
         $machine->save();
+        $second->save();
 
         self::grant($machine, 'activation', self::tenant('acct1'));
+        self::grant($second, 'activation', self::tenant('acct1'));
         self::grant(StubIdentity::query()->findOrFail('d-tenant-node'), 'role', self::tenant('acct1'), false);
         self::activate(self::identity('z-ended'), $role, ['ended_at' => Carbon::now()]);
         self::activate(self::identity('z-expired'), $role, ['expires_at' => Carbon::now()->subSecond()]);
 
-        self::assertEquals(self::references('c-ancestor-subtree', 'd-tenant-node', 'e-platform', 'h-tenant-subtree'), self::scopes()->granteesReaching(self::tenant('acct1')));
-        self::assertEquals(self::references('a-below', 'd-tenant-node', 'h-tenant-subtree'), self::scopes()->granteesWithin(self::tenant('acct1')));
+        self::assertEquals(
+            [...self::references('c-ancestor-subtree', 'd-tenant-node', 'e-platform', 'h-tenant-subtree'), Reference::of($second)],
+            self::scopes()->granteesReaching(self::tenant('acct1')),
+        );
+        self::assertEquals([...self::references('a-below', 'd-tenant-node', 'h-tenant-subtree'), Reference::of($second)], self::scopes()->granteesWithin(self::tenant('acct1')));
         self::assertCount(1, $this->queriesOf(static fn (): array => self::scopes()->granteesWithin(self::tenant('org1')))['queries']);
 
         self::switchBreakGlass(false);

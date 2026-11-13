@@ -341,6 +341,7 @@ final class RowCollectorTest extends TestCase
         $rows->route(SourceKind::ROLE_INHERITED, new Reference('u', 'c'), self::grant('c', 'role-1', null), new Reference('role', 'role-300'), $chain);
 
         self::assertSame([1, 'role', 'role-300', 'u', 'b', 0, '', 0, '', 0, '', true, 0, '', 'role-1', 300], $rows->next());
+        self::assertSame(['role-1', 300], \array_slice($rows->next(), RowCollector::ROUTE));
     }
 
     /**

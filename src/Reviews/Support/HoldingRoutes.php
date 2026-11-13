@@ -95,8 +95,16 @@ final class HoldingRoutes
      */
     private static function throughRoles(ReviewRun $run, RowCollector $rows, Reference $subject, array $grantees, ?Reference $via): void
     {
-        $grants = self::grantsOf($run, GrantTarget::ROLE, $grantees);
-        $grants = \array_values(\array_filter($grants, static fn (GrantRow $grant): bool => $grant->breakGlass === null || !self::isThrough($grant, $via)));
+        $grants = [];
+
+        foreach (self::grantsOf($run, GrantTarget::ROLE, $grantees) as $grant) {
+            if ($grant->breakGlass !== null && self::isThrough($grant, $via)) {
+                continue;
+            }
+
+            $grants[] = $grant;
+        }
+
         $chains = RoleChains::above($run, \array_values(\array_unique(\array_map(static fn (GrantRow $grant): string => $grant->targetId, $grants))));
         $roles  = \array_values(\array_unique(\array_merge([], ...\array_values($chains))));
 
@@ -160,14 +168,15 @@ final class HoldingRoutes
      */
     private static function grantsOf(ReviewRun $run, GrantTarget $kind, array $grantees): array
     {
-        $table = $kind->table();
+        return GrantRows::allOf(
+            $grantees,
+            static fn (array $chunk): array => GrantRows::held($run, $kind, static function (Builder $query, string $table) use ($run, $kind, $chunk): Builder {
+                $query = $run->visible(GrantRows::grantedTo($run->live($run->constrain($query, $table), $table), $table, $chunk), $kind, $table . '.' . $kind->column());
 
-        return GrantRows::allOf($grantees, static function (array $chunk) use ($run, $kind, $table): Builder {
-            $held  = $run->live($run->constrain(GrantRows::held($run, $kind), $table), $table);
-            $query = $run->visible(GrantRows::grantedTo($held, $table, $chunk), $kind, $table . '.' . $kind->column());
-
-            return $kind === GrantTarget::POLICY ? InlinePolicies::attachedToTheirGrantee($query, $table) : $query;
-        }, $kind->value);
+                return $kind === GrantTarget::POLICY ? InlinePolicies::attachedToTheirGrantee($query, $table) : $query;
+            }),
+            $kind->value,
+        );
     }
 
     /**

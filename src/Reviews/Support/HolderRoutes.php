@@ -213,16 +213,21 @@ final class HolderRoutes
             return;
         }
 
-        $table = $kind->table();
-        $query = GrantRows::ordered(self::scoped($run, $kind)->where($table . '.' . $kind->column(), $target->id), $table, $kind->column(), null);
+        $column  = $kind->column();
+        $queries = self::scoped($run, $kind, static function (Builder $query, string $table) use ($kind, $column, $target): Builder {
+            $query->where($table . '.' . $column, $target->id);
 
-        if ($kind === GrantTarget::POLICY) {
-            InlinePolicies::attachedToTheirGrantee($query, $table)->where($table . '.authorizable_type', '!=', Definitions::morph(GrantTarget::ROLE));
-        }
+            if ($kind === GrantTarget::POLICY) {
+                InlinePolicies::attachedToTheirGrantee($query, $table)->where($table . '.authorizable_type', '!=', Definitions::morph(GrantTarget::ROLE));
+            }
+
+            return GrantRows::ordered($query, $table, $column, null);
+        });
 
         $resume = $rows->resumeAt($source);
+        $from   = static fn (Builder $query, string $table): Builder => self::resumed($query, $table, $column, null, $resume);
 
-        foreach (GrantRows::page(self::resumed($query, $table, $kind->column(), null, $resume), $kind->value, self::sizeOf($rows, $resume)) as $grant) {
+        foreach (GrantRows::pageOf($queries, $from, $kind->value, self::sizeOf($rows, $resume), null) as $grant) {
             $rows->route($source, $grant->grantee, $grant, new Reference($target->type, $grant->targetId), $kind === GrantTarget::ROLE ? [$grant->targetId] : []);
         }
     }
@@ -261,15 +266,20 @@ final class HolderRoutes
         ?\Closure $narrow = null,
         ?\Closure $read = null,
     ): void {
-        $table  = GrantTarget::ROLE->table();
-        $query  = self::scoped($run, GrantTarget::ROLE)->whereIn($table . '.role_id', \array_map(strval(...), \array_keys($chains)));
-        $query  = GrantRows::ordered($narrow === null ? $query : $narrow($query, $table), $table, 'role_id', false);
+        $roles   = \array_map(strval(...), \array_keys($chains));
+        $queries = self::scoped($run, GrantTarget::ROLE, static function (Builder $query, string $table) use ($roles, $narrow): Builder {
+            $query->whereIn($table . '.role_id', $roles);
+
+            return GrantRows::ordered($narrow === null ? $query : $narrow($query, $table), $table, 'role_id', false);
+        });
+
         $resume = $rows->resumeAt($source);
         $isLeft = $chains !== [];
 
         while ($isLeft && !$rows->isFull()) {
             $size = self::sizeOf($rows, $resume);
-            $page = GrantRows::page(self::resumed(clone $query, $table, 'role_id', false, $resume), GrantTarget::ROLE->value, $size);
+            $from = static fn (Builder $query, string $table): Builder => self::resumed($query, $table, 'role_id', false, $resume);
+            $page = GrantRows::pageOf($queries, $from, GrantTarget::ROLE->value, $size, false);
 
             self::expand($page, $chains, $expand, $read);
 
@@ -339,17 +349,17 @@ final class HolderRoutes
     }
 
     /**
-     * Return a query of the live grants of the kind in the review's scope,
-     * with, for roles, the activations not ended or expired.
+     * Return the queries of the live grants of the kind in the review's scope,
+     * with, for roles, the activations not ended or expired, each then built by
+     * the callback, given its table.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @return \Illuminate\Database\Query\Builder
+     * @param  \Closure(\Illuminate\Database\Query\Builder, string): \Illuminate\Database\Query\Builder  $build
+     * @return non-empty-array<string, \Illuminate\Database\Query\Builder>
      */
-    private static function scoped(ReviewRun $run, GrantTarget $kind): Builder
+    private static function scoped(ReviewRun $run, GrantTarget $kind, \Closure $build): array
     {
-        $table = $kind->table();
-
-        return $run->live($run->constrain(GrantRows::held($run, $kind), $table), $table);
+        return GrantRows::held($run, $kind, static fn (Builder $query, string $table): Builder => $build($run->live($run->constrain($query, $table), $table), $table));
     }
 }

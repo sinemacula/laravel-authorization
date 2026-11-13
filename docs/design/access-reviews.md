@@ -359,7 +359,9 @@ still left out.
     `break_glass { activation, justification }`, never the note, and their `usage` is always `unknown`, since an
     activation's use is never tracked. A machine's activation, or one naming half a tenant, is listed as such a grant
     is; in principal mode an identity's activation is left out, since it never reaches a principal through the
-    identity. The row keeps `version: 1`, since the package is unreleased.
+    identity. Each table is filtered, ordered and limited on its own indexes, a page reading both as the branches of
+    one `union all` and merging them in the review's order (`GrantRows::pageOf()`), so a page reads each table only
+    from where it starts. The row keeps `version: 1`, since the package is unreleased.
 
 ## Success Path
 
