@@ -4,8 +4,10 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -26,6 +28,7 @@ use SineMacula\Laravel\Authorization\Exceptions\GranteeGuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
+use SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
@@ -35,6 +38,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\BreakGlassService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\RoleExclusionService;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
@@ -54,6 +58,7 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
+use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\TestCase;
 
 /**
@@ -75,6 +80,12 @@ final class BreakGlassServiceTest extends TestCase
 
     /** @var string The action the emergency role carries. */
     private const string ACTION = 'posts:create';
+
+    /** @var string The query an activation locks its role with. */
+    private const string ROLE_LOCK = '/^select .id. from .roles. where .roles.\..id. = \? limit 1 /';
+
+    /** @var list<string> The tests that race another session, run outside the test's transaction on MySQL and PostgreSQL. */
+    private const array RACED = ['testActivationsOfOneRoleShareItsLock', 'testAnActivationAndAWriteOfItsPairQueue'];
 
     /**
      * Start the clock, put the tenants in the tree and switch break-glass on:
@@ -779,6 +790,110 @@ final class BreakGlassServiceTest extends TestCase
     }
 
     /**
+     * An activation that would leave its grantee holding both roles of a pair
+     * where their reach overlaps, beside a grant or a live activation of the
+     * other role, is refused, trusted or delegated, and nothing is written; one
+     * whose reach does not overlap is made.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActivationThatWouldHoldBothRolesOfAPairIsRefused(): void
+    {
+        $responder = self::emergencyRole(self::ACTION);
+        $auditor   = self::emergencyRole(self::ACTION, 'auditor');
+        $granted   = StubIdentity::query()->create(['id' => 'user-1']);
+        $activated = StubIdentity::query()->create(['id' => 'user-2']);
+        $actor     = self::administrator([PackagePermissions::BREAK_GLASS_GRANT], 'admin-1', null);
+
+        self::exclusions()->declare($responder, $auditor);
+        GrantService::instance()?->grantRole($granted, $auditor, tenant: self::tenant('acct1'));
+        self::activate($activated, $auditor);
+
+        foreach ([null, $actor] as $caller) {
+            $refusal = self::refusalOf(static fn () => self::activateFor($granted, $caller, new GrantScope(self::tenant('team1'))));
+            $beside  = self::refusalOf(static fn () => self::activateFor($activated, $caller, new GrantScope(self::tenant('acct2'))));
+
+            self::assertInstanceOf(RoleExclusionConflictException::class, $refusal);
+            self::assertSame('user-1', $refusal->getReport()->conflicts[0]->holder->id);
+            self::assertInstanceOf(RoleExclusionConflictException::class, $beside);
+        }
+
+        self::assertSame(1, BreakGlassActivation::query()->count());
+
+        self::activateFor($granted, $actor, new GrantScope(self::tenant('acct2')));
+        self::activateFor($granted, scope: new GrantScope(self::tenant('org1'), includeSubtree: false));
+
+        self::assertSame(3, BreakGlassActivation::query()->count());
+    }
+
+    /**
+     * Two activations of a role no pair touches share its lock, neither waiting
+     * on the other, and a deletion of the role waits for an activation holding
+     * it, then takes the activation with it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testActivationsOfOneRoleShareItsLock(): void
+    {
+        $this->raceOrSkip(static function (): void {
+            $first  = StubIdentity::query()->create(['id' => 'user-1']);
+            $second = StubIdentity::query()->create(['id' => 'user-2']);
+            $role   = self::emergencyRole(self::ACTION);
+
+            self::assertSame(['ok', 'ok', true], self::raced(static fn () => self::activateFor($first), self::ROLE_LOCK, static fn () => self::activateFor($second)));
+            self::assertSame(2, BreakGlassActivation::query()->count());
+
+            $delete = static fn (): int => DB::table('roles')->where('id', $role->getKey())->delete();
+
+            self::assertSame(['ok', 'ok', false], self::raced(static fn () => self::activateFor($first), self::ROLE_LOCK, $delete));
+            self::assertSame(0, BreakGlassActivation::query()->count());
+        });
+    }
+
+    /**
+     * An activation racing a grant or an activation of the other role of its
+     * pair, for one grantee, started once the first write holds its role's
+     * lock, queues on the pair whichever runs first, never deadlocking: the one
+     * that takes the pair second is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActivationAndAWriteOfItsPairQueue(): void
+    {
+        $this->raceOrSkip(static function (): void {
+            $responder = self::emergencyRole(self::ACTION);
+            $auditor   = self::emergencyRole(self::ACTION, 'auditor');
+            $grant     = static fn (Model $user) => GrantService::instance()?->grantRole($user, $auditor);
+            $activate  = static fn (Model $user) => self::activateFor($user);
+            $conflict  = RoleExclusionConflictException::class;
+            $races     = [
+                'activation first' => [$activate, self::ROLE_LOCK, $grant, [$conflict, 'ok', true]],
+                'grant first'      => [$grant, '/^select .parent_id., \(select 1 from/', $activate, ['ok', $conflict, false]],
+                'activations'      => [$activate, self::ROLE_LOCK, static fn (Model $user) => self::activateFor($user, role: 'auditor'), [$conflict, 'ok', true]],
+            ];
+
+            self::exclusions()->declare($responder, $auditor);
+
+            foreach ($races as $name => [$write, $pattern, $concurrent, $ended]) {
+                $user = StubIdentity::query()->create(['id' => $name]);
+
+                self::assertSame($ended, self::raced(static fn () => $write($user), $pattern, static fn () => $concurrent($user)), $name);
+            }
+
+            $granted = DB::table('authorizable_roles')->where('role_id', $auditor->getKey())->pluck('authorizable_id')->all();
+
+            self::assertSame(['activations'], BreakGlassActivation::query()->pluck('authorizable_id')->all());
+            self::assertEqualsCanonicalizing(['activation first', 'grant first'], $granted);
+        });
+    }
+
+    /**
      * Every operation refuses once the package refuses, before it reads.
      *
      * @return void
@@ -808,6 +923,123 @@ final class BreakGlassServiceTest extends TestCase
     public function testIsBoundAsASingleton(): void
     {
         self::assertSame(BreakGlassService::instance(), app(BreakGlassService::class));
+    }
+
+    /**
+     * Run the races outside the test's transaction, so a write sees what
+     * another session commits; SQLite, which skips them, keeps its transaction.
+     *
+     * @return list<string|null>
+     */
+    #[\Override]
+    protected function connectionsToTransact(): array
+    {
+        $isRaced = \in_array($this->name(), self::RACED, true) && DB::connection()->getDriverName() !== 'sqlite';
+
+        /** @var list<string|null> $connections */
+        $connections = parent::connectionsToTransact();
+
+        return $isRaced ? [] : $connections;
+    }
+
+    /**
+     * Run the race on MySQL and PostgreSQL, deleting what it stored once it
+     * ends; SQLite, which has one writer, skips it.
+     *
+     * @param  \Closure(): void  $race
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private function raceOrSkip(\Closure $race): void
+    {
+        if (DB::connection()->getDriverName() === 'sqlite') {
+            self::markTestSkipped('SQLite has one writer, so nothing commits while a write runs.');
+        }
+
+        try {
+            $race();
+        } finally {
+            $grants = ['break_glass_activations', 'role_exclusions', 'authorizable_roles', 'authorizable_permissions', 'role_permissions'];
+
+            foreach ([...$grants, 'permissions', 'roles', 'stub_identities', ClosureTenantTree::TABLE] as $table) {
+                DB::table($table)->delete();
+            }
+        }
+    }
+
+    /**
+     * Run the write and, once it has run a query matching the pattern, the
+     * concurrent write in a forked process on sessions of its own, the write
+     * going on once that ends or two seconds pass; return how each ended, `ok`
+     * or the class thrown, and whether the concurrent one ended first.
+     *
+     * @param  \Closure(): mixed  $write
+     * @param  string  $pattern
+     * @param  \Closure(): mixed  $concurrent
+     * @return array{0: string, 1: string, 2: bool}
+     */
+    private static function raced(\Closure $write, string $pattern, \Closure $concurrent): array
+    {
+        $end = static function (\Closure $call): string {
+            try {
+                $call();
+            } catch (\Throwable $exception) {
+                return $exception::class;
+            }
+
+            return 'ok';
+        };
+
+        [$ours, $theirs] = \stream_socket_pair(\STREAM_PF_UNIX, \STREAM_SOCK_STREAM, \STREAM_IPPROTO_IP) ?: self::fail('No socket pair.');
+
+        $pid = \pcntl_fork();
+
+        if ($pid === 0) {
+            \fread($theirs, 1);
+
+            // The sessions inherited are the parent's: kept open, never used.
+            $inherited = \array_map(static fn (Connection $connection) => $connection->getRawPdo(), DB::getConnections());
+
+            \array_map(DB::purge(...), \array_keys($inherited));
+            \fwrite($theirs, $end($concurrent));
+            \posix_kill(\posix_getpid(), \SIGKILL);
+        }
+
+        \fclose($theirs);
+
+        $isStarted = false;
+        $ended     = null;
+
+        DB::listen(static function (QueryExecuted $query) use ($pattern, $ours, &$isStarted, &$ended): void {
+            if ($isStarted || \preg_match($pattern, $query->sql) !== 1) {
+                return;
+            }
+
+            $isStarted = true;
+            $read      = [$ours];
+            $none      = [];
+
+            \fwrite($ours, '1');
+
+            if (\stream_select($read, $none, $none, 2) !== 1) {
+                return;
+            }
+
+            $ended = \stream_get_contents($ours);
+        });
+
+        $first = $end($write);
+
+        if (!$isStarted) {
+            \fwrite($ours, '1');
+        }
+
+        $second = $ended ?? \stream_get_contents($ours);
+
+        \pcntl_waitpid($pid, $status);
+
+        return [$first, (string) $second, $ended !== null];
     }
 
     /**
@@ -889,6 +1121,16 @@ final class BreakGlassServiceTest extends TestCase
         self::assertInstanceOf(BreakGlassService::class, $service);
 
         return $service;
+    }
+
+    /**
+     * Return the role exclusion service.
+     *
+     * @return \SineMacula\Laravel\Authorization\Services\RoleExclusionService
+     */
+    private static function exclusions(): RoleExclusionService
+    {
+        return app(RoleExclusionService::class);
     }
 
     /**

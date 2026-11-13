@@ -91,7 +91,10 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   definition is, declared and removed through the role exclusion service under its own actions with the owner, rank
   and administered-scope rules, idempotence and its events, and the conflict report: where two holdings overlap by
   tenant, subtree, platform and application, roles held through parents, a principal with its identity, what holds
-  nothing, the bounded read, and the refusal that carries the report and removes nothing.
+  nothing, the bounded read, and the refusal that carries the report and removes nothing; and the enforcement on every
+  grant, re-parenting and break-glass activation that could let someone hold both roles, live activations counted as
+  holdings, under a declaration's locks, after the delegated decision, at one query a level of the roles above for a
+  write no pair touches.
 - `access-reviews.md`: what an access review means by holding (grant routes, never effective access), the structural
   predicates it shares with a check and never evaluates beyond, every edge live and every route kept, the hierarchy
   read in a fixed number of queries, the scope selections and the explicit application selector, `holders()`,

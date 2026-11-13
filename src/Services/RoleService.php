@@ -51,7 +51,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * Setting a parent locks the role and the parent, and the observer walks the
  * parent's ancestors under the same lock and outside the tenant scope, so two
  * concurrent re-parentings cannot close a cycle between them, and a cycle
- * through another tenant's role is refused as well.
+ * through another tenant's role is refused as well. A parent that would leave a
+ * holder of the role, or of a role below it, holding both roles of a declared
+ * pair where their reach overlaps is refused with
+ * `RoleExclusionConflictException`, trusted or delegated, once the change is
+ * decided (see `Exclusions\Support\ExclusionGuard`).
  *
  * A role's grant of a permission may carry an expiry, after which it no longer
  * counts. Granting a permission the role carries with the same expiry changes

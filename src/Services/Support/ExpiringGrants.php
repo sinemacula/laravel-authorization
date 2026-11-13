@@ -17,7 +17,8 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
  * same expiry changes nothing; any other expiry is written, re-arming a grant
  * that had expired or changing a live one's. A re-arm, as a sync makes it,
  * writes only a grant that had expired and leaves a live one as it is. Each
- * write reports what it changed and the expiry the row carried before.
+ * write reports what it changed and the expiry, and any reach, the row carried
+ * before.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,13 +44,13 @@ abstract readonly class ExpiringGrants
             return new GrantChange(GrantOutcome::GRANTED);
         }
 
-        $previous = $this->lockedExpiry($id);
+        $held = $this->lockedRow($id);
 
-        if (self::isSameInstant($previous, $expiresAt)) {
-            return new GrantChange(GrantOutcome::UNCHANGED, $previous);
+        if (self::isSameInstant($held->previousExpiresAt, $expiresAt)) {
+            return $held;
         }
 
-        return $this->rewrite($id, $previous, $expiresAt, Carbon::now('UTC'));
+        return $this->rewrite($id, $held, $expiresAt, Carbon::now('UTC'));
     }
 
     /**
@@ -76,13 +77,13 @@ abstract readonly class ExpiringGrants
             return new GrantChange(GrantOutcome::GRANTED);
         }
 
-        $previous = $this->lockedExpiry($id);
+        $held = $this->lockedRow($id);
 
-        if (!self::hasExpired($previous, $now) || self::isSameInstant($previous, $expiresAt)) {
-            return new GrantChange(GrantOutcome::UNCHANGED, $previous);
+        if (!self::hasExpired($held->previousExpiresAt, $now) || self::isSameInstant($held->previousExpiresAt, $expiresAt)) {
+            return $held;
         }
 
-        return $this->rewrite($id, $previous, $expiresAt, $now);
+        return $this->rewrite($id, $held, $expiresAt, $now);
     }
 
     /**
@@ -96,12 +97,13 @@ abstract readonly class ExpiringGrants
     abstract protected function store(string $id, ?Carbon $expiresAt): bool;
 
     /**
-     * Read the expiry of the held row under a row lock.
+     * Read the held row under a row lock, as a write that left it as it was:
+     * its expiry and, for grants that carry one, its reach.
      *
      * @param  string  $id
-     * @return \Illuminate\Support\Carbon|null
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
      */
-    abstract protected function lockedExpiry(string $id): ?Carbon;
+    abstract protected function lockedRow(string $id): GrantChange;
 
     /**
      * Write the new expiry to the held row.
@@ -117,16 +119,18 @@ abstract readonly class ExpiringGrants
      * previous expiry had passed at the instant given, else a changed one.
      *
      * @param  string  $id
-     * @param  \Illuminate\Support\Carbon|null  $previous
+     * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantChange  $held
      * @param  \Illuminate\Support\Carbon|null  $expiresAt
      * @param  \Illuminate\Support\Carbon  $now
      * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
      */
-    private function rewrite(string $id, ?Carbon $previous, ?Carbon $expiresAt, Carbon $now): GrantChange
+    private function rewrite(string $id, GrantChange $held, ?Carbon $expiresAt, Carbon $now): GrantChange
     {
         $this->writeExpiry($id, $expiresAt);
 
-        return new GrantChange(self::hasExpired($previous, $now) ? GrantOutcome::REARMED : GrantOutcome::EXPIRY_CHANGED, $previous);
+        $outcome = self::hasExpired($held->previousExpiresAt, $now) ? GrantOutcome::REARMED : GrantOutcome::EXPIRY_CHANGED;
+
+        return new GrantChange($outcome, $held->previousExpiresAt, $held->previousReach);
     }
 
     /**

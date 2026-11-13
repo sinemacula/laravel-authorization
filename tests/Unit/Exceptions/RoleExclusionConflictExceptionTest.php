@@ -52,4 +52,28 @@ final class RoleExclusionConflictExceptionTest extends TestCase
             $plural->getMessage(),
         );
     }
+
+    /**
+     * The refusal of a write carries the report of the conflicts it would
+     * create and names the roles and how many it would leave holding both.
+     *
+     * @return void
+     */
+    public function testRefusesAWriteWithItsReport(): void
+    {
+        $route = new ExclusionRoute(new Reference('user', '1'), new Reference('role', 'a'), [new Reference('role', 'a')], GrantScope::platform(), GrantScope::platform());
+        $one   = new ConflictReport(new Reference('role', 'a'), new Reference('role', 'b'), [new ExclusionConflict(new Reference('user', '1'), null, $route, $route)]);
+        $two   = new ConflictReport(new Reference('role', 'a'), new Reference('role', 'b'), [
+            new ExclusionConflict(new Reference('user', '1'), null, $route, $route),
+            new ExclusionConflict(new Reference('user', '2'), null, $route, $route),
+        ]);
+        $single = RoleExclusionConflictException::written($one, 'clerk', 'auditor');
+
+        self::assertSame($one, $single->getReport());
+        self::assertSame('Roles \'clerk\' and \'auditor\' are mutually exclusive: the write would leave 1 holder holding both where their reach overlaps.', $single->getMessage());
+        self::assertSame(
+            'Roles \'clerk\' and \'auditor\' are mutually exclusive: the write would leave 2 holders holding both where their reach overlaps.',
+            RoleExclusionConflictException::written($two, 'clerk', 'auditor')->getMessage(),
+        );
+    }
 }

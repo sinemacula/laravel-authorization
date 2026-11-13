@@ -4,8 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Exclusions\Support;
 
-use Illuminate\Database\Eloquent\Relations\Relation;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Exclusions\ConflictReport;
 use SineMacula\Laravel\Authorization\Exclusions\ExclusionConflict;
@@ -36,11 +34,13 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * The holdings of every role of every pair are read together (see
  * `ExclusionHoldings`), in a fixed number of queries, read locked for a
- * declaration. Whether the tenant of one route lies within the tenant of a
- * route to the other role reaching below it is settled for every pair of routes
- * together, a chunk of them a query (see `TenantRelations::settleWithin()`),
- * never once for each holder or tenant; the identity directory, the
- * application's seam, is asked once for each holder of a role of a pair.
+ * declaration and for a write the exclusion guard weighs (see
+ * `ExclusionGuard`). Whether the tenant of one route lies within the tenant of
+ * a route to the other role reaching below it is settled for every pair of
+ * routes together, a chunk of them a query (see
+ * `TenantRelations::settleWithin()`), never once for each holder or tenant; the
+ * identity directory, the application's seam, is asked once for each holder of
+ * a role of a pair.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -74,16 +74,18 @@ final class ConflictReader
     /**
      * Return the conflict report of each pair, in the order given, each pair
      * its two roles in the pair's order, read under locks when asked (see
-     * `ExclusionHoldings`).
+     * `ExclusionHoldings`); given a write, as it would leave the holdings, each
+     * report keeping only the conflicts the write creates.
      *
      * @param  list<array{0: \SineMacula\Laravel\Authorization\Support\Reference, 1: \SineMacula\Laravel\Authorization\Support\Reference}>  $pairs
      * @param  bool  $isLocked
+     * @param  \SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionWrite|null  $write
      * @return list<\SineMacula\Laravel\Authorization\Exclusions\ConflictReport>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      * @throws \UnexpectedValueException
      */
-    public function read(array $pairs, bool $isLocked = false): array
+    public function read(array $pairs, bool $isLocked = false, ?ExclusionWrite $write = null): array
     {
         $roles = [];
 
@@ -93,7 +95,7 @@ final class ConflictReader
         }
 
         $keys     = \array_values($roles);
-        $holdings = ExclusionHoldings::read($keys, $this->relations, $isLocked);
+        $holdings = ExclusionHoldings::read($keys, $this->relations, $isLocked, $write);
 
         $this->learn($holdings->holders(...$keys));
 
@@ -101,7 +103,7 @@ final class ConflictReader
 
         $this->settle(\array_merge(...$candidates));
 
-        return \array_map(fn (array $pair, array $sets): ConflictReport => $this->report($pair[0], $pair[1], $sets, $holdings), $pairs, $candidates);
+        return \array_map(fn (array $pair, array $sets): ConflictReport => $this->report($pair[0], $pair[1], $sets, $holdings, $write), $pairs, $candidates);
     }
 
     /**
@@ -115,18 +117,23 @@ final class ConflictReader
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $excluded
      * @param  list<array{0: \SineMacula\Laravel\Authorization\Support\Reference, 1: \SineMacula\Laravel\Authorization\Support\Reference|null, 2: list<\SineMacula\Laravel\Authorization\Exclusions\ExclusionRoute>, 3: list<\SineMacula\Laravel\Authorization\Exclusions\ExclusionRoute>}>  $candidates
      * @param  \SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionHoldings  $holdings
+     * @param  \SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionWrite|null  $write
      * @return \SineMacula\Laravel\Authorization\Exclusions\ConflictReport
      *
      * @formatter:on
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      */
-    private function report(Reference $role, Reference $excluded, array $candidates, ExclusionHoldings $holdings): ConflictReport
+    private function report(Reference $role, Reference $excluded, array $candidates, ExclusionHoldings $holdings, ?ExclusionWrite $write): ConflictReport
     {
         $conflicts = [];
 
         foreach ($candidates as [$holder, $identity, $firsts, $seconds]) {
             \array_push($conflicts, ...$this->overlapping($holder, $identity, $firsts, $seconds));
+        }
+
+        if ($write !== null) {
+            $conflicts = \array_values(\array_filter($conflicts, $write->makes(...)));
         }
 
         \usort($conflicts, static fn (ExclusionConflict $one, ExclusionConflict $other): int => $one->orderKey() <=> $other->orderKey());
@@ -139,8 +146,9 @@ final class ConflictReader
     /**
      * Return the sets of routes to weigh against each other for the pair: each
      * holder's own routes to each role, and, for each principal of a holder,
-     * its own routes to one role against the holder's to the other, each way
-     * round.
+     * its own routes to one role against the holder's grants of the other, each
+     * way round, since no break-glass activation reaches a principal through
+     * its identity.
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
@@ -163,8 +171,8 @@ final class ConflictReader
             $candidates[] = [$holder, null, $holdings->of($role, $holder), $holdings->of($excluded, $holder)];
 
             foreach ($this->principals[$key] ?? [] as $principal) {
-                $candidates[] = [$principal, $holder, $holdings->of($role, $principal), $holdings->of($excluded, $holder)];
-                $candidates[] = [$principal, $holder, $holdings->of($role, $holder), $holdings->of($excluded, $principal)];
+                $candidates[] = [$principal, $holder, $holdings->of($role, $principal), $holdings->of($excluded, $holder, isIdentity: true)];
+                $candidates[] = [$principal, $holder, $holdings->of($role, $holder, isIdentity: true), $holdings->of($excluded, $principal)];
             }
         }
 
@@ -296,23 +304,10 @@ final class ConflictReader
                 $this->incomplete[$key] = true;
             }
 
-            $reached = static fn (Reference $principal): bool => ExclusionHoldings::key($principal) !== $key && self::isMachine($principal) === self::isMachine($holder);
+            $isMachine = ExclusionHoldings::isMachine($holder);
+            $reached   = static fn (Reference $principal): bool => ExclusionHoldings::key($principal) !== $key && ExclusionHoldings::isMachine($principal) === $isMachine;
 
             $this->principals[$key] = \array_values(\array_filter($listed->principals, $reached));
         }
-    }
-
-    /**
-     * Determine whether the grantee is a machine, as its model class says (see
-     * `AuthorizableMachine`).
-     *
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
-     * @return bool
-     */
-    private static function isMachine(Reference $grantee): bool
-    {
-        $class = Relation::getMorphedModel($grantee->type) ?? $grantee->type;
-
-        return \is_a($class, AuthorizableMachine::class, true);
     }
 }

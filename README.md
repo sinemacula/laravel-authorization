@@ -83,8 +83,9 @@ refuse what the allow permitted (see [Delegated administration](#delegated-admin
   permission the package declares itself and no guardrail caps, may set or remove one.
 - **Separation of duties**: two roles may be declared mutually exclusive, so no grantee holds both where their reach
   overlaps. A pair is managed through `RoleExclusionService` as the other definitions are, declaring one that someone
-  already holds both roles of is refused with a report of who holds both, and every pair can be reported on later;
-  enforcing the pairs on every grant comes next (see [Separation of duties](#separation-of-duties)).
+  already holds both roles of is refused with a report of who holds both, and every grant, re-parenting and
+  break-glass activation that would let someone hold both is refused, trusted or not (see
+  [Separation of duties](#separation-of-duties)).
 - **Session caps and machines**: a check is capped by the scopes of the subject's credential, from a session policy
   source you bind and mapped to actions through a scope map checked at boot, and by any actions the caller passes to
   `Authorization::capped()`. Every cap must cover the action, a cap grants nothing, and an empty cap allows nothing. A
@@ -1367,9 +1368,9 @@ them, and are cached with the rest of the resolution: once warm, a check reads n
 ### Separation of duties
 
 Two roles may be declared mutually exclusive (AUTHZ-11.8), so that no grantee holds both where their reach overlaps: a
-clerk who raises payments and an approver who signs them off, say. This release adds the declarations, their management
-and the conflict report; enforcing every declared pair on every grant, and on a change to a role's parents, comes in the
-next release, so for now a grant made after a pair is declared is not refused, and the report finds it.
+clerk who raises payments and an approver who signs them off, say. A pair is declared and removed through
+`RoleExclusionService`, which also reports who holds both roles of a pair, and once declared it is enforced on every
+write that could let someone hold both (see [Enforcement](#enforcement) below).
 
 ```php
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
@@ -1453,10 +1454,59 @@ of either waits for it, and reads each role and grant row under a shared lock, s
 the declaration runs is still found, whatever snapshot the transaction holds. It refuses with
 `RoleExclusionConflictException`, carrying the report, when it holds any conflict: nothing is written and nothing is
 removed, so an administrator resolves each conflict, revoking a grant or narrowing its reach, and declares the pair
-again. `conflictsForAll()` finds the conflicts a tenant moved, an identity linked to a principal or a grant made since
-left behind. The reads, `pairs()`, `conflicts()` and `conflictsForAll()`, are trusted and not decided: they read every
-pair and grant stored, whatever tenant owns it, so show them only to those who should see them. See
-[docs/design/separation-of-duties.md](docs/design/separation-of-duties.md).
+again. `conflictsForAll()` finds the conflicts a tenant moved, an identity linked to a principal, or a grant written
+past the package left behind. The reads, `pairs()`, `conflicts()` and `conflictsForAll()`, are trusted and not decided:
+they read every pair and grant stored, whatever tenant owns it, so show them only to those who should see them.
+
+#### Enforcement
+
+Once a pair is declared, every write that could let someone hold both its roles where their reach overlaps is refused
+with `RoleExclusionConflictException`, trusted or delegated, with no override (N136):
+
+- **Role grants.** `GrantService::grantRole()` and `syncRoles()`, and `assignRole()` and `syncRoles()` on the
+  `HasRoles` trait, which call them; a re-armed grant, a later expiry and a reach widened below its tenant count as
+  grants. A sync is weighed as it leaves the grantee's roles, so swapping one role of a pair for the other in one sync
+  goes through. A grant that leaves a role as it was, a shorter expiry, a narrower reach and a revocation are never
+  weighed, so a conflict already stored can always be narrowed away.
+- **Parents.** `RoleService::setParent()`, or a role saved with a new `parent_id`, while the role hierarchy is enabled:
+  every holder of the role, and of every role below it, is weighed as holding the new parent and its ancestors. A
+  parent a pair touches must be saved inside a transaction on the package's connection, as `setParent()` saves it, so
+  the check's locks hold until the save commits; a model saved outside one is refused with `LogicException`.
+- **Break-glass.** `BreakGlassService::activate()` weighs an activation as a live grant of its role once the role's
+  row is locked shared. An activation not ended or expired counts as a holding for every other write, even while
+  break-glass is switched off, since it grants again once break-glass is switched on.
+- **Commands.** `authorization:grant` prints the refusal and fails; `authorization:migrate-spatie` stops at the refused
+  grant, keeping what it imported before it, as for any failed grant.
+
+A role's owner never changes, and no write moves a grant to another tenant or application, so neither needs a check.
+
+```php
+try {
+    $user->assignRole('approver'); // the user holds 'clerk', declared exclusive with 'approver'
+} catch (RoleExclusionConflictException $exception) {
+    $exception->getReport()->conflicts; // only the conflicts this write would create
+}
+```
+
+The refusal carries the report of the conflicts the write would create, never one already stored, references and scopes
+only, and nothing is written: the grant, or the parent, is rolled back and no event is dispatched. A delegated write is
+decided first, so an actor not allowed it is refused as such; a grant hook has already run by then, since hooks run
+before the package takes any lock. A write is weighed under the locks a declaration takes, so a grant and a declaration
+racing each other never both commit. Two writes that could together create a conflict for a pair, such as grants of its
+two roles, a grant and an activation of them or a grant and a parent change, both lock the pair's row before either
+writes, whatever other pairs their roles are in, so they never both commit: the second waits and is weighed against what
+the first committed. An activation locks its role, then the pair, then the holdings it reads, as a grant does: shared,
+unless a delegated call has already locked it for update, so two trusted activations of one role share the role's lock
+and a trusted activation queues on the pair with a write of the pair's other role instead of deadlocking with it. The
+database can still refuse a write as a deadlock when the writes climb several levels of parents or hand out several
+roles, when a delegated write, which locks its role for update before the pair, races a write of the pair's other role,
+or when a write races a declaration, a parent change or the deletion of the other role of one of its pairs. Only a
+delegated call, made with an acting context, is tried again: in a transaction the package opened, or thrown as
+`TransactionConflictException` in one the application opened. A trusted call, `setParent()` without an actor and the
+commands among them, and a model saved directly throw the database's deadlock error for the caller to retry. A grant no
+pair touches costs one query for each level of its role's ancestry, its own included, so one for a role with no parent;
+one a pair touches costs one more to lock the pairs, then reads the report in a fixed number of queries however many
+hold the roles. See [docs/design/separation-of-duties.md](docs/design/separation-of-duties.md).
 
 ### Session caps and machines
 
@@ -4580,6 +4630,9 @@ $breakGlass->revoke($activation, $actor);    // by a holder of the revoke right
   role's maximum (never shortened), a justification not listed, a note while `notes` is false or one longer than
   `note_max_length` characters, and a scope naming half a tenant. An unknown role throws `UnknownRoleException`, an
   unsaved grantee `InvalidGranteeException`, and a role is held to its owner and guard as a grant of it is.
+- An activation that would leave the grantee holding both roles of a pair of mutually exclusive roles where their
+  reach overlaps is refused with `RoleExclusionConflictException`, trusted or delegated, and nothing is written (see
+  [Separation of duties](#separation-of-duties)).
 - The grant hooks are asked about an activation as about a grant of its role in its scope until its expiry, and a
   hook's refusal refuses it. A delegated call locks what a delegated role grant locks, in the same order.
 - `surrender()` is for the grantee alone, acting as itself; anyone else is refused, as is the grantee while

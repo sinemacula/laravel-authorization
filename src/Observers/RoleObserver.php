@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHasChildrenException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
+use SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionGuard;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\Support\RecordChanges;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -29,9 +30,10 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * Translates Eloquent's native `saving` / `updating` / `created` / `updated` /
  * `deleting` / `deleted` events into the package's typed record events,
  * enforces the tenant-columns both-or-neither invariant and the reserved system
- * role names on save, and guards against hierarchy cycles before a `parent_id`
- * change is persisted. System-protection hooks (`deleting`, `updating` guard,
- * `saved` bypass reset) live in
+ * role names on save, and guards against hierarchy cycles, and a parent that
+ * would leave someone holding both roles of a declared pair, before a
+ * `parent_id` change is persisted. System-protection hooks (`deleting`,
+ * `updating` guard, `saved` bypass reset) live in
  * `HasSystemProtection::bootHasSystemProtection()` and run independently of
  * this observer.
  *
@@ -51,8 +53,9 @@ final class RoleObserver
     /**
      * Enforce the owner rules (see `RecordOwner`), the reserved system role
      * names, parity with the parent, children and permissions (see
-     * `RoleParity`) and the hierarchy cycle-detection guard before any
-     * persistence.
+     * `RoleParity`), the hierarchy cycle-detection guard and, for a parent
+     * changed, the pairs of mutually exclusive roles (see `ExclusionGuard`)
+     * before any persistence.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
@@ -64,6 +67,8 @@ final class RoleObserver
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException
+     * @throws \UnexpectedValueException
      */
     public function saving(Role $role): void
     {
@@ -76,6 +81,8 @@ final class RoleObserver
         }
 
         $this->assertNoHierarchyCycle($role);
+
+        ExclusionGuard::assertParent($role);
     }
 
     /**

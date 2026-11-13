@@ -9,15 +9,19 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Exclusions\ConflictReport;
 use SineMacula\Laravel\Authorization\Exclusions\ExclusionConflict;
 use SineMacula\Laravel\Authorization\Exclusions\Support\ConflictReader;
+use SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionWrite;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\StubIdentity;
@@ -43,7 +47,7 @@ use Tests\TestCase;
 #[CoversClass(ConflictReader::class)]
 final class ConflictReaderTest extends TestCase
 {
-    use ComparesReferences, RecordsRowLocks;
+    use ActivatesBreakGlass, ComparesReferences, RecordsRowLocks;
 
     /** @var string The type of the stub tenants. */
     private const string TENANT = 'stub_tenant';
@@ -127,6 +131,36 @@ final class ConflictReaderTest extends TestCase
         self::assertFalse($conflict->second->scope->includeSubtree);
         self::assertNull(self::conflictOf($report, $other)->first->scope->tenant);
         self::assertTrue($report->isComplete);
+    }
+
+    /**
+     * Given a write, each report keeps only the conflicts the write creates,
+     * those a route of its own takes part in, read as the write leaves the
+     * holdings, and leaves out any already stored.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAWritesReportKeepsOnlyTheConflictsItCreates(): void
+    {
+        [$clerk, $auditor] = self::roles();
+
+        $user  = StubIdentity::query()->create(['id' => 'user']);
+        $other = StubIdentity::query()->create(['id' => 'other']);
+
+        self::grants()->grantRole($user, $clerk);
+        self::grants()->grantRole($user, $auditor);
+        self::grants()->grantRole($other, $clerk);
+
+        $reader = new ConflictReader(new ListedIdentityDirectory);
+        $pair   = [[Reference::of($clerk), Reference::of($auditor)]];
+        $report = $reader->read($pair, write: ExclusionWrite::proposed(Reference::of($other), $auditor->id, new GrantScope(self::tenant('child'))))[0];
+
+        self::assertSame(['other'], self::holderKeys($report));
+        self::assertNotSame([], $reader->read($pair, write: ExclusionWrite::proposed(Reference::of($user), $auditor->id, new GrantScope(self::tenant('other'))))[0]->conflicts);
+        self::assertTrue($reader->read($pair, write: ExclusionWrite::granted(Reference::of($other), [[$clerk->id, GrantScope::platform()]]))[0]->isEmpty());
+        self::assertCount(1, $reader->read($pair)[0]->conflicts);
     }
 
     /**
@@ -269,8 +303,8 @@ final class ConflictReaderTest extends TestCase
     }
 
     /**
-     * Read locked, the roles and their grants are read under shared locks; read
-     * plain, as by default, nothing is locked.
+     * Read locked, the roles, their grants and their activations are read under
+     * shared locks; read plain, as by default, nothing is locked.
      *
      * @return void
      *
@@ -286,7 +320,7 @@ final class ConflictReaderTest extends TestCase
         $reader = new ConflictReader(new ListedIdentityDirectory);
 
         self::assertSame([], $this->lockedTables(static fn (): array => $reader->read($pairs)));
-        self::assertSame(['authorizable_roles', 'roles'], $this->lockedTables(static fn (): array => $reader->read($pairs, true)));
+        self::assertSame(['authorizable_roles', 'break_glass_activations', 'roles'], $this->lockedTables(static fn (): array => $reader->read($pairs, true)));
     }
 
     /**
@@ -432,6 +466,41 @@ final class ConflictReaderTest extends TestCase
         self::assertTrue(self::refersTo($reverse->identity, $both));
         self::assertTrue(self::refersTo($reverse->second->grantee, $both));
         self::assertTrue($report->isComplete);
+    }
+
+    /**
+     * A live break-glass activation conflicts with its holder's grant of the
+     * other role, and a principal's own with its identity's grant, either way
+     * round; an identity's activation never reaches its principal.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActivationIsWeighedAsTheSubjectsOwnGrant(): void
+    {
+        [$clerk, $auditor] = self::roles();
+
+        $holder   = StubIdentity::query()->create(['id' => 'holder']);
+        $identity = StubIdentity::query()->create(['id' => 'identity']);
+        $active   = StubSecondIdentity::query()->create(['id' => 'active']);
+        $first    = StubSecondIdentity::query()->create(['id' => 'first']);
+        $second   = StubSecondIdentity::query()->create(['id' => 'second']);
+        $other    = StubIdentity::query()->create(['id' => 'other']);
+
+        self::activate($clerk, $holder);
+        self::grants()->grantRole($holder, $auditor);
+        self::activate($auditor, $active);
+        self::grants()->grantRole($identity, $clerk);
+        self::activate($clerk, $other);
+        self::activate($auditor, $other);
+        self::grants()->grantRole($first, $clerk);
+        self::grants()->grantRole($second, $auditor);
+
+        $report = self::report($clerk, $auditor, self::directory(['identity' => [$active], 'other' => [$first, $second]]));
+
+        self::assertSame(['holder', 'other', 'active'], self::holderKeys($report));
+        self::assertTrue(self::refersTo(self::conflictOf($report, $active)->identity, $identity));
     }
 
     /**
@@ -741,6 +810,27 @@ final class ConflictReaderTest extends TestCase
     private static function tenant(string $id): Reference
     {
         return new Reference(self::TENANT, $id);
+    }
+
+    /**
+     * Store a live break-glass activation of the role for the grantee at the
+     * platform.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  \Illuminate\Database\Eloquent\Model  $grantee
+     * @return void
+     */
+    private static function activate(Role $role, Model $grantee): void
+    {
+        DB::table('break_glass_activations')->insert([
+            'id'                => (string) Str::uuid(),
+            'role_id'           => $role->id,
+            'authorizable_type' => $grantee->getMorphClass(),
+            'authorizable_id'   => $grantee->getKey(),
+            'justification'     => 'incident',
+            'activated_at'      => Carbon::now()->subHour(),
+            'expires_at'        => Carbon::now()->addHour(),
+        ]);
     }
 
     /**

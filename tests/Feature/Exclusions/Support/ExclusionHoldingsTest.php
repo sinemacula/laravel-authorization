@@ -6,20 +6,24 @@ namespace Tests\Feature\Exclusions\Support;
 
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Exclusions\ExclusionRoute;
 use SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionHoldings;
+use SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionWrite;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Reviews\Support\TenantRelations;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
@@ -35,7 +39,47 @@ use Tests\TestCase;
 #[CoversClass(ExclusionHoldings::class)]
 final class ExclusionHoldingsTest extends TestCase
 {
-    use ActsAsTenant, ComparesReferences, RecordsRowLocks;
+    use ActivatesBreakGlass, ActsAsTenant, ComparesReferences, RecordsRowLocks;
+
+    /**
+     * Given a write, the holdings are read as it would leave them: a role given
+     * a parent below the role read is read with the roles below it, its holders
+     * holding the role through the new parent, and no longer through the old; a
+     * grant proposed is read as a live grant beside the stored ones.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAWriteIsReadAsItWouldLeaveTheHoldings(): void
+    {
+        $clerk   = Role::query()->create(['name' => 'clerk']);
+        $auditor = Role::query()->create(['name' => 'auditor']);
+        $intern  = Role::query()->create(['name' => 'intern']);
+        $trainee = Role::query()->create(['name' => 'trainee', 'parent_id' => $intern->id]);
+        $junior  = Role::query()->create(['name' => 'junior', 'parent_id' => $auditor->id]);
+        $user    = StubIdentity::query()->create(['id' => 'user']);
+        $other   = StubIdentity::query()->create(['id' => 'other']);
+        $tenant  = new Reference('stub_tenant', 'a');
+
+        self::grants()->grantRole($user, $trainee);
+        self::grants()->grantRole($user, $junior);
+
+        $adopted = ExclusionHoldings::read([$clerk->id], new TenantRelations, write: ExclusionWrite::reparented($intern->id, $clerk->id));
+        $moved   = ExclusionHoldings::read([$auditor->id], new TenantRelations, write: ExclusionWrite::reparented($junior->id, $clerk->id));
+        $granted = ExclusionHoldings::read([$clerk->id], new TenantRelations, write: ExclusionWrite::proposed(Reference::of($other), $clerk->id, new GrantScope($tenant)));
+
+        self::assertSame([], ExclusionHoldings::read([$clerk->id], new TenantRelations)->of($clerk->id, Reference::of($user)));
+        self::assertSame([$trainee->id, $intern->id, $clerk->id], self::pathOf($adopted->of($clerk->id, Reference::of($user))[0]->path));
+        self::assertCount(1, ExclusionHoldings::read([$auditor->id], new TenantRelations)->of($auditor->id, Reference::of($user)));
+        self::assertSame([], $moved->of($auditor->id, Reference::of($user)));
+
+        $route = $granted->of($clerk->id, Reference::of($other))[0];
+
+        self::assertEquals($tenant, $route->scope->tenant);
+        self::assertNull($route->expiresAt);
+        self::assertTrue(self::refersTo($route->grantee, $other));
+    }
 
     /**
      * Each live grant of a role, or of a role below it, is a route to it, in
@@ -158,8 +202,8 @@ final class ExclusionHoldingsTest extends TestCase
     }
 
     /**
-     * The grants are read a chunk of the roles at a time, so a set of roles
-     * larger than one chunk is read whole.
+     * The grants and the activations are read a chunk of the roles at a time,
+     * so a set of roles larger than one chunk is read whole.
      *
      * @return void
      *
@@ -175,8 +219,9 @@ final class ExclusionHoldingsTest extends TestCase
         }
 
         self::grants()->grantRole($user, Role::query()->findOrFail(\end($roles)));
+        self::activate(Role::query()->findOrFail(\end($roles)), Reference::of($user), null, Carbon::now()->addHour());
 
-        self::assertCount(1, ExclusionHoldings::read($roles, new TenantRelations)->of(\end($roles), Reference::of($user)));
+        self::assertCount(2, ExclusionHoldings::read($roles, new TenantRelations)->of(\end($roles), Reference::of($user)));
     }
 
     /**
@@ -425,7 +470,56 @@ final class ExclusionHoldingsTest extends TestCase
         self::grants()->grantRole(StubIdentity::query()->create(['id' => 'user']), $deputy);
 
         self::assertSame([], $this->lockedTables(static fn (): ExclusionHoldings => ExclusionHoldings::read([$clerk->id], new TenantRelations)));
-        self::assertSame(['authorizable_roles', 'roles'], $this->lockedTables(static fn (): ExclusionHoldings => ExclusionHoldings::read([$clerk->id], new TenantRelations, true)));
+        $locked = $this->lockedTables(static fn (): ExclusionHoldings => ExclusionHoldings::read([$clerk->id], new TenantRelations, true));
+
+        self::assertSame(['authorizable_roles', 'break_glass_activations', 'roles'], $locked);
+    }
+
+    /**
+     * A live break-glass activation holds its role as a grant does, of a role
+     * below too, and one proposed beside it; one ended, one expired and one
+     * naming a machine hold nothing, and an identity's activations are left out
+     * where it is weighed as another subject's identity.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testALiveActivationHoldsItsRoleAsAGrantDoes(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $clerk   = Role::query()->create(['name' => 'clerk']);
+        $deputy  = Role::query()->create(['name' => 'deputy', 'parent_id' => $clerk->id]);
+        $user    = StubIdentity::query()->create(['id' => 'user']);
+        $machine = StubMachine::query()->create(['id' => 'machine']);
+        $tenant  = new Reference('stub_tenant', 'a');
+
+        self::activate($deputy, Reference::of($user), $tenant, Carbon::now()->addHour());
+        self::activate($clerk, Reference::of($user), null, Carbon::now()->addHour(), Carbon::now()->subMinute());
+        self::activate($clerk, Reference::of($user), null, Carbon::now());
+        self::activate($clerk, Reference::of($machine), null, Carbon::now()->addHour());
+
+        $holdings = ExclusionHoldings::read([$clerk->id], new TenantRelations);
+        $routes   = $holdings->of($clerk->id, Reference::of($user));
+
+        self::assertCount(1, $routes);
+        self::assertSame([$deputy->id, $clerk->id], self::pathOf($routes[0]->path));
+        self::assertEquals($tenant, $routes[0]->scope->tenant);
+        self::assertSame('2026-07-01 13:00:00', $routes[0]->expiresAt?->format('Y-m-d H:i:s'));
+        self::assertSame([], $holdings->of($clerk->id, Reference::of($user), isIdentity: true));
+        self::assertSame([], $holdings->of($clerk->id, Reference::of($machine)));
+        self::assertCount(1, $holdings->holders($clerk->id));
+
+        self::grants()->grantRole($user, $clerk);
+
+        $proposed = ExclusionHoldings::read([$clerk->id], new TenantRelations, write: ExclusionWrite::proposed(Reference::of($machine), $clerk->id, new GrantScope($tenant)));
+
+        self::assertCount(1, $proposed->of($clerk->id, Reference::of($user), isIdentity: true));
+        self::assertCount(2, $proposed->of($clerk->id, Reference::of($user)));
+        self::assertSame([], $proposed->of($clerk->id, Reference::of($machine)));
+
+        Carbon::setTestNow();
     }
 
     /**
@@ -437,6 +531,34 @@ final class ExclusionHoldingsTest extends TestCase
     private static function pathOf(array $path): array
     {
         return \array_map(static fn (Reference $role): string => $role->id, $path);
+    }
+
+    /**
+     * Store a break-glass activation of the role for the grantee, in the tenant
+     * given or at the platform, until the expiry, ended at the instant given.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  \DateTimeInterface  $expiresAt
+     * @param  \DateTimeInterface|null  $endedAt
+     * @return void
+     */
+    private static function activate(Role $role, Reference $grantee, ?Reference $tenant, \DateTimeInterface $expiresAt, ?\DateTimeInterface $endedAt = null): void
+    {
+        DB::table('break_glass_activations')->insert([
+            'id'                => (string) Str::uuid(),
+            'role_id'           => $role->id,
+            'authorizable_type' => $grantee->type,
+            'authorizable_id'   => $grantee->id,
+            'tenant_type'       => $tenant?->type,
+            'tenant_id'         => $tenant?->id,
+            'include_subtree'   => true,
+            'justification'     => 'incident',
+            'activated_at'      => Carbon::now()->subHour(),
+            'expires_at'        => $expiresAt,
+            'ended_at'          => $endedAt,
+        ]);
     }
 
     /**

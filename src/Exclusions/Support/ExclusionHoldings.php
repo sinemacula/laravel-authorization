@@ -4,8 +4,13 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Exclusions\Support;
 
+use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Config\SwitchConfigValidator;
+use SineMacula\Laravel\Authorization\Config\TableNames;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Exclusions\ExclusionRoute;
@@ -23,7 +28,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * Who holds each of a set of roles, and through which grants (AUTHZ-11.8,
  * N135), as the conflict report reads them: every live grant, in every tenant
  * and application, of the role or of a role below it, which inherits it while
- * the role hierarchy is enabled, each one route.
+ * the role hierarchy is enabled, each one route. A live break-glass activation
+ * is read as the grant it stands for (see `BreakGlassActivations`): one naming
+ * a machine counts for nothing, and one held by an identity never reaches its
+ * principals (see `of()`).
  *
  * A grant holds the roles of its chain, from the role granted up through its
  * parents, as a check walks it (see `RoleGraph`) in a tenant the grant holds
@@ -42,15 +50,19 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * It reads in a fixed number of queries, never one for each holder or tenant:
  * the roles below the set in one recursive query (`RoleChains`), then one read
  * of them and of every role whose parent is among them, repeated only for a
- * role it finds that the first query did not; the grants of all of them
- * together, as `GrantRows` selects them, a chunk of the roles at a time, live
- * at one instant (see `ReviewRun`); and whether each grant's tenant and the
- * owners of its chain lie within one another, settled together (see
+ * role it finds that the first query did not; the grants and the activations of
+ * all of them together, as `GrantRows` selects them, a chunk of the roles at a
+ * time, live at one instant (see `ReviewRun`); and whether each grant's tenant
+ * and the owners of its chain lie within one another, settled together (see
  * `TenantRelations::settleWithin()`). Every read is on the write connection,
- * outside every tenant scope. Read locked, the roles and the grants are read
- * under shared locks, so they are the rows as last committed whatever snapshot
- * the transaction reads, as MySQL's repeatable read would otherwise keep it,
- * and they stay so until it ends.
+ * outside every tenant scope. Read locked, the roles, grants and activations
+ * are read under shared locks, so they are the rows as last committed whatever
+ * snapshot the transaction reads, as MySQL's repeatable read would otherwise
+ * keep it, and they stay so until it ends.
+ *
+ * Given a write (see `ExclusionWrite`), the holdings are read as it would leave
+ * them: a role it re-parents is read with the roles below it and the parent it
+ * would have, and an activation it proposes is read beside the stored ones.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,16 +71,32 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  */
 final readonly class ExclusionHoldings
 {
+    /** @var list<string> The columns of a break-glass activation a route reads, each under a grant row's name. */
+    private const array ACTIVATION_COLUMNS = [
+        'role_id as target_id',
+        'authorizable_type as grantee_type',
+        'authorizable_id as grantee_id',
+        'tenant_type',
+        'tenant_id',
+        'include_subtree',
+        'application',
+        'expires_at',
+    ];
+
     /**
      * Create the holdings read.
      *
      * @param  array<string, array<string, list<\SineMacula\Laravel\Authorization\Exclusions\ExclusionRoute>>>  $routes
+     * @param  array<string, array<string, list<\SineMacula\Laravel\Authorization\Exclusions\ExclusionRoute>>>  $activated
      * @param  array<string, \SineMacula\Laravel\Authorization\Support\Reference>  $grantees
      */
     private function __construct(
 
-        /** The routes to each role, by the role's key, then by the key of their grantee. */
+        /** The routes through grants to each role, by the role's key, then by the key of their grantee. */
         private array $routes,
+
+        /** The routes through break-glass activations to each role, keyed as the routes through grants are. */
+        private array $activated,
 
         /** Every grantee holding one of the roles, by its key. */
         private array $grantees,
@@ -81,41 +109,57 @@ final readonly class ExclusionHoldings
      * @param  list<string>  $roles
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\TenantRelations  $relations
      * @param  bool  $isLocked
+     * @param  \SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionWrite|null  $write
      * @return self
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      * @throws \UnexpectedValueException
      */
-    public static function read(array $roles, TenantRelations $relations, bool $isLocked = false): self
+    public static function read(array $roles, TenantRelations $relations, bool $isLocked = false, ?ExclusionWrite $write = null): self
     {
-        $family = self::family($roles, $isLocked);
-        $grants = self::grants(ReviewRun::of(ReviewScope::everywhere()), \array_map(strval(...), \array_keys($family)), $isLocked);
-        $type   = Definitions::morph(GrantTarget::ROLE);
-        $routes = [];
-        $found  = [];
+        $parents = $write->parents ?? [];
+        $family  = self::family([...$roles, ...\array_keys($parents)], $isLocked);
 
-        $relations->settleWithin(self::questions($grants, $family));
+        foreach ($family as $key => $role) {
+            $family[$key]['parent'] = $parents[$key] ?? $role['parent'];
+        }
 
-        foreach ($grants as $grant) {
-            foreach (self::reached($grant, $family, $relations, $roles, $type) as $role => $route) {
-                $routes[$role][self::key($grant->grantee)][] = $route;
-                $found[self::key($grant->grantee)]           = $grant->grantee;
+        [$granted, $activated] = self::grants(ReviewRun::of(ReviewScope::everywhere()), \array_keys($family), $isLocked);
+
+        $activated = \array_filter([...$activated, ...$write->proposed ?? []], static fn (GrantRow $row): bool => !self::isMachine($row->grantee));
+        $type      = Definitions::morph(GrantTarget::ROLE);
+        $routes    = [[], []];
+        $found     = [];
+
+        $relations->settleWithin(self::questions([...$granted, ...$activated], $family));
+
+        foreach ([$granted, $activated] as $source => $grants) {
+            foreach ($grants as $grant) {
+                foreach (self::reached($grant, $family, $relations, $roles, $type) as $role => $route) {
+                    $routes[$source][$role][self::key($grant->grantee)][] = $route;
+                    $found[self::key($grant->grantee)]                    = $grant->grantee;
+                }
             }
         }
 
-        return new self($routes, $found);
+        return new self($routes[0], $routes[1], $found);
     }
 
     /**
-     * Return the routes through which the grantee holds the role.
+     * Return the routes through which the grantee holds the role: through its
+     * grants and its break-glass activations, or, weighed as another subject's
+     * identity, which no activation reaches, through its grants alone.
      *
      * @param  string  $role
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  bool  $isIdentity
      * @return list<\SineMacula\Laravel\Authorization\Exclusions\ExclusionRoute>
      */
-    public function of(string $role, Reference $grantee): array
+    public function of(string $role, Reference $grantee, bool $isIdentity = false): array
     {
-        return $this->routes[$role][self::key($grantee)] ?? [];
+        $key = self::key($grantee);
+
+        return [...$this->routes[$role][$key] ?? [], ...$isIdentity ? [] : $this->activated[$role][$key] ?? []];
     }
 
     /**
@@ -129,7 +173,7 @@ final readonly class ExclusionHoldings
         $holders = [];
 
         foreach ($roles as $role) {
-            foreach (\array_keys($this->routes[$role] ?? []) as $key) {
+            foreach (\array_keys([...$this->routes[$role] ?? [], ...$this->activated[$role] ?? []]) as $key) {
                 $holders[$key] = $this->grantees[$key];
             }
         }
@@ -146,6 +190,20 @@ final readonly class ExclusionHoldings
     public static function key(Reference $grantee): string
     {
         return \serialize([$grantee->type, $grantee->id]);
+    }
+
+    /**
+     * Determine whether the grantee is a machine, as its model class says (see
+     * `AuthorizableMachine`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @return bool
+     */
+    public static function isMachine(Reference $grantee): bool
+    {
+        $class = Relation::getMorphedModel($grantee->type) ?? $grantee->type;
+
+        return \is_a($class, AuthorizableMachine::class, true);
     }
 
     /**
@@ -359,25 +417,37 @@ final readonly class ExclusionHoldings
     }
 
     /**
-     * Read the live grants of the roles, in every tenant and application, a
-     * chunk of the roles at a time, under a shared lock when asked.
+     * Read the live grants of the roles, and the unexpired break-glass
+     * activations of them as the grants they stand for, in every tenant and
+     * application, a chunk of the roles at a time, under a shared lock when
+     * asked. An activation counts while break-glass is disabled, since it
+     * grants again once break-glass is enabled (N141).
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  list<string>  $roles
      * @param  bool  $isLocked
-     * @return list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>
+     * @return array{0: list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>, 1: list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>}
      */
     private static function grants(ReviewRun $run, array $roles, bool $isLocked): array
     {
-        $table  = GrantTarget::ROLE->table();
-        $grants = [];
+        $table       = GrantTarget::ROLE->table();
+        $activations = TableNames::get('break_glass');
+        $rows        = [[], []];
 
         foreach (\array_chunk($roles, GrantRows::CHUNK) as $chunk) {
-            $query = $run->live(GrantRows::of(GrantTarget::ROLE), $table)->whereIn($table . '.' . GrantTarget::ROLE->column(), $chunk);
+            $queries = [
+                $run->live(GrantRows::of(GrantTarget::ROLE), $table)->whereIn($table . '.' . GrantTarget::ROLE->column(), $chunk),
+                BreakGlassActivations::unexpired(AuthorizationConnection::connection()->table($activations), $activations, Carbon::instance($run->now))
+                    ->useWritePdo()
+                    ->select(self::ACTIVATION_COLUMNS)
+                    ->whereIn('role_id', $chunk),
+            ];
 
-            \array_push($grants, ...GrantRows::all($isLocked ? $query->sharedLock() : $query, GrantTarget::ROLE->value));
+            foreach ($queries as $source => $query) {
+                \array_push($rows[$source], ...GrantRows::all($isLocked ? $query->sharedLock() : $query, GrantTarget::ROLE->value));
+            }
         }
 
-        return $grants;
+        return $rows;
     }
 }

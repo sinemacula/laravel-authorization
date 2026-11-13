@@ -153,6 +153,20 @@ final class BreakGlassActivations
             $query->whereRaw('1 = 0');
         }
 
+        return self::unexpired($query, $table, $now);
+    }
+
+    /**
+     * Limit the query to the activations of the table not ended and expiring
+     * after the instant given, else now, whether break-glass is enabled or not.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  string  $table
+     * @param  \Illuminate\Support\Carbon|null  $now
+     * @return \Illuminate\Database\Query\Builder
+     */
+    public static function unexpired(Builder $query, string $table, ?Carbon $now = null): Builder
+    {
         return $query->whereNull($table . '.ended_at')->where($table . '.expires_at', '>', $now ?? Carbon::now('UTC'));
     }
 

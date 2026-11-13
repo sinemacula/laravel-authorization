@@ -22,6 +22,7 @@ use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\BreakGlassRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
+use SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionGuard;
 use SineMacula\Laravel\Authorization\Hooks\ProposedGrant;
 use SineMacula\Laravel\Authorization\Hooks\WideningPhase;
 use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
@@ -53,7 +54,10 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * `note_max_length` characters, and for a scope naming half a tenant. A role
  * that does not exist under the grantee's guard throws `UnknownRoleException`,
  * an unsaved grantee `InvalidGranteeException`, and the role's owner and guard
- * are held to what a grant of it is held to.
+ * are held to what a grant of it is held to. An activation that would leave the
+ * grantee holding both roles of a declared pair where their reach overlaps is
+ * refused with `RoleExclusionConflictException`, trusted or delegated, weighed
+ * under the role's lock (see `ExclusionGuard::assertActivatable()`).
  *
  * Each call takes the acting context making it as `$actor`: null for trusted
  * system work (N75), which skips the right but none of the other refusals. A
@@ -153,6 +157,8 @@ final class BreakGlassService
 
             self::assertHoldable($grantee, $held, $scope);
             self::lockRole($held);
+
+            ExclusionGuard::assertActivatable($reference, $held, $scope);
 
             return BreakGlassActivation::query()->create([
                 ...$columns,
@@ -343,8 +349,7 @@ final class BreakGlassService
     /**
      * Refuse the role where the grantee may not hold it, as a grant of it is
      * refused: outside the tenant that owns it and the tenants below, or under
-     * another guard. The one place an activation decides whether the grantee
-     * may hold the role here, which separation of duties (BL-71b) extends.
+     * another guard.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
@@ -362,9 +367,9 @@ final class BreakGlassService
     }
 
     /**
-     * Lock the role's row, outside every scope, refusing a role whose row is
-     * gone, so a deletion racing the activation either waits for it and takes
-     * it, or refuses it.
+     * Lock the role's row shared, outside every scope, refusing a role whose
+     * row is gone, so a deletion racing the activation either waits for it and
+     * takes it, or refuses it.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
@@ -373,7 +378,7 @@ final class BreakGlassService
      */
     private static function lockRole(Role $role): void
     {
-        $key = $role->newQueryWithoutScopes()->useWritePdo()->whereKey($role->getKey())->lockForUpdate()->value($role->getKeyName());
+        $key = $role->newQueryWithoutScopes()->useWritePdo()->whereKey($role->getKey())->sharedLock()->value($role->getKeyName());
 
         if ($key === null) {
             throw new UnknownRoleException($role->name);

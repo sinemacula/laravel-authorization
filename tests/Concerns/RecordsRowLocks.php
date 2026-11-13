@@ -100,6 +100,17 @@ trait RecordsRowLocks
     }
 
     /**
+     * Return the recorded locks of rows of the roles table, in order.
+     *
+     * @param  \ArrayObject<int, array{string, list<mixed>}>  $locks
+     * @return list<array{string, list<mixed>}>
+     */
+    protected static function roleLocks(\ArrayObject $locks): array
+    {
+        return \array_values(\array_filter($locks->getArrayCopy(), static fn (array $lock): bool => $lock[0] === 'roles'));
+    }
+
+    /**
      * Restore the connection's default query grammar.
      *
      * @param  \Illuminate\Database\Connection  $connection
@@ -111,15 +122,25 @@ trait RecordsRowLocks
     }
 
     /**
-     * Return the table a locking query reads.
+     * Return the table a locking query reads: the first named outside every
+     * parenthesis, so a subquery in the select list is passed over, else the
+     * first named.
      *
      * @param  string  $sql
      * @return string
      */
     private static function lockedTable(string $sql): string
     {
-        \preg_match('/\bfrom\s+[`"]?(\w+)[`"]?/i', $sql, $matches);
+        \preg_match_all('/\bfrom\s+[`"]?(\w+)[`"]?/i', $sql, $matches, \PREG_OFFSET_CAPTURE);
 
-        return $matches[1] ?? '';
+        foreach ($matches[1] as [$table, $offset]) {
+            $before = \substr($sql, 0, $offset);
+
+            if (\substr_count($before, '(') === \substr_count($before, ')')) {
+                return $table;
+            }
+        }
+
+        return $matches[1][0][0] ?? '';
     }
 }
