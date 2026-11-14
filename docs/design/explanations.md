@@ -3,28 +3,28 @@
 ## Purpose
 
 Every decision can be explained, for "why can" and "why can't" alike: which grants and policies applied, which
-statements decided, which conditions held or failed and which key was missing (AUTHZ-11.5). This note explains explain
-mode, the switch on the one decision path that records the evidence an explanation needs, and the `Explanation` it
-returns: what it holds, how it renders and what it never holds, and the `authorization:why` command that prints one
-for a saved subject from the console.
+statements decided, which conditions held or failed and which key was missing. This note explains explain mode, the
+switch on the one decision path that records the evidence an explanation needs, and the `Explanation` it returns: what
+it holds, how it renders and what it never holds, and the `authorization:why` command that prints one for a saved
+subject from the console.
 
 ## Invariants
 
-1. **One path (D22, N89).** `AuthorizationManager::explain()` decides its check through `CheckBatch::decideOne()`, as
+1. **One path.** `AuthorizationManager::explain()` decides its check through `CheckBatch::decideOne()`, as
    `check()` does, with the batch's explain switch on. The batch decides it through `DecisionPipeline::explaining()`,
    a clone of the pipeline holding a fresh `Evaluation\EvidenceRecorder` for that one check. The stages, the sources
    and the verdict are the ones `check()` gets; the decision is recorded as the last decision and reported with its
    `DecisionEvaluated`, as any check is. A preview's `explain()` takes the preview's path, admitted, recorded and
    reported as its `check()` is.
 
-2. **An everyday check is unchanged.** No other caller turns the switch on. Without it the pipeline makes no recorder,
-   the check's context records nothing, the grants are resolved as they always are, through the resolution cache, and
-   the decision carries no evidence. Its only additions are cheap and taken on construction: each statement works out
-   once the `${…}` references its operands and resource patterns name (`Statement::$dependencies`), and each step of a
-   statement assessed carries them, so `Decision::keys()`, and the decision events, name them beside the condition
-   keys.
+2. **An everyday check records no evidence.** No other caller turns the switch on. Without it the pipeline makes no
+   recorder, the check's context records nothing, the grants are resolved through the resolution cache, and the
+   decision carries no evidence. What every check does carry is cheap and worked out on construction: each statement
+   works out once the `${...}` references its operands and resource patterns name (`Statement::$dependencies`), and
+   each step of a statement assessed carries them, so `Decision::keys()`, and the decision events, name them beside the
+   condition keys.
 
-3. **Complete for the path taken, and nothing else (N88).** An explanation holds the evidence of every stage the
+3. **Complete for the path taken, and nothing else.** An explanation holds the evidence of every stage the
    decision reached, in order, and marks the stages after the deciding one that it never reached as not evaluated. An
    allow marks none, since every stage that could refuse it let it through. Nothing is evaluated hypothetically, so an
    explicit deny never says whether the caps or the allows would have let the check through.
@@ -53,7 +53,7 @@ for a saved subject from the console.
    operand that is empty or holds a NUL byte, against a string value it can test, is `undecidable`, the operand's
    doing, never `wrong_type`.
 
-6. **Grant provenance, matched to what decided (N89).** For an explained check, `Resolvers\GrantProvenanceResolver`
+6. **Grant provenance, matched to what decided.** For an explained check, `Resolvers\GrantProvenanceResolver`
    decides the permission held and the policies of the principal and its identity from what an everyday check decides
    from: the grantee's entry in the resolution cache, when the cache holds one. Where each grant came from is read
    afresh from the rows a resolution reads, with the grant row's tenant and application, the role held and each
@@ -73,7 +73,7 @@ for a saved subject from the console.
 
 7. **What it asked.** The batch adds to an explained decision's evidence an `ExplanationRequest`: the action, the
    resource's identifier, the subject, its identity and the previewer, the scope the check was asked in and the scope
-   it was decided in, from the provenance #123 records. It is captured as the check is made, never read back.
+   it was decided in, from the provenance the decision records. It is captured as the check is made, never read back.
 
 8. **An immutable projection.** `Decision::explain()` returns `Explanation::of($decision)`, built from the decision
    alone. Nothing is evaluated, read, recorded or dispatched to build or render it.
@@ -85,10 +85,10 @@ for a saved subject from the console.
    `version: 1`: the verdict, `decided_by`, the steps grouped by stage, `not_evaluated`, the grants, the requirements
    by part names and unmet parts, the keys, the missing keys, the request and whether the evidence was recorded.
 
-10. **Never a value (AUTHZ-8.8).** No context or attribute value, operand, interpolated string, model, raw context,
+10. **Never a value.** No context or attribute value, operand, interpolated string, model, raw context,
     session, proof or fingerprint reaches an explanation, its text or its schema; a requirement is named by its parts,
     never its options. Names still disclose how the policies are built, so an explanation is for those allowed to see
-    them, and another subject's goes through a preview (N85).
+    them, and another subject's goes through a preview.
 
 11. **A stored decision explains with what it has.** A decision made without explain mode, the last decision of an
     everyday check say, explains with its verdict, its cause, its trace, the stages it never reached and its
@@ -125,39 +125,41 @@ for a saved subject from the console.
 ## The `authorization:why` command
 
 `authorization:why {subject} {action} {resource?} --tenant= --application= --context= --format=text --opaque` explains
-the named subject under the given scope and console context, without their browser session (N91). It replaces
-`authorization:why-can`, which printed a check's trace, with no alias.
+the named subject under the given scope and console context, without their browser session.
 
 1. **The subject is resolved, never inferred.** The `{subject}` reference is resolved by the bound
    `Contracts\ConsoleSubjectResolver`, never from whoever is signed in to the console. The default,
    `Resolvers\ReferenceSubjectResolver`, loads the row a `{morphType}:{key}` reference names (a morph alias or an
    Eloquent class) and maps the model through the bound `SubjectResolver::forUser()`, the package's one translation of a
-   model into a subject (N55), read on every call. A malformed reference, a type that names no model and a key no row
+   model into a subject, read on every call. A malformed reference, a type that names no model and a key no row
    has are refused; so is a mapping about neither the model's principal nor its identity (ambiguous), one whose
    principal is not a saved `AuthorizableIdentity` model (unsupported), and a lookup or mapping that fails, such as a
-   key a PostgreSQL key column cannot hold (unresolvable, naming neither the reference nor the failure). The subject
-   keeps its principal, identity and guard and nothing else: no tenant, no application and no session, whatever the
-   resolver gives it. An application binds its own resolver on the contract, which replaces the default.
+   key a PostgreSQL key column cannot hold (unresolvable, naming neither the reference nor the failure). The default
+   keeps the subject's principal, identity and guard and nothing else. Whatever a resolver gives, the command drops its
+   tenant, application, session and anything said of its credential's scopes, keeping its principal, identity, guard
+   and any platform marker an application's own resolver sets; the scope it is decided in is the command's to name. An
+   application binds its own resolver on the contract, which replaces the default.
 
-2. **The scope is named, never inherited (N71).** `--tenant` omitted is `AuthorizationScope::platform()`, never the
+2. **The scope is named, never inherited.** `--tenant` omitted is `AuthorizationScope::platform()`, never the
    tenant in place; `TYPE:ID` is that tenant, a model-backed type naming a row that exists, by its morph class, and
    any other type the reference as given. `--application` omitted is no application, as `AuthorizationScope` defines
    it. The check runs as `$scope->within(fn () => $authorization->for($scope->subjectIn($subject))->explain(...))`, so
    the scope is in place both as the ambient grant scope and as the subject's, and the scope before is restored
    afterwards, even when the check throws.
 
-3. **One path, one explanation (D22).** The command explains through `AuthorizationManager::for()` and `explain()` on
-   the trusted path, in explain mode, as any explained check is: the decision is recorded as the last decision, and its
-   `DecisionEvaluated` is dispatched when `events.decisions` reports it (events.md invariant 14). The verdict is the one
-   `check()` gives under the same scope and input. The explanation is captured once and rendered once.
+3. **One path, one explanation.** The command explains through `AuthorizationManager::for()` and `explain()` on the
+   trusted path, in explain mode, as any explained check is: the decision is recorded as the last decision, and its
+   `DecisionEvaluated` is dispatched when `events.decisions` reports it (see [Events](events.md), invariant 14). The
+   verdict is the one `check()` gives under the same scope and input. The explanation is captured once and rendered
+   once.
 
-4. **The context is input alone (N90).** `--context` is a JSON object read as the `input` namespace. Malformed JSON,
+4. **The context is input alone.** `--context` is a JSON object read as the `input` namespace. Malformed JSON,
    a value that is not an object, and a top-level key naming a trusted namespace, or a dotted key whose first segment
    names one, are refused; `CheckContextFactory::trustedNamespaces()` lists them: the namespaces the authentication
    context and the application's context sources supply, `request`, `environment`, `subject` and `resource`. A
    missing key is evidence, not advice to supply it.
 
-5. **The resource is what `check()` takes (N92).** `type:id` names that record and is passed as the `(type, id)` pair,
+5. **The resource is what `check()` takes.** `type:id` names that record and is passed as the `(type, id)` pair,
    its key keeping any colon after the first, so the bound `ResourceTenantResolver` gives its tenant, its resource
    policies and its type's apply, and its type's attribute provider supplies its attributes, exactly as in an
    ordinary check on the pair. `type:*` names the type alone, passed as the model class when the type is one and as
@@ -184,8 +186,8 @@ the named subject under the given scope and console context, without their brows
    it is not UTF-8, and their console markup escaped.
 
 8. **A trusted operator surface.** The command admits no caller: whoever can run the console sees the names an
-   explanation holds. Delegated or application disclosure of another subject's explanation stays on `previewFor()`
-   (N85), which admits the caller first.
+   explanation holds. Delegated or application disclosure of another subject's explanation stays on `previewFor()`,
+   which admits the caller first.
 
 ## Implementation Anchors
 
@@ -197,8 +199,8 @@ the named subject under the given scope and console context, without their brows
   allowed it.
 - `Resolvers\GrantProvenanceResolver`, `Resolvers\DefaultPolicyResolver::explainedPoliciesFor()` -- the grants with
   their provenance.
-- `Evaluation\CheckContext::explain()`, `noteUnresolved()`, `noteAssessment()`, `ContextInterpolator` -- the unresolved
-  references and the tests each statement notes.
+- `Evaluation\CheckContext::explain()`, `noteUnresolved()`, `noteIfUnresolved()`, `noteAssessment()`,
+  `Evaluation\ContextInterpolator` -- the unresolved references and the tests each statement notes.
 - `Evaluation\Statement`, `Evaluation\ConditionClassifier`, `Evaluation\ConditionResult` -- each test's outcome.
 - `Evaluation\Decision`, `DecisionEvidence`, `GrantProvenance`, `ExplanationRequest` -- the evidence a decision carries.
 - `Evaluation\Explanation`, `Evaluation\ExplanationText` -- the projection and its renderers.
@@ -220,8 +222,9 @@ the named subject under the given scope and console context, without their brows
 - `Resolvers\GrantProvenanceResolverTest` (Feature) -- the provenance of each kind of grant, the same names and
   policies as the resolution, no more queries, a warm cache deciding, a stale grant `unavailable`, and a cold cache
   keeping nothing.
-- `ExplanationTest`, `ExplanationTextTest`, `ConditionClassifierTest`, `EvidenceRecorderTest` (Unit) -- causes, stages
-  not evaluated, the schema, the escaping, each typed outcome, and the sentinels that no value reaches an explanation.
+- `ExplanationTest`, `ExplanationTextTest`, `ExplanationRequestTest`, `ConditionClassifierTest`,
+  `EvidenceRecorderTest` (Unit) -- causes, stages not evaluated, the schema, the escaping, the request, each typed
+  outcome, and the sentinels that no value reaches an explanation.
 - `WhyCommandTest`, `WhyInvocationTest`, `Resolvers\ReferenceSubjectResolverTest` (Feature) -- each option, its
   default and each refusal with its exit code, text and JSON for an allow and a deny, the JSON equal to `explain()`'s,
   the verdict equal to `check()`'s, a record with its tenant, resource policy and provider attribute, the type alone

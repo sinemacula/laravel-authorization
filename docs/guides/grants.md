@@ -72,7 +72,7 @@ enum PostPermission: string implements PermissionEnum
 ```
 
 A module that ships its own permissions can declare them with a provider. A provider's permissions are written to the
-catalogue, answered through the Gate, `@can` and the `can:` middleware like an enum's, and checked through the
+catalogue, answered through the Gate, `@can` and the `can:` middleware like an enum's, checked through the
 `Authorization` facade and `hasPermission()`, and listed by `permissionsFor()`:
 
 ```php
@@ -84,7 +84,12 @@ final class MediaPermissions implements PermissionProvider
     public function permissions(): array
     {
         return [
-            new PermissionDefinition(name: 'media:upload', description: 'Upload media', category: 'Media', guard: 'web'),
+            new PermissionDefinition(
+                name: 'media:upload',
+                description: 'Upload media',
+                category: 'Media',
+                guard: 'web',
+            ),
         ];
     }
 }
@@ -107,14 +112,15 @@ php artisan authorization:sync --dry-run --format=json
 
 ## Managing roles, permissions and grants
 
-Every write goes through eight services, which you inject or resolve from the container: `RoleService`,
+Every write goes through nine services, which you inject or resolve from the container: `RoleService`,
 `PermissionService` and `PolicyService` for the records, `GrantService` for what a grantee holds,
 `ResourcePolicyService` for the policies attached to resources (see [Resource-based
 policies](policies.md#resource-based-policies)), `BoundaryService` for the permission boundaries of principals and
 identities (see [Permission boundaries](caps.md#permission-boundaries)), `GuardrailService` for the guardrails of
-tenants and the platform, whose acting context is required (see [Guardrails](caps.md#guardrails)), and
+tenants and the platform, whose acting context is required (see [Guardrails](caps.md#guardrails)),
 `RoleExclusionService` for the pairs of mutually exclusive roles (see [Separation of
-duties](separation-of-duties.md#separation-of-duties)). Each call runs in one transaction on the package's connection
+duties](separation-of-duties.md#separation-of-duties)), and `BreakGlassService` for emergency activations of a role (see
+[Break-glass](break-glass.md#break-glass)). Each call runs in one transaction on the package's connection
 (`authorization.connection`), through the models `authorization.models` configures, and takes an optional `actor`, the
 `ActingContext` making the call. A call without one is trusted system work, as seeders, migrations and console commands
 are, and is not decided; a call with one is delegated administration, each change decided as that actor (see [Delegated
@@ -134,7 +140,7 @@ $grants = app(GrantService::class);
 $editor = $roles->create('editor', 'web', 'Edits posts');
 $author = $roles->create('author', tenant: $team); // owned by the team, not the platform
 $roles->grantPermission($editor, 'posts:update');
-$roles->setParent($editor, 'author');
+$roles->setParent($author, $editor); // the team's author inherits the editor's permissions
 
 $grants->grantRole($user, $editor, now()->addMonth()); // GrantOutcome::GRANTED
 $grants->syncPermissions($user, ['posts:delete']);     // SyncResult
@@ -167,9 +173,9 @@ while `*:*` matches only names with a `:`. With the role hierarchy enabled, a ro
 A role, permission or policy flagged `is_system` cannot be edited, deleted or have the flag cleared unless
 `forceSystem()` on the model unlocks the next change.
 
-`authorization:sync` is the one writer that does not go through the services yet: it writes the permission catalogue
-through the permission model, in one transaction on the package's connection and as one operation, and will move onto
-`PermissionService` later.
+`authorization:sync` is the one writer that does not go through the services: it writes the permission catalogue
+through the permission model, in one transaction on the package's connection and as one operation, and decides
+nothing as an actor.
 
 Every grant holds in a scope: one tenant, or the whole platform. A role, permission or policy a tenant owns is granted
 in that tenant; one the platform owns is granted platform-wide unless you name a tenant, so one person can be admin in
@@ -272,7 +278,7 @@ application, so an acting context needs the platform authority for the action, n
 stored, counted, and, once the removal commits, written to the log as malformed rather than reported by an event, and
 the cache forgets it. A row another writer removed first is neither counted nor written. An expired one is pruned the
 same way. `authorization:list-roles` and `authorization:list-permissions` show such an owner as
-`malformed (tenant_type=…, tenant_id=…)`, a policy's guardrail refusal counts such guardrails as malformed, and an
+`malformed (tenant_type=..., tenant_id=...)`, a policy's guardrail refusal counts such guardrails as malformed, and an
 [access review](access-reviews.md#access-reviews) lists such a row as `malformed`.
 
 Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class

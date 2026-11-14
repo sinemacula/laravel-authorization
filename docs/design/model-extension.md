@@ -7,20 +7,26 @@ explains the extension path and walks through a concrete example: adding soft de
 
 ## Invariants
 
-1. **Every model reference is config-resolved.** The package never hard-codes `new Role` or `Role::query()` in
-   production code. All instantiation and query paths read `config('authorization.models.role')` (and the equivalent for
-   `permission` and `policy`) so a consumer-registered subclass is used transparently. This covers the relations as well
+1. **Every model reference is config-resolved.** Every query and every saved row goes through the class
+   `Config\ModelClasses::get('role')` (and the equivalent for `permission` and `policy`) reads from
+   `authorization.models`, so a consumer-registered subclass is used transparently. This covers the relations as well
    as the lookups: `parent()`, `children()`, `Role::permissions()`, `Permission::roles()` and the observer's hierarchy
-   cycle check all use the configured class. Both sides of the role-permission relation use the `RolePermission` pivot,
+   cycle check all use the configured class. The package builds a shipped `Role` or `Permission` directly only as an
+   unsaved stand-in: a role or permission an `authorization:migrate-spatie` dry run reports, and the permission names
+   delegated administration weighs. Both sides of the role-permission relation use the `RolePermission` pivot,
    so guard parity is enforced whichever side a permission is attached from.
 
-2. **The configured class is validated at boot.** Each `authorization.models.*` entry must name an existing class that is
-   the shipped model or a subclass of it. Anything else -- a class that does not exist, an unrelated model, an empty
-   value -- raises `InvalidAuthorizationConfigException` naming the offending key when the application boots.
+2. **The configured class is validated at boot.** Each `authorization.models.*` entry must name an existing class that
+   is the shipped model or a subclass of it. Anything else -- a class that does not exist, an unrelated model, an empty
+   value -- raises `InvalidAuthorizationConfigException` naming the offending key when the application boots. After
+   boot, `ModelClasses::get()` checks only that the value is a non-empty string.
 
-3. **Subclasses inherit all package behaviour.** Extending the shipped model and calling `parent::booted()` (or letting
-   Laravel's trait-boot convention handle it) preserves lifecycle events, system protection, name validation, and the
-   guard-precedence query.
+3. **Subclasses inherit all package behaviour.** The shipped models attach their observers with `#[ObservedBy]`, and
+   `Role` and `Permission` their tenant scope with `#[ScopedBy]`, which Laravel applies to a subclass too. The rest
+   comes from traits: a `name` mutator validates the name, and `boot<Trait>()` methods, which Laravel calls by
+   convention, add hooks such as system protection. A subclass therefore keeps lifecycle events, system protection,
+   name validation and tenant scoping without doing anything; one that overrides a trait's boot method, such as
+   `bootHasSystemProtection()`, calls the parent's.
 
 4. **Schema changes are the consumer's responsibility.** The package ships migrations for its own columns. A subclass
    that adds columns (e.g. `deleted_at`, `archived_at`) must ship its own migration -- either in the application's
@@ -51,22 +57,35 @@ class Role extends BaseRole
 
 ### 2. Migration
 
+The roles table may carry a prefix or another name, and may live on another connection, so the migration reads both
+the way the package does:
+
 ```php
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 
 return new class extends Migration {
+    public function getConnection(): ?string
+    {
+        return config('authorization.connection') ?: null;
+    }
+
     public function up(): void
     {
-        Schema::table('roles', static function (Blueprint $table): void {
+        $schema = Schema::connection($this->getConnection());
+
+        $schema->table(TableNames::get('roles'), static function (Blueprint $table): void {
             $table->softDeletes();
         });
     }
 
     public function down(): void
     {
-        Schema::table('roles', static function (Blueprint $table): void {
+        $schema = Schema::connection($this->getConnection());
+
+        $schema->table(TableNames::get('roles'), static function (Blueprint $table): void {
             $table->dropSoftDeletes();
         });
     }
@@ -85,8 +104,10 @@ return new class extends Migration {
 ],
 ```
 
-Once registered, every package-internal query (`RoleService::find()`, the `HasRoles` trait methods, the resolution cache)
-instantiates the consumer's `App\Models\Role` and benefits from the `SoftDeletes` trait automatically.
+Once registered, every query the package makes through the model (`RoleService::find()`, the `HasRoles` relations,
+the resolution cache's reads) instantiates the consumer's `App\Models\Role` and applies the `SoftDeletes` scope. The
+package also reads its tables directly with the query builder in places, such as delegated administration's reads of
+a role's policy attachments, where no model scope applies.
 
 ## Applying the Same Pattern to Permission and Policy
 
@@ -99,10 +120,30 @@ column, and register the swap. The package treats all three entity models symmet
   reconstruction (SOC 2, ISO 27001 compliance) add soft deletes via the extension path above or rely on a dedicated
   audit-log package that snapshots row state on delete.
 - **Cascade rules need consumer attention.** A soft-deleted role's pivot rows are not automatically soft-deleted --
-  Laravel's `cascadeOnDelete` foreign key fires on hard delete only. Consumers should handle orphaned pivots via model
+  the `cascadeOnDelete` foreign keys fire on a hard delete only. Consumers should handle orphaned pivots via model
   events on the subclass or accept that pivot rows reference a trashed parent (which the `SoftDeletes` trait's
   `withTrashed()` scope can resolve at query time).
-- **The subclass must not change the table name.** The shipped migrations target the configured table name. A subclass
-  that overrides `$table` must ensure its migrations target the same table or the schema will diverge.
+- **The table name comes from configuration.** Each shipped model's constructor sets its table from
+  `Config\TableNames::get()`, so a `$table` property on a subclass has no effect. Rename a table through
+  `authorization.tables`, before migrating.
 - **The connection is the package's.** Every shipped model and pivot names `authorization.connection` when it is set,
-  so a subclass's own `$connection` applies only while the setting is unset.
+  so a subclass's own `$connection` applies only while the setting is unset, and never to a pivot.
+
+## Implementation Anchors
+
+- `Config\ModelClasses::get()` -- the configured class, read at run time.
+- `Config\ConfigValidator::model()` -- the boot check of each `authorization.models` entry.
+- `Models\Role`, `Models\Permission`, `Models\Policy` -- the constructors that set the configured table and
+  `getConnectionName()`.
+- `Concerns\HasRoleHierarchy`, `Concerns\ManagesPermissions`, `Models\Permission::roles()` and `Observers\RoleObserver`
+  -- the relations and the cycle check reading the configured class.
+
+## Authoritative Tests
+
+- `ConfigValidatorTest::testSubclassesOfShippedModelsPass` and `testInvalidModelEntryIsRejected` -- the boot check.
+- `ModelClassesTest::testAConfiguredClassIsRead` -- the configured class read at run time.
+- `HasRoleHierarchyTest::testParentReturnsConfiguredRoleClass`, `testChildrenReturnsConfiguredRoleClass` and
+  `testAncestorsCycleLookupUsesConfiguredRoleClass` -- the relations and the cycle check.
+- `HasSystemProtectionTest::testSubclassExtendingBootHookKeepsProtection` -- a subclass keeps system protection.
+- `RoleObserverTest::testCycleCheckLooksUpProposedParentThroughConfiguredRoleClass` -- the observer's cycle check
+  hydrating the configured class.
