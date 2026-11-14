@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Enums\BreakGlassRefusal;
@@ -22,8 +23,12 @@ use SineMacula\Laravel\Authorization\Enums\WideningReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Events\Identity\BreakGlassActivated;
+use SineMacula\Laravel\Authorization\Events\Identity\BreakGlassRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\BreakGlassSurrendered;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\BreakGlassRefusedException;
+use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\GranteeGuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
@@ -48,6 +53,7 @@ use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\RacesDelegatedCalls;
+use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ReportsEveryDecision;
@@ -75,11 +81,14 @@ use Tests\TestCase;
 #[CoversClass(BreakGlassService::class)]
 final class BreakGlassServiceTest extends TestCase
 {
-    use ActivatesBreakGlass, ActsAsAdministrator, CatchesRefusals, RacesDelegatedCalls, RecordsRowLocks, RefusesThePackage, ReportsEveryDecision, UsesAnAuthorizationConnection,
-        WidensGrants;
+    use ActivatesBreakGlass, ActsAsAdministrator, CatchesRefusals, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage, ReportsEveryDecision,
+        UsesAnAuthorizationConnection, WidensGrants;
 
     /** @var string The action the emergency role carries. */
     private const string ACTION = 'posts:create';
+
+    /** @var string How a time is compared, to the microsecond. */
+    private const string INSTANT = 'Y-m-d H:i:s.u e';
 
     /** @var string The query an activation locks its role with. */
     private const string ROLE_LOCK = '/^select .id. from .roles. where .roles.\..id. = \? limit 1 /';
@@ -593,8 +602,43 @@ final class BreakGlassServiceTest extends TestCase
     }
 
     /**
+     * A surrender that conflicts on every try is refused as a conflict and
+     * reported as the grantee's refusal, ending nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASurrenderConflictingOnEveryTryIsReportedAsTheGrantees(): void
+    {
+        config(['authorization.administration.retries' => 0]);
+
+        $user       = StubIdentity::query()->create(['id' => 'user-1']);
+        $activation = self::activateFor($user, role: self::emergencyRole(self::ACTION));
+
+        /** @var \ArrayObject<int, array{\SineMacula\Laravel\Authorization\Support\Reference|null, string}> $failed */
+        $failed = new \ArrayObject;
+
+        Event::listen(AuthorizationFailed::class, static fn (AuthorizationFailed $event) => $failed->append([$event->subject, $event->action]));
+        DB::listen(static function (QueryExecuted $query): void {
+            if (\str_starts_with($query->sql, 'select') && \str_contains($query->sql, 'break_glass_activations')) {
+                throw DependencyChangedException::rows('break_glass_activations');
+            }
+        });
+
+        $refusal = self::refusalOf(static fn (): int => self::service()->surrender($activation, ActingContext::for($user)));
+
+        Event::forget(QueryExecuted::class);
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertSame(DecisionReason::ADMINISTRATION_CONFLICT, $refusal->getReason());
+        self::assertEquals([[Reference::of($user), OperationResource::TYPE]], $failed->getArrayCopy());
+        self::assertNull(BreakGlassActivation::query()->findOrFail($activation->id)->ended_at);
+    }
+
+    /**
      * Ending an activation leaves a normal grant of the same role as it was,
-     * and is allowed while break-glass is disabled.
+     * and is allowed, and reported, while break-glass is disabled.
      *
      * @return void
      *
@@ -610,10 +654,138 @@ final class BreakGlassServiceTest extends TestCase
 
         self::switchBreakGlass(false);
 
+        Event::fake([BreakGlassRevoked::class]);
+
         self::assertFalse(self::allows($user, 'acct1'));
         self::assertSame(1, self::service()->revoke($activation));
+        Event::assertDispatchedTimes(BreakGlassRevoked::class, 1);
         self::assertTrue(self::allows(StubIdentity::query()->findOrFail('user-1'), 'acct2'));
         self::assertSame(1, DB::table('authorizable_roles')->where('authorizable_id', 'user-1')->count());
+    }
+
+    /**
+     * Each activation is reported once with its grantee, role, scope, key, code
+     * and expiry, never its note: a trusted one naming no actor, a delegated
+     * one its granter, and a platform-wide one reaching below.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActivationIsReportedWithItsGranter(): void
+    {
+        $user  = StubIdentity::query()->create(['id' => 'user-1']);
+        $role  = self::emergencyRole(self::ACTION);
+        $actor = self::administrator([PackagePermissions::BREAK_GLASS_GRANT], 'admin-1', null);
+        $scope = new GrantScope(self::tenant('acct1'), 'admin', false);
+
+        Event::fake([BreakGlassActivated::class]);
+        Carbon::setTestNow('2026-07-01 12:00:00.250000');
+
+        $trusted   = self::service()->activate($user, 'responder', $scope, 10, 'audit', 'Page');
+        $delegated = self::service()->activate($user, 'responder', $scope, 20, 'incident', actor: $actor);
+        $platform  = self::service()->activate($user, 'responder', new GrantScope(null, null, false), 5, 'incident');
+        $events    = self::dispatchedEvents(BreakGlassActivated::class);
+        $granted   = [Reference::of($user), Reference::of($role), 'responder', $scope];
+
+        self::assertCount(3, $events);
+        self::assertEquals([...$granted, $trusted->id, 'audit', '2026-07-01 12:10:00.000000 UTC'], self::activated($events[0]));
+        self::assertEquals([...$granted, $delegated->id, 'incident', '2026-07-01 12:20:00.000000 UTC'], self::activated($events[1]));
+        self::assertSame(self::stored($trusted, 'expires_at'), $events[0]->expiresAt->format(self::INSTANT));
+        self::assertEquals(new GrantScope(null, null, true), $events[2]->scope);
+        self::assertSame($platform->id, $events[2]->activation);
+        self::assertSame([true, null], [$events[0]->isTrusted(), $events[0]->actor()]);
+        self::assertEquals([false, $actor->principal()], [$events[1]->isTrusted(), $events[1]->actor()]);
+        self::assertStringNotContainsString('Page', \serialize($events));
+    }
+
+    /**
+     * A surrender is reported once with the grantee as its actor, and a
+     * revocation with its revoker, or none when trusted, each with when it
+     * ended; ending one already ended or expired reports nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEachEndIsReportedOnceWithWhoEndedIt(): void
+    {
+        $user   = StubIdentity::query()->create(['id' => 'user-1']);
+        $role   = self::emergencyRole(self::ACTION);
+        $holder = self::administrator([PackagePermissions::BREAK_GLASS_REVOKE], 'holder-1', null);
+        $scope  = new GrantScope(self::tenant('acct1'), 'admin', false);
+        $own    = ActingContext::for($user);
+        $ending = \array_map(static fn (int $minutes): BreakGlassActivation => self::service()->activate($user, $role, $scope, $minutes, 'incident'), [10, 10, 10, 1]);
+
+        [$surrendered, $revoked, $delegated, $expired] = $ending;
+
+        Event::fake([BreakGlassSurrendered::class, BreakGlassRevoked::class]);
+        Carbon::setTestNow('2026-07-01 12:01:00.750000');
+
+        self::assertSame(1, self::service()->surrender($surrendered, $own));
+        self::assertSame(1, self::service()->revoke($revoked));
+        self::assertSame(1, self::service()->revoke($delegated, $holder));
+        self::assertSame(0, self::service()->surrender($surrendered, $own));
+        self::assertSame(0, self::service()->revoke($revoked));
+        self::assertSame(0, self::service()->surrender($expired, $own));
+        self::assertSame(0, self::service()->revoke($expired, $holder));
+
+        $surrenders  = self::dispatchedEvents(BreakGlassSurrendered::class);
+        $revocations = self::dispatchedEvents(BreakGlassRevoked::class);
+        $ended       = [Reference::of($user), Reference::of($role), 'responder', $scope];
+
+        self::assertCount(1, $surrenders);
+        self::assertCount(2, $revocations);
+        self::assertEquals([...$ended, $surrendered->id, '2026-07-01 12:01:00.000000 UTC'], self::ended($surrenders[0]));
+        self::assertSame(self::stored($surrendered, 'ended_at'), $surrenders[0]->endedAt->format(self::INSTANT));
+        self::assertEquals([false, $own->principal(), $own->identity(), null], self::callOf($surrenders[0]));
+        self::assertEquals([...$ended, $revoked->id, '2026-07-01 12:01:00.000000 UTC'], self::ended($revocations[0]));
+        self::assertSame(self::stored($revoked, 'ended_at'), $revocations[0]->endedAt->format(self::INSTANT));
+        self::assertEquals([true, null, null, null], self::callOf($revocations[0]));
+        self::assertEquals([...$ended, $delegated->id, '2026-07-01 12:01:00.000000 UTC'], self::ended($revocations[1]));
+        self::assertEquals([false, $holder->principal(), $holder->identity(), null], self::callOf($revocations[1]));
+    }
+
+    /**
+     * Nothing is reported for a refusal, nor for an activation, a surrender or
+     * a revocation whose enclosing transaction rolls back.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testNothingIsReportedForARefusalOrARollback(): void
+    {
+        $user  = StubIdentity::query()->create(['id' => 'user-1']);
+        $other = StubIdentity::query()->create(['id' => 'user-2']);
+        $role  = self::emergencyRole(self::ACTION);
+        $kept  = self::service()->activate($user, $role, GrantScope::platform(), 10, 'incident');
+        $none  = self::administrator([PackagePermissions::BREAK_GLASS_GRANT], 'none-1', null);
+
+        Event::fake([BreakGlassActivated::class, BreakGlassSurrendered::class, BreakGlassRevoked::class]);
+
+        self::assertInstanceOf(BreakGlassRefusedException::class, self::refusalOf(static fn () => self::service()->activate($user, $role, GrantScope::platform(), 10, 'urgent')));
+        self::assertInstanceOf(BreakGlassRefusedException::class, self::refusalOf(static fn () => self::service()->surrender($kept, ActingContext::for($other))));
+        self::assertInstanceOf(AuthorizationException::class, self::refusalOf(static fn () => self::service()->revoke($kept, $none)));
+
+        try {
+            DB::transaction(static function () use ($user, $role, $kept): never {
+                $activation = self::service()->activate($user, $role, GrantScope::platform(), 10, 'incident');
+
+                self::service()->surrender($activation, ActingContext::for($user));
+                self::service()->revoke($kept);
+
+                throw new \RuntimeException('Rolled back.');
+            });
+        } catch (\RuntimeException) {
+            // The enclosing transaction rolled back.
+        }
+
+        self::assertSame(1, BreakGlassActivation::query()->count());
+        self::assertNull(BreakGlassActivation::query()->findOrFail($kept->id)->ended_at);
+        Event::assertNotDispatched(BreakGlassActivated::class);
+        Event::assertNotDispatched(BreakGlassSurrendered::class);
+        Event::assertNotDispatched(BreakGlassRevoked::class);
     }
 
     /**
@@ -1202,6 +1374,54 @@ final class BreakGlassServiceTest extends TestCase
         $stored = BreakGlassActivation::query()->findOrFail($activation->id);
 
         return [$stored->ended_by_type, $stored->ended_by_id, $stored->end_reason];
+    }
+
+    /**
+     * Return the activation's time in the column as stored.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\BreakGlassActivation  $activation
+     * @param  'ended_at'|'expires_at'  $column
+     * @return string|null
+     */
+    private static function stored(BreakGlassActivation $activation, string $column): ?string
+    {
+        return BreakGlassActivation::query()->findOrFail($activation->id)->{$column}?->format(self::INSTANT);
+    }
+
+    /**
+     * Return what the activation event reports: the grantee, the role, its
+     * name, the scope, the activation, the code and the expiry.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Events\Identity\BreakGlassActivated  $event
+     * @return list<mixed>
+     */
+    private static function activated(BreakGlassActivated $event): array
+    {
+        return [$event->grantee, $event->role, $event->name, $event->scope, $event->activation, $event->justification, $event->expiresAt->format(self::INSTANT)];
+    }
+
+    /**
+     * Return what the end event reports: the grantee, the role, its name, the
+     * scope, the activation and when it ended.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Events\Identity\BreakGlassRevoked|\SineMacula\Laravel\Authorization\Events\Identity\BreakGlassSurrendered  $event
+     * @return list<mixed>
+     */
+    private static function ended(BreakGlassRevoked|BreakGlassSurrendered $event): array
+    {
+        return [$event->grantee, $event->role, $event->name, $event->scope, $event->activation, $event->endedAt->format(self::INSTANT)];
+    }
+
+    /**
+     * Return who the end event names as ending it: whether the call was
+     * trusted, its actor, the identity behind it and any impersonator.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Events\Identity\BreakGlassRevoked|\SineMacula\Laravel\Authorization\Events\Identity\BreakGlassSurrendered  $event
+     * @return list<mixed>
+     */
+    private static function callOf(BreakGlassRevoked|BreakGlassSurrendered $event): array
+    {
+        return [$event->isTrusted(), $event->actor(), $event->actorIdentity(), $event->impersonator()];
     }
 
     /**

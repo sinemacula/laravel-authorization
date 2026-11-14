@@ -56,7 +56,11 @@ final class EventSnapshotsTest extends TestCase
         self::assertContains('Guardrail/GuardrailRemoved', $names);
         self::assertContains('Role/ExclusionDeclared', $names);
         self::assertContains('Role/ExclusionRemoved', $names);
-        self::assertCount(36, $names);
+        self::assertContains('Identity/BreakGlassActivated', $names);
+        self::assertContains('Identity/BreakGlassSurrendered', $names);
+        self::assertContains('Identity/BreakGlassRevoked', $names);
+        self::assertContains('Identity/BreakGlassExpired', $names);
+        self::assertCount(40, $names);
     }
 
     /**
@@ -178,7 +182,7 @@ final class EventSnapshotsTest extends TestCase
             self::assertMatchesRegularExpression('/^[a-z_]+(\.[a-z_]+)+$/', $operations[$class]);
         }
 
-        self::assertCount(33, $operations);
+        self::assertCount(37, $operations);
         self::assertSame(\array_values($operations), \array_values(\array_unique($operations)));
     }
 

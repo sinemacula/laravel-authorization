@@ -10,7 +10,9 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
+use SineMacula\Laravel\Authorization\Events\Identity\BreakGlassExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpired;
@@ -19,14 +21,18 @@ use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached as ResourcePolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
+use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
+use SineMacula\Laravel\Authorization\Services\BreakGlassService;
 use SineMacula\Laravel\Authorization\Services\GrantPruner;
 use SineMacula\Laravel\Authorization\Services\PruneResult;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\NumberedIdentity;
@@ -49,7 +55,7 @@ use Tests\TestCase;
 #[CoversClass(PruneResult::class)]
 final class GrantPrunerTest extends TestCase
 {
-    use ReadsDispatchedEvents, RefusesThePackage;
+    use ActivatesBreakGlass, ReadsDispatchedEvents, RefusesThePackage;
 
     /**
      * Start the clock.
@@ -579,6 +585,57 @@ final class GrantPrunerTest extends TestCase
         );
 
         self::assertTrue((bool) $policy->delete());
+    }
+
+    /**
+     * An activation that expired without ending has its expiry recorded and
+     * reported, its row kept and counted apart from the grants, while
+     * break-glass is disabled too; a live one, one revoked and one surrendered
+     * are left, pretending writes nothing, and a second run records nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRecordsTheExpiryOfBreakGlassActivations(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $role    = self::emergencyRole();
+        $service = BreakGlassService::instance();
+
+        self::assertInstanceOf(BreakGlassService::class, $service);
+
+        $expired     = self::activate($user, $role, ['expires_at' => Carbon::parse('2026-07-01 11:30:00')]);
+        $live        = self::activate($user, $role, ['expires_at' => Carbon::parse('2026-07-01 13:00:00')]);
+        $surrendered = $service->activate($user, $role, GrantScope::platform(), 10, 'incident');
+        $revoked     = $service->activate($user, $role, GrantScope::platform(), 10, 'incident');
+
+        $service->surrender($surrendered, ActingContext::for($user));
+        $service->revoke($revoked);
+
+        Carbon::setTestNow('2026-07-01 12:15:00');
+        self::switchBreakGlass(false);
+        Event::fake([BreakGlassExpired::class]);
+
+        $pretended = self::pruner()->prune(1000, true);
+
+        self::assertSame([1, 0], [$pretended->activations, $pretended->expired]);
+        self::assertNull(BreakGlassActivation::query()->findOrFail($expired->id)->ended_at);
+        Event::assertNotDispatched(BreakGlassExpired::class);
+
+        $result = self::pruner()->prune(1000);
+        $stored = BreakGlassActivation::query()->findOrFail($expired->id);
+
+        self::assertSame([1, 0], [$result->activations, $result->expired]);
+        self::assertSame(4, BreakGlassActivation::query()->count());
+        self::assertSame('2026-07-01 11:30:00', $stored->ended_at?->toDateTimeString());
+        self::assertSame(['expired', null, null], [$stored->end_reason, $stored->ended_by_type, $stored->ended_by_id]);
+        self::assertNull(BreakGlassActivation::query()->findOrFail($live->id)->ended_at);
+        self::assertSame('surrendered', BreakGlassActivation::query()->findOrFail($surrendered->id)->end_reason);
+        self::assertSame('revoked', BreakGlassActivation::query()->findOrFail($revoked->id)->end_reason);
+        self::assertSame([$expired->id], \array_map(static fn (BreakGlassExpired $event): string => $event->activation, self::dispatchedEvents(BreakGlassExpired::class)));
+        self::assertSame(0, self::pruner()->prune(1000)->activations);
+        Event::assertDispatchedTimes(BreakGlassExpired::class, 1);
     }
 
     /**

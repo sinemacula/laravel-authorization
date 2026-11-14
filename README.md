@@ -2861,14 +2861,15 @@ Event::listen(static function (RoleDeleted $event): void {
 ```
 
 The change events (roles, permissions and policies created, updated and deleted; permissions granted to and revoked from
-a role; roles, permissions and policies granted to, revoked from and re-dated on a grantee; policies attached to and
-detached from a resource, `Resource\PolicyAttached` and `Resource\PolicyDetached`; permission boundaries set and
-removed, `Identity\BoundarySet` and `Identity\BoundaryRemoved`; guardrails set and removed, `Guardrail\GuardrailSet` and
-`Guardrail\GuardrailRemoved`; and `SystemOverrideUsed`) are `final readonly` snapshots of plain values: a record is a
-`Reference`, its morph class under your morph map and its key as a string, never a model, alongside names, the scope,
-expiries and times. An update carries the fields it changed, before and after. A policy event carries its document's
-version and SHA-256 digest, never the document. A delete lists every grantee that held the role, permission or policy,
-so the evidence says who lost access.
+a role; roles, permissions and policies granted to, revoked from and re-dated on a grantee; break-glass activations
+activated, surrendered, revoked and expired; policies attached to and detached from a resource,
+`Resource\PolicyAttached` and `Resource\PolicyDetached`; permission boundaries set and removed, `Identity\BoundarySet`
+and `Identity\BoundaryRemoved`; guardrails set and removed, `Guardrail\GuardrailSet` and `Guardrail\GuardrailRemoved`;
+and `SystemOverrideUsed`) are `final readonly` snapshots of plain values: a record is a `Reference`, its morph class
+under your morph map and its key as a string, never a model, alongside names, the scope, expiries and times. An update
+carries the fields it changed, before and after. A policy event carries its document's version and SHA-256 digest, never
+the document. A delete lists every grantee that held the role, permission or policy, so the evidence says who lost
+access.
 
 Each is dispatched only once its write commits on the package's connection: inside your own transaction it waits for the
 outermost commit, and a transaction that rolls back dispatches nothing. Every event of one service call carries the same
@@ -2930,6 +2931,10 @@ grant hook alone, so no accessor returns them and `auditProperties()` never hold
 | `Identity\PolicyExpired`           | `identity.policy.expired`            | the grantee                          | the grantee                      |
 | `Identity\BoundarySet`             | `identity.boundary.set`              | the grantee                          | the grantee                      |
 | `Identity\BoundaryRemoved`         | `identity.boundary.removed`          | the grantee                          | the grantee                      |
+| `Identity\BreakGlassActivated`     | `identity.break_glass.activated`     | the grantee                          | the grantee                      |
+| `Identity\BreakGlassSurrendered`   | `identity.break_glass.surrendered`   | the grantee                          | the grantee                      |
+| `Identity\BreakGlassRevoked`       | `identity.break_glass.revoked`       | the grantee                          | the grantee                      |
+| `Identity\BreakGlassExpired`       | `identity.break_glass.expired`       | the grantee                          | the grantee                      |
 | `Role\Created`                     | `role.created`                       | the role                             | none                             |
 | `Role\Updated`                     | `role.updated`                       | the role                             | none                             |
 | `Role\Deleted`                     | `role.deleted`                       | the role                             | every grantee that held it       |
@@ -4557,8 +4562,8 @@ hook refuses stops the import, with what was written before it kept.
 Break-glass is opt-in emergency access (AUTHZ-11.7): a principal with the break-glass right grants itself, or another
 person, a configured emergency role for a limited time, with a justification code from a configured list, reported
 every time and never needing prior approval. It ships over three releases, and stays switched off until the last,
-which brings its audit trail. The settings, the table, the resolution and the service that activates and ends an
-activation are here; `enabled` true is still refused at boot.
+which brings its audit trail. The settings, the table, the resolution, the service that activates and ends an
+activation and its events are here; `enabled` true is still refused at boot.
 
 **The settings.** `config/authorization.php` holds a `break_glass` block, checked at boot like every other:
 
@@ -4596,9 +4601,9 @@ setting on its own.
 `tables.prefix` prefixes like every default name), created by the package's migration on its connection, beside any
 normal grant of the same role and never merged with it. It holds the role, the grantee, who activated it (or no one),
 the scope (the platform, or a tenant with or without its subtree, and an application or every application), the
-justification code, the note, when it was activated and when it expires (both UTC), and, if it ends early, when, by
-whom and why (`surrendered`, `revoked` or `expired`). `Models\BreakGlassActivation` reads and writes it. Run the
-package's migrations when you upgrade: the roles every check reads now include this table.
+justification code, the note, when it was activated and when it expires (both UTC), and, once it ends, when, by whom and
+why (`surrendered`, `revoked`, or `expired`, which `authorization:prune` records). `Models\BreakGlassActivation` reads
+and writes it. Run the package's migrations when you upgrade: the roles every check reads now include this table.
 
 **How it grants.** While an activation has not ended and its expiry is still to come, its role counts for the grantee
 exactly as a grant of the role in the activation's scope does, through the same resolution, cache and tenant chain:
@@ -4649,7 +4654,14 @@ $breakGlass->revoke($activation, $actor);    // by a holder of the revoke right
 - `surrender()` is for the grantee alone, acting as itself; anyone else is refused, as is the grantee while
   impersonated. `revoke()` needs the revoke right, or a trusted call. Each returns how many it ended: an activation
   already ended or expired changes nothing and returns 0.
-- No event is dispatched yet: the lifecycle events arrive with the audit trail.
+
+**Events.** Each activation dispatches `Identity\BreakGlassActivated`, carrying the role, the scope, the activation's
+key, the justification code and the expiry, never the note. A surrender or revocation that ended one dispatches
+`Identity\BreakGlassSurrendered` or `Identity\BreakGlassRevoked`, with when it ended; ending one already ended or
+expired dispatches nothing. The operation's actor is the granter, the grantee who surrendered or the revoker, and none
+for a trusted call. `authorization:prune` records the expiry of every activation that expired without ending, keeping
+its row, and dispatches `Identity\BreakGlassExpired` with no actor. Each is dispatched once its write commits, never for
+a refusal or a rollback, whether break-glass is enabled or not.
 
 **Switching it off.** While `enabled` is false no activation counts anywhere, at once: checks, listings, query scopes
 and delegated administration all read none, and the rows stay for audit. The setting is read once a request or job,
@@ -5197,8 +5209,10 @@ deleted, and last the resource policy attachments of a record that no longer exi
 no model class is reported and its records' attachments are left, and a whole type's attachments are never removed. A
 soft-deleted grantee keeps its grants, its boundaries and its inline policies, and a soft-deleted record its
 attachments. Expired grants stop counting at their expiry with or without it, so pruning keeps the tables small rather
-than making checks correct. Like `model:prune`, it takes `--pretend`, which counts exactly what a run would remove, the
-boundaries apart from the grants as a run does, and `--chunk`, and is scheduled like any command:
+than making checks correct. It never removes a break-glass activation: one that expired without ending has its expiry
+recorded on its row and is reported as `Identity\BreakGlassExpired`, counted apart. Like `model:prune`, it takes
+`--pretend`, which counts exactly what a run would remove or record, the boundaries apart from the grants as a run does,
+and `--chunk`, and is scheduled like any command:
 
 ```php
 use SineMacula\Laravel\Authorization\Console\PruneGrantsCommand;
