@@ -11,6 +11,7 @@ statements allow, conditions included, and the boundary's deny statements deny a
 grants nothing: a check it lets through still needs an allow statement or a permission held.
 
 ```php
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 
@@ -46,15 +47,18 @@ tenant owns is set in that tenant, or a tenant below it that the call names, and
 `GrantScopeMismatchException`; a platform policy is set in the tenant named, else platform-wide. A boundary in a tenant
 reaches the tenants below it unless `includeSubtree` is false. Boundaries have no application: one holds in every
 application. `remove($grantee, $tenant, $actor)` removes the grantee's boundary in the tenant named, else its
-platform-wide one, and returns whether it had one there. A boundary caps a principal or an identity, so a grantee that
-is never one, a role, a permission or a policy, is refused with `BoundaryException`: a role's holders never read its
-boundary. An inline policy is refused with `BoundaryException` too, since it belongs to one grantee and is deleted with
-it; a policy whose allows name `principals` is refused with `ResourcePolicyException`, a policy whose row is gone with
-`InvalidGrantTargetException`, and a grantee that is unsaved or has no key with `InvalidGranteeException`, each before
-anything is written. A boundary is only reported set once its row is read back: a policy deleted while the boundary is
-written is refused with `InvalidGrantTargetException`, and a boundary a concurrent change kept from being written with
-`UnwrittenGrantException`, which is safe to retry, so no `BoundarySet` is ever dispatched for a boundary that is not
-there.
+platform-wide one, and returns whether it had one there, and `removeAll($grantee, $actor)` removes every boundary it has
+and returns how many. A call without an acting context is trusted system work; one with an acting context is decided
+under `authorization:boundary.set` or `authorization:boundary.remove` (see
+[Delegated administration](administration.md#delegated-administration)). A boundary caps a principal or an identity, so
+a grantee that is never one, a role, a permission or a policy, is refused with `BoundaryException`: a role's holders
+never read its boundary. An inline policy is refused with `BoundaryException` too, since it belongs to one grantee and
+is deleted with it; a policy whose allows name `principals` is refused with `ResourcePolicyException`, a policy whose
+row is gone with `InvalidGrantTargetException`, and a grantee that is unsaved or has no key with
+`InvalidGranteeException`, each before anything is written. A boundary is only reported set once its row is read back: a
+policy deleted while the boundary is written is refused with `InvalidGrantTargetException`, and a boundary a concurrent
+change kept from being written with `UnwrittenGrantException`, which is safe to retry, so no `BoundarySet` is ever
+dispatched for a boundary that is not there.
 
 **Which apply.** A check reads the boundaries of the subject's principal and, when it is a separate model, of its
 identity, whichever contracts each implements, so a boundary set on a saved model always caps the checks about it. It
@@ -106,6 +110,8 @@ does. Where a boundary caps one grantee, a guardrail caps every subject checked 
 guardrail grants nothing: a check it lets through still needs an allow statement or a permission held.
 
 ```php
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
 
@@ -226,9 +232,9 @@ guardrails, and the Gate asks the package about it as about any declared permiss
 
 **Lifecycle.** Setting or removing a guardrail dispatches `Guardrail\GuardrailSet` or `Guardrail\GuardrailRemoved` once
 the call commits, only when it changed something, with the policy, its name, the scope and the actor. Both implement
-`AuthorizationEvent`, and the change takes effect on the next check in every worker. A policy in use as a guardrail can
-be neither edited nor deleted: either is refused with `GuardrailException`, whose `getReason()` is `in_use` and whose
-`getTenants()` lists every scope it caps, the platform first as null, until each guardrail is removed through the
+`AuthorizationMutation`, and the change takes effect on the next check in every worker. A policy in use as a guardrail
+can be neither edited nor deleted: either is refused with `GuardrailException`, whose `getReason()` is `in_use` and
+whose `getTenants()` lists every scope it caps, the platform first as null, until each guardrail is removed through the
 service, and the table's foreign key refuses a delete made past the model. A guardrail row naming half a tenant is in no
 scope: the refusal counts it as malformed, and removing the policy's guardrail at the platform removes it too. A
 guardrail's statements are named in the decision, the trace and `explain()` as any policy's are, at the `deny` stage for
@@ -286,7 +292,7 @@ DENY (session_policy: a session cap does not allow it) at the session stage by s
   [session] credential: covered
   [session] capped[1]: refused
   not evaluated: allow, administration, implicit
-  request "posts:read" about user:1; asked in platform, decided in platform
+  request "posts:read" about user:1 (identity user:1); asked in platform, decided in platform
 ```
 
 **What they cap.** The session stage runs after every deny, the guardrails and the permission boundaries, and before
@@ -430,10 +436,10 @@ therefore denies the check as `invalid_policy` whatever the identity's kind.
 **The scope registry.** `SineMacula\Laravel\Authorization\Contracts\ScopeRegistry` answers which scopes a credential may
 carry, so that one is issued only scopes naming real permissions: `isValid($scope)` and `scopes()`. The package ships
 `CatalogueScopeRegistry`, backed by the permission catalogue and the scope map, and binds none. It accepts every scope
-the map names and every other scope that names a declared permission, the package's own included, or a pattern
-covering at least one; `scopes()` lists the mapped scopes, then the declared permissions. Bind it where your
-credentials' scopes are issued; under the suite, `sinemacula/laravel-iam` binds it as `laravel-authentication`'s scope
-registry:
+the map names and every other scope that names a declared permission, the package's own included, or a pattern covering
+at least one; `scopes()` lists the mapped scopes, then the declared permissions the map does not name. Bind it where
+your credentials' scopes are issued; under the suite, `sinemacula/laravel-iam` binds it as `laravel-authentication`'s
+scope registry:
 
 ```php
 use SineMacula\Laravel\Authorization\Contracts\ScopeRegistry;

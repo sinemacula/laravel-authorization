@@ -1,41 +1,40 @@
 # Grant Scope
 
 An integration such as `laravel-iam` needs facts about grants that no check gives: whether everything an identity has
-been granted lies within a tenant, which SSO's principal scope is composed from (AUTHZ-14.2), whether a principal holds
-a grant that applies in a tenant, an input to a tenant's admission (AUTHZ-13.8), and whose grants reach a tenant or lie
-within its subtree, which a move of a tenant widens or carries (N131). This note explains the identity directory that
-says whose grants count, the shared reader of grant roots, `GrantScopeQuery::forIdentity()`,
-`GrantScopeQuery::hasGrantIn()`, `granteesReaching()` and `granteesWithin()`, and why none is membership or
-authorisation. It then explains the grant hooks that build on them (AUTHZ-11.3, N80): which grants widen an identity's
-scope, the hook contract and its binding, and where the hook runs in a grant call.
+been granted lies within a tenant, which SSO's principal scope is composed from, whether a principal holds a grant that
+applies in a tenant, an input to a tenant's admission, and whose grants reach a tenant or lie within its subtree, which
+a move of a tenant widens or carries. This note explains the identity directory that says whose grants count, the shared
+reader of grant roots, `GrantScopeQuery::forIdentity()`, `GrantScopeQuery::hasGrantIn()`, `granteesReaching()` and
+`granteesWithin()`, and why none is membership or authorisation. It then explains the grant hooks that build on them:
+which grants widen an identity's scope, the hook contract and its binding, and where the hook runs in a grant call.
 
 ## Invariants
 
-1. **The identity directory (N81).** `Contracts\IdentityDirectory::principalsOf($identity)` returns an
-   `IdentityPrincipals`: the references to the principals the identity owns, the identity left out, and `isComplete`.
-   Principals and identities are the application's (AUTHZ-13.9), so the package never infers them, from
-   `AuthorizableIdentity` or from anything else. The default, `Resolvers\GuardUserIdentityDirectory`, is complete and
-   empty under the shipped `AuthGuardSubjectResolver`, where every user is its own identity, and incomplete under any
-   other resolver; it reads the bound resolver on every call. The class is named by `authorization.identity_directory`,
-   validated at boot (a missing key falls back to the default, null or a class that does not implement the contract is
-   refused) and bound as a scoped default, built per request or job, which a binding of the contract replaces.
+1. **The identity directory.** `Contracts\IdentityDirectory::principalsOf($identity)` returns an `IdentityPrincipals`:
+   the references to the principals the identity owns, the identity left out, and `isComplete`. Principals and
+   identities are the application's, so the package never infers them, from `AuthorizableIdentity` or from anything
+   else. The default, `Resolvers\GuardUserIdentityDirectory`, is complete and empty under the shipped
+   `AuthGuardSubjectResolver`, where every user is its own identity, and incomplete under any other resolver; it reads
+   the bound resolver on every call. The class is named by `authorization.identity_directory`, validated at boot (a
+   missing key falls back to the default, null or a class that does not implement the contract is refused) and bound as
+   a scoped default, built per request or job, which a binding of the contract replaces.
 
-2. **What counts as a grant (N82).** A live row of a role granted, a permission granted directly or a policy attached,
-   a policy that only denies included. Roles are not expanded: a role's root is where it was granted. A row
-   `LiveGrants` reads as expired is no grant, nor is an inline policy attached to a grantee it does not belong to
+2. **What counts as a grant.** A live row of a role granted, a permission granted directly or a policy attached, a
+   policy that only denies included. Roles are not expanded: a role's root is where it was granted. A row `LiveGrants`
+   reads as expired is no grant, nor is an inline policy attached to a grantee it does not belong to
    (`InlinePolicies::attachedToTheirGrantee()`), which no check applies. Boundaries and guardrails cap grants and are
    never read. A grant's root is the tenant its row names, or the platform for a row naming none. A live break-glass
-   activation (`BreakGlassActivations::live()`) is a grant of its role in its scope for the answers and the lists
-   (N143), as a check reads it: none while break-glass is disabled, none of a machine, and an identity's reaches none
-   of its principals, so `forIdentity()` counts its principals' activations and `hasGrantIn()` the principal's alone.
-   The widening (invariant 10) never counts one.
+   activation (`BreakGlassActivations::live()`) is a grant of its role in its scope for the answers and the lists, as a
+   check reads it: none while break-glass is disabled, none of a machine, and an identity's reaches none of its
+   principals, so `forIdentity()` counts its principals' activations and `hasGrantIn()` the principal's alone. The
+   widening (invariant 10) never counts one.
 
 3. **One reader.** `Support\GrantRoots` reads the grantees' roots from the three grant tables in one `UNION ALL` query
-   on the write connection (AUTHZ-12.4), across every tenant and application, matching each grantee by its exact morph
-   type and key, each grantee once. It shares the predicates the decision path uses rather than copying them:
-   `LiveGrants::only()` for expiry, `TenantChain::grants()` for applicability and `GrantApplications::only()` for the
-   application. An empty list of grantees runs no query. Given the grantees whose activations count, it reads their
-   live activations in the same query, as role grant rows.
+   on the write connection, across every tenant and application, matching each grantee by its exact morph type and key,
+   each grantee once. It shares the predicates the decision path uses rather than copying them: `LiveGrants::only()` for
+   expiry, `TenantChain::grants()` for applicability and `GrantApplications::only()` for the application. An empty list
+   of grantees runs no query. Given the grantees whose activations count, it reads their live activations in the same
+   query, as role grant rows.
 
 4. **Containment.** A root is within when it is the tenant or below it in the bound tree. For `FlatTenantTree` that is
    the tenant's own pair; any other tree's `subtree()` query is nested whole inside the grant query, never loaded, so
@@ -43,12 +42,12 @@ scope, the hook contract and its binding, and where the hook runs in a grant cal
    root at an ancestor, a subtree grant reaching the tenant included, at a sibling or any other tenant, or at the
    platform is outside. A row naming one tenant column without the other cannot be read.
 
-5. **`forIdentity()` answers (N81, N82).** It reads the roots of the identity's grants and of every principal the
-   directory lists, in every application and under every guard. `OUTSIDE` on any root proven outside, whether or not
-   the list is complete. `WITHIN` only when the list is complete, the tree was read and every root is within, or there
-   is no grant at all. `UNKNOWN` otherwise: an incomplete list, a tree that cannot be read (a platform-wide grant still
-   proves `OUTSIDE` then) or a row that cannot be read. The tenant is a model, an `AuthorizableTenant` or a
-   `Reference`, and every form gives the same answer.
+5. **`forIdentity()` answers.** It reads the roots of the identity's grants and of every principal the directory lists,
+   in every application and under every guard. `OUTSIDE` on any root proven outside, whether or not the list is
+   complete. `WITHIN` only when the list is complete, the tree was read and every root is within, or there is no grant
+   at all. `UNKNOWN` otherwise: an incomplete list, a tree that cannot be read (a platform-wide grant still proves
+   `OUTSIDE` then) or a row that cannot be read. The tenant is a model, an `AuthorizableTenant` or a `Reference`, and
+   every form gives the same answer.
 
 6. **`hasGrantIn()` answers.** It reads whether a grant of the principal, or of its identity when
    `SubjectGrants::grantingIdentity()` says that identity's grants reach it (so a person's never reach a machine),
@@ -59,12 +58,12 @@ scope, the hook contract and its binding, and where the hook runs in a grant cal
    (only the tenant itself and the platform are then looked in) or a grantee is neither a model nor a `Reference`;
    `ABSENT` otherwise. Uncertainty never becomes `PRESENT`.
 
-7. **Two questions, not two decision paths (D22).** The answers differ on purpose: a subtree grant made in an ancestor
-   makes `hasGrantIn($principal, $child)` `PRESENT` and `forIdentity($identity, $child)` `OUTSIDE`. Neither authorises
+7. **Two questions, not two decision paths.** The answers differ on purpose: a subtree grant made in an ancestor makes
+   `hasGrantIn($principal, $child)` `PRESENT` and `forIdentity($identity, $child)` `OUTSIDE`. Neither authorises
    anything, says whether a principal is a member of a tenant, or whether it may act there or use an application;
    `check()` stays the one decision path, and `ApplicationAccess` its adapter for application access, which decides
-   without session caps (N105): a principal being admitted holds no session yet, so neither the request's credential
-   scopes nor a machine's missing ones refuse it, while its denies, guardrails and boundaries still do.
+   without session caps: a principal being admitted holds no session yet, so neither the request's credential scopes nor
+   a machine's missing ones refuse it, while its denies, guardrails and boundaries still do.
 
 8. **A trusted service.** Even the bare status reveals a fact about other tenants, so the service is for trusted
    integration code, never an endpoint for users. `forIdentity()` and `hasGrantIn()` return the status alone, never
@@ -76,16 +75,16 @@ scope, the hook contract and its binding, and where the hook runs in a grant cal
    `forIdentity()` a second query, of the platform-wide grants. Nothing is cached: completeness across an identity's
    principals would need invalidation the resolution cache does not have.
 
-10. **Widening (AUTHZ-11.3).** `Hooks\WideningClassifier` classifies the grants a call proposes. A grant the grantee
-    holds live in the same scope, unchanged or only shortened (an earlier expiry, a narrower or equal reach), is never
-    classified. Every other grant is evaluated: a new one, a re-arm of an expired one, an extension and a wider reach.
-    An evaluated grant widens when its grantee is the identity itself (`IDENTITY`), when it is platform-wide
-    (`PLATFORM`), when no live grant of the identity or of a principal the directory lists applied in its tenant
-    (`NEW_TENANT`: a new tenant, a sibling or an ancestor of one held), and when it reaches below its tenant where none
-    of those grants reached below (`NEW_SUBTREE`). It is read with `GrantRoots::appliesIn()`, over the identity, the
-    grantee and every listed principal, in every application. `Narrowing` is not the trigger: a permission added to a
-    role is no grant to an identity, and a grant to a role is never classified. A break-glass activation is never a
-    grant already held here (N143): a grant beside one widens as it would without it.
+10. **Widening.** `Hooks\WideningClassifier` classifies the grants a call proposes. A grant the grantee holds live in
+    the same scope, unchanged or only shortened (an earlier expiry, a narrower or equal reach), is never classified.
+    Every other grant is evaluated: a new one, a re-arm of an expired one, an extension and a wider reach. An evaluated
+    grant widens when its grantee is the identity itself (`IDENTITY`), when it is platform-wide (`PLATFORM`), when no
+    live grant of the identity or of a principal the directory lists applied in its tenant (`NEW_TENANT`: a new tenant,
+    a sibling or an ancestor of one held), and when it reaches below its tenant where none of those grants reached below
+    (`NEW_SUBTREE`). It is read with `GrantRoots::appliesIn()`, over the identity, the grantee and every listed
+    principal, in every application. `Narrowing` is not the trigger: a permission added to a role is no grant to an
+    identity, and a grant to a role is never classified. A break-glass activation is never a grant already held here: a
+    grant beside one widens as it would without it.
 
 11. **When in doubt, the hook.** An incomplete directory (`INCOMPLETE_DIRECTORY`) or a tree that cannot be read
     (`UNREADABLE_TREE`) makes an evaluated grant widen. The identity is resolved through the subject resolver's
@@ -93,7 +92,7 @@ scope, the hook contract and its binding, and where the hook runs in a grant cal
     whose model cannot be read, or for which the resolver throws or names neither, is refused with
     `UnresolvableRecipientException`, never classified as not widening.
 
-12. **The contract (N80).** `Contracts\GrantHook::beforeWidening(GrantWidening $widening)`. `Hooks\GrantWidening` and
+12. **The contract.** `Contracts\GrantHook::beforeWidening(GrantWidening $widening)`. `Hooks\GrantWidening` and
     `Hooks\ProposedGrant` are immutable values of references, strings and immutable UTC instants: the operation's id and
     mode, the actor references, the recipient identity and the actual grantee, each widening grant with its action,
     target, tenant, application, reach, expiry and reasons, the reasons of the call once each, and when the proposal was
@@ -101,26 +100,26 @@ scope, the hook contract and its binding, and where the hook runs in a grant cal
     the application binds on the contract. The classes `authorization.grant_hooks` lists, validated at boot
     (`Config\GrantHookConfigValidator`), run before whichever hook is bound, in order, stopped by the first that throws.
     With none listed, and the default bound, nothing is classified. There is no runtime registrar. When hooks are
-    listed, the package extends the contract with Laravel's `extend()` (N108), so whatever it resolves to is wrapped in
-    `Hooks\ListedGrantHooks`: the listed hooks first, then the bound hook, any of which may refuse. Hooks only refuse,
-    so every one runs and none is dropped. Laravel applies the extender each time it builds the contract, so a hook
-    bound before the package registered or after, with `bind()`, `singleton()` or `scoped()`, a scoped closure naming
-    the contract by its return type, or a deferred provider, is wrapped, and so is the default, which holds none of the
-    listed hooks, so none runs twice. An extender registered before the package's decorates the bound hook before it is
-    wrapped; one registered after receives the wrapped hook. Laravel applies no extender to an instance it is handed
-    later, so `Hooks\WideningPhase` wraps the hook it calls as well, with `ListedGrantHooks::wrap()`, which leaves a
-    wrapped hook as it is: a hook bound with `instance()` after the package registered, or bound in any way after an
-    instance the package wrapped as it registered, runs after the listed hooks too. A decorator called while another
-    runs its hook for the same widening calls its own hook alone, so when an extender registered after the package
-    decorates the wrapped hook and the grant service wraps the decoration again, the listed hooks still run once. The
-    wrapped hook builds the listed hooks from its container at its first use and keeps them, so registering builds none
-    of them, and they share the bound hook's lifetime, in a queue worker and in each Octane sandbox. Registering
-    resolves the bound hook only when it was resolved before and a callback watches the contract for rebinding, which
-    Laravel hands the wrapped hook. A wrapped hook is never wrapped again, so registering the package twice runs the
-    listed hooks once. `Registrars\SeamBindings` binds the default and registers the extender. With none listed nothing
-    is extended, and the bound hook stands alone. The widening also carries the operation's client, `ip` and
-    `userAgent`, both nullable, the last two constructor arguments with defaults, so a widening built by hand without
-    them still builds (see invariant 16).
+    listed, the package extends the contract with Laravel's `extend()` as the application boots, so whatever it resolves
+    to is wrapped in `Hooks\ListedGrantHooks`: the listed hooks first, then the bound hook, any of which may refuse.
+    Hooks only refuse, so every one runs and none is dropped. Laravel applies the extender each time it builds the
+    contract, so a hook bound before the package registered or after, with `bind()`, `singleton()` or `scoped()`, a
+    scoped closure naming the contract by its return type, or a deferred provider, is wrapped, and so is the default,
+    which holds none of the listed hooks, so none runs twice. An extender registered before the package's decorates the
+    bound hook before it is wrapped; one registered after receives the wrapped hook. Laravel applies no extender to an
+    instance it is handed later, so `Hooks\WideningPhase` wraps the hook it calls as well, with
+    `ListedGrantHooks::wrap()`, which leaves a wrapped hook as it is: a hook bound with `instance()` after the
+    application boots, or bound in any way after an instance the package wrapped as the application booted, runs after
+    the listed hooks too. A decorator called while another runs its hook for the same widening calls its own hook alone,
+    so when an extender registered after the package decorates the wrapped hook and the grant service wraps the
+    decoration again, the listed hooks still run once. The wrapped hook builds the listed hooks from its container at
+    its first use and keeps them, so registering builds none of them, and they share the bound hook's lifetime, in a
+    queue worker and in each Octane sandbox. Extending resolves the bound hook only when it was resolved before and a
+    callback watches the contract for rebinding, which Laravel hands the wrapped hook. A wrapped hook is never wrapped
+    again, so registering the package twice runs the listed hooks once. `Registrars\SeamBindings` binds the default and
+    registers the extender as the application boots. With none listed nothing is extended, and the bound hook stands
+    alone. The widening also carries the operation's client, `ip` and `userAgent`, both nullable, the last two
+    constructor arguments with defaults, so a widening built by hand without them still builds (see invariant 16).
 
 13. **Veto only.** A hook refuses by throwing, `Exceptions\GrantRefusedException` or anything else: the call rolls back
     with nothing written and no event, and is not tried again, unless what it threw is a concurrency error
@@ -130,23 +129,24 @@ scope, the hook contract and its binding, and where the hook runs in a grant cal
     management service refuses; read-only queries stay allowed. A raw Eloquent write is not guarded: it stays the
     trusted surface it always is.
 
-14. **Placement.** `Hooks\WideningPhase` is the one call point, for trusted and delegated grants alike and for
-    break-glass (AUTHZ-11.7) to come. In `GrantService::grant()` and `sync()`, first in the work of
-    `OperationScope::run()`: a non-locking preliminary proposal (the target, the scope, the reach, the expiry; a sync's
-    additions and re-arms, and the roles it holds live with the other reach than their entry's `RoleReach` names, with
-    the expiry each keeps, never another row held live), its classification, and one hook call with every widening
-    grant, before any lock and any write. The call then locks, rebuilds its grants, decides them, and hands them to
-    `assertCovers()`, which classifies them again, after every other lock, with locking reads: the grantee's own rows
-    (`GrantTable::liveRows()` and `liveRow()` under a row lock), and the evidence the hook was skipped or limited on,
-    the grants of the identity, the grantee and every listed principal that apply in the tenant, read table by table
-    with `GrantRoots::appliesUnderLock()`, never as a union, locked through `DependencyPins::lockCoverage()` as the last
-    part of the protocol (`DependencyPhase::COVERAGE`). A locking read sees the latest committed rows on MySQL whatever
-    the snapshot, and holds them until commit on PostgreSQL and MySQL, so a revocation committed after the hook phase is
-    seen and one made later waits. A grant that now widens with no hook run for it throws
-    `DependencyChangedException::widening()`. A delegated call is tried again by `ConflictRetries`; a trusted call is
-    tried again for this conflict alone, up to the same `retries`, then refused as `administration.conflict`. The hook
-    may run on each try; it is never called under the package's locks. Only the application's answers, the directory's
-    list and the tenant tree, are read as they stand.
+14. **Placement.** `Hooks\WideningPhase` is the one call point, for trusted and delegated grants alike and for a
+    break-glass activation. In `GrantService::grant()` and `sync()`, and in `BreakGlassService::activate()`, first in
+    the work of `OperationScope::run()`: a non-locking preliminary proposal (the target, the scope, the reach, the
+    expiry; a sync's additions and re-arms, and the roles it holds live with the other reach than their entry's
+    `RoleReach` names, with the expiry each keeps, never another row held live), its classification, and one hook call
+    with every widening grant, before any lock and any write. The call then locks, rebuilds its grants, decides them,
+    and hands them to `assertCovers()`, which classifies them again, after every other lock, with locking reads: the
+    grantee's own rows (`GrantTable::liveRows()` and `liveRow()` under a row lock), and the evidence the hook was
+    skipped or limited on, the grants of the identity, the grantee and every listed principal that apply in the tenant,
+    read table by table with `GrantRoots::appliesUnderLock()`, never as a union, locked through
+    `DependencyPins::lockCoverage()` as the last part of the protocol (`DependencyPhase::COVERAGE`). A break-glass
+    activation proposes its role once, decides it, and locks the role's row only after the coverage check. A locking
+    read sees the latest committed rows on MySQL whatever the snapshot, and holds them until commit on PostgreSQL and
+    MySQL, so a revocation committed after the hook phase is seen and one made later waits. A grant that now widens
+    with no hook run for it throws `DependencyChangedException::widening()`. A delegated call is tried again by
+    `ConflictRetries`; a trusted call is tried again for this conflict alone, up to the same `retries`, then refused as
+    `administration.conflict`. The hook may run on each try; it is never called under the package's locks. Only the
+    application's answers, the directory's list and the tenant tree, are read as they stand.
 
 15. **Nested calls and outer transactions.** A grant made while another operation's work runs
     (`OperationScope::isNested()`) may follow that operation's locks, so one that widens is refused with
@@ -157,42 +157,41 @@ scope, the hook contract and its binding, and where the hook runs in a grant cal
     each a call of their own; `authorization:migrate-spatie` commits its catalogue, then makes each grant as one.
     A binding of the contract to anything that is not a `GrantHook` is refused, never taken as none.
 
-16. **The client is personal data, for the hook alone (BL-74).** `Support\Operation` and `Hooks\GrantWidening` carry
-    the IP address and the user agent of the call. `Operation::begin()` takes a client the caller passes as it is;
-    otherwise a delegated operation reads the routed request it is begun in through `Support\RequestClient` (the IP
-    behind the trusted proxies), and a trusted one, or any begun with no routed request (console, queue), has none. The
-    grant service hands `WideningPhase::before()` the operation as begun, with its client, while `OperationScope`
-    gives the call's work, and so every event it dispatches and every write its observers report, the operation
-    without it (`Operation::withoutClient()`). The client is never put in a cache key, a decision event, a log or a
-    stored grant row. No service takes a client: each begins its own operation with none given, so a service grant
-    reaches the hook with the client of the routed request of a delegated call, or with none for a trusted, console
-    or queued call. An explicit client applies only to an `Operation` or a `GrantWidening` a caller builds itself, such
-    as a hook's own tests, and is the client of a routed request or none, never one read from the request Laravel
-    binds for the console and the queue.
+16. **The client is personal data, for the hook alone.** `Support\Operation` and `Hooks\GrantWidening` carry the IP
+    address and the user agent of the call. `Operation::begin()` takes a client the caller passes as it is; otherwise a
+    delegated operation reads the routed request it is begun in through `Support\RequestClient` (the IP behind the
+    trusted proxies), and a trusted one, or any begun with no routed request (console, queue), has none. The grant
+    service hands `WideningPhase::before()` the operation as begun, with its client, while `OperationScope` gives the
+    call's work, and so every event it dispatches and every write its observers report, the operation without it
+    (`Operation::withoutClient()`). The client is never put in a cache key, a decision event, a log or a stored grant
+    row. No service takes a client: each begins its own operation with none given, so a service grant reaches the hook
+    with the client of the routed request of a delegated call, or with none for a trusted, console or queued call. An
+    explicit client applies only to an `Operation` or a `GrantWidening` a caller builds itself, such as a hook's own
+    tests, and is the client of a routed request or none, never one read from the request Laravel binds for the console
+    and the queue.
 
-17. **The grantees reaching or within a tenant (BL-91, N131).** `treeChanged()` runs no grant hook, so a sibling that
-    reports a move of a tenant to its sign-on scope widening asks whose grants the move concerns.
-    `granteesReaching($tenant, $application = null)` lists every grantee, a principal or an identity as its rows store
-    it, holding a live grant that reaches the tenant as a check there reads it (`TenantChain::grants()`): made in the
-    tenant, for it alone or reaching below it, made in an ancestor and reaching below it, or platform-wide. The
-    ancestors are read from the bound tree afresh (`TenantChain::of(..., isFresh: true)`), never a batch's kept answer.
-    `granteesWithin($tenant, $application = null)` lists every grantee holding a live grant made in the tenant or below
-    it, through `GrantRoots::within()`: the tenant's own pair for the flat tree, else the tree's `subtree()` nested
-    whole. A subtree moved under a new parent comes to be reached by the grants that reach the parent from above it or
-    were made there reaching below it, so the sibling asks `granteesReaching()` of the moved tenant once it has moved,
-    or of the new parent at any time, which lists as well whoever holds a grant made there for the parent alone; the
-    grants within the subtree, which `granteesWithin()` lists, keep their reach. What counts as a grant is invariant 2,
-    and a row naming half a tenant never counts: a check takes a row with no tenant type for a platform-wide grant, but
-    neither list does. A role a policy is attached to is never listed, wherever the policy is attached: it is no
-    principal or identity, and whoever holds the role is listed through their own grant of it. A named application
-    counts the grants made for it or for every application, as `hasGrantIn()` does; none counts every grant. Each
-    grantee is listed once, ordered by type and then key byte by byte, in PHP (`Reference::sorted()`), so every database
-    lists them alike. A machine's activation lists no one, and a grantee holding both a grant and an activation is
-    listed once. Each list is one `UNION` query over the three grant tables and the activations on the write
-    connection, plus the
-    tree's read of the ancestors for `granteesReaching()`, and refuses first while the package is not healthy. A list
-    cannot say `unknown`, so a tree that throws is thrown, a subtree on another connection than the package's is refused
-    with `UnexpectedValueException`, and a subtree query that fails as it runs is thrown as its `QueryException` once
+17. **The grantees reaching or within a tenant.** `treeChanged()` runs no grant hook, so a sibling that reports a move
+    of a tenant to its sign-on scope widening asks whose grants the move concerns. `granteesReaching($tenant,
+    $application = null)` lists every grantee, a principal or an identity as its rows store it, holding a live grant
+    that reaches the tenant as a check there reads it (`TenantChain::grants()`): made in the tenant, for it alone or
+    reaching below it, made in an ancestor and reaching below it, or platform-wide. The ancestors are read from the
+    bound tree afresh (`TenantChain::of(..., isFresh: true)`), never a batch's kept answer. `granteesWithin($tenant,
+    $application = null)` lists every grantee holding a live grant made in the tenant or below it, through
+    `GrantRoots::within()`: the tenant's own pair for the flat tree, else the tree's `subtree()` nested whole. A subtree
+    moved under a new parent comes to be reached by the grants that reach the parent from above it or were made there
+    reaching below it, so the sibling asks `granteesReaching()` of the moved tenant once it has moved, or of the new
+    parent at any time, which lists as well whoever holds a grant made there for the parent alone; the grants within the
+    subtree, which `granteesWithin()` lists, keep their reach. What counts as a grant is invariant 2, and a row naming
+    half a tenant never counts: a check takes a row with no tenant type for a platform-wide grant, but neither list
+    does. A role a policy is attached to is never listed, wherever the policy is attached: it is no principal or
+    identity, and whoever holds the role is listed through their own grant of it. A named application counts the grants
+    made for it or for every application, as `hasGrantIn()` does; none counts every grant. Each grantee is listed once,
+    ordered by type and then key byte by byte, in PHP (`Reference::sorted()`), so every database lists them alike. A
+    machine's activation lists no one, and a grantee holding both a grant and an activation is listed once. Each list is
+    one `UNION` query over the three grant tables and the activations on the write connection, plus the tree's read of
+    the ancestors for `granteesReaching()`, and refuses first while the package is not healthy. A list cannot say
+    `unknown`, so a tree that throws is thrown, a subtree on another connection than the package's is refused with
+    `UnexpectedValueException`, and a subtree query that fails as it runs is thrown as its `QueryException` once
     `granteesWithin()`'s savepoint has rolled back, never answered as an empty list.
 
 ## Success Path
@@ -218,7 +217,7 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
 ## Failure / Edge Cases
 
 - **An incomplete directory.** `UNKNOWN`, unless a grant already proves `OUTSIDE`.
-- **No grants.** `WITHIN` with a complete directory (N82), `UNKNOWN` with an incomplete one.
+- **No grants.** `WITHIN` with a complete directory, `UNKNOWN` with an incomplete one.
 - **A tree that throws, or a subtree on another connection.** The failure is written to the log; `forIdentity()` is
   `OUTSIDE` on a platform-wide grant, else `UNKNOWN`; `hasGrantIn()` looks only in the tenant and the platform, and is
   `UNKNOWN` when it finds nothing.
@@ -228,8 +227,8 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
   it is written to the log, and `forIdentity()` reads the platform-wide grants alone, answering as for a tree that
   throws. `hasGrantIn()` never runs the subtree query, so it is unaffected.
 - **A row naming half a tenant.** `UNKNOWN` for `forIdentity()`, unless another root is outside; never a grant for
-  `hasGrantIn()`, since a check applies a grant stored that way nowhere (N130: what restricts of such a row applies
-  everywhere instead, see `Support\TenantColumns`); never listed by `granteesReaching()` or `granteesWithin()`.
+  `hasGrantIn()`, since a check applies a grant stored that way nowhere (what restricts of such a row applies everywhere
+  instead, see `Support\TenantColumns`); never listed by `granteesReaching()` or `granteesWithin()`.
 - **A tree that cannot be read, for a list.** `granteesReaching()` and `granteesWithin()` throw what the tree throws; a
   subtree on another connection is refused with `UnexpectedValueException`; a subtree query that fails as it runs is
   thrown once only its savepoint has rolled back. Neither answers an empty list it cannot vouch for.
@@ -257,7 +256,7 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
 - `Services\GrantScopeQuery` -- `forIdentity()`, `hasGrantIn()`, the grantees and the tree's failures, and
   `granteesReaching()` and `granteesWithin()` with their one query over the grant tables (`holding()`).
 - `Enums\GrantScopeStatus` and `Enums\GrantPresence` -- the answers.
-- `Config\ImplementationConfigValidator` and `Config\ConfigValidator` -- the `identity_directory` validation.
+- `Config\SeamConfigValidator` and `Config\ConfigValidator` -- the `identity_directory` validation.
 - `AuthorizationServiceProvider::registerConfiguredDefaults()` and `registerManagementServices()` -- the scoped
   directory and the singleton service.
 - `Contracts\GrantHook`, `Hooks\GrantHooks`, `Hooks\GrantWidening`, `Hooks\ProposedGrant` and
@@ -267,7 +266,8 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
   guard, nesting and retries inside the application's transaction.
 - `Support\GrantRoots::appliesUnderLock()`, `Administration\DependencyPins::lockCoverage()` and
   `Services\Support\GrantTable::liveRows()` and `liveRow()` under a lock -- the locking reads of the coverage check.
-- `Services\GrantService::grant()`, `sync()` and `plan()`, and `Services\Support\SyncPlan` -- the placement.
+- `Services\GrantService::grant()`, `sync()` and `plan()`, `Services\Support\SyncPlan` and
+  `Services\BreakGlassService::activate()` -- the placement.
 - `Exceptions\GrantRefusedException`, `GrantHookRecursionException`, `NestedGrantException` and
   `UnresolvableRecipientException`; `Config\GrantHookConfigValidator`.
 
@@ -289,8 +289,9 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
   nested subtrees, refused subtrees and the write connection, on a connection outside the test's transaction.
 - `Performance\GrantScopeQueryBudgetTest` -- the query count is the same for one grant and ten of each kind, and at
   depth one and depth eight, for each answer and each list of grantees.
-- `Feature\Resolvers\GuardUserIdentityDirectoryTest`, `Feature\ConfigValidatorTest` and
-  `Feature\AuthorizationServiceProviderTest` -- the default directory, its validation and its binding.
+- `Feature\Resolvers\GuardUserIdentityDirectoryTest`, `Unit\Config\SeamConfigValidatorTest`,
+  `Feature\ConfigValidatorTest` and `Feature\AuthorizationServiceProviderTest` -- the default directory, its validation
+  and its binding.
 - `Feature\Hooks\WideningClassifierTest` -- the classification matrix: an identity grantee, the platform, a new
   tenant, an ancestor, a tenant held, siblings, a re-arm, a wider reach, an extension, a shortening, an unchanged
   grant, an incomplete directory, an unreadable tree and unresolvable identities, a grantee by reference, a chain read
@@ -302,8 +303,10 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
   guard, the grant scope query from a hook, nested calls and a binding that is no hook.
 - `Feature\Services\GrantServiceTest` and `Feature\Hooks\GrantHookEntryPointsTest` -- every entry point (the service,
   the trait helpers, `authorization:grant`), trusted and delegated, a sync's hooks all run before any lock or write
-  (`GrantServiceTest::testASyncRunsEveryHookBeforeAnyLockOrWrite`), the coverage race of a grant and a sync, a BL-65
+  (`GrantServiceTest::testASyncRunsEveryHookBeforeAnyLockOrWrite`), the coverage race of a grant and a sync, a delegated
   refusal after the hook, a hook run again on a retried try, and a refusal not retried.
+- `Feature\Services\BreakGlassServiceTest` -- an activation's hooks asked and able to refuse, and its coverage race
+  tried again with the hook, trusted and delegated.
 - `Feature\MigrateSpatieCommandTest` -- the Spatie import's grants each made once its catalogue has committed.
 - `Feature\Services\GrantTableTest` and `Feature\Administration\DependencyPinsTest` -- the grantee's rows read under a
   lock, and the coverage check's locks last in the lock order.
@@ -313,28 +316,19 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
   `Feature\OperationScopeTest` and `GrantServiceTest::testTheHookAloneIsHandedTheRequestsClient` -- the client read
   from a routed request for a delegated operation, none for trusted, console and queued work, an explicit client kept,
   the work and its events given the operation without it, and the hook handed it.
-- `Feature\Hooks\ListedGrantHooksTest` -- the listed hooks run before whatever the contract resolves to (N108): a hook
-  bound before or after the package registered, every way of binding it, a deferred provider's, the default without
-  running twice, and an earlier extender's decoration, either refusing; a wrapped hook not wrapped again and a later
-  decoration wrapped again running the listed hooks once, nothing extended with none listed, the bound hook's lifetime
-  kept in a queue worker and each Octane sandbox, nothing built while registering, a rebinding watcher handed the
-  wrapped hook, and nothing wrapped twice. `Feature\Hooks\WideningPhaseTest` -- the grant service running the listed
-  hooks before an instance bound after registration and a hook bound after a wrapped instance.
-  `Feature\Registrars\SeamBindingsTest` -- the default bound with no hook, and the extender registered only when hooks
-  are listed.
-
-## Done
-
-- **Widening hooks (BL-66 part 2, AUTHZ-11.3, N80).** Widening classification, the `GrantHook` contract and its one
-  binding with the ordered composite, the run before the package's first lock with the coverage check and retry, the
-  recursion guard and the refusal of nested calls (invariants 10 to 15).
-- **Grantees reaching or within a tenant (BL-91, N131).** `granteesReaching()` and `granteesWithin()` for a sibling
-  reporting a tenant moved (invariant 17).
+- `Feature\Hooks\ListedGrantHooksTest` -- the listed hooks run before whatever the contract resolves to: a hook bound
+  before or after the package registered, every way of binding it, a deferred provider's, the default without running
+  twice, and an earlier extender's decoration, either refusing; a wrapped hook not wrapped again and a later decoration
+  wrapped again running the listed hooks once, nothing extended with none listed, the bound hook's lifetime kept in a
+  queue worker and each Octane sandbox, nothing built while registering, a rebinding watcher handed the wrapped hook,
+  and nothing wrapped twice. `Feature\Hooks\WideningPhaseTest` -- the grant service running the listed hooks before an
+  instance bound after registration and a hook bound after a wrapped instance. `Feature\Registrars\SeamBindingsTest` --
+  the default bound with no hook, and the extender registered only when hooks are listed.
 
 ## Change Triggers
 
-- Counting any other row as a grant, or leaving one out, changes invariant 2 and N82.
-- Inferring principals from anything but the directory breaks invariant 1 and N81.
+- Counting any other row as a grant, or leaving one out, changes invariant 2.
+- Inferring principals from anything but the directory breaks invariant 1.
 - Returning anything beyond the status, or for a list anything beyond the grantees, breaks invariant 8.
 - Listing a grantee whose grant does not reach the tenant or lie within it, or answering an empty list for a tree that
   cannot be read, breaks invariant 17.
@@ -343,5 +337,5 @@ it again first; it is still covered, so the role is granted and `RoleAssigned` i
 - Handing the client to anything but the grant hook (an event, a cache key, a log or a stored row) breaks invariant 16.
 - Classifying from anything but the identity and every principal the directory lists, or skipping the hook in doubt,
   breaks invariants 10 and 11.
-- Letting a hook change the grant, or a service run while a hook does, breaks invariant 13 and N80.
+- Letting a hook change the grant, or a service run while a hook does, breaks invariant 13.
 - Calling a hook after the package's first lock, or skipping the coverage check, breaks invariant 14.
