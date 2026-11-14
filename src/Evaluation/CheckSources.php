@@ -7,7 +7,8 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 /**
  * Every source one check is decided from, gathered by the decision pipeline in
  * the scope the check is decided in: the policies, the guardrails, the
- * boundaries, the check's context, the permission held and the session caps.
+ * boundaries, the check's context, the permission held and the session caps,
+ * and what attributes an allow to the break-glass activations behind it.
  *
  * `whereAuthorized()` reads them as the pipeline gathered them, to tell whether
  * the statements they hold can be compiled, before the pipeline weighs them, so
@@ -29,6 +30,7 @@ final readonly class CheckSources
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @param  \Closure(): ?string  $permission
      * @param  \SineMacula\Laravel\Authorization\Evaluation\SessionCaps  $session
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\BreakGlassAttribution|null  $attribution
      */
     public function __construct(
 
@@ -49,5 +51,8 @@ final readonly class CheckSources
 
         /** The session caps the check is decided under. */
         public SessionCaps $session,
+
+        /** Notes the break-glass activations behind the principal's grants as they resolve; null while none can count. */
+        public ?BreakGlassAttribution $attribution = null,
     ) {}
 }

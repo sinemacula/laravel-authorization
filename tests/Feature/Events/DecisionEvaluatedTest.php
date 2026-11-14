@@ -48,7 +48,7 @@ final class DecisionEvaluatedTest extends TestCase
 
     /** @var list<string> Every property a decision event has, in order. */
     private const array PROPERTIES = [
-        'subject', 'identity', 'previewer', 'action', 'resource', 'tenant', 'application', 'effect', 'reason', 'statements', 'usedBreakGlass', 'keys',
+        'subject', 'identity', 'previewer', 'action', 'resource', 'tenant', 'application', 'effect', 'reason', 'statements', 'usedBreakGlass', 'activations', 'keys',
     ];
 
     /**
@@ -89,6 +89,7 @@ final class DecisionEvaluatedTest extends TestCase
         self::assertSame($decision->statements, $event->statements);
         self::assertSame('read-audited', $event->statements[0]->sid);
         self::assertFalse($event->usedBreakGlass);
+        self::assertSame([], $event->activations);
         self::assertSame(['resource.status', 'subject.department', 'input.reason'], $event->keys);
         self::assertCarriesNoValue($event);
     }

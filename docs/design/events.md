@@ -121,7 +121,9 @@ carry references, names and ids, never a value the decision read, and are dispat
    platform, a scope put in place, or the request's, a guest's decision included), never read from its subject; its
    `effect` and `reason`; the `statements` that decided it, each a `StatementReference` naming its policy's name, the
    stored policy's key, its index and its sid and, for a statement of a resource policy, the resource that policy is
-   attached to (`type:id` or `type:*`); `usedBreakGlass`, false until break-glass grants arrive; and `keys`, the name of
+   attached to (`type:id` or `type:*`); `usedBreakGlass`, whether a grant that allowed it came through a live
+   break-glass activation, and `activations`, the key of each such activation, sorted, never its note (see
+   [Break-glass](break-glass.md)); and `keys`, the name of
    each condition key the decision tested, held or failed, and of each `${…}` reference named by a condition operand or
    resource pattern of a statement it assessed, each once and never its value (see [Explanations](explanations.md)).
    Neither the caller's context nor the decision, with its trace, is carried: the last decision holds the decision,
@@ -177,8 +179,9 @@ carry references, names and ids, never a value the decision read, and are dispat
     nor the last decision: a bulk check reports one event for each reported decision, in the order of its checks (N70),
     and a preview's listing reports each action while `previews` is on, storing none (N86). `AuthorizationFailed` is not
     filtered: every refusal `authorize()` throws dispatches it, for the reason it has with every setting on, so a
-    listener of both tells an observation from a failure by the event's class. A break-glass allow is to be reported
-    whatever the settings (BL-72b); no decision uses a break-glass grant yet.
+    listener of both tells an observation from a failure by the event's class. An allow that used break-glass is
+    reported whatever the settings, `allows: none` and a preview's listing with every setting off included, as
+    `BREAK_GLASS` (N142); a listing that dispatches nothing reports none.
 
 ## Success Path
 
@@ -243,7 +246,7 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
   and `Support\AuditProperties`: the audit accessors, the call accessors and the flat details.
 - `Events\DecisionEvent`: the decision payload; `Evaluation\DecisionProvenance`: who a decision was about and where;
   `Evaluation\DecisionReporting`, `Evaluation\Enums\DecisionReport` and `Config\EventConfigValidator`: which
-  decisions are reported, and why;
+  decisions are reported, and why; `Evaluation\BreakGlassAttribution`: the activations behind an allow;
   `Evaluation\LastDecisionStore`: the last decision and its provenance; `Evaluation\CheckBatch`: the dispatch and
   store switches.
 - `Support\Reference`, `Support\Operation`, `Support\GrantScope`, `Support\DocumentDigest`.
@@ -271,7 +274,9 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
   read anywhere in the serialised event, and `reportedBecause()` and `isSensitiveAction()`; `DecisionReportingTest`,
   `DecisionReportTest` and `EventConfigValidatorTest`: which decisions each setting reports, the order of the reasons
   and the settings' checks; `DecisionProvenanceTest`, `LastDecisionStoreTest` and the manager's
-  `AuthorizationManagerTest`: the provenance of the last decision; `CheckBatchTest`: the dispatch and store switches.
+  `AuthorizationManagerTest`: the provenance of the last decision; `CheckBatchTest`: the dispatch and store switches;
+  `BreakGlassAttributionTest`: the activations an allow names, and its report, through a check, a bulk check, a
+  listing and a preview's listing, cold and warm.
 - `OperationScopeTest`: after-commit dispatch, nesting, rollback and the current operation.
 - `ResourcePolicyServiceTest`, `PolicyAttachedTest`, `PolicyDetachedTest`, `ResourcePolicyEventTest`: the resource
   policy events and the shape they share, after commit and only for a change.
@@ -298,7 +303,7 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 
 ## Change Triggers
 
-- Break-glass grants filling `usedBreakGlass` (BL-70), and break-glass allows reported whatever the settings
-  (BL-72b).
+- A change to which decisions name a break-glass activation, or to which of them are reported whatever the
+  settings.
 - Applications: the grant events report the application written.
 - Grant expiry: its events join the set.

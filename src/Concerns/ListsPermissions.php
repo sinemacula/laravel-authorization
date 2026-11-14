@@ -62,9 +62,9 @@ trait ListsPermissions
      * to be authorized when it is taken.
      *
      * Listing is introspection, not a check (N70): it records no last decision
-     * and dispatches no `DecisionEvaluated` and no `AuthorizationFailed`. The
-     * break-glass reporting of BL-70 is to define how it treats it. A catalogue
-     * that cannot be read, such as one declaring a name twice with different
+     * and dispatches no `DecisionEvaluated` and no `AuthorizationFailed`, not
+     * even for an action listed through break-glass (N142). A catalogue that
+     * cannot be read, such as one declaring a name twice with different
      * metadata, throws `InvalidPermissionCatalogueException`.
      *
      * On a preview from `previewFor()`, the subject is the preview's target,
@@ -72,8 +72,9 @@ trait ListsPermissions
      * application than the preview's, throws `InvalidPreviewException`. The
      * preview is admitted first, and each action it evaluates is reported with
      * `DecisionEvaluated` as `authorization.events.decisions` selects, every
-     * one while `previews` is on, naming both parties, while the last decision
-     * is left as the admission recorded it (N86).
+     * one while `previews` is on and one that used break-glass whatever the
+     * settings, naming both parties, while the last decision is left as the
+     * admission recorded it (N86).
      *
      * @param  object|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope

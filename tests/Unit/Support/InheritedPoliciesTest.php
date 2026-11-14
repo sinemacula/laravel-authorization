@@ -75,4 +75,15 @@ final class InheritedPoliciesTest extends TestCase
         self::assertSame([], (new InheritedPolicies)->denyOnly);
         self::assertSame(['policy-1'], (new InheritedPolicies(['policy-1', 'policy-2'], denyOnly: ['policy-1']))->denyOnly);
     }
+
+    /**
+     * The activations behind each policy are none by default and kept as given.
+     *
+     * @return void
+     */
+    public function testTheActivationsBehindEachPolicyAreKept(): void
+    {
+        self::assertSame([], (new InheritedPolicies)->activations);
+        self::assertSame(['policy-1' => ['activation-1']], (new InheritedPolicies(['policy-1'], activations: ['policy-1' => ['activation-1']]))->activations);
+    }
 }

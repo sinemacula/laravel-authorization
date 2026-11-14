@@ -14,7 +14,9 @@ use SineMacula\Laravel\Authorization\Usage\RouteMap;
  * While grant usage is tracked, a grantee's permissions and policies are kept
  * under a kind of their own, with the routes of the grants behind them (see
  * `Usage\RouteMap`), so an entry kept without them, before tracking was turned
- * on, is never read for one.
+ * on, is never read for one. The keys of the break-glass activations behind a
+ * grantee's permissions or policies are kept beside them when a role came
+ * through one.
  *
  * Whatever is read back is checked against the shape it was written in, and an
  * entry that does not hold to it is refused with `UnexpectedValueException`, so
@@ -84,12 +86,40 @@ final class ResolutionCodec
     }
 
     /**
+     * Read the stored keys of the break-glass activations behind each
+     * permission or policy back, refusing anything that is not lists of keys by
+     * name.
+     *
+     * @param  mixed  $stored
+     * @return array<string, list<string>>
+     *
+     * @throws \UnexpectedValueException
+     */
+    public static function activations(mixed $stored): array
+    {
+        if (!\is_array($stored)) {
+            throw new \UnexpectedValueException('Cached activations are not keyed by grant.');
+        }
+
+        foreach ($stored as $keys) {
+            if (!\is_array($keys) || !\array_is_list($keys)) {
+                throw new \UnexpectedValueException('Cached activations are not a list of keys.');
+            }
+
+            self::names($keys);
+        }
+
+        /** @var array<string, list<string>> */
+        return $stored;
+    }
+
+    /**
      * Determine whether a stored value has the shape of an entry.
      *
      * @param  mixed  $entry
      * @return bool
      *
-     * @phpstan-assert-if-true array{versions: non-empty-array<string, string>, value: array<mixed>, until: int, routes?: mixed} $entry
+     * @phpstan-assert-if-true array{versions: non-empty-array<string, string>, value: array<mixed>, until: int, routes?: mixed, activations?: mixed} $entry
      */
     public static function isEntry(mixed $entry): bool
     {
@@ -156,7 +186,7 @@ final class ResolutionCodec
             $policies[] = $policy;
         }
 
-        return new Resolution($policies, $resolution->expiresIn, $resolution->stable, $resolution->routes);
+        return new Resolution($policies, $resolution->expiresIn, $resolution->stable, $resolution->routes, $resolution->activations);
     }
 
     /**

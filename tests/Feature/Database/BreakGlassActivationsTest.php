@@ -470,6 +470,42 @@ final class BreakGlassActivationsTest extends TestCase
     }
 
     /**
+     * Only roles read through an activation name it behind what every role of
+     * their chain carries, each activation once per grant; roles held through
+     * role grants alone name nothing.
+     *
+     * @return void
+     */
+    public function testWhatAnActivatedRoleCarriesNamesItsActivation(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $role   = self::emergencyRole();
+        $editor = Role::create(['name' => 'editor']);
+
+        $user->assignRole($role);
+        $user->assignRole($editor);
+
+        $plain   = $user->roles()->get();
+        $chains  = [$role->id => [$role->id, 'parent'], $editor->id => [$editor->id]];
+        $carried = [$role->id => ['create', 'publish'], 'parent' => ['publish', 'read'], $editor->id => ['edit']];
+
+        self::assertFalse(BreakGlassActivations::isAnyActivated($plain));
+        self::assertSame([], BreakGlassActivations::behind($plain, $chains, $carried));
+
+        $first  = self::activate($user, $role);
+        $second = self::activate($user, $role);
+        $held   = $user->roles()->get();
+        $behind = BreakGlassActivations::behind($held, $chains, $carried);
+
+        self::assertTrue(BreakGlassActivations::isAnyActivated($held));
+        self::assertSame(['create', 'publish', 'read'], \array_keys($behind));
+
+        foreach ($behind as $keys) {
+            self::assertEqualsCanonicalizing([$first->id, $second->id], $keys);
+        }
+    }
+
+    /**
      * The rows read in place of the role grant table are every role grant, with
      * no activation, and every live activation with its key; an uncounted
      * grantee's activations are left out.

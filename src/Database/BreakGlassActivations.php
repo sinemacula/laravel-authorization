@@ -229,6 +229,56 @@ final class BreakGlassActivations
     }
 
     /**
+     * Determine whether a role held was read through an activation, so what
+     * each role carries is to be read by role, to name it.
+     *
+     * @param  iterable<\Illuminate\Database\Eloquent\Model>  $held
+     * @return bool
+     */
+    public static function isAnyActivated(iterable $held): bool
+    {
+        foreach ($held as $role) {
+            if (self::activationOf($role) !== null) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Return the keys of the activations behind what the roles held carry, by
+     * each permission's name or policy's key: for each role read through an
+     * activation, what every role of its chain carries (N142). A role held
+     * through a role grant as well still names its activation.
+     *
+     * @param  iterable<\SineMacula\Laravel\Authorization\Models\Role>  $held
+     * @param  array<string, list<string>>  $chains
+     * @param  array<array-key, list<string>>  $carried
+     * @return array<string, list<string>>
+     */
+    public static function behind(iterable $held, array $chains, array $carried): array
+    {
+        $behind = [];
+
+        foreach ($held as $role) {
+            $activation = self::activationOf($role);
+
+            if ($activation === null) {
+                continue;
+            }
+
+            foreach ($chains[$role->id] ?? [] as $carrier) {
+                foreach ($carried[$carrier] ?? [] as $grant) {
+                    $behind[$grant][$activation] = $activation;
+                }
+            }
+        }
+
+        return \array_map(\array_values(...), $behind);
+    }
+
+    /**
      * Return the key of the activation a role held was read through, or null
      * for a role read through a role grant, or read otherwise.
      *

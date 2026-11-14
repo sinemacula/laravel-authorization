@@ -95,6 +95,21 @@ final class RoleGraph
     }
 
     /**
+     * Return the chain of each role, by its key, as `chainsWithin()` gives it,
+     * from the roles as they are read, as `pathsOf()` reads them: what a
+     * resolution whose hierarchy moved while it ran reads afresh.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Models\Role>  $roles
+     * @return array<string, list<string>>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     */
+    public static function chainsOf(array $roles): array
+    {
+        return \array_map(static fn (array $path): array => \array_map(static fn (Role $role): string => $role->id, $path), self::pathsOf($roles));
+    }
+
+    /**
      * Return the names of the permissions each of the roles with the given keys
      * still carries, keyed by the role's key, in one query through the
      * permission model, as `permissionsHeldBy()` reads them: the grants an
