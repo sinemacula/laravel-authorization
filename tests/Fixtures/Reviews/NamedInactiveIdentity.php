@@ -18,7 +18,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
  *
  * @internal
  */
-final class NamedInactiveIdentity extends Model implements AuthorizableIdentity
+final class NamedInactiveIdentity extends Model implements AuthorizableIdentity // @phpstan-ignore-line
 {
     use HasAuthorization;
 

@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
  *
  * @SuppressWarnings("php:S1192")
  */
-final class StubSecondIdentity extends Model implements AuthorizableIdentity
+final class StubSecondIdentity extends Model implements AuthorizableIdentity // @phpstan-ignore-line
 {
     use HasAuthorization;
 

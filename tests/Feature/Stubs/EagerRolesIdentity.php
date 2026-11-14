@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
  *
  * @internal
  */
-final class EagerRolesIdentity extends Model implements Authenticatable, AuthorizableIdentity
+final class EagerRolesIdentity extends Model implements Authenticatable, AuthorizableIdentity // @phpstan-ignore-line
 {
     use AuthenticatableConcern, HasAuthorization;
 
