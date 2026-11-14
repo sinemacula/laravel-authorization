@@ -118,18 +118,34 @@ final class HoldingRoutes
             $chain   = $chains[$grant->targetId] ?? [];
             $through = self::isThrough($grant, $via) ? $via : null;
 
-            foreach ($chain as $depth => $role) {
-                $kind = $depth === 0 ? SourceKind::ROLE_GRANT : SourceKind::ROLE_INHERITED;
-
-                $rows->route($kind, $subject, $grant, new Reference($type, $role), \array_slice($chain, 0, $depth + 1), [], $through);
-            }
-
             if ($chain === []) {
                 continue;
             }
 
+            self::throughChain($rows, $subject, $grant, $chain, $type, $through);
             RoleCarriers::throughEdges($rows, $subject, $grant, $chain, $edges, $through);
             RoleCarriers::throughAttachments($run, $rows, $subject, $grant, $chain, $attachments, $through);
+        }
+    }
+
+    /**
+     * Collect the route of the role granted and of each role above it in its
+     * chain.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $subject
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\GrantRow  $grant
+     * @param  non-empty-list<string>  $chain
+     * @param  string  $type
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $through
+     * @return void
+     */
+    private static function throughChain(RowCollector $rows, Reference $subject, GrantRow $grant, array $chain, string $type, ?Reference $through): void
+    {
+        foreach ($chain as $depth => $role) {
+            $kind = $depth === 0 ? SourceKind::ROLE_GRANT : SourceKind::ROLE_INHERITED;
+
+            $rows->route($kind, $subject, $grant, new Reference($type, $role), \array_slice($chain, 0, $depth + 1), [], $through);
         }
     }
 

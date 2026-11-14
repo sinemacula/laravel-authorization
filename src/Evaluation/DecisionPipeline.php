@@ -17,7 +17,6 @@ use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
-use SineMacula\Laravel\Authorization\Resolvers\GrantProvenanceResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
@@ -98,6 +97,9 @@ final class DecisionPipeline
     /** @var \SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder|null Notes the grant routes the decisions of a `tracking()` pipeline use; null for every other pipeline. */
     private ?GrantUsageRecorder $usage = null;
 
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\CheckGrants Gathers the policies and the permission held a check weighs. */
+    private readonly CheckGrants $grants;
+
     /**
      * Create a new decision pipeline instance.
      *
@@ -127,7 +129,9 @@ final class DecisionPipeline
 
         /** Makes the session caps of a check; null reads no credential's scopes, so only `capped()` and a machine's missing scopes cap it. */
         private readonly ?SessionCapResolver $sessionCaps = null,
-    ) {}
+    ) {
+        $this->grants = new CheckGrants($policyResolver, $resourcePolicies);
+    }
 
     /**
      * Return a pipeline that evaluates only the supplied policies, bypassing
@@ -364,7 +368,7 @@ final class DecisionPipeline
         Previewing::admit($subject);
 
         $attribution = BreakGlassAttribution::of($subject, $action);
-        $policies    = $this->gatherPolicies($subject, $resource, $evidence, $attribution);
+        $policies    = $this->policyOverride ?? $this->grants->policies($subject, $resource, $evidence, $attribution);
         $guardrails  = $action === PackagePermissions::GUARDRAIL_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
         $boundaries  = SubjectGrants::boundaries($subject);
 
@@ -376,11 +380,7 @@ final class DecisionPipeline
         $checkContext = $this->contexts?->make($context, $subject, $resource, $attributes)
             ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
 
-        $held = $evidence === null
-            ? static fn (): ?string => SubjectGrants::permissionFor($subject, $action, $weighed)
-            : static fn (): ?string => $evidence->notePermission(GrantProvenanceResolver::permissionFor($subject, $action));
-
-        $permission = $attribution === null ? $held : static fn (): ?string => $attribution->notePermission($held());
+        $permission = CheckGrants::permission($subject, $action, $evidence, $weighed, $attribution);
         $session    = $this->isSessionless
             ? SessionCaps::of(null, $this->caps)
             : ($this->sessionCaps ?? new SessionCapResolver)->capsFor($subject, $this->caps);
@@ -671,69 +671,5 @@ final class DecisionPipeline
         $decision = $this->weigh($sources, $action, $resource);
 
         return $decision->withActivations($sources->attribution?->behind($decision, $sources->policies) ?? []);
-    }
-
-    /**
-     * Gather the policies applicable to the supplied subject and resource.
-     *
-     * When a per-call override is in effect, it is returned verbatim. Otherwise
-     * the pipeline delegates to the bound `PolicyResolver` for the subject —
-     * consumers swap the resolver to introduce tenant scoping or other
-     * gathering strategies without touching the manager — and adds the policies
-     * attached to its identity when that is another model, whole when it grants
-     * to the subject (another model of the same kind, see
-     * `SubjectGrants::grantingIdentity()`) and as their deny statements alone
-     * otherwise, and those attached to the resource and its type (see
-     * `ResourcePolicyResolver`). Given a recorder, the subject's and its
-     * identity's policies are resolved with where each came from (see
-     * `explainedPolicies()`).
-     *
-     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
-     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder|null  $evidence
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\BreakGlassAttribution|null  $attribution
-     * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
-     *
-     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
-     */
-    private function gatherPolicies(Subject $subject, ?ResourceReference $resource, ?EvidenceRecorder $evidence, ?BreakGlassAttribution $attribution): array
-    {
-        if ($this->policyOverride !== null) {
-            return $this->policyOverride;
-        }
-
-        $own = $evidence === null
-            ? [...$this->policyResolver->policiesFor($subject->subject), ...SubjectGrants::identityPolicies($subject)]
-            : $this->explainedPolicies($subject, $evidence);
-
-        // Reading the resource's policies in its tenant empties the memo.
-        $attribution?->notePolicies();
-
-        return [...$own, ...$this->resourcePolicies?->policiesFor($resource) ?? []];
-    }
-
-    /**
-     * Gather the subject's and its identity's policies for an explained check,
-     * noting where each came from with the recorder: through the default
-     * resolver, by the grant rows that gave them, and through a resolver bound
-     * in its place, which cannot say, as `unavailable`.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder  $evidence
-     * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
-     *
-     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
-     */
-    private function explainedPolicies(Subject $subject, EvidenceRecorder $evidence): array
-    {
-        if ($this->policyResolver instanceof DefaultPolicyResolver) {
-            $principal = $this->policyResolver->explainedPoliciesFor($subject->subject, $evidence);
-        } else {
-            $principal = $this->policyResolver->policiesFor($subject->subject);
-
-            $evidence->notePolicies($principal, null, $subject->subject);
-        }
-
-        return [...$principal, ...GrantProvenanceResolver::identityPolicies($subject, $evidence)];
     }
 }

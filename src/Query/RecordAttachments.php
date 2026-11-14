@@ -121,13 +121,7 @@ final class RecordAttachments
         $chain       = TenantScope::currentChain();
         $application = TenantScope::currentApplication();
 
-        try {
-            [$policies, $everywhere] = $this->policiesIn($chain, $application, $action);
-        } catch (InvalidPolicyDocumentException) {
-            $screen->refuse(new Refusal(RefusalReason::INVALID_POLICY, null, null, null, 'a policy attached to a record cannot be read'));
-
-            return [];
-        }
+        [$policies, $everywhere] = $this->policiesIn($screen, $chain, $application, $action);
 
         $keyText = $policies === [] ? null : $this->keyTextOr($screen, $policies === null);
 
@@ -153,23 +147,29 @@ final class RecordAttachments
      * Return the policies attached to records of the type in the scope that
      * name the action, or null for more than allowed, with whether each policy
      * whose denies count on them in every scope names half a tenant itself,
-     * read once for each scope.
+     * read once for each scope; none, keeping a refusal, when one cannot be
+     * read.
      *
+     * @param  \SineMacula\Laravel\Authorization\Query\StatementScreen  $screen
      * @param  \SineMacula\Laravel\Authorization\Support\TenantChain  $chain
      * @param  string|null  $application
      * @param  string  $action
      * @return array{list<\SineMacula\Laravel\Authorization\Evaluation\Policy>|null, array<string, bool>}
-     *
-     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
-    private function policiesIn(TenantChain $chain, ?string $application, string $action): array
+    private function policiesIn(StatementScreen $screen, TenantChain $chain, ?string $application, string $action): array
     {
         $key = \serialize([$application, $chain->isBelow, $chain->tenants]);
 
         if (!\array_key_exists($key, $this->read)) {
-            $everywhere       = [];
-            $policies         = $this->resolver->recordPoliciesFor($this->shape->type, $action, $this->limit, $everywhere);
-            $this->read[$key] = [$policies, $everywhere];
+            try {
+                $everywhere       = [];
+                $policies         = $this->resolver->recordPoliciesFor($this->shape->type, $action, $this->limit, $everywhere);
+                $this->read[$key] = [$policies, $everywhere];
+            } catch (InvalidPolicyDocumentException) {
+                $screen->refuse(new Refusal(RefusalReason::INVALID_POLICY, null, null, null, 'a policy attached to a record cannot be read'));
+
+                return [[], []];
+            }
         }
 
         return $this->read[$key];

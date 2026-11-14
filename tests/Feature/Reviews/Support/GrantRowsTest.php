@@ -148,11 +148,8 @@ final class GrantRowsTest extends TestCase
     }
 
     /**
-     * Rows are ordered by their target first, or by it last, or, for one
-     * target, not by it, then by grantee and scope, an activation after a grant
-     * of the same scope, and read a page at a time by keyset, a grant's and an
-     * activation's merged from one query, each limited to the page: each page
-     * after any row, or from it too when asked, never at an offset.
+     * Rows are ordered by target, grantee and scope, an activation after its
+     * scope's grant, and paged by keyset from one query, never an offset.
      *
      * @return void
      *
@@ -192,20 +189,7 @@ final class GrantRowsTest extends TestCase
         self::assertSame(['r0 a -', 'r0 a - bg', 'r0 a t', 'r0 b -'], $describe(self::pageFrom($queries(null), null)));
 
         foreach ([true, false, null] as $isTargetFirst) {
-            $held = $queries($isTargetFirst);
-            $all  = self::pageFrom($held, $isTargetFirst);
-
-            self::assertSame($describe($all), $describe(self::pagedByOne($held, $isTargetFirst)));
-
-            foreach ($all as $index => $row) {
-                $position = GrantRows::positionOf($row, $isTargetFirst);
-
-                self::assertSame($describe(\array_slice($all, $index)), $describe(self::pageFrom($held, $isTargetFirst, $position, true)), "from row {$index}");
-                self::assertSame($describe(\array_slice($all, $index + 1)), $describe(self::pageFrom($held, $isTargetFirst, $position)), "after row {$index}");
-            }
-
-            // A page leaves the queries it reads as they were.
-            self::assertSame($describe($all), $describe(self::pageFrom($held, $isTargetFirst)));
+            self::assertPagedFromEveryRow($queries($isTargetFirst), $isTargetFirst, $describe);
         }
 
         $read = [];
@@ -219,7 +203,15 @@ final class GrantRowsTest extends TestCase
         self::assertCount(1, $read);
         self::assertSame(2, \substr_count($read[0], ' limit 2'));
         self::assertStringNotContainsString(' offset ', $read[0]);
+    }
 
+    /**
+     * A position that does not match the order is refused.
+     *
+     * @return void
+     */
+    public function testAPositionOfTheWrongLengthIsRefused(): void
+    {
         $this->expectException(\UnexpectedValueException::class);
 
         GrantRows::after(GrantRows::of(GrantTarget::ROLE), 'authorizable_roles', 'role_id', true, ['short']);
@@ -405,6 +397,31 @@ final class GrantRowsTest extends TestCase
     private static function isCast(string $name): bool
     {
         return \in_array($name, ['role_id', 'id'], true);
+    }
+
+    /**
+     * Assert the queries read alike whole, a row at a time, and from or after
+     * each row, and are left as they were.
+     *
+     * @param  non-empty-array<string, \Illuminate\Database\Query\Builder>  $held
+     * @param  bool|null  $isTargetFirst
+     * @param  \Closure(list<\SineMacula\Laravel\Authorization\Reviews\Support\GrantRow>): array<string>  $describe
+     * @return void
+     */
+    private static function assertPagedFromEveryRow(array $held, ?bool $isTargetFirst, \Closure $describe): void
+    {
+        $all = self::pageFrom($held, $isTargetFirst);
+
+        self::assertSame($describe($all), $describe(self::pagedByOne($held, $isTargetFirst)));
+
+        foreach ($all as $index => $row) {
+            $position = GrantRows::positionOf($row, $isTargetFirst);
+
+            self::assertSame($describe(\array_slice($all, $index)), $describe(self::pageFrom($held, $isTargetFirst, $position, true)), "from row {$index}");
+            self::assertSame($describe(\array_slice($all, $index + 1)), $describe(self::pageFrom($held, $isTargetFirst, $position)), "after row {$index}");
+        }
+
+        self::assertSame($describe($all), $describe(self::pageFrom($held, $isTargetFirst)));
     }
 
     /**

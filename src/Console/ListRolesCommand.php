@@ -17,6 +17,6 @@ final class ListRolesCommand extends ListCatalogueCommand
     /** @var string The console command's name. */
     public const string NAME = 'authorization:list-roles';
 
-    /** @var string The `authorization.models` key of the listed model. */
+    /** @var 'role' The `authorization.models` key of the listed model. */
     protected const string MODEL = 'role';
 }

@@ -202,12 +202,9 @@ final class RoleChains
 
         foreach ($rows as $row) {
             /** @var array{role_key: int|string, parent_id: int|string|null, name: string, tenant_type: string|null, tenant_id: int|string|null} $columns */
-            $columns     = (array) $row;
-            [$type, $id] = [$columns['tenant_type'], $columns['tenant_id']];
-            $owner       = $type === null || $id === null ? null : new Reference($type, (string) $id);
-            $isHidden    = ($type === null) !== ($id === null) ? $run->isApplicability() : !$run->sees($owner);
+            $columns = (array) $row;
 
-            if ($isHidden) {
+            if (self::isHidden($run, $columns['tenant_type'], $columns['tenant_id'])) {
                 continue;
             }
 
@@ -215,6 +212,23 @@ final class RoleChains
         }
 
         return $roles;
+    }
+
+    /**
+     * Determine whether the review hides a role owned by the tenant columns:
+     * one naming half a tenant in a review of what applies, else one the
+     * reviewed tenant does not see.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
+     * @param  string|null  $type
+     * @param  int|string|null  $id
+     * @return bool
+     */
+    private static function isHidden(ReviewRun $run, ?string $type, int|string|null $id): bool
+    {
+        $owner = $type === null || $id === null ? null : new Reference($type, (string) $id);
+
+        return ($type === null) !== ($id === null) ? $run->isApplicability() : !$run->sees($owner);
     }
 
     /**

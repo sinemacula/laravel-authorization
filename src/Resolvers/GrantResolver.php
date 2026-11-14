@@ -155,9 +155,14 @@ final class GrantResolver
         // A hierarchy that moved is read afresh, by role while an activation is
         // to be named.
         if ($inherited === null) {
-            $fresh     = self::rolesAfresh($roles, $keys);
-            $chains    = $isByRole ? RoleGraph::chainsOf($fresh) : null;
-            $inherited = $chains === null ? RoleGraph::permissionsHeldBy($fresh) : RoleGraph::carriedWithin($chains);
+            $fresh = self::rolesAfresh($roles, $keys);
+
+            if ($isByRole) {
+                $chains    = RoleGraph::chainsOf($fresh);
+                $inherited = RoleGraph::carriedWithin($chains);
+            } else {
+                $inherited = RoleGraph::permissionsHeldBy($fresh);
+            }
         }
 
         /** @var list<string> $names */
@@ -212,8 +217,13 @@ final class GrantResolver
 
         [$own, $throughRoles] = self::attached($grants, $roles, $pins->isRouting());
 
-        $held      = $roles !== null && $throughRoles ? self::heldOf($roles, $pins) : null;
-        $inherited = $roles !== null && $held !== null ? RolePolicies::heldThrough($held, $roles, $pins) : new InheritedPolicies;
+        if ($roles !== null && $throughRoles) {
+            $held      = self::heldOf($roles, $pins);
+            $inherited = RolePolicies::heldThrough($held, $roles, $pins);
+        } else {
+            $held      = null;
+            $inherited = new InheritedPolicies;
+        }
 
         // Flipping the keys and back lists each policy once, in the order it
         // was first reached.

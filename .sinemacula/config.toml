@@ -4,7 +4,7 @@
 
 [project]
 project_name = "sinemacula/laravel-authorization"
-project_description = "Role-based access control plus AWS IAM-style policy evaluation for Laravel — standalone, enterprise-grade, and plug-and-play with the laravel-iam ecosystem."
+project_description = "Role-based access control and IAM-style policy evaluation for Laravel 12 and 13."
 copyright = "Sine Macula Limited"
 
 [language]

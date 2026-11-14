@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
  *
  * @internal
  */
-final class CustomGrantsIdentity extends Model implements AuthorizableIdentity
+final class CustomGrantsIdentity extends Model implements AuthorizableIdentity // @phpstan-ignore-line
 {
     use HasAuthorization;
 

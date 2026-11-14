@@ -420,13 +420,8 @@ final class QueryAuthorizerTest extends TestCase
     }
 
     /**
-     * A policy attached to a record is weighed on that record alone: its deny
-     * applies to everyone, its allow to the subjects it names, as `check()`
-     * weighs it; an override, which reads no attachment, ignores it. The
-     * policies one scope attaches to records are at most
-     * `authorization.query_scoping.max_attachments`, or 64 when it is not set;
-     * more are refused, and so is a limit that is not a whole number of at
-     * least one.
+     * A record's attached deny binds everyone and its allow the subjects it
+     * names, as `check()` weighs them; an override ignores both.
      *
      * @return void
      *
@@ -459,33 +454,48 @@ final class QueryAuthorizerTest extends TestCase
         $overridden = self::authorizer(self::pipeline()->withPolicies([]))->compile($subject, new ScopedPost, 'posts:view');
 
         self::assertSame([3, 4, 5], ScopedPost::query()->whereRaw(new ComposedExpression($overridden))->orderBy('id')->pluck('id')->all());
+    }
 
-        $config  = $this->app?->make(ConfigRepository::class);
+    /**
+     * A scope over its `query_scoping.max_attachments` record policies, 64 by
+     * default, is refused, as is a limit not a positive whole number.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAScopePastItsAttachmentLimitIsRefused(): void
+    {
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $subject = $this->resolveRequest($user)->currentSubject();
+        $config  = app(ConfigRepository::class);
         $compile = static fn (): string => self::authorizer()->compile($subject, new ScopedPost, 'posts:view');
 
-        foreach (\range(6, 67) as $id) {
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+
+        foreach (\range(4, 67) as $id) {
             self::attachToResource([ScopedPost::class, (string) $id], [['effect' => 'deny', 'actions' => ['posts:view']]]);
         }
 
-        $config?->set('authorization.query_scoping', []);
+        $config->set('authorization.query_scoping', []);
 
         self::assertStringContainsString('EXISTS', $compile());
 
-        $config?->set('authorization.query_scoping.max_attachments', 63);
+        $config->set('authorization.query_scoping.max_attachments', 63);
 
         self::assertSame([RefusalReason::TOO_MANY_ATTACHMENTS], self::refusalOf($compile)->reasons());
 
-        $config?->set('authorization.query_scoping.max_attachments', '63');
+        $config->set('authorization.query_scoping.max_attachments', '63');
 
         self::assertSame([RefusalReason::TOO_MANY_ATTACHMENTS], self::refusalOf($compile)->reasons());
 
-        $config?->set('authorization.query_scoping', []);
+        $config->set('authorization.query_scoping', []);
         self::attachToResource([ScopedPost::class, '68'], [['effect' => 'deny', 'actions' => ['posts:view']]]);
 
         self::assertSame([RefusalReason::TOO_MANY_ATTACHMENTS], self::refusalOf($compile)->reasons());
 
         foreach (['many', 0, null] as $limit) {
-            $config?->set('authorization.query_scoping.max_attachments', $limit);
+            $config->set('authorization.query_scoping.max_attachments', $limit);
 
             try {
                 $compile();

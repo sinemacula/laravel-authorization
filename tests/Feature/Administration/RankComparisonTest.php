@@ -35,8 +35,7 @@ use Tests\TestCase;
 #[CoversClass(RankComparison::class)]
 final class RankComparisonTest extends TestCase
 {
-    use ActivatesBreakGlass;
-    use ActsAsTenant;
+    use ActivatesBreakGlass, ActsAsTenant;
 
     /**
      * Reset the clock.

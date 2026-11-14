@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
  *
  * @internal
  */
-final class DefaultGuardUser extends Model implements AuthorizableIdentity
+final class DefaultGuardUser extends Model implements AuthorizableIdentity // @phpstan-ignore-line
 {
     use HasAuthorization;
 
