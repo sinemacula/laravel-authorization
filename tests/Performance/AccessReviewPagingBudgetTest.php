@@ -331,7 +331,8 @@ final class AccessReviewPagingBudgetTest extends TestCase
     /**
      * Return the rows the plan node and those below it read from the table, the
      * rows each filter or recheck removed included; a bitmap's index scan reads
-     * no row itself, its heap scan reading them.
+     * no row itself, its heap scan reading them, nor does a subquery's scan,
+     * which reads only the rows of the plan below it.
      *
      * @param  array<array-key, mixed>  $node
      * @return int
@@ -340,7 +341,7 @@ final class AccessReviewPagingBudgetTest extends TestCase
     {
         $type  = \is_string($node['Node Type'] ?? null) ? $node['Node Type'] : '';
         $rows  = self::wholeNumber($node, 'Actual Rows') + self::wholeNumber($node, 'Rows Removed by Filter') + self::wholeNumber($node, 'Rows Removed by Index Recheck');
-        $read  = \str_contains($type, 'Scan') && $type !== 'Bitmap Index Scan' ? $rows * \max(1, self::wholeNumber($node, 'Actual Loops')) : 0;
+        $read  = \str_contains($type, 'Scan') && !\in_array($type, ['Bitmap Index Scan', 'Subquery Scan'], true) ? $rows * \max(1, self::wholeNumber($node, 'Actual Loops')) : 0;
         $plans = \is_array($node['Plans'] ?? null) ? $node['Plans'] : [];
 
         foreach ($plans as $child) {

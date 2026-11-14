@@ -20,7 +20,6 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionMemo;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
-use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
@@ -1460,8 +1459,6 @@ final class ResolutionCacheTest extends TestCase
      */
     private function switchBreakGlass(bool $isEnabled): void
     {
-        BreakGlassConfigValidator::$isAvailable = true;
-
         config()->set('authorization.break_glass', ['enabled' => $isEnabled, 'justifications' => ['incident']]);
 
         $this->app?->forgetInstance(BreakGlassActivations::class);

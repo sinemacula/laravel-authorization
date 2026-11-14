@@ -4,28 +4,22 @@
 
 Break-glass is opt-in emergency access (AUTHZ-11.7, N133): a principal with the break-glass right grants itself, or
 another person, a configured emergency role for a configured maximum time, with a justification code from a configured
-list. It arrives in three releases (N138), and stays switched off until the third:
+list. It arrived in three releases (N138), all of which have shipped:
 
 1. **Storage, configuration and resolution** (BL-70a): the `break_glass` settings, validated at boot; the activations
    table and its model; and the resolution that reads a live activation as a grant of its role.
 2. **Activation and revocation** (BL-70b): the service that activates, surrenders and revokes, its rights, its limits,
    the grant hooks and its concurrency, and the switch that stops every activation at once.
-3. **Expiry and reviews** (BL-70c): the lifecycle events, the access reviews of activations, and the switch that lets
-   `enabled` be true.
+3. **Expiry, reviews and attribution** (BL-70c): the lifecycle events, the listings and access reviews of
+   activations, the attribution of decisions to the activation behind them, and `enabled` accepted at boot.
 
-The attribution of a decision to the activations behind it, and its report on the decision events, arrive beside them
-(BL-72b, N142). This note records the invariants the first two releases, the lifecycle events and the attribution fix,
-so the rest of the last extends them rather than changes them.
+This note records the invariants they fix.
 
 ## Invariants
 
-1. **Off until its audit trail ships.** `break_glass.enabled` is a switch, false by default, read from
-   `AUTHORIZATION_BREAK_GLASS_ENABLED` as written, never cast. While `Config\BreakGlassConfigValidator::AVAILABLE` is
-   false, true is refused at boot, under `authorization.break_glass.enabled`, with the reason "break-glass is not
-   available until its audit trail ships; leave it disabled." BL-70c flips that one constant. The package's tests
-   enable break-glass through `BreakGlassConfigValidator::$isAvailable`, an internal static that starts as `AVAILABLE`
-   and that `Tests\TestCase` puts back before every boot; no production path sets it, and BL-70c removes it with the
-   constant.
+1. **An opt-in switch.** `break_glass.enabled` is a switch, false by default, read from
+   `AUTHORIZATION_BREAK_GLASS_ENABLED` as written, never cast. True is accepted at boot with the block's other checks
+   (invariant 2): at least one justification code, among them. There is no availability gate.
 
 2. **The settings fail closed (N116, N117).** The block sets only `enabled`, `max_minutes`, `roles`, `justifications`,
    `notes` and `note_max_length`; any other key is refused under its own path, and so is a key a role's entry sets
@@ -171,10 +165,36 @@ so the rest of the last extends them rather than changes them.
     whatever `events.decisions` says (`DecisionReport::BREAK_GLASS`), a preview's listing included; a listing that
     dispatches nothing reports none.
 
+17. **Listings count a live activation (N143).** The grant scope query (`Services\GrantScopeQuery`, through
+    `Support\GrantRoots`) counts a live activation (`BreakGlassActivations::live()`) as a grant of its role in its
+    scope, as a check does: `forIdentity()` its principals', `hasGrantIn()` the principal's, never an identity's or a
+    machine's, and `granteesReaching()` and `granteesWithin()` list the grantee of every live activation but a
+    machine's, once beside any grant, in the same one query. None counts while break-glass is disabled.
+
+18. **The widening counts none.** Whether a grant widens what an identity holds (`Hooks\WideningClassifier`) reads
+    role grants alone: an activation is never a grant already held, so a grant beside one widens as without it.
+
+19. **Reviews list every unexpired activation (N143).** The access reviews (`Reviews\Support\GrantRows::held()`, read
+    by `HolderRoutes`, `HoldingRoutes` and `StoredRows`, through `RoleChains` and `RoleCarriers` as a grant is) list
+    every activation not ended or expired at the review's instant, whatever the switch, since it grants again once
+    break-glass is enabled, as for separation of duties (N141): a row of its own beside any grant of the same role,
+    keyed by the activation, ordered after a grant of the same scope, with its expiry and granter as the row's own and
+    `break_glass { activation, justification }`, never the note. A machine's, or one naming half a tenant, is listed
+    as such a grant is; an identity's never reaches a principal's holdings. Its `usage` is `unknown`.
+
+20. **Usage never counts one.** Grant usage tracking starts no route from an activation (`Usage\RouteSources`), so
+    its use is never a role grant's, and `Usage\UsagePruner` matches usage against the grant tables alone, so an
+    activation keeps no use alive.
+
+21. **A role's deletion reports its activations.** `Enums\GrantTarget::holders()` lists the grantees of a role's
+    activations not ended or expired, which the deletion deletes, beside its grantees, each once, so
+    `Role\Deleted::grantees()` names them. `Services\GrantPruner` never deletes an activation, a grantee that no
+    longer exists included: it only records an expiry (invariant 15).
+
 ## Success Path
 
-1. An application lists `incident-responder` under `break_glass.roles` and `incident` under `justifications`; once
-   break-glass is available, `enabled` true is accepted at boot.
+1. An application lists `incident-responder` under `break_glass.roles` and `incident` under `justifications`, and
+   sets `AUTHORIZATION_BREAK_GLASS_ENABLED=true`, which is accepted at boot.
 2. An administrator holding `authorization:break-glass.grant` activates the role for a principal in a tenant with its
    subtree for 60 minutes through `BreakGlassService::activate()`, which writes a row of `break_glass_activations`.
 3. A check in that tenant, or below it, reads the role through the principal's `roles()`, and allows what the role's
@@ -185,8 +205,8 @@ so the rest of the last extends them rather than changes them.
 
 ## Failure / Edge Cases
 
-- `enabled` true, a role's maximum above the global one, an unknown key, a malformed code, a duplicate code, or a value
-  written loosely is refused at boot under its path, and by `read()` after boot.
+- `enabled` true with no justification code, a role's maximum above the global one, an unknown key, a malformed code,
+  a duplicate code, or a value written loosely is refused at boot under its path, and by `read()` after boot.
 - An activation breaking a limit is refused before anything is written, each with its reason; a hook's refusal, a
   refused right, a role deleted meanwhile or a conflict with a pair of exclusive roles leaves nothing written either.
 - Switching `enabled` off stops every activation at once from the next request or job; switching it on counts them
@@ -198,22 +218,9 @@ so the rest of the last extends them rather than changes them.
 - The roles relation reads a table the activations migration creates: an application upgrading the package runs its
   migrations before serving checks, as for any table the package adds.
 
-## Plan for BL-70c
-
-- **BL-70c.** The reviews of activations, and `AVAILABLE` flipped to true, with the tests' seam `$isAvailable`
-  removed. What lists or reviews holdings reads role grants alone until then, and BL-70c decides how each shows an
-  activation:
-  - the grantee listings and the grant scope query (`Support\GrantRoots`, `Services\GrantScopeQuery`), and the
-    widening a grant hook is asked about, which therefore never counts an activation as a grant already held;
-  - the access reviews (`Reviews\Support\ReviewRun`, `StoredRows`, `HolderRoutes`, `HoldingRoutes`, `RoleChains`,
-    `RoleCarriers`, `GrantRows`);
-  - grant usage (`Usage\RouteSources`, which starts no route from an activation, and `Usage\UsagePruner`);
-  - the grantees a role's deletion reports (`Enums\GrantTarget::holders()`), and the grant pruner
-    (`Services\GrantPruner`), which never prunes an activation.
-
 ## Implementation Anchors
 
-- `Config\BreakGlassConfigValidator` -- the block's checks, `read()`, `AVAILABLE` and the tests' `$isAvailable`.
+- `Config\BreakGlassConfigValidator` -- the block's checks and `read()`.
 - `Config\TableNames::DEFAULTS`, `Config\TableConfigValidator::LENGTHS` -- the table's default name and its bound.
 - `database/migrations/2026_11_12_000001_create_break_glass_activations_table.php` -- the table.
 - `Models\BreakGlassActivation`, `Observers\BreakGlassActivationObserver` -- the record and its version bumps.
@@ -230,12 +237,16 @@ so the rest of the last extends them rather than changes them.
   `Administration\AuthorityRows` -- delegated administration weighing an activation.
 - `Resolvers\GrantProvenanceResolver`, `Evaluation\GrantProvenance`, `Evaluation\Enums\GrantSource` -- the route named.
 - `Usage\RouteSources` -- no route from an activation.
-- `Evaluation\BreakGlassAttribution`, `Evaluation\Decision::$activations`, `Database\BreakGlassActivations::behind()`,
-  `Cache\ResolutionCache::activationsOf()`, `Evaluation\DecisionReporting` -- the activations an allow names, and its
-  report.
 - `Events\Identity\BreakGlassActivated`, `BreakGlassSurrendered` and `BreakGlassRevoked` (sharing `BreakGlassEnded`),
   `BreakGlassExpired` -- the lifecycle events.
 - `Services\GrantPruner`, `Services\Support\ExpiredActivations`, `Services\PruneResult` -- the recorded expiry.
+- `Support\GrantRoots`, `Services\GrantScopeQuery`, `Hooks\WideningClassifier` -- the listings and the widening.
+- `Reviews\Support\GrantRows::held()`, `GrantRow`, `RowCollector`, `ReviewRow`, `ReviewUsage` -- the reviews.
+- `Enums\GrantTarget::holders()`, `Events\Role\Deleted` -- a role's deletion.
+- `Usage\UsagePruner` -- usage matched against the grant tables alone.
+- `Evaluation\BreakGlassAttribution`, `Evaluation\Decision::$activations`, `Database\BreakGlassActivations::behind()`,
+  `Cache\ResolutionCache::activationsOf()`, `Evaluation\DecisionReporting` -- the activations an allow names, and its
+  report.
 
 ## Authoritative Tests
 
@@ -247,7 +258,7 @@ so the rest of the last extends them rather than changes them.
   `AuthorizationFailedTest`, `GrantResolverTest`, `RolePoliciesTest`, `PrincipalSelectorsTest`,
   `ResolutionCacheTest` -- each part on its own.
 - `BreakGlassConfigValidatorTest`, `ConfigValidatorTest`, `Diagnostics\Checks\BlockChecksTest` (Feature) -- every
-  setting's default, type, bound and unknown key, `enabled` refused, the role maximums and the codes required once
+  setting's default, type, bound and unknown key, `enabled` accepted, the role maximums and the codes required once
   enabled.
 - `Database\BreakGlassActivationsTest` (Feature) -- the scopes an activation grants in through a check, a bulk check,
   `permissionsFor()` and `whereAuthorized()`, cold and warm; expiry and ending; a normal grant beside it; denies,
@@ -281,10 +292,19 @@ so the rest of the last extends them rather than changes them.
   `Resolvers\GrantProvenanceResolverTest`, `Usage\RouteSourcesTest`, `BreakGlassActivationObserverTest`,
   `Models\BreakGlassActivationTest`, `Administration\PossessionLimitsTest`, `Administration\RankComparisonTest`,
   `Administration\AffectedHoldersTest`, `Administration\AuthorityRowsTest` (Feature) -- each part on its own.
+- `Support\GrantRootsTest`, `Services\GrantScopeQueryTest`, `Hooks\WideningClassifierTest` (Feature) -- live,
+  ended, expired, disabled, machine and identity activations in the answers and the lists, and none in the widening.
+- `Reviews\Support\HolderRoutesTest`, `HoldingRoutesTest`, `StoredRowsTest`, `GrantRowsTest`, `RowCollectorTest`,
+  `Usage\ReviewUsageTest` (Feature), `ReviewRowTest`, `GrantRowTest` (Unit) -- every unexpired activation reviewed
+  beside a grant, whatever the switch, never the note, an identity's left out of a principal's holdings, paged once
+  each, and its use unknown.
+- `Services\GrantTargetTest`, `Services\RoleServiceTest`, `Services\GrantPrunerTest`, `Usage\UsagePrunerTest`,
+  `Usage\RouteSourcesTest` (Feature) -- a role's deletion naming its activations' grantees once, an orphaned grantee's
+  activation kept, and no use counted.
 
 ## Change Triggers
 
 Update this note when the write path, its rights, its refusals or its events change, when the exclusion check moves
-relative to the role's lock, when `AVAILABLE` changes or the reviews land (BL-70c), when the prune stops recording an
-expiry, when what a decision names or reports of an activation changes, or when an activation starts or stops counting
-anywhere a role grant counts.
+relative to the role's lock, when the prune stops recording an expiry, when what a decision names or reports of an
+activation changes, when a reader of role grants starts or stops reading activations, or when an activation starts or
+stops counting anywhere a role grant counts.

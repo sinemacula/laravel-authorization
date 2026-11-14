@@ -48,7 +48,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   review knows of the subject;
  * - `usage`: what the review knows of the route's use, `used`, `unused` or
  *   `unknown`, with its last observed use and the coverage of tracking (see
- *   `RowUsage`); `unknown` while grant usage tracking is off;
+ *   `RowUsage`); `unknown` while grant usage tracking is off, and on a route
+ *   starting from a break-glass activation, whose use is never tracked;
+ * - `break_glass`: only on a route starting from a break-glass activation, its
+ *   key (`activation`) and justification code (`justification`), never its
+ *   note; its expiry and granter are the row's own `expires_at` and
+ *   `granted_by`, and the row stands beside any grant of the same role;
  * - `action_evidence`: only on a review of holdings filtered by an action (see
  *   `ReviewQuery::forAction()`), what gives the action and where (see
  *   `ActionEvidence`); absent from every other review's rows, which keep their
@@ -86,6 +91,7 @@ final readonly class ReviewRow
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState  $subjectState
      * @param  \SineMacula\Laravel\Authorization\Reviews\RowUsage|null  $usage
      * @param  \SineMacula\Laravel\Authorization\Reviews\ActionEvidence|null  $evidence
+     * @param  array{activation: string, justification: string}|null  $breakGlass
      *
      * @formatter:on
      *
@@ -140,6 +146,9 @@ final readonly class ReviewRow
 
         /** What gives the action an action-filtered review of holdings asks about; null for every other review. */
         public ?ActionEvidence $evidence = null,
+
+        /** The key and justification code of the break-glass activation the route starts from; null for none. */
+        public ?array $breakGlass = null,
     ) {}
 
     /**
@@ -167,6 +176,7 @@ final readonly class ReviewRow
             $state,
             $this->usage,
             $this->evidence,
+            $this->breakGlass,
         );
     }
 
@@ -195,6 +205,7 @@ final readonly class ReviewRow
             $this->subjectState,
             $usage,
             $this->evidence,
+            $this->breakGlass,
         );
     }
 
@@ -224,6 +235,7 @@ final readonly class ReviewRow
             $this->subjectState,
             $this->usage,
             $evidence,
+            $this->breakGlass,
         );
     }
 
@@ -250,7 +262,8 @@ final readonly class ReviewRow
     }
 
     /**
-     * Return the row in its versioned shape, as plain values, with what gives
+     * Return the row in its versioned shape, as plain values, with the
+     * break-glass activation only on a route starting from one, and what gives
      * the action last, only for a review filtered by one.
      *
      * @return array<string, mixed>
@@ -278,6 +291,10 @@ final readonly class ReviewRow
             'subject_state'     => $this->subjectState->value,
             'usage'             => ($this->usage ?? RowUsage::unknown())->toArray(),
         ];
+
+        if ($this->breakGlass !== null) {
+            $row['break_glass'] = $this->breakGlass;
+        }
 
         return $this->evidence === null ? $row : [...$row, 'action_evidence' => $this->evidence->toArray()];
     }

@@ -16,8 +16,8 @@ use Tests\TestCase;
  * Feature tests for the validation and reading of `authorization.break_glass`
  * (AUTHZ-11.7, N133): every setting optional with its default, each checked as
  * it is written, a key the package does not define refused, `enabled` true
- * refused while break-glass is not available, a role's maximum above the global
- * one refused, and the justification codes required once enabled.
+ * accepted, a role's maximum above the global one refused, and the
+ * justification codes required once enabled.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -120,7 +120,6 @@ final class BreakGlassConfigValidatorTest extends TestCase
         yield 'enabled null' => [['enabled' => null], "{$key}.enabled", 'invalid_type', 'expected true or false, got \'null\' (null).'];
         yield 'enabled as a string' => [['enabled' => 'true'], "{$key}.enabled", 'invalid_type', 'expected true or false, got \'true\' (string).'];
         yield 'enabled as a number' => [['enabled' => 1], "{$key}.enabled", 'invalid_type', 'expected true or false, got 1 (int).'];
-        yield 'enabled true' => [['enabled' => true, 'justifications' => ['incident']], "{$key}.enabled", 'invalid_value', BreakGlassConfigValidator::UNAVAILABLE];
         yield 'max_minutes null' => [['max_minutes' => null], "{$key}.max_minutes", 'invalid_type', 'expected a whole number of at least 1, got \'null\' (null).'];
         yield 'max_minutes written loosely' => [['max_minutes' => '60m'], "{$key}.max_minutes", 'invalid_type', 'expected a whole number of at least 1, got \'60m\' (string).'];
         yield 'max_minutes a float' => [['max_minutes' => 1.5], "{$key}.max_minutes", 'invalid_type', 'expected a whole number of at least 1, got 1.5 (float).'];
@@ -248,44 +247,26 @@ final class BreakGlassConfigValidatorTest extends TestCase
     }
 
     /**
-     * `enabled` true is refused, with the reason and what is expected, while
-     * break-glass is not available, and accepted once it is; false is accepted
-     * either way.
+     * `enabled` true is accepted with a justification code, at boot and when
+     * read; true without one, and anything but a boolean, is refused.
      *
      * @return void
      */
-    public function testEnabledIsRefusedUntilBreakGlassIsAvailable(): void
+    public function testEnabledIsAcceptedWithItsChecks(): void
     {
-        self::assertFalse(BreakGlassConfigValidator::AVAILABLE);
-        self::assertSame([self::KEY . '.enabled', 'invalid_value', 'false', 'bool'], self::refusedSetting(static fn () => BreakGlassConfigValidator::enabled(true)));
-        self::assertSame('break-glass is not available until its audit trail ships; leave it disabled.', BreakGlassConfigValidator::UNAVAILABLE);
-        self::assertTrue(BreakGlassConfigValidator::enabled(true, true));
+        self::assertTrue(BreakGlassConfigValidator::enabled(true));
         self::assertFalse(BreakGlassConfigValidator::enabled(false));
-        self::assertFalse(BreakGlassConfigValidator::enabled(false, true));
-        self::assertSame(
-            [self::KEY . '.enabled', 'invalid_type', 'true or false', 'string'],
-            self::refusedSetting(static fn () => BreakGlassConfigValidator::enabled('yes', true)),
-        );
-    }
+        self::assertSame([self::KEY . '.enabled', 'invalid_type', 'true or false', 'string'], self::refusedSetting(static fn () => BreakGlassConfigValidator::enabled('yes')));
 
-    /**
-     * The tests' seam starts as `AVAILABLE` before every boot, and set true
-     * lets `enabled` be true at boot and when read, unless a call says
-     * break-glass is unavailable.
-     *
-     * @return void
-     */
-    public function testTheTestSeamLetsBreakGlassBeEnabled(): void
-    {
-        self::assertSame(BreakGlassConfigValidator::AVAILABLE, BreakGlassConfigValidator::$isAvailable);
-
-        BreakGlassConfigValidator::$isAvailable = true;
+        BreakGlassConfigValidator::validate(['enabled' => true, 'justifications' => ['incident']]);
 
         config()->set(self::KEY, ['enabled' => true, 'justifications' => ['incident']]);
 
-        self::assertTrue(BreakGlassConfigValidator::enabled(true));
         self::assertTrue(BreakGlassConfigValidator::read()['enabled']);
-        self::assertSame([self::KEY . '.enabled', 'invalid_value', 'false', 'bool'], self::refusedSetting(static fn () => BreakGlassConfigValidator::enabled(true, false)));
+        self::assertSame(
+            [self::KEY . '.justifications', 'invalid_value', 'a list of at least one code', 'array'],
+            self::refusedSetting(static fn () => BreakGlassConfigValidator::validate(['enabled' => true])),
+        );
     }
 
     /**

@@ -31,6 +31,12 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageKey;
  *   or a changed reach overwrites it. A trusted write names no actor, so no
  *   actor's review lists it; a revoked row is gone.
  *
+ * The roles granted are read with the break-glass activations not ended or
+ * expired at the review's instant, each a row of its own (see
+ * `GrantRows::held()`): one expiring within the window, or one the actor
+ * activated, is listed, and an unused review lists each as `unknown`, since its
+ * use is never tracked.
+ *
  * A role edge holds no scope of its own: in a review of what applies in a
  * tenant, it is listed when the tenant sees both its role and its permission;
  * in a review rooted within a tenant, when its role is owned there or below. A
@@ -195,27 +201,27 @@ final class StoredRows
             if ($source !== SourceKind::ROLE_PERMISSION_EDGE) {
                 self::collect($rows, $source, $kind, self::grants($run, $kind, $isToRole, $role, $condition));
             } elseif ($withEdges) {
-                self::collect($rows, $source, $kind, self::edges($run, $condition), $role);
+                self::collect($rows, $source, $kind, [Definitions::edges() => self::edges($run, $condition)], $role);
             }
         }
     }
 
     /**
-     * Collect at most the room left of the query's rows, in the review's order,
-     * each the row of the source, its target of the kind: none when the rows
-     * are full or every row of the source comes before the page before ended,
-     * and on a later page those after its last row.
+     * Collect at most the room left of the queries' rows, in the review's
+     * order, each the row of the source, its target of the kind: none when the
+     * rows are full or every row of the source comes before the page before
+     * ended, and on a later page those after its last row.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind  $source
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  non-empty-array<string, \Illuminate\Database\Query\Builder>  $queries
      * @param  string|null  $roleType
      * @return void
      *
      * @throws \UnexpectedValueException
      */
-    private static function collect(RowCollector $rows, SourceKind $source, GrantTarget $kind, Builder $query, ?string $roleType = null): void
+    private static function collect(RowCollector $rows, SourceKind $source, GrantTarget $kind, array $queries, ?string $roleType = null): void
     {
         if ($rows->isFull() || $rows->isPast($source)) {
             return;
@@ -223,8 +229,10 @@ final class StoredRows
 
         $type   = Definitions::morph($kind);
         $stored = $roleType === null ? $kind->value : GrantRow::EDGE;
+        $after  = $rows->resumeAt($source);
+        $from   = static fn (Builder $query, string $table): Builder => self::resumed($query, $table, $kind, $roleType !== null, $after);
 
-        foreach (GrantRows::page(self::resumed($query, $kind, $roleType !== null, $rows->resumeAt($source)), $stored, $rows->room(), $roleType) as $row) {
+        foreach (GrantRows::pageOf($queries, $from, $stored, $rows->room(), true, $roleType) as $row) {
             $isRoleRow = $source === SourceKind::ROLE_POLICY_ATTACHMENT || $source === SourceKind::ROLE_PERMISSION_EDGE;
             $chain     = match (true) {
                 $source === SourceKind::ROLE_GRANT => [$row->targetId],
@@ -247,13 +255,13 @@ final class StoredRows
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\RowCollector  $rows
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind  $source
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  non-empty-array<string, \Illuminate\Database\Query\Builder>  $queries
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewUsage  $usage
      * @return void
      *
      * @throws \UnexpectedValueException
      */
-    private static function collectUnobserved(RowCollector $rows, SourceKind $source, GrantTarget $kind, Builder $query, ReviewUsage $usage): void
+    private static function collectUnobserved(RowCollector $rows, SourceKind $source, GrantTarget $kind, array $queries, ReviewUsage $usage): void
     {
         $type  = Definitions::morph($kind);
         $after = $rows->resumeAt($source);
@@ -261,7 +269,8 @@ final class StoredRows
         $chain = static fn (GrantRow $row): array => $source === SourceKind::ROLE_GRANT ? [$row->targetId] : [];
 
         while (!$rows->isFull() && !$rows->isPast($source)) {
-            $read = GrantRows::page(self::resumed(clone $query, $kind, false, $after), $kind->value, $size);
+            $from = static fn (Builder $query, string $table): Builder => self::resumed($query, $table, $kind, false, $after);
+            $read = GrantRows::pageOf($queries, $from, $kind->value, $size, true);
 
             $usage->prime(\array_map(static fn (GrantRow $row): string => GrantUsageKey::ofStored($source, $row, new Reference($type, $row->targetId), $chain($row)), $read));
 
@@ -284,6 +293,7 @@ final class StoredRows
      * none. Each stored row is one row of the review, so none is read again.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  string  $table
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  bool  $isEdge
      * @param  list<bool|int|string|null>|null  $after
@@ -291,45 +301,46 @@ final class StoredRows
      *
      * @throws \UnexpectedValueException
      */
-    private static function resumed(Builder $query, GrantTarget $kind, bool $isEdge, ?array $after): Builder
+    private static function resumed(Builder $query, string $table, GrantTarget $kind, bool $isEdge, ?array $after): Builder
     {
         return match (true) {
             $after === null => $query,
             $isEdge         => GrantRows::afterEdge($query, GrantRows::edgeAt($after)),
-            default         => GrantRows::after($query, $kind->table(), $kind->column(), true, GrantRows::positionAt($after, true)),
+            default         => GrantRows::after($query, $table, $kind->column(), true, GrantRows::positionAt($after, true)),
         };
     }
 
     /**
-     * Return the ordered query of the grants of the kind in the review's scope
-     * that meet the condition, of definitions the reviewed tenant sees; for a
-     * policy, only its attachments to roles, of roles the tenant sees, or only
-     * those to grantees, as asked, an inline policy's to another grantee left
-     * out.
+     * Return the ordered queries, keyed by table, of the grants of the kind in
+     * the review's scope that meet the condition, of definitions the reviewed
+     * tenant sees; for a policy, only its attachments to roles, of roles the
+     * tenant sees, or only those to grantees, as asked, an inline policy's to
+     * another grantee left out.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  bool|null  $isToRole
      * @param  string  $role
      * @param  \Closure(\Illuminate\Database\Query\Builder, string): void  $condition
-     * @return \Illuminate\Database\Query\Builder
+     * @return non-empty-array<string, \Illuminate\Database\Query\Builder>
      */
-    private static function grants(ReviewRun $run, GrantTarget $kind, ?bool $isToRole, string $role, \Closure $condition): Builder
+    private static function grants(ReviewRun $run, GrantTarget $kind, ?bool $isToRole, string $role, \Closure $condition): array
     {
-        $table = $kind->table();
-        $query = $run->visible($run->constrain(GrantRows::of($kind), $table), $kind, $table . '.' . $kind->column());
+        return GrantRows::held($run, $kind, static function (Builder $query, string $table) use ($run, $kind, $isToRole, $role, $condition): Builder {
+            $run->visible($run->constrain($query, $table), $kind, $table . '.' . $kind->column());
 
-        $condition($query, $table);
+            $condition($query, $table);
 
-        if ($isToRole !== null) {
-            InlinePolicies::attachedToTheirGrantee($query, $table)->where($table . '.authorizable_type', $isToRole ? '=' : '!=', $role);
-        }
+            if ($isToRole !== null) {
+                InlinePolicies::attachedToTheirGrantee($query, $table)->where($table . '.authorizable_type', $isToRole ? '=' : '!=', $role);
+            }
 
-        if ($isToRole === true) {
-            $run->visibleRoles($query, $table);
-        }
+            if ($isToRole === true) {
+                $run->visibleRoles($query, $table);
+            }
 
-        return GrantRows::ordered($query, $table, $kind->column());
+            return GrantRows::ordered($query, $table, $kind->column());
+        });
     }
 
     /**

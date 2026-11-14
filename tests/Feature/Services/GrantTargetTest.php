@@ -34,6 +34,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\Feature\Stubs\StubIdentity;
@@ -53,7 +54,7 @@ use Tests\TestCase;
 #[CoversClass(GrantTarget::class)]
 final class GrantTargetTest extends TestCase
 {
-    use ActsAsTenant;
+    use ActivatesBreakGlass, ActsAsTenant;
 
     /**
      * The grant table, column and relation of each kind.
@@ -474,6 +475,34 @@ final class GrantTargetTest extends TestCase
         DB::table('authorizable_roles')->insert(['role_id' => $other->id, 'authorizable_type' => 'user', 'authorizable_id' => '3']);
 
         self::assertEquals([new Reference('admin', '1'), new Reference('user', '10'), new Reference('user', '2')], GrantTarget::ROLE->holders($role->id));
+        self::assertSame([], GrantTarget::PERMISSION->holders($role->id));
+    }
+
+    /**
+     * The holders of a role are also the grantees of its activations not ended
+     * or expired, whether break-glass is enabled or not, each once beside a
+     * grant of the role, in the same order; an ended or expired activation, or
+     * another role's, names none.
+     *
+     * @return void
+     */
+    public function testListsTheGranteesOfARolesActivations(): void
+    {
+        $role  = Role::query()->create(['name' => 'responder']);
+        $other = Role::query()->create(['name' => 'author']);
+
+        DB::table('authorizable_roles')->insert(['role_id' => $role->id, 'authorizable_type' => 'user', 'authorizable_id' => '2']);
+
+        self::activate(new Reference('user', '2'), $role);
+        self::activate(new Reference('user', '2'), $role, ['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
+        self::activate(new Reference('admin', '1'), $role);
+        self::activate(new Reference('user', '3'), $role, ['ended_at' => Carbon::now()]);
+        self::activate(new Reference('user', '4'), $role, ['expires_at' => Carbon::now()->subSecond()]);
+        self::activate(new Reference('user', '5'), $other);
+        self::switchBreakGlass(false);
+
+        self::assertEquals([new Reference('admin', '1'), new Reference('user', '2')], GrantTarget::ROLE->holders($role->id));
+        self::assertEquals([new Reference('user', '5')], GrantTarget::ROLE->holders($other->id));
         self::assertSame([], GrantTarget::PERMISSION->holders($role->id));
     }
 

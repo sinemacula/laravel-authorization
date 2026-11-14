@@ -584,8 +584,8 @@ final class ConfigValidatorTest extends TestCase
 
     /**
      * The break-glass block is validated with the rest: the shipped block
-     * passes, disabled, and `enabled` true is refused with its reason, as is a
-     * role's maximum above the global one.
+     * passes, disabled, and so does `enabled` true with a justification code,
+     * while a role's maximum above the global one is refused.
      *
      * @return void
      */
@@ -602,7 +602,7 @@ final class ConfigValidatorTest extends TestCase
         $enabled['break_glass']['enabled']        = true;
         $enabled['break_glass']['justifications'] = ['incident'];
 
-        $this->assertRejected(fn () => ConfigValidator::validate($enabled, $this->container()), 'authorization.break_glass.enabled', BreakGlassConfigValidator::UNAVAILABLE);
+        ConfigValidator::validate($enabled, $this->container());
 
         $config['break_glass']['roles'] = ['responder' => ['max_minutes' => 61]];
 

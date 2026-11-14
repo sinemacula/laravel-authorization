@@ -5,18 +5,21 @@ declare(strict_types = 1);
 namespace Tests\Feature\Reviews\Support;
 
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Reviews\ApplicationSelector;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
+use SineMacula\Laravel\Authorization\Reviews\ReviewResult;
 use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRows;
 use SineMacula\Laravel\Authorization\Reviews\Support\HoldingRoutes;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\SuspendableIdentity;
@@ -39,7 +42,7 @@ use Tests\TestCase;
 #[CoversClass(HoldingRoutes::class)]
 final class HoldingRoutesTest extends TestCase
 {
-    use ReviewsAccess;
+    use ActivatesBreakGlass, ReviewsAccess;
 
     /**
      * A subject holds each role granted, each role above it, what each of them
@@ -76,6 +79,50 @@ final class HoldingRoutesTest extends TestCase
         self::assertCount(7, $rows);
         self::assertTrue($result->isComplete);
         self::assertSame(SubjectState::ACTIVE, $result->rows[0]->subjectState);
+    }
+
+    /**
+     * A principal holds what its break-glass activation not ended or expired
+     * holds, whether break-glass is enabled or not, as rows of their own beside
+     * its grant of the same role, never its identity's activation; an
+     * identity's review lists its own and every listed principal's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPrincipalHoldsItsOwnActivationsButNeverItsIdentitys(): void
+    {
+        $admin     = self::role('admin');
+        $editor    = self::role('editor', $admin);
+        $identity  = self::identity('person');
+        $principal = self::identity('person-web');
+
+        $admin->givePermissionTo(self::permission('posts:edit'));
+        self::grants()->grantRole($principal, $editor);
+        self::grants()->grantRole($identity, $admin);
+        self::activate($principal, $editor);
+        self::activate($identity, $admin);
+        self::activate($principal, $admin, ['expires_at' => Carbon::now()->subSecond()]);
+        self::switchBreakGlass(false);
+
+        self::assertSame([
+            'role_grant person-web [editor] editor',
+            'role_grant person-web [editor] editor (break-glass)',
+            'role_grant person-web via person [admin] admin',
+            'role_inherited person-web [editor>admin] admin',
+            'role_inherited person-web [editor>admin] admin (break-glass)',
+            'role_permission person-web [editor>admin] posts:edit',
+            'role_permission person-web [editor>admin] posts:edit (break-glass)',
+            'role_permission person-web via person [admin] posts:edit',
+        ], self::sorted(self::trusted(ReviewQuery::holdings(new Subject($principal, $identity), ReviewScope::everywhere()))));
+
+        $this->app?->instance(IdentityDirectory::class, new ListedIdentityDirectory([ListedIdentityDirectory::key(Reference::of($identity)) => [Reference::of($principal)]]));
+
+        $held = self::described(self::trusted(ReviewQuery::holdings($identity, ReviewScope::everywhere())));
+
+        self::assertContains('role_grant person [admin] admin (break-glass)', $held);
+        self::assertContains('role_grant person via person-web [editor] editor (break-glass)', $held);
     }
 
     /**
@@ -339,5 +386,21 @@ final class HoldingRoutesTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
 
         ReviewQuery::holdings(new Subject(new \stdClass, null), ReviewScope::everywhere());
+    }
+
+    /**
+     * Describe the rows of the result, sorted, so the routes compare whatever
+     * the roles' keys.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewResult  $result
+     * @return list<string>
+     */
+    private static function sorted(ReviewResult $result): array
+    {
+        $rows = self::described($result);
+
+        \sort($rows);
+
+        return $rows;
     }
 }

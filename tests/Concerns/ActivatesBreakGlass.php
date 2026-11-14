@@ -7,7 +7,6 @@ namespace Tests\Concerns;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -19,7 +18,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * emergency role carrying an action, and an activation of it for a grantee,
  * platform-wide and live for half an hour unless the columns say otherwise,
  * with a note no output may show. Break-glass is switched on before each test,
- * as it is unavailable otherwise.
+ * as it is off by default.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,8 +51,6 @@ trait ActivatesBreakGlass
      */
     protected static function switchBreakGlass(bool $isEnabled, array $settings = []): void
     {
-        BreakGlassConfigValidator::$isAvailable = true;
-
         config()->set('authorization.break_glass', ['enabled' => $isEnabled, 'roles' => ['responder' => []], 'justifications' => ['incident'], ...$settings]);
 
         app()->forgetInstance(BreakGlassActivations::class);
@@ -64,12 +61,12 @@ trait ActivatesBreakGlass
      * Store an activation of the role for the grantee through the model,
      * platform-wide, live for half an hour, with the columns given in place.
      *
-     * @param  \Illuminate\Database\Eloquent\Model  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  array<string, mixed>  $columns
      * @return \SineMacula\Laravel\Authorization\Models\BreakGlassActivation
      */
-    protected static function activate(Model $grantee, Role $role, array $columns = []): BreakGlassActivation
+    protected static function activate(Model|Reference $grantee, Role $role, array $columns = []): BreakGlassActivation
     {
         return BreakGlassActivation::query()->create([
             'role_id' => $role->getKey(),
@@ -102,10 +99,10 @@ trait ActivatesBreakGlass
     /**
      * Return the grantee's columns of a grant row.
      *
-     * @param  \Illuminate\Database\Eloquent\Model  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @return array{authorizable_type: string, authorizable_id: string}
      */
-    protected static function granteeColumns(Model $grantee): array
+    protected static function granteeColumns(Model|Reference $grantee): array
     {
         return ['authorizable_type' => $grantee->getMorphClass(), 'authorizable_id' => Reference::of($grantee)->id];
     }

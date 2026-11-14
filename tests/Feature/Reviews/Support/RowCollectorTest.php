@@ -123,6 +123,30 @@ final class RowCollectorTest extends TestCase
     }
 
     /**
+     * A route starting from a break-glass activation is marked with its key and
+     * justification code, and is a row of its own after the route of a grant of
+     * the same role in the same scope.
+     *
+     * @return void
+     */
+    public function testARouteFromAnActivationIsMarkedAndKeptApart(): void
+    {
+        $rows       = new RowCollector(ReviewRun::of(ReviewScope::everywhere()), 5);
+        $columns    = ['target_id' => 'r', 'grantee_type' => 'u', 'grantee_id' => 'ann', 'include_subtree' => true, 'justification' => 'incident'];
+        $activation = GrantRow::from((object) [...$columns, 'break_glass_id' => 'a1'], 'role');
+
+        $rows->route(SourceKind::ROLE_GRANT, new Reference('u', 'ann'), $activation, new Reference('role', 'r'), ['r']);
+        $rows->route(SourceKind::ROLE_GRANT, new Reference('u', 'ann'), self::grant('ann', 'r', null), new Reference('role', 'r'), ['r']);
+
+        [$grant, $activated] = $rows->rows(true);
+
+        self::assertNull($grant->breakGlass);
+        self::assertSame(['activation' => 'a1', 'justification' => 'incident'], $activated->breakGlass);
+        self::assertSame($activation->key(), $activated->sourceKey);
+        self::assertNotSame($grant->rowKey, $activated->rowKey);
+    }
+
+    /**
      * A route resting on a row that never expires and one that does expires
      * when that one does, the never-expiring row passed over rather than taken
      * as the earliest.
@@ -223,7 +247,7 @@ final class RowCollectorTest extends TestCase
         self::assertSame(['d', 'b'], \array_map(static fn (ReviewRow $row): string => $row->subject->id, $rows->rows()));
         self::assertSame(SubjectState::ACTIVE, $rows->rows()[1]->subjectState);
         self::assertSame(['a', 'b'], \array_map(static fn (ReviewRow $row): string => $row->subject->id, $rows->rows(true)));
-        self::assertSame([0, 'role', 'r', 'u', 'b', 0, '', 0, '', 0, '', true, 'r', 1], $rows->next());
+        self::assertSame([0, 'role', 'r', 'u', 'b', 0, '', 0, '', 0, '', true, 0, '', 'r', 1], $rows->next());
 
         $rows->narrow(static fn (array $read): array => []);
 
@@ -316,7 +340,8 @@ final class RowCollectorTest extends TestCase
         $rows->route(SourceKind::ROLE_INHERITED, new Reference('u', 'b'), self::grant('b', 'role-1', null), new Reference('role', 'role-300'), $chain);
         $rows->route(SourceKind::ROLE_INHERITED, new Reference('u', 'c'), self::grant('c', 'role-1', null), new Reference('role', 'role-300'), $chain);
 
-        self::assertSame([1, 'role', 'role-300', 'u', 'b', 0, '', 0, '', 0, '', true, 'role-1', 300], $rows->next());
+        self::assertSame([1, 'role', 'role-300', 'u', 'b', 0, '', 0, '', 0, '', true, 0, '', 'role-1', 300], $rows->next());
+        self::assertSame(['role-1', 300], \array_slice($rows->next(), RowCollector::ROUTE));
     }
 
     /**
@@ -339,7 +364,7 @@ final class RowCollectorTest extends TestCase
 
         $rows->rows(true);
 
-        self::assertSame([0, 'role', 'r', 'u', 'b', 0, '', 0, '', 0, '', true, 'r', 1], $rows->next());
+        self::assertSame([0, 'role', 'r', 'u', 'b', 0, '', 0, '', 0, '', true, 0, '', 'r', 1], $rows->next());
 
         $short = new RowCollector(ReviewRun::of(ReviewScope::everywhere()), 2);
 

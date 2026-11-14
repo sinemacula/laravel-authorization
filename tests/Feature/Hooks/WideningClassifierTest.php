@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\WidensGrants;
 use Tests\Feature\Stubs\StubIdentity;
@@ -50,7 +51,7 @@ use Tests\TestCase;
 #[CoversClass(WideningClassifier::class)]
 final class WideningClassifierTest extends TestCase
 {
-    use RecordsRowLocks, WidensGrants;
+    use ActivatesBreakGlass, RecordsRowLocks, WidensGrants;
 
     /**
      * Set up the identity, its principals and the tree.
@@ -275,6 +276,30 @@ final class WideningClassifierTest extends TestCase
         self::grants()->grantRole($principal, $role, tenant: self::tenant('acct1'), includeSubtree: false);
 
         self::assertSame([WideningReason::NEW_SUBTREE], self::classify($principal, self::tenant('acct1'), true, null, $role)?->reasons);
+    }
+
+    /**
+     * A live break-glass activation is never a grant already held: a grant
+     * where only an activation of the same role applies, or reaches below,
+     * widens as it would without it, read plainly or under the lock.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActivationIsNeverAGrantAlreadyHeld(): void
+    {
+        $role      = self::role('held');
+        $principal = self::principal('p1');
+
+        self::activate($principal, $role, ['tenant_type' => 'tenant', 'tenant_id' => 'acct1']);
+        self::activate(self::principal('p2'), $role, ['tenant_type' => 'tenant', 'tenant_id' => 'acct1']);
+
+        foreach ([false, true] as $isLocked) {
+            $widening = WideningClassifier::classify(Operation::begin(), $principal, [self::proposal($role, self::tenant('acct1'))], $isLocked);
+
+            self::assertSame([WideningReason::NEW_TENANT], $widening?->reasons);
+        }
     }
 
     /**
