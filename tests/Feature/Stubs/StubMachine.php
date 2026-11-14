@@ -18,7 +18,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
  *
  * @internal
  */
-final class StubMachine extends Model implements AuthorizableIdentity, AuthorizableMachine
+final class StubMachine extends Model implements AuthorizableIdentity, AuthorizableMachine // @phpstan-ignore-line
 {
     use HasAuthorization;
 

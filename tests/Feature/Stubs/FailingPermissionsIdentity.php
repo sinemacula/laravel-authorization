@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
  *
  * @internal
  */
-final class FailingPermissionsIdentity extends Model implements AuthorizableIdentity
+final class FailingPermissionsIdentity extends Model implements AuthorizableIdentity // @phpstan-ignore-line
 {
     use HasAuthorization;
 

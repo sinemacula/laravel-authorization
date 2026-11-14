@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
  *
  * @internal
  */
-final class NumberedIdentity extends Model implements AuthorizableIdentity
+final class NumberedIdentity extends Model implements AuthorizableIdentity // @phpstan-ignore-line
 {
     use HasAuthorization, SoftDeletes;
 
