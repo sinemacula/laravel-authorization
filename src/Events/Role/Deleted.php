@@ -14,10 +14,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * permission it carried.
  *
  * `grantees` lists every grantee that held the role, in any scope and whether
- * or not the grant had expired, and `permissions` every permission the role
- * carried, each read inside the delete's transaction before the row was
- * removed, so the evidence says who lost access and to what. A role with
- * children is never deleted, so none lose what it passed down.
+ * or not the grant had expired, and every grantee of a break-glass activation
+ * of it not ended or expired, which the deletion deletes, each once; and
+ * `permissions` every permission the role carried, each read inside the
+ * delete's transaction before the row was removed, so the evidence says who
+ * lost access and to what. A role with children is never deleted, so none lose
+ * what it passed down.
  *
  * A snapshot of plain values, never a model. It is dispatched once the write
  * commits, on the package's connection, and never for a write that rolls back

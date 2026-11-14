@@ -10,7 +10,6 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
@@ -490,7 +489,6 @@ final class DecisionPipelineTest extends TestCase
         $policy  = self::stored('deleting', [['effect' => 'allow', 'actions' => ['posts:delete']]]);
 
         config(['authorization.rank.enabled' => false]);
-        BreakGlassConfigValidator::$isAvailable = true;
         config()->set('authorization.break_glass', ['enabled' => true, 'roles' => ['responder' => []], 'justifications' => ['incident']]);
 
         foreach ([BreakGlassActivations::class, ResolutionCache::class] as $abstract) {

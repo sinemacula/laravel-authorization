@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Usage\DatabaseGrantUsageStore;
 use SineMacula\Laravel\Authorization\Usage\UsageBatch;
 use SineMacula\Laravel\Authorization\Usage\UsagePruner;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\CompilesQueries;
 use Tests\Concerns\ReviewsAccess;
 use Tests\TestCase;
@@ -32,7 +33,7 @@ use Tests\TestCase;
 #[CoversClass(UsagePruner::class)]
 final class UsagePrunerTest extends TestCase
 {
-    use CompilesQueries, ReviewsAccess;
+    use ActivatesBreakGlass, CompilesQueries, ReviewsAccess;
 
     /**
      * Reset the clock.
@@ -89,6 +90,28 @@ final class UsagePrunerTest extends TestCase
         self::assertSame(7, DB::table('grant_usage')->count());
         self::assertSame([4, 0], UsagePruner::prune(400));
         self::assertEqualsCanonicalizing(\array_column($kept, 'grant_key'), DB::table('grant_usage')->pluck('grant_key')->all());
+    }
+
+    /**
+     * A live break-glass activation of a role in a scope keeps no use: the
+     * usage of a route whose role grant is gone is removed though an activation
+     * of the same role stands in the same scope.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActivationKeepsNoUsage(): void
+    {
+        $ann  = self::identity('ann');
+        $role = self::role('responder');
+
+        self::activate($ann, $role);
+
+        (new DatabaseGrantUsageStore)->record(UsageBatch::of([self::observation('role', Reference::of($role)->id, $ann->getMorphClass(), 'ann')], Carbon::now()->getTimestamp()));
+
+        self::assertSame([1, 0], UsagePruner::prune(400));
+        self::assertSame(0, DB::table('grant_usage')->count());
     }
 
     /**

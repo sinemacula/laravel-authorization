@@ -10,16 +10,20 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\QueryException;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
+use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantPresence;
 use SineMacula\Laravel\Authorization\Enums\GrantScopeStatus;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Exclusions\Support\ExclusionHoldings;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
@@ -41,7 +45,11 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * says whether a principal is a member of a tenant, which is the application's
  * (AUTHZ-13.9), nor whether it may act there. A grant is a live role, direct
  * permission or policy attachment, a policy that only denies included; an
- * expired row, a boundary and a guardrail are not (N82, see `GrantRoots`).
+ * expired row, a boundary and a guardrail are not (N82, see `GrantRoots`). A
+ * live break-glass activation counts as a grant of its role in its scope, for
+ * the grantee it names, as a check reads it: none while break-glass is
+ * disabled, none of a machine, and an identity's reaches none of its principals
+ * (see `BreakGlassActivations`).
  *
  * This is a trusted service, not an endpoint for users: even its bare answer
  * tells a caller something about grants in other tenants, so it is never
@@ -103,7 +111,7 @@ final readonly class GrantScopeQuery
 
         $scope      = self::referenceTo($tenant);
         $principals = $this->directory()->principalsOf($identity);
-        $status     = self::placed(new GrantRoots([$identity, ...$principals->principals]), $scope);
+        $status     = self::placed(new GrantRoots([$identity, ...$principals->principals], $principals->principals), $scope);
 
         return $status === GrantScopeStatus::OUTSIDE || $principals->isComplete ? $status : GrantScopeStatus::UNKNOWN;
     }
@@ -144,9 +152,9 @@ final readonly class GrantScopeQuery
         $subject = $principal instanceof Subject ? $principal : $this->resolver()->forUser($principal);
         $chain   = self::chainOf($scope);
 
-        [$grantees, $isEveryGranteeRead] = self::granteesOf($subject);
+        [$grantees, $activated, $isEveryGranteeRead] = self::granteesOf($subject);
 
-        $isPresent = (new GrantRoots($grantees))->appliesIn($chain ?? new TenantChain([$scope]), $application);
+        $isPresent = (new GrantRoots($grantees, $activated))->appliesIn($chain ?? new TenantChain([$scope]), $application);
 
         return match (true) {
             $isPresent                              => GrantPresence::PRESENT,
@@ -231,10 +239,12 @@ final readonly class GrantScopeQuery
 
     /**
      * Return the references to the subject and to its identity when that grants
-     * to it, and whether each of them could be named by one.
+     * to it, the subject's alone among those whose activations count, unless it
+     * was read as another subject's identity, and whether each of them could be
+     * named by one.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
-     * @return array{0: list<\SineMacula\Laravel\Authorization\Support\Reference>, 1: bool}
+     * @return array{0: list<\SineMacula\Laravel\Authorization\Support\Reference>, 1: list<\SineMacula\Laravel\Authorization\Support\Reference>, 2: bool}
      */
     private static function granteesOf(Subject $subject): array
     {
@@ -251,7 +261,10 @@ final readonly class GrantScopeQuery
             $isEveryNamed = false;
         }
 
-        return [$grantees, $isEveryNamed];
+        $own       = $subject->subject;
+        $activated = ($own instanceof Model || $own instanceof Reference) && !BreakGlassActivations::isIdentity($own) ? [Reference::of($own)] : [];
+
+        return [$grantees, $activated, $isEveryNamed];
     }
 
     /**
@@ -366,13 +379,15 @@ final readonly class GrantScopeQuery
     }
 
     /**
-     * Return every grantee holding a live grant that meets the condition and
-     * holds in the application, read from every grant table in one query on the
-     * write connection, each grantee once, by type and then key, byte by byte,
-     * as every database orders them alike. An inline policy attached to a
-     * grantee it does not belong to is no grant (see `InlinePolicies`), and a
-     * role a policy is attached to no grantee: whoever holds the role is listed
-     * through their own grant of it (see `RolePolicies`).
+     * Return every grantee holding a live grant, or a live break-glass
+     * activation, that meets the condition and holds in the application, read
+     * from every grant table and the activations in one query on the write
+     * connection, each grantee once, by type and then key, byte by byte, as
+     * every database orders them alike; a machine's activation is no grant. An
+     * inline policy attached to a grantee it does not belong to is no grant
+     * (see `InlinePolicies`), and a role a policy is attached to no grantee:
+     * whoever holds the role is listed through their own grant of it (see
+     * `RolePolicies`).
      *
      * @param  \Closure(\Illuminate\Database\Query\Builder, string): void  $constrain
      * @param  string|null  $application
@@ -380,17 +395,28 @@ final readonly class GrantScopeQuery
      */
     private static function holding(\Closure $constrain, ?string $application): array
     {
-        $connection = AuthorizationConnection::connection();
-        $union      = null;
+        $connection  = AuthorizationConnection::connection();
+        $activations = TableNames::get('break_glass');
+        $union       = self::holdersOf(BreakGlassActivations::live($connection->table($activations), $activations), $activations, $constrain, $application, true);
 
         foreach (GrantTarget::cases() as $target) {
-            $rows  = self::holdersIn($connection, $target, $constrain, $application);
-            $union = $union === null ? $rows : $union->union($rows);
+            $union->union(self::holdersIn($connection, $target, $constrain, $application));
         }
 
-        return Reference::sorted($union->useWritePdo()->get()
-            ->map(static fn (\stdClass $row): Reference => new Reference(self::text($row->authorizable_type), self::text($row->authorizable_id)))
-            ->all());
+        $holders = [];
+
+        foreach ($union->useWritePdo()->get() as $row) {
+            /** @var \stdClass $row */
+            $holder = new Reference(self::text($row->authorizable_type), self::text($row->authorizable_id));
+
+            if (\in_array($row->is_activated, [1, '1', true], true) && ExclusionHoldings::isMachine($holder)) {
+                continue;
+            }
+
+            $holders[ExclusionHoldings::key($holder)] = $holder;
+        }
+
+        return Reference::sorted($holders);
     }
 
     /**
@@ -406,9 +432,7 @@ final readonly class GrantScopeQuery
     private static function holdersIn(Connection $connection, GrantTarget $target, \Closure $constrain, ?string $application): Builder
     {
         $table = $target->table();
-        $query = $connection->query()->from($table)->select([$table . '.authorizable_type', $table . '.authorizable_id']);
-
-        LiveGrants::only($query, $table);
+        $query = self::holdersOf(LiveGrants::only($connection->table($table), $table), $table, $constrain, $application, false);
 
         if ($target === GrantTarget::POLICY) {
             /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $role */
@@ -420,6 +444,26 @@ final readonly class GrantScopeQuery
             // listed through their own grant of it, never to the role.
             $query->where($table . '.authorizable_type', '<>', (new $role)->getMorphClass());
         }
+
+        return $query;
+    }
+
+    /**
+     * Return the query of the grantees of the table's rows the query reads that
+     * meet the condition and hold in the application, each marked by whether it
+     * is an activation's.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  string  $table
+     * @param  \Closure(\Illuminate\Database\Query\Builder, string): void  $constrain
+     * @param  string|null  $application
+     * @param  bool  $isActivated
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private static function holdersOf(Builder $query, string $table, \Closure $constrain, ?string $application, bool $isActivated): Builder
+    {
+        $query->select([$table . '.authorizable_type', $table . '.authorizable_id'])
+            ->addSelect(new ComposedExpression(($isActivated ? '1' : '0') . ' as ' . $query->getGrammar()->wrap('is_activated')));
 
         if ($application !== null) {
             GrantApplications::only($query, $table, $application);

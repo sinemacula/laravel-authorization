@@ -222,9 +222,8 @@ trait ReviewsAccess
     }
 
     /**
-     * Describe each row of the result as its kind, its subject's key, its
-     * grantee's key when another, the roles of its path by name, and its target
-     * by name, in the result's order.
+     * Describe each row of the result as `describe()` does, in the result's
+     * order.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewResult  $result
      * @return list<string>
@@ -236,7 +235,8 @@ trait ReviewsAccess
 
     /**
      * Describe the row as its kind, its subject's key, its grantee's key when
-     * another, the roles of its path by name, and its target by name.
+     * another, the roles of its path by name, its target by name, and whether
+     * it starts from a break-glass activation.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewRow  $row
      * @return string
@@ -247,7 +247,9 @@ trait ReviewsAccess
         $path    = \array_map(static fn (Reference $role): string => self::nameOf($role), $row->rolePath);
         $target  = self::nameOf($row->target);
 
-        return $row->sourceKind->value . ' ' . $row->subject->id . $grantee . ($path === [] ? '' : ' [' . \implode('>', $path) . ']') . ' ' . $target;
+        $route = $row->sourceKind->value . ' ' . $row->subject->id . $grantee . ($path === [] ? '' : ' [' . \implode('>', $path) . ']') . ' ' . $target;
+
+        return $row->breakGlass === null ? $route : $route . ' (break-glass)';
     }
 
     /**

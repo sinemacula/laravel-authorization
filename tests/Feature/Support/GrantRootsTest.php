@@ -21,9 +21,11 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\SubtreeQueryTree;
@@ -43,7 +45,7 @@ use Tests\TestCase;
 #[CoversClass(GrantRoots::class)]
 final class GrantRootsTest extends TestCase
 {
-    use RecordsRowLocks, UsesAnAuthorizationConnection;
+    use ActivatesBreakGlass, RecordsRowLocks, UsesAnAuthorizationConnection;
 
     /**
      * Roots are classified against a tenant: within at the tenant, outside at
@@ -189,6 +191,48 @@ final class GrantRootsTest extends TestCase
         self::assertTrue($roots->appliesIn(new TenantChain([$tenant]), 'admin'));
         self::assertFalse($roots->appliesIn(new TenantChain([$tenant]), 'mobile'));
         self::assertTrue($roots->appliesIn(new TenantChain([$tenant])));
+    }
+
+    /**
+     * A live activation of a grantee named as activated is a grant of its role
+     * in its scope: placed against a tenant and applying where a check reads
+     * it, as a grant row would; an ended or expired one, one while break-glass
+     * is disabled, a machine's, one of a grantee not named as activated, and
+     * any under the lock, are not.
+     *
+     * @return void
+     */
+    public function testAnActivatedGranteesLiveActivationIsAGrant(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user']);
+        $machine = StubMachine::query()->create(['id' => 'machine']);
+        $role    = self::emergencyRole();
+        $tenant  = new Reference('tenant', 'a');
+        $within  = GrantRoots::within($tenant, new FlatTenantTree);
+        $grant   = ['tenant_type' => 'tenant', 'tenant_id' => 'b', 'application' => 'admin'];
+
+        self::activate($user, $role, ['ended_at' => now()]);
+        self::activate($user, $role, ['expires_at' => now()->subSecond()]);
+        self::activate($machine, $role, $grant);
+
+        $grantees = [Reference::of($user), Reference::of($machine)];
+        $roots    = new GrantRoots($grantees, $grantees);
+
+        self::assertSame(GrantScopeStatus::WITHIN, $roots->against($within));
+        self::assertFalse($roots->appliesIn(new TenantChain([new Reference('tenant', 'b')])));
+
+        self::activate($user, $role, $grant);
+
+        self::assertSame(GrantScopeStatus::OUTSIDE, $roots->against($within));
+        self::assertSame(GrantScopeStatus::WITHIN, (new GrantRoots($grantees))->against($within));
+        self::assertTrue($roots->appliesIn(new TenantChain([new Reference('tenant', 'b')]), 'admin'));
+        self::assertFalse($roots->appliesIn(new TenantChain([new Reference('tenant', 'b')]), 'mobile'));
+        self::assertFalse($roots->appliesUnderLock(new TenantChain([new Reference('tenant', 'b')])));
+
+        self::switchBreakGlass(false);
+
+        self::assertSame(GrantScopeStatus::WITHIN, $roots->against($within));
+        self::assertFalse($roots->appliesIn(new TenantChain([new Reference('tenant', 'b')])));
     }
 
     /**

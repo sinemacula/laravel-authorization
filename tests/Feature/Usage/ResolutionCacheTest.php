@@ -10,7 +10,6 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Config\BreakGlassConfigValidator;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use Tests\Concerns\ReviewsAccess;
@@ -200,8 +199,6 @@ final class ResolutionCacheTest extends TestCase
         $role  = self::role('responder');
 
         $role->givePermissionTo(self::permission('posts:read'));
-
-        BreakGlassConfigValidator::$isAvailable = true;
 
         config()->set('authorization.break_glass', ['enabled' => true, 'justifications' => ['incident']]);
         $this->app?->forgetInstance(BreakGlassActivations::class);

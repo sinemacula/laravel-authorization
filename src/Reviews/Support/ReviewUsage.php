@@ -38,11 +38,12 @@ use SineMacula\Laravel\Authorization\Usage\UsageTracking;
  *
  * Every row is `unknown`, and nothing is read, while tracking is off. So is a
  * row whose source cannot report its use: a role's permission edge or policy
- * attachment, which no check uses on its own, and a grant to a grantee whose
- * grants the package does not resolve (a `getPermissions()` or `getPolicies()`
- * of its own) or, for a policy, while a policy resolver of the application's is
- * bound; a role's grant needs both its permissions and its policies to be
- * reported.
+ * attachment, which no check uses on its own, a route starting from a
+ * break-glass activation, whose use is never tracked (see `RouteSources`), and
+ * a grant to a grantee whose grants the package does not resolve (a
+ * `getPermissions()` or `getPolicies()` of its own) or, for a policy, while a
+ * policy resolver of the application's is bound; a role's grant needs both its
+ * permissions and its policies to be reported.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -175,7 +176,7 @@ final class ReviewUsage
      */
     public function usageOf(ReviewRow $row): RowUsage
     {
-        if ($this->store === null || !$this->canReport($row)) {
+        if ($this->store === null || $row->breakGlass !== null || !$this->canReport($row)) {
             return RowUsage::unknown();
         }
 

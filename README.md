@@ -3796,11 +3796,13 @@ document or value. Its shape is versioned (`version: 1`):
 | `granted_by`                             | The last actor to grant or change the starting row; null for a trusted write                 |
 | `grant_state`, `subject_state`           | `live`, `expired` or `malformed`; `active`, `inactive` or `unknown`                          |
 | `usage`                                  | `status` (`used`, `unused` or `unknown`), the last observed use and the coverage             |
+| `break_glass`                            | Only on a route from a break-glass activation, its key and justification code                |
 | `action_evidence`                        | Only in a review narrowed to an action, what gives it and where (see below)                  |
 
 The rows come in one total order, the same on SQLite, PostgreSQL and MySQL: by source kind, target, grantee, origin
-scope (the platform before a tenant, every application before a named one) and route (the first role of its chain, how
-many roles the chain runs through, then the rows it rests on), every string compared byte for byte. A review returns at
+scope (the platform before a tenant, every application before a named one, a role grant before a break-glass
+activation of the same scope, and activations by key) and route (the first role of its chain, how many roles the chain
+runs through, then the rows it rests on), every string compared byte for byte. A review returns at
 most `authorization.reviews.limit` rows (1000 by default; a whole number of at least 1, or boot fails), or the limit
 `withLimit()` sets, and reads at least one more to say exactly whether any was left out. Every grant is read on the
 write connection, never one query per holder: the roles a review involves are read in a fixed number of queries, then
@@ -4560,13 +4562,13 @@ hook refuses stops the import, with what was written before it kept.
 - **Break-glass.** An activation (AUTHZ-11.7) is asked about as a grant of its role in its scope until its expiry,
   through the same `Hooks\WideningPhase`, so its hook is never skipped either.
 
-### Break-glass (not yet available)
+### Break-glass
 
 Break-glass is opt-in emergency access (AUTHZ-11.7): a principal with the break-glass right grants itself, or another
 person, a configured emergency role for a limited time, with a justification code from a configured list, reported
-every time and never needing prior approval. It ships over three releases, and stays switched off until the last,
-which brings its audit trail. The settings, the table, the resolution, the service that activates and ends an
-activation and its events are here; `enabled` true is still refused at boot.
+every time and never needing prior approval. It is off by default. To enable it, list the emergency roles under
+`roles`, list at least one code under `justifications`, set `AUTHORIZATION_BREAK_GLASS_ENABLED=true`, and grant the
+break-glass rights to whoever may use them.
 
 **The settings.** `config/authorization.php` holds a `break_glass` block, checked at boot like every other:
 
@@ -4584,8 +4586,7 @@ activation and its events are here; `enabled` true is still refused at boot.
 ],
 ```
 
-- `enabled` is a switch, false by default. Until break-glass is available, true is refused with "break-glass is not
-  available until its audit trail ships; leave it disabled."
+- `enabled` is a switch, false by default, read from `AUTHORIZATION_BREAK_GLASS_ENABLED` as written.
 - `max_minutes` is the longest any activation lasts, a whole number of at least 1. A longer request will be refused,
   never shortened.
 - `roles` maps each emergency role, named as a role is named anywhere, to its own `max_minutes`: from 1 up to the
@@ -4666,13 +4667,23 @@ for a trusted call. `authorization:prune` records the expiry of every activation
 its row, and dispatches `Identity\BreakGlassExpired` with no actor. Each is dispatched once its write commits, never for
 a refusal or a rollback, whether break-glass is enabled or not.
 
+**Listings, reviews and deletion.** The grant scope query's answers and its lists of grantees reaching or within a
+tenant count a live activation as a grant of its role in its scope, as a check does: none while break-glass is off,
+none of a machine, and an identity's reaches none of its principals. The access reviews list every activation not
+ended or expired, whether break-glass is on or off, since it grants again once it is on: each is a row of its own
+beside any grant of the same role, with its own `source_key`, `expires_at` and `granted_by`, and a `break_glass`
+field holding its key (`activation`) and justification code, never the note; its `usage` is always `unknown`. Deleting
+a role deletes its activations, and `Role\Deleted` lists their grantees among the role's, each once. Whether a grant
+widens what an identity holds, for the grant hooks, never counts an activation as a grant already held, and grant
+usage tracking never counts one as the use of a role grant.
+
 **Switching it off.** While `enabled` is false no activation counts anywhere, at once: checks, listings, query scopes
 and delegated administration all read none, and the rows stay for audit. The setting is read once a request or job,
 and the resolution cache keeps what it resolved while break-glass was on apart from what it resolved while off, so
 switching it either way is seen on the next request. `activate()` refuses while it is off; an activation can still
 be ended.
 
-See [Break-glass](docs/design/break-glass.md) for the invariants and what the last release adds.
+See [Break-glass](docs/design/break-glass.md) for the invariants.
 
 See [Grant scope](docs/design/grant-scope.md) for the design.
 
@@ -5780,7 +5791,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Grant scope](docs/design/grant-scope.md)                                                   | The identity directory, the scope query and the grant hooks   |
 | [Explanations](docs/design/explanations.md)                                                 | Explain mode, the `Explanation` and `authorization:why`       |
 | [Access reviews](docs/design/access-reviews.md)                                             | Grant routes, queries, rows, admission, paging and exports    |
-| [Break-glass](docs/design/break-glass.md)                                                   | Emergency access: settings, records, resolution and the plan  |
+| [Break-glass](docs/design/break-glass.md)                                                   | Emergency access: settings, records, resolution and readers   |
 | [Separation of duties](docs/design/separation-of-duties.md)                                 | Mutually exclusive roles, owners and the conflict report      |
 
 ## Requirements

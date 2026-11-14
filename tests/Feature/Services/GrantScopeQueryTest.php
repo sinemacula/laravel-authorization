@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Enums\GrantPresence;
 use SineMacula\Laravel\Authorization\Enums\GrantScopeStatus;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -30,6 +31,7 @@ use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\RecordingLogger;
@@ -61,7 +63,7 @@ use Tests\TestCase;
 #[CoversClass(GrantScopeQuery::class)]
 final class GrantScopeQueryTest extends TestCase
 {
-    use RefusesThePackage, UsesAnAuthorizationConnection;
+    use ActivatesBreakGlass, RefusesThePackage, UsesAnAuthorizationConnection;
 
     /** @var string The tenants' morph type. */
     private const string TENANT = 'tenant';
@@ -1149,6 +1151,138 @@ final class GrantScopeQueryTest extends TestCase
     }
 
     /**
+     * A principal's live break-glass activation is a grant of its role in its
+     * scope, for where its identity's grants lie, as a check reads it; the
+     * identity's own activation reaches none of its principals, and none counts
+     * while break-glass is disabled.
+     *
+     * @return void
+     */
+    public function testAPrincipalsActivationIsAGrantForItsIdentity(): void
+    {
+        $this->tree();
+
+        $identity  = self::identity('identity');
+        $principal = self::identity('principal');
+
+        $this->app?->instance(IdentityDirectory::class, self::directory($identity, [$principal]));
+
+        self::grant($identity, 'activation', self::tenant('org2'));
+
+        self::assertSame(GrantScopeStatus::WITHIN, self::scopes()->forIdentity(Reference::of($identity), self::tenant('acct1')));
+
+        self::grant($principal, 'activation', self::tenant('org2'));
+
+        self::assertSame(GrantScopeStatus::OUTSIDE, self::scopes()->forIdentity(Reference::of($identity), self::tenant('acct1')));
+
+        self::switchBreakGlass(false);
+
+        self::assertSame(GrantScopeStatus::WITHIN, self::scopes()->forIdentity(Reference::of($identity), self::tenant('acct1')));
+    }
+
+    /**
+     * A subject's live break-glass activation makes a grant present where a
+     * check reads it, in its application; an ended or expired one, its
+     * identity's, a machine's, and any while break-glass is disabled do not.
+     *
+     * @return void
+     */
+    public function testASubjectsActivationIsPresentWhereACheckReadsIt(): void
+    {
+        $this->tree();
+
+        $identity  = self::identity('identity');
+        $principal = self::identity('principal');
+        $machine   = new StubMachine(['id' => 'machine']);
+        $role      = self::emergencyRole();
+
+        $machine->save();
+
+        self::grant($identity, 'activation', self::tenant('org1'));
+        self::grant($machine, 'activation', self::tenant('org1'));
+        self::activate($principal, $role, ['ended_at' => Carbon::now(), 'tenant_type' => self::TENANT, 'tenant_id' => 'org1']);
+        self::activate($principal, $role, ['expires_at' => Carbon::now()->subSecond(), 'tenant_type' => self::TENANT, 'tenant_id' => 'org1']);
+
+        self::assertSame(GrantPresence::ABSENT, self::scopes()->hasGrantIn(new Subject($principal, $identity), self::tenant('acct1')));
+        self::assertSame(GrantPresence::ABSENT, self::scopes()->hasGrantIn(new Subject($machine, $machine), self::tenant('acct1')));
+
+        self::grant($principal, 'activation', self::tenant('org1'), application: 'admin');
+
+        self::assertSame(GrantPresence::PRESENT, self::scopes()->hasGrantIn(new Subject($principal, $identity), self::tenant('acct1')));
+        self::assertSame(GrantPresence::PRESENT, self::scopes()->hasGrantIn(new Subject($principal, $identity), self::tenant('acct1'), 'admin'));
+        self::assertSame(GrantPresence::ABSENT, self::scopes()->hasGrantIn(new Subject($principal, $identity), self::tenant('acct1'), 'mobile'));
+        self::assertSame(GrantPresence::ABSENT, self::scopes()->hasGrantIn(new Subject($principal, $identity), self::tenant('org2')));
+
+        self::switchBreakGlass(false);
+
+        self::assertSame(GrantPresence::ABSENT, self::scopes()->hasGrantIn(new Subject($principal, $identity), self::tenant('acct1')));
+    }
+
+    /**
+     * A subject named by a reference holds its own live activation; one that
+     * cannot be named is unknown, and an instance read as an identity holds
+     * none of its own.
+     *
+     * @return void
+     */
+    public function testOnlyANamedPrincipalHoldsItsOwnActivation(): void
+    {
+        $this->tree();
+
+        $principal = self::identity('principal');
+        $named     = Reference::of($principal);
+
+        self::grant($principal, 'activation', self::tenant('acct1'));
+
+        self::assertSame(GrantPresence::PRESENT, self::scopes()->hasGrantIn(new Subject($named, $named), self::tenant('acct1')));
+        self::assertSame(GrantPresence::UNKNOWN, self::scopes()->hasGrantIn(new Subject(new \stdClass, $principal), self::tenant('acct1')));
+
+        BreakGlassActivations::markIdentity($principal);
+
+        self::assertSame(GrantPresence::ABSENT, self::scopes()->hasGrantIn(new Subject($principal, $principal), self::tenant('acct1')));
+    }
+
+    /**
+     * The grantees of live break-glass activations are listed as the grantees
+     * of grants of their roles in their scopes, each once beside a grant; an
+     * ended or expired one, a machine's, and any while break-glass is disabled
+     * are not, a grantee read after a machine's still is, and each list still
+     * reads in one query.
+     *
+     * @return void
+     */
+    public function testTheGranteesOfActivationsAreListed(): void
+    {
+        $this->tree();
+        $this->holders('activation');
+
+        $machine = new StubMachine(['id' => 'machine']);
+        $second  = new StubSecondIdentity(['id' => 'second']);
+        $role    = self::emergencyRole();
+
+        $machine->save();
+        $second->save();
+
+        self::grant($machine, 'activation', self::tenant('acct1'));
+        self::grant($second, 'activation', self::tenant('acct1'));
+        self::grant(StubIdentity::query()->findOrFail('d-tenant-node'), 'role', self::tenant('acct1'), false);
+        self::activate(self::identity('z-ended'), $role, ['ended_at' => Carbon::now()]);
+        self::activate(self::identity('z-expired'), $role, ['expires_at' => Carbon::now()->subSecond()]);
+
+        self::assertEquals(
+            [...self::references('c-ancestor-subtree', 'd-tenant-node', 'e-platform', 'h-tenant-subtree'), Reference::of($second)],
+            self::scopes()->granteesReaching(self::tenant('acct1')),
+        );
+        self::assertEquals([...self::references('a-below', 'd-tenant-node', 'h-tenant-subtree'), Reference::of($second)], self::scopes()->granteesWithin(self::tenant('acct1')));
+        self::assertCount(1, $this->queriesOf(static fn (): array => self::scopes()->granteesWithin(self::tenant('org1')))['queries']);
+
+        self::switchBreakGlass(false);
+
+        self::assertEquals(self::references('d-tenant-node'), self::scopes()->granteesReaching(self::tenant('acct1')));
+        self::assertEquals(self::references('d-tenant-node'), self::scopes()->granteesWithin(self::tenant('acct1')));
+    }
+
+    /**
      * Put the fixture tenants in the closure-table tree and bind it, with a
      * complete directory listing no principals.
      *
@@ -1291,7 +1425,8 @@ final class GrantScopeQueryTest extends TestCase
     }
 
     /**
-     * Grant the grantee one grant of the kind, in the tenant or platform-wide.
+     * Grant the grantee one grant of the kind, in the tenant or platform-wide,
+     * a live break-glass activation of a role among them.
      *
      * @param  \Tests\Feature\Stubs\StubIdentity|\Tests\Feature\Stubs\StubMachine|\Tests\Feature\Stubs\StubSecondIdentity  $grantee
      * @param  string  $kind
@@ -1311,9 +1446,12 @@ final class GrantScopeQueryTest extends TestCase
     ): void {
         $name = $kind . '-' . Str::random(16);
 
+        $scope = ['tenant_type' => $tenant?->type, 'tenant_id' => $tenant?->id, 'include_subtree' => $isSubtree, 'application' => $application];
+
         match ($kind) {
             'role'       => $grantee->assignRole(Role::create(['name' => $name]), $expiresAt, $tenant, $isSubtree, $application),
             'permission' => $grantee->givePermission(Permission::create(['name' => $name . ':read']), $expiresAt, $tenant, $isSubtree, $application),
+            'activation' => self::activate($grantee, Role::create(['name' => $name]), [...$scope, 'expires_at' => $expiresAt ?? Carbon::now()->addMinutes(30)]),
             default      => $grantee->attachPolicy(self::denying($name), $expiresAt, $tenant, $isSubtree, $application),
         };
     }

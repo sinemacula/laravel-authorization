@@ -102,6 +102,27 @@ final class ReviewUsageTest extends TestCase
     }
 
     /**
+     * A route starting from a break-glass activation is unknown, though a
+     * grant's route of the same role in the same scope was observed, since an
+     * activation's use is never tracked.
+     *
+     * @return void
+     */
+    public function testARouteFromAnActivationIsUnknown(): void
+    {
+        $store      = $this->store(['2026-11-09 07:00:00', '2026-11-09 09:00:00', '2026-11-09 11:00:00']);
+        $grant      = self::row(SourceKind::PERMISSION_GRANT, '2026-11-09 07:30:00');
+        $activation = self::row(SourceKind::PERMISSION_GRANT, '2026-11-09 07:30:00', breakGlass: ['activation' => 'a1', 'justification' => 'incident']);
+
+        self::observe($store, $grant, '2026-11-09 09:00:00');
+
+        $rows = $this->usage(ReviewQuery::unused(ReviewScope::everywhere(), self::at('2026-11-09 08:00:00')))->annotate([$grant, $activation]);
+
+        self::assertSame(GrantUsageKey::ofRow($grant), GrantUsageKey::ofRow($activation));
+        self::assertSame([UsageStatus::USED, UsageStatus::UNKNOWN], \array_map(static fn (ReviewRow $row): ?UsageStatus => $row->usage?->status, $rows));
+    }
+
+    /**
      * A window coverage does not reach whole is unknown: one starting before
      * tracking began, one a gap of more than two intervals interrupts, one
      * ending more than two intervals past the last period, and an empty one.
@@ -314,15 +335,16 @@ final class ReviewUsageTest extends TestCase
 
     /**
      * Return a row of the kind, created at the instant, to the target, its
-     * grantee of the class given.
+     * grantee of the class given, starting from the activation given.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Enums\SourceKind  $kind
      * @param  string|null  $created
      * @param  string  $target
      * @param  string  $grantee
+     * @param  array{activation: string, justification: string}|null  $breakGlass
      * @return \SineMacula\Laravel\Authorization\Reviews\ReviewRow
      */
-    private static function row(SourceKind $kind, ?string $created, string $target = 'p', string $grantee = StubIdentity::class): ReviewRow
+    private static function row(SourceKind $kind, ?string $created, string $target = 'p', string $grantee = StubIdentity::class, ?array $breakGlass = null): ReviewRow
     {
         return new ReviewRow(
             'row-' . $target,
@@ -338,6 +360,7 @@ final class ReviewUsageTest extends TestCase
             ['created_at' => $created === null ? null : self::at($created), 'updated_at' => null, 'expires_at' => null, 'route_expires_at' => null],
             null,
             GrantState::LIVE,
+            breakGlass: $breakGlass,
         );
     }
 

@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Reviews\Support;
 
 use Carbon\CarbonImmutable;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Reviews\OriginScope;
 use SineMacula\Laravel\Authorization\Reviews\SupportingGrant;
@@ -30,6 +31,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * placed (see `isPlaced()`), and meets an attachment, or a grant, only one that
  * holds everywhere (see `canMeet()`).
  *
+ * A break-glass activation read as a role grant (see `GrantRows::held()`)
+ * carries its key and justification code, never its note, and is keyed by its
+ * own key, so it stays a row of its own beside a grant of the same role in the
+ * same scope.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -39,6 +45,9 @@ final readonly class GrantRow
 {
     /** @var string The source of a role's permission edge, beside the grant targets' own. */
     public const string EDGE = 'role_permission';
+
+    /** @var string The part a break-glass activation's key starts with. */
+    private const string BREAK_GLASS = 'break_glass';
 
     /**
      * Create a new stored row.
@@ -50,6 +59,7 @@ final readonly class GrantRow
      * @param  array{expires_at: \Carbon\CarbonImmutable|null, created_at: \Carbon\CarbonImmutable|null, updated_at: \Carbon\CarbonImmutable|null}  $times
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $grantedBy
      * @param  \SineMacula\Laravel\Authorization\Reviews\OriginScope|null  $origin
+     * @param  array{activation: string, justification: string}|null  $breakGlass
      */
     public function __construct(
 
@@ -73,6 +83,9 @@ final readonly class GrantRow
 
         /** Where the row is stored to hold, its tenant columns as they are; null for the scope's own. */
         public ?OriginScope $origin = null,
+
+        /** The key and justification code of the break-glass activation the row is; null for a stored grant. */
+        public ?array $breakGlass = null,
     ) {}
 
     /**
@@ -96,20 +109,26 @@ final readonly class GrantRow
             'updated_at' => self::instant($columns['updated_at'] ?? null),
         ];
 
-        $origin = $roleType === null ? self::originOf($columns) : null;
-        $scope  = $origin   === null ? null : new GrantScope($origin->tenant(), $origin->application, $origin->includeSubtree);
+        $origin     = $roleType === null ? self::originOf($columns) : null;
+        $scope      = $origin   === null ? null : new GrantScope($origin->tenant(), $origin->application, $origin->includeSubtree);
+        $activation = $text(BreakGlassActivations::ACTIVATION);
+        $breakGlass = $activation === null ? null : ['activation' => $activation, 'justification' => $text('justification') ?? ''];
 
-        return new self($source, (string) $text('target_id'), $grantee, $scope, $times, self::pair($text('granted_by_type'), $text('granted_by_id')), $origin);
+        return new self($source, (string) $text('target_id'), $grantee, $scope, $times, self::pair($text('granted_by_type'), $text('granted_by_id')), $origin, $breakGlass);
     }
 
     /**
      * Return the row's key: its source and the columns that make it unique, the
-     * tenant's as stored.
+     * tenant's as stored, or a break-glass activation's own key.
      *
      * @return string
      */
     public function key(): string
     {
+        if ($this->breakGlass !== null) {
+            return ReviewOrder::key([self::BREAK_GLASS, $this->breakGlass['activation']]);
+        }
+
         $origin = $this->originScope();
 
         if ($origin === null) {
@@ -203,8 +222,8 @@ final readonly class GrantRow
     /**
      * Return the sort key of the row's grantee and scope, in the review's
      * order: the grantee's type and key, then the tenant's type and key as
-     * stored, the application and the reach, each nullable one tagged, as the
-     * grant queries order them.
+     * stored, the application, the reach and the break-glass activation's key,
+     * each nullable one tagged, as the grant queries order them.
      *
      * @return list<bool|int|string|null>
      */
@@ -219,6 +238,7 @@ final readonly class GrantRow
             ...ReviewOrder::nullable($origin?->tenantId),
             ...ReviewOrder::nullable($origin?->application),
             $origin !== null && $origin->includeSubtree,
+            ...ReviewOrder::nullable($this->breakGlass['activation'] ?? null),
         ];
     }
 

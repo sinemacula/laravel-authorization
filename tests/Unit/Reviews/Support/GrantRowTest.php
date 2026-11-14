@@ -40,7 +40,30 @@ final class GrantRowTest extends TestCase
         self::assertSame(['role', 'r1', 'user', '42'], [$row->source, $row->targetId, $row->grantee->type, $row->grantee->id]);
         self::assertSame(['tenant', '7', 'web', false], [$scope->tenant?->type, $scope->tenant?->id, $scope->application, $scope->includeSubtree]);
         self::assertSame(ReviewOrder::key(['role', 'r1', 'user', '42', 'tenant', '7', 'web']), $row->key());
-        self::assertSame(['user', '42', 1, 'tenant', 1, '7', 1, 'web', false], $row->orderKey());
+        self::assertSame(['user', '42', 1, 'tenant', 1, '7', 1, 'web', false, 0, ''], $row->orderKey());
+    }
+
+    /**
+     * A break-glass activation read as a role grant row carries its key and
+     * justification code, empty when none is read, and is keyed by its own key
+     * and ordered after a grant of the same role in the same scope.
+     *
+     * @return void
+     */
+    public function testAnActivationIsARowOfItsOwn(): void
+    {
+        $columns    = ['target_id' => 'r1', 'grantee_type' => 'user', 'grantee_id' => '42', 'include_subtree' => true, 'justification' => 'incident'];
+        $activation = GrantRow::from((object) [...$columns, 'break_glass_id' => 'a1'], 'role');
+        $grant      = GrantRow::from((object) [...$columns, 'break_glass_id' => null], 'role');
+
+        self::assertSame(['activation' => 'a1', 'justification' => 'incident'], $activation->breakGlass);
+        self::assertNull($grant->breakGlass);
+        self::assertSame(ReviewOrder::key(['break_glass', 'a1']), $activation->key());
+        self::assertSame(ReviewOrder::key(['role', 'r1', 'user', '42', null, null, null]), $grant->key());
+        self::assertSame(['user', '42', 0, '', 0, '', 0, '', true, 1, 'a1'], $activation->orderKey());
+        self::assertSame(-1, ReviewOrder::compare($grant->orderKey(), $activation->orderKey()));
+        self::assertSame($activation->key(), $activation->supporting()->sourceKey);
+        self::assertSame(['activation' => 'a2', 'justification' => ''], GrantRow::from((object) ['target_id' => 'r1', 'break_glass_id' => 'a2'], 'role')->breakGlass);
     }
 
     /**
@@ -75,7 +98,7 @@ final class GrantRowTest extends TestCase
             [null, null, true, null, null, null],
             [$row->scope?->tenant, $row->scope?->application, $row->scope?->includeSubtree, $row->expiresAt(), $row->times['created_at'], $row->grantedBy],
         );
-        self::assertSame(['user', 'u', 0, '', 0, '', 0, '', true], $row->orderKey());
+        self::assertSame(['user', 'u', 0, '', 0, '', 0, '', true, 0, ''], $row->orderKey());
         self::assertSame(ReviewOrder::key(['permission', 'p', 'user', 'u', null, null, null]), $row->key());
 
         $half = GrantRow::from((object) ['target_id' => 'p', 'grantee_type' => 'user', 'grantee_id' => 'u', 'tenant_type' => 'tenant', 'granted_by_type' => 'user'], 'permission');
@@ -114,8 +137,8 @@ final class GrantRowTest extends TestCase
 
         self::assertSame(ReviewOrder::key(['permission', 'p', 'user', 'u', null, 't1', null]), $noType->key());
         self::assertSame(ReviewOrder::key(['permission', 'p', 'user', 'u', 'tenant', null, null]), $noKey->key());
-        self::assertSame(['user', 'u', 0, '', 1, 't1', 0, '', true], $noType->orderKey());
-        self::assertSame(['user', 'u', 1, 'tenant', 0, '', 0, '', true], $noKey->orderKey());
+        self::assertSame(['user', 'u', 0, '', 1, 't1', 0, '', true, 0, ''], $noType->orderKey());
+        self::assertSame(['user', 'u', 1, 'tenant', 0, '', 0, '', true, 0, ''], $noKey->orderKey());
         self::assertSame(['type' => 'tenant', 'id' => null], $noKey->supporting()->toArray()['scope']['tenant'] ?? null);
 
         $edge = GrantRow::from((object) ['target_id' => 'p1', 'grantee_id' => 'r1'], GrantRow::EDGE, 'role');
@@ -162,7 +185,7 @@ final class GrantRowTest extends TestCase
 
         self::assertSame(['role_permission', 'role', 'r1', null], [$edge->source, $edge->grantee->type, $edge->grantee->id, $edge->scope]);
         self::assertSame(ReviewOrder::key(['role_permission', 'r1', 'p1']), $edge->key());
-        self::assertSame(['role', 'r1', 0, '', 0, '', 0, '', false], $edge->orderKey());
+        self::assertSame(['role', 'r1', 0, '', 0, '', 0, '', false, 0, ''], $edge->orderKey());
         self::assertSame(['source_key' => $edge->key(), 'scope' => null, 'expires_at' => null], $edge->supporting()->toArray());
     }
 

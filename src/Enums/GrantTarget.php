@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
@@ -235,22 +236,27 @@ enum GrantTarget: string
 
     /**
      * Return a reference to every grantee that holds the given row, in any
-     * scope and whether or not the grant has expired, read on the package's
-     * connection, for the event a delete of the row dispatches.
+     * scope and whether or not the grant has expired, and, for a role, every
+     * grantee of an activation of it not ended or expired, each once, read on
+     * the package's connection, for the event a delete of the row dispatches.
      *
      * @param  string  $id
      * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
      */
     public function holders(string $id): array
     {
+        $connection = AuthorizationConnection::connection();
+        $query      = $connection->table($this->table())->where($this->column(), $id)->select(['authorizable_type', 'authorizable_id']);
+
+        if ($this === self::ROLE) {
+            $activations = TableNames::get('break_glass');
+            $activated   = BreakGlassActivations::unexpired($connection->table($activations), $activations)->where('role_id', $id);
+
+            $query->union($activated->select(['authorizable_type', 'authorizable_id']));
+        }
+
         /** @var list<\stdClass> $rows */
-        $rows = AuthorizationConnection::connection()->table($this->table())
-            ->where($this->column(), $id)
-            ->distinct()
-            ->orderBy('authorizable_type')
-            ->orderBy('authorizable_id')
-            ->get(['authorizable_type', 'authorizable_id'])
-            ->all();
+        $rows = $query->distinct()->orderBy('authorizable_type')->orderBy('authorizable_id')->get()->all();
 
         return \array_map(static fn (\stdClass $row): Reference => new Reference(self::text($row->authorizable_type), self::text($row->authorizable_id)), $rows);
     }

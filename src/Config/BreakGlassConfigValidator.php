@@ -15,10 +15,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
  *
  * The block must be an array of these settings, each optional:
  *
- * - `enabled`: whether break-glass is on, a boolean, false by default. True is
- *   refused while `AVAILABLE` is false: break-glass is not available until its
- *   audit trail ships, and that release flips the constant. The package's tests
- *   accept it through `$isAvailable`, which nothing else sets;
+ * - `enabled`: whether break-glass is on, a boolean, false by default;
  * - `max_minutes`: the longest an activation may last, in minutes, a whole
  *   number of at least 1, 60 by default;
  * - `roles`: the emergency roles, each role's name mapped to its settings, an
@@ -42,8 +39,6 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * or a role's settings, is refused, naming its path (N116). The same checks
  * refuse a setting changed after boot when it is read (see `read()`).
  *
- * @managed-static
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -53,9 +48,6 @@ final class BreakGlassConfigValidator
 {
     /** @var string The config key of the block. */
     public const string KEY = 'authorization.break_glass';
-
-    /** @var bool Whether break-glass may be enabled: false until its audit trail ships, which flips it. */
-    public const bool AVAILABLE = false;
 
     /** @var list<string> The settings the block may set. */
     public const array SETTINGS = ['enabled', 'max_minutes', 'roles', 'justifications', 'notes', 'note_max_length'];
@@ -72,17 +64,11 @@ final class BreakGlassConfigValidator
     /** @var int The most characters a justification code may have. */
     public const int CODE_LENGTH = 64;
 
-    /** @var string Why `enabled` true is refused while break-glass is not available. */
-    public const string UNAVAILABLE = 'break-glass is not available until its audit trail ships; leave it disabled.';
-
     /** @var string A justification code: a lower-case letter, then lower-case letters, digits, dots, underscores and hyphens. */
     private const string CODE = '/\A[a-z][a-z0-9._-]*\z/';
 
     /** @var string What a justification code is expected to be. */
     private const string CODE_SHAPE = 'a lower-case letter, then lower-case letters, digits, ".", "_" and "-", of at most 64 characters';
-
-    /** @var bool Whether `enabled` true is accepted: `AVAILABLE`, set true only by the package's own tests. */
-    public static bool $isAvailable = self::AVAILABLE;
 
     /**
      * Validate the supplied `break_glass` config, throwing on the first
@@ -140,23 +126,16 @@ final class BreakGlassConfigValidator
 
     /**
      * Return whether break-glass is enabled, refusing a value that is not a
-     * boolean, and true while break-glass is not available.
+     * boolean.
      *
      * @param  mixed  $enabled
-     * @param  bool|null  $isAvailable
      * @return bool
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    public static function enabled(mixed $enabled, ?bool $isAvailable = null): bool
+    public static function enabled(mixed $enabled): bool
     {
-        $enabled = self::isSwitchedOn('enabled', $enabled);
-
-        if ($enabled && !($isAvailable ?? self::$isAvailable)) {
-            throw new InvalidAuthorizationConfigException(self::KEY . '.enabled', self::UNAVAILABLE, IssueCode::INVALID_VALUE, 'false', 'bool');
-        }
-
-        return $enabled;
+        return self::isSwitchedOn('enabled', $enabled);
     }
 
     /**
