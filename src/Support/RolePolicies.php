@@ -124,17 +124,20 @@ final class RolePolicies
         $pins->roles(\array_keys($reach));
 
         $isByRole = $pins->isRouting() || BreakGlassActivations::isAnyActivated($held);
-        $chains   = $isByRole ? RoleGraph::chainsWithin($reach, $keys) : null;
-        $within   = match (true) {
-            !$isByRole       => RoleGraph::keysWithin($reach, $keys),
-            $chains === null => null,
-            default          => RoleGraph::keysOf($chains),
-        };
-        $fresh  = $within === null ? RoleGraph::chainsOf(self::afresh($roles, $keys)) : null;
+
+        if ($isByRole) {
+            $chains = RoleGraph::chainsWithin($reach, $keys);
+            $within = $chains === null ? null : RoleGraph::keysOf($chains);
+        } else {
+            $chains = null;
+            $within = RoleGraph::keysWithin($reach, $keys);
+        }
+
+        $fresh  = $within === null ? RoleGraph::chainsOf(self::afresh($roles, $keys)) : [];
         $type   = $roles->getRelated()->getMorphClass();
-        $rows   = self::attachments($type, $within ?? RoleGraph::keysOf($fresh ?? []), $isByRole ? [...$columns, 'authorizable_id'] : $columns);
+        $rows   = self::attachments($type, $within ?? RoleGraph::keysOf($fresh), $isByRole ? [...$columns, 'authorizable_id'] : $columns);
         $grants = $rows === [] ? [] : $held->map(static fn (Model $role): mixed => self::grantExpiry($role))->all();
-        $placed = \array_values(\array_filter($rows, static fn (array $row): bool => !TenantColumns::isHalf($row['tenant_type'] ?? null, $row['tenant_id'] ?? null)));
+        $placed = self::placed($rows);
         $found  = \array_values(\array_filter(\array_column($rows, 'policy_id'), \is_string(...)));
         $byRole = $isByRole ? self::byRole($placed) : [];
 
@@ -145,7 +148,7 @@ final class RolePolicies
             $chains,
             $byRole,
             \array_values(\array_diff($found, \array_filter(\array_column($placed, 'policy_id'), \is_string(...)))),
-            $isByRole ? BreakGlassActivations::behind($held, $chains ?? $fresh ?? [], $byRole) : [],
+            $isByRole ? BreakGlassActivations::behind($held, $chains ?? $fresh, $byRole) : [],
         );
     }
 
@@ -172,6 +175,17 @@ final class RolePolicies
         }
 
         return $rows;
+    }
+
+    /**
+     * Return the attachments naming no half tenant, whose allows count too.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return list<array<string, mixed>>
+     */
+    private static function placed(array $rows): array
+    {
+        return \array_values(\array_filter($rows, static fn (array $row): bool => !TenantColumns::isHalf($row['tenant_type'] ?? null, $row['tenant_id'] ?? null)));
     }
 
     /**

@@ -17,6 +17,6 @@ final class ListPermissionsCommand extends ListCatalogueCommand
     /** @var string The console command's name. */
     public const string NAME = 'authorization:list-permissions';
 
-    /** @var string The `authorization.models` key of the listed model. */
+    /** @var 'permission' The `authorization.models` key of the listed model. */
     protected const string MODEL = 'permission';
 }

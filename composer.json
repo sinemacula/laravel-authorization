@@ -1,7 +1,7 @@
 {
     "name": "sinemacula/laravel-authorization",
     "type": "library",
-    "description": "Role-based access control and IAM-style policy evaluation for Laravel",
+    "description": "Role-based access control and IAM-style policy evaluation for Laravel 12 and 13.",
     "keywords": [
         "sine macula",
         "laravel",

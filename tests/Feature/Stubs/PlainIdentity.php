@@ -156,7 +156,7 @@ final class PlainIdentity implements AuthorizableIdentity
     /**
      * Sync the roles, which it ignores.
      *
-     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
+     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|\SineMacula\Laravel\Authorization\Support\RoleReach|string>  $roles
      * @return static
      */
     #[\Override]

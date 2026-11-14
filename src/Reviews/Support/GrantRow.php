@@ -104,9 +104,9 @@ final readonly class GrantRow
         $grantee = new Reference($roleType ?? (string) $text('grantee_type'), (string) $text('grantee_id'));
 
         $times = [
-            'expires_at' => self::instant($columns['expires_at'] ?? null),
-            'created_at' => self::instant($columns['created_at'] ?? null),
-            'updated_at' => self::instant($columns['updated_at'] ?? null),
+            'expires_at' => self::instant($columns, 'expires_at'),
+            'created_at' => self::instant($columns, 'created_at'),
+            'updated_at' => self::instant($columns, 'updated_at'),
         ];
 
         $origin     = $roleType === null ? self::originOf($columns) : null;
@@ -288,14 +288,16 @@ final readonly class GrantRow
     }
 
     /**
-     * Return the stored instant as a UTC instant, or null for none.
+     * Return the instant stored in the column as a UTC instant, or null for
+     * none.
      *
-     * @param  mixed  $value
+     * @param  array<array-key, mixed>  $columns
+     * @param  string  $column
      * @return \Carbon\CarbonImmutable|null
      */
-    private static function instant(mixed $value): ?CarbonImmutable
+    private static function instant(array $columns, string $column): ?CarbonImmutable
     {
-        $instant = UtcDateTime::toUtc($value);
+        $instant = UtcDateTime::toUtc($columns[$column] ?? null);
 
         return $instant === null ? null : CarbonImmutable::instance($instant);
     }

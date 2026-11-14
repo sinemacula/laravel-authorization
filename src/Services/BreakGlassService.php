@@ -133,12 +133,11 @@ final class BreakGlassService
     ): BreakGlassActivation {
         PackageState::guardCurrent();
 
-        $settings  = self::settings($justification, $note);
+        $limits    = self::settings($justification, $note)['roles'];
         $reference = self::grantee($grantee);
         $scope     = self::scope($scope);
         $action    = $actor !== null && OperationGrantee::isActor($reference, $actor->subject) ? PackagePermissions::BREAK_GLASS_ACTIVATE : PackagePermissions::BREAK_GLASS_GRANT;
         $begun     = Operation::begin($actor, [$action]);
-        $limits    = $settings['roles'];
         $columns   = [
             'authorizable_type' => $reference->type,
             'authorizable_id'   => $reference->id,

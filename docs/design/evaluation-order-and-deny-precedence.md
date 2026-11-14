@@ -96,7 +96,7 @@ resolver, `DefaultPolicyResolver`, unions three sources (AUTHZ-6.9, AUTHZ-7.2):
 An attachment of an inline policy to any grantee but the one it belongs to is left out of the resolution, should one
 reach the table past the write paths that refuse it.
 
-Two more sources follow the resolver's, in `DecisionPipeline::gatherPolicies()`, after the bound `PolicyResolver` rather
+Two more sources follow the resolver's, in `CheckGrants::policies()`, after the bound `PolicyResolver` rather
 than through it, so a custom resolver controls neither:
 
 - **A separate identity's policies.** When the subject's identity is a separate model, that identity's own and

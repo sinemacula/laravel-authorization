@@ -11,7 +11,6 @@ use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException;
-use SineMacula\Laravel\Authorization\Models\Permission;
 
 /**
  * The platform's permission catalogue as the package and the application

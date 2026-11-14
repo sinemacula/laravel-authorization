@@ -265,7 +265,7 @@ final readonly class ActingContext
      */
     public function authorizeIn(Operation $operation, OperationResource ...$changes): void
     {
-        $changes = self::ordered($changes);
+        $changes = ChangeOrder::of($changes);
         $pins    = OperationScope::pins();
 
         $pins?->lockChanges(...$changes);
@@ -332,39 +332,6 @@ final readonly class ActingContext
         $translator = $container->bound('translator') ? $container->make('translator') : null;
 
         return AuthorizationException::translated($decision->reason ?? DecisionReason::NO_MATCH, $translator instanceof Translator ? $translator : null, $decision);
-    }
-
-    /**
-     * Return the changes in the order a batch decides them: kind by kind, in
-     * the order their actions first appear, and within a kind by where each
-     * holds and what it acts on.
-     *
-     * @param  array<array-key, \SineMacula\Laravel\Authorization\Administration\OperationResource>  $changes
-     * @return list<\SineMacula\Laravel\Authorization\Administration\OperationResource>
-     */
-    private static function ordered(array $changes): array
-    {
-        $kinds = \array_flip(\array_unique(\array_map(static fn (OperationResource $change): string => $change->action, $changes)));
-
-        $order = static fn (OperationResource $change): array => [$kinds[$change->action], self::placeOf($change)];
-
-        \usort($changes, static fn (OperationResource $one, OperationResource $other): int => $order($one) <=> $order($other));
-
-        return $changes;
-    }
-
-    /**
-     * Return where the change holds and what it acts on, as one string: its
-     * tenant, its application and its record's type and key.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $change
-     * @return string
-     */
-    private static function placeOf(OperationResource $change): string
-    {
-        $target = $change->change?->target;
-
-        return \serialize([$change->tenant, $change->change?->scope->application, $target?->getMorphClass(), $target?->getKey()]);
     }
 
     /**
