@@ -49,13 +49,20 @@ carry references, names and ids, never a value the decision read, and are dispat
 - **Expiry events.** Under `Identity\`: `RoleExpired`, `PermissionExpired` and `PolicyExpired`, dispatched when
   `authorization:prune` removes an expired grant, with its expiry and an operation that names no actor (the sweep is
   system work).
+- **Break-glass events.** Under `Identity\`: `BreakGlassActivated`, with the role, the scope, the activation's key, the
+  justification code and the expiry, never the note; `BreakGlassSurrendered` and `BreakGlassRevoked`, with when it
+  ended, only for an end that ended one; and `BreakGlassExpired`, when `authorization:prune` records the expiry of one
+  that expired without ending, keeping its row, with an operation that names no actor. The actor is the granter, the
+  grantee who surrendered or the revoker. Surrendered and revoked extend `Identity\BreakGlassEnded`, the abstract,
+  readonly shape they share, which is never dispatched itself. Each implements `IdentityEvent`, naming the grantee
+  (see [Break-glass](break-glass.md)).
 - **`SystemOverrideUsed`.** A change to a system role, permission or policy that `forceSystem()` unlocked.
 
 ## Invariants
 
 1. **One marker.** Every event class implements `AuthorizationEvent`; `AuthorizationMutation` extends it for every
-   change event (all but the decision events and `SystemOverrideUsed`), and `IdentityEvent` extends that for the grant
-   and boundary events.
+   change event (all but the decision events and `SystemOverrideUsed`), and `IdentityEvent` extends that for the grant,
+   boundary and break-glass events.
 
 2. **Snapshots of plain values.** Every event is a `final readonly` class whose constructor takes only scalars, backed
    enums, arrays of scalars or of the package's value objects, those value objects (`Support\Operation`,
@@ -151,10 +158,10 @@ carry references, names and ids, never a value the decision read, and are dispat
     is read from the event's operation through `operationId()`, `isTrusted()`, `actor()`, `actorIdentity()`,
     `impersonator()` and `occurredAt()` (in UTC); the call's IP address and user agent are personal data for the grant
     hook alone, so no accessor returns them. Each family implements the accessors once:
-    `Events\Concerns\DescribesGrantChange` for the grant and boundary events, `Events\Concerns\DescribesRecordChange`
-    for the record, role permission and role exclusion events, and the resource policy and guardrail base classes for
-    theirs, each reading the call through `Events\Concerns\DescribesOperation`; each event class names its own
-    identifier.
+    `Events\Concerns\DescribesGrantChange` for the grant, boundary and break-glass events,
+    `Events\Concerns\DescribesRecordChange` for the record, role permission and role exclusion events, and the resource
+    policy and guardrail base classes for theirs, each reading the call through `Events\Concerns\DescribesOperation`;
+    each event class names its own identifier.
 
 14. **Selective decision events (N137).** Which decisions `DecisionEvaluated` reports is set by
     `authorization.events.decisions`: `denials`, `insufficient_authentication` and `previews` (each on by default),
@@ -248,6 +255,7 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 - `Services\GuardrailService`: the guardrail events; `Support\PolicyGuardrails`: the refused edit and delete of a
   guardrail's policy.
 - `Services\RoleExclusionService`: the role exclusion events.
+- `Services\BreakGlassService`, `Services\Support\ExpiredActivations`: the break-glass events.
 - `Concerns\HasSystemProtection`: the override event.
 - `Console\Support\ActorOption`: the commands' `--actor`.
 
@@ -270,6 +278,9 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
   replaced and the shape they share, after commit and only for a change; `GrantServiceTest` and `GrantPrunerTest`: a
   deleted or pruned grantee's boundaries reported as removed; `PolicyObserverTest`: a boundary's policy refused
   deletion.
+- `BreakGlassServiceTest`, `ExpiredActivationsTest`, `BreakGlassActivatedTest`, `BreakGlassSurrenderedTest`,
+  `BreakGlassRevokedTest`, `BreakGlassEndedTest`, `BreakGlassExpiredTest`: the break-glass events and the shape the
+  ended ones share, after commit and only for a change, and never the note.
 - `GuardrailServiceTest`, `GuardrailSetTest`, `GuardrailRemovedTest`, `GuardrailEventTest`: the guardrail events and
   the shape they share, after commit and only for a change; `PolicyObserverTest`: a guardrail's policy refused editing
   and deletion.
@@ -289,4 +300,4 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 - Break-glass grants filling `usedBreakGlass` (BL-70), and break-glass allows reported whatever the settings
   (BL-72b).
 - Applications: the grant events report the application written.
-- Grant expiry and break-glass: their events join the set.
+- Grant expiry: its events join the set.

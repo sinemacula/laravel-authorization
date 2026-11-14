@@ -13,7 +13,8 @@ list. It arrives in three releases (N138), and stays switched off until the thir
 3. **Expiry, reviews and attribution** (BL-70c): the lifecycle events, the access reviews of activations, the
    attribution of decisions to the activation behind them, and the switch that lets `enabled` be true.
 
-This note records the invariants the first two releases fix, so the last extends them rather than changes them.
+This note records the invariants the first two releases and the lifecycle events fix, so the rest of the last
+extends them rather than changes them.
 
 ## Invariants
 
@@ -43,13 +44,14 @@ This note records the invariants the first two releases fix, so the last extends
    deduplicated and never rewriting a role grant. It names the role, the grantee (morph type and key), the granter
    (or none), the scope (both tenant columns null for the platform, else a tenant and `include_subtree`), the
    application (or every application), the justification code, the note (or none), `activated_at` and `expires_at`
-   (both UTC; an activation always expires), and, once it ends early, `ended_at`, `ended_by` and `end_reason`
+   (both UTC; an activation always expires), and, once it ends, `ended_at`, `ended_by` and `end_reason`
    (`surrendered`, `revoked` or `expired`). The reference columns compare their exact bytes on every database
    (`ExactReferences`). A role's deletion deletes its activations.
 
 4. **Live means not ended and not expired.** An activation counts while `ended_at` is null and `expires_at` is after
-   now, compared in UTC (`Database\BreakGlassActivations::live()`). Expiry is exact: no sweeper runs, and a
-   resolution that counts an activation lives no longer than its expiry, as for a grant's.
+   now, compared in UTC (`Database\BreakGlassActivations::live()`). Expiry is exact: it needs no sweep (one only
+   records it, invariant 15), and a resolution that counts an activation lives no longer than its expiry, as for a
+   grant's.
 
 5. **It grants through the role grant path.** A grantee's `roles()` relation reads its role grants and its live
    activations as one set of rows (`BreakGlassActivations::roleGrants()`, joined in place of the role grant table by
@@ -109,8 +111,13 @@ This note records the invariants the first two releases fix, so the last extends
     activation for its grantee alone, acting as itself and not impersonated (`NOT_GRANTEE` otherwise), and `revoke()`
     for a holder of the revoke right or a trusted call; either records `ended_at`, `ended_by` and `end_reason`, and
     either may end an activation while break-glass is disabled. Each returns how many it ended, as a revocation does:
-    one already ended or expired changes nothing and returns 0. No event is dispatched and nothing else is recorded: the
-    lifecycle events are BL-70c's.
+    one already ended or expired changes nothing and returns 0. A surrender's operation is begun with the grantee's
+    acting context, so it is delegated and names the grantee as its actor, though it decides no right. An activation
+    dispatches `Identity\BreakGlassActivated` (the role, scope, key, justification code and expiry, never the note), and
+    an end that ended one `Identity\BreakGlassSurrendered` or `Identity\BreakGlassRevoked` (with `endedAt`), through
+    `OperationScope::dispatch()` inside the operation, so each fires once the write commits and never for a refusal, an
+    end that changed nothing or a rollback, whether break-glass is enabled or not. The operation's actor is the granter,
+    the grantee who surrendered or the revoker, none for a trusted call.
 
 12. **Holding the right is the gate (N140).** A delegated activation is decided through `check()` (D22) on
     `OperationResource::breakGlass()`, in the activation's tenant and application, under
@@ -137,6 +144,15 @@ This note records the invariants the first two releases fix, so the last extends
     an activation of its pair's other role queues on the pair. An update lock on the role would deadlock with that
     write, which locks the pair and then reads the role shared; a delegated activation has taken one through its pins,
     as a delegated grant has, so it can still be refused as a deadlock there (see invariant 12 of separation of duties).
+
+15. **An expiry is recorded, never pruned.** `authorization:prune` (`Services\GrantPruner`, through
+    `Services\Support\ExpiredActivations`) sets `ended_at` to `expires_at`, `end_reason` to `expired` and `ended_by`
+    to null on every activation that expired without ending, whether break-glass is enabled or not, keeps the row, and
+    dispatches one `Identity\BreakGlassExpired` for each, with no actor, a chunk at a time, each chunk one operation. It
+    writes through a query, and each event's dispatch bumps the grantee's versions as any grant event's does. It writes
+    only where `ended_at` is still null, so an activation a surrender or revocation ended meanwhile is neither
+    overwritten nor reported. One naming half a tenant is recorded and counted with no event. `--pretend` counts
+    them, and `PruneResult::$activations` reports how many.
 
 ## Success Path
 
@@ -166,11 +182,10 @@ This note records the invariants the first two releases fix, so the last extends
 
 ## Plan for BL-70c
 
-- **BL-70c.** The activated, surrendered, revoked and expired events (the granted event carries the justification
-  code, the role, the grantee, the granter and the expiry, never the note), the reviews of activations, the
-  attribution of a decision to the activation behind it (from the pivot's `break_glass_id`), break-glass reporting on
-  decision events (BL-72), and `AVAILABLE` flipped to true, with the tests' seam `$isAvailable` removed. What lists
-  or reviews holdings reads role grants alone until then, and BL-70c decides how each shows an activation:
+- **BL-70c.** The reviews of activations, the attribution of a decision to the activation behind it (from the pivot's
+  `break_glass_id`), break-glass reporting on decision events (BL-72), and `AVAILABLE` flipped to true, with the tests'
+  seam `$isAvailable` removed. What lists or reviews holdings reads role grants alone until then, and BL-70c decides
+  how each shows an activation:
   - the grantee listings and the grant scope query (`Support\GrantRoots`, `Services\GrantScopeQuery`), and the
     widening a grant hook is asked about, which therefore never counts an activation as a grant already held;
   - the access reviews (`Reviews\Support\ReviewRun`, `StoredRows`, `HolderRoutes`, `HoldingRoutes`, `RoleChains`,
@@ -198,6 +213,9 @@ This note records the invariants the first two releases fix, so the last extends
   `Administration\AuthorityRows` -- delegated administration weighing an activation.
 - `Resolvers\GrantProvenanceResolver`, `Evaluation\GrantProvenance`, `Evaluation\Enums\GrantSource` -- the route named.
 - `Usage\RouteSources` -- no route from an activation.
+- `Events\Identity\BreakGlassActivated`, `BreakGlassSurrendered` and `BreakGlassRevoked` (sharing `BreakGlassEnded`),
+  `BreakGlassExpired` -- the lifecycle events.
+- `Services\GrantPruner`, `Services\Support\ExpiredActivations`, `Services\PruneResult` -- the recorded expiry.
 
 ## Authoritative Tests
 
@@ -220,6 +238,13 @@ This note records the invariants the first two releases fix, so the last extends
   PostgreSQL and MySQL; and, in forked processes on PostgreSQL and MySQL, two activations of one role sharing its lock
   while a deletion of it waits, and an activation racing a grant or an activation of its pair's other role queueing on
   the pair.
+- `Services\BreakGlassServiceTest` (Feature) -- each lifecycle event once, with its fields and actor, a surrender's
+  actor the grantee; none for a refusal, a rollback, an end that changed nothing; a revocation reported while
+  disabled. `Events\Identity\BreakGlass{Activated,Ended,Surrendered,Revoked,Expired}Test` (Unit) -- the identifiers,
+  the shared shape and the audit properties, with no note.
+- `Services\ExpiredActivationsTest`, `Services\GrantPrunerTest`, `PruneGrantsCommandTest` (Feature) -- the expiry
+  recorded and reported once, the row kept, a live, an ended and a surrendered one left, one ended meanwhile left,
+  half a tenant recorded with no event, one operation a chunk, pretending, a second run, and while disabled.
 - `Database\BreakGlassActivationsTest`, `ResolutionCacheTest`, `Query\ScopeAnchorsTest` (Feature) -- the switch: none
   counts while it is off, in the next request and a fresh container, from the memo and the store, and every one again
   once it is on.
@@ -232,6 +257,6 @@ This note records the invariants the first two releases fix, so the last extends
 
 ## Change Triggers
 
-Update this note when the write path, its rights or its refusals change, when the exclusion check moves relative to the
-role's lock, when `AVAILABLE` changes or the lifecycle events, reviews or attribution land (BL-70c), or when an
-activation starts or stops counting anywhere a role grant counts.
+Update this note when the write path, its rights, its refusals or its events change, when the exclusion check moves
+relative to the role's lock, when `AVAILABLE` changes or the reviews or attribution land (BL-70c), when the prune stops
+recording an expiry, or when an activation starts or stops counting anywhere a role grant counts.
