@@ -1,9 +1,9 @@
 # Gate Authority
 
-The package is the authority of Laravel's Gate for every ability it declares (AUTHZ-9.1). This note explains the one
-`Gate::before` hook through which it answers, which abilities it answers and which fall through to Laravel, the
-registration order that decides precedence, whom a Gate check is about, the switch that turns the hook off, and how a
-Laravel policy class decides through the package (AUTHZ-9.2) for the abilities the hook leaves to it.
+The package is the authority of Laravel's Gate for every ability it declares. This note explains the one `Gate::before`
+hook through which it answers, which abilities it answers and which fall through to Laravel, the registration order that
+decides precedence, whom a Gate check is about, the switch that turns the hook off, and how a Laravel policy class
+decides through the package for the abilities the hook leaves to it.
 
 ## Invariants
 
@@ -17,10 +17,10 @@ Laravel policy class decides through the package (AUTHZ-9.2) for the abilities t
    own (`PackagePermissions`). The match is by membership, never by pattern, so `posts:*` is answered only when a
    permission of that name is declared. A permission row that exists only in the database is not declared.
 
-3. **Both answers stand.** For a declared ability the hook returns the decision of `check()` (D22), true for an allow
-   and false for a deny. Laravel stops at the first before-callback that answers and ignores an after-callback's answer
-   once one is given, so no `Gate::define` callback, Laravel policy class or `Gate::after` callback can override
-   either.
+3. **Both answers stand.** For a declared ability the hook returns the decision of `check()`, through
+   `forUser($user)->can()`, true for an allow and false for a deny. Laravel stops at the first before-callback that
+   answers and ignores an after-callback's answer once one is given, so no `Gate::define` callback, Laravel policy
+   class or `Gate::after` callback can override either.
 
 4. **Everything else falls through.** For any other ability the hook returns null and records no decision, so Laravel
    decides it exactly as without the package.
@@ -28,7 +28,8 @@ Laravel policy class decides through the package (AUTHZ-9.2) for the abilities t
 5. **The first registered answers first.** Laravel runs before-callbacks in registration order and the first non-null
    answer wins. The provider registers the hook right after validating the configuration, before anything else in its
    boot, so a `Gate::before` the application registers once the package has booted never pre-empts it. One registered
-   before the package boots still can; that is Laravel's order, documented rather than worked around.
+   before the package boots still can; that is Laravel's order, documented rather than worked around. A boot whose
+   validation fails registers no hook (see [The diagnostic boot](../guides/console.md#the-diagnostic-boot)).
 
 6. **A guest is no subject.** The Gate's user goes through `forUser($user)`, which the subject resolver translates
    into the subject (see `subject-resolver-contract.md`). A guest (no user) is decided as no subject, which denies as
@@ -48,7 +49,7 @@ Laravel policy class decides through the package (AUTHZ-9.2) for the abilities t
 
 `Gate::allows('posts:update', $post)` for a signed-in user reaches the hook with the user, the ability and the
 arguments. `posts:update` is declared, so the arguments are translated into the resource and the caller's values
-(`input`), exactly as before the hook existed, the user is translated into the subject, and `check()` decides. Its
+(`input`), as the package's own API takes them, the user is translated into the subject, and `check()` decides. Its
 allow or deny is the Gate's answer; any define or policy for `posts:update` is never called.
 
 ## Failure / Edge Cases
@@ -64,7 +65,7 @@ allow or deny is the Gate's answer; any define or policy for `posts:update` is n
 - **Policy classes.** A Laravel policy class can decide through the package with
   `Concerns\DecidesThroughAuthorization`: each method names its action and calls `decide()`, which makes one
   `forUser($user)->check()` and returns `Response::allow()`, or `Response::deny()` with the reason code as its code and
-  the generic `authorization::authorization.denied` line as its message, whatever the reason (N61), never a not-found
+  the generic `authorization::authorization.denied` line as its message, whatever the reason, never a not-found
   response. No method name is mapped to an action. For a declared ability the hook answers before any policy class
   runs (invariant 3), so the trait serves the abilities the hook leaves to Laravel (invariant 4), and every ability
   when the hook is off. An `insufficient_authentication` denial keeps its code but raises no step-up exception and
@@ -77,8 +78,9 @@ allow or deny is the Gate's answer; any define or policy for `posts:update` is n
 - `AuthorizationManager::forUser()` -- the Gate's user translated, a guest as no subject.
 - `Concerns\DecidesThroughAuthorization` and `Support\PolicyResponses` -- a policy class deciding through the package,
   and the decision as a policy response.
-- `Config\ConfigValidator` -- the strict switch.
-- `Console\CheckConfigurationCommand` -- `authorization:check`, the Gate hook among the integrations it reports.
+- `Config\SwitchConfigValidator` -- the strict switch, run by `Config\ConfigValidator` at boot.
+- `Console\CheckConfigurationCommand` and `Diagnostics\IntegrationReader` -- `authorization:check`, the Gate hook among
+  the integrations it reports.
 
 ## Authoritative Tests
 
@@ -89,7 +91,7 @@ allow or deny is the Gate's answer; any define or policy for `posts:update` is n
   and the translated message, a reworded line, `insufficient_authentication`, a guest, every resource form and the
   context under `input`; `PolicyResponsesTest` -- every reason's response, each with its code and the generic line.
 - `DeclaredAbilitiesTest` -- exact membership, one read per instance, one instance per job.
-- `ConfigValidatorTest` -- the strict switch.
+- `SwitchConfigValidatorTest` -- the strict switch.
 - `CheckConfigurationCommandTest` -- the report.
 - `GateHookBudgetTest` -- the cost of falling through and of a declared ability.
 
@@ -97,8 +99,8 @@ allow or deny is the Gate's answer; any define or policy for `posts:update` is n
 
 - Answering abilities by pattern, or for undeclared rows, would change what falls through and must update this note.
 - Wrapping the Gate contract, or registering the hook anywhere other than first in the provider's boot, changes the
-  precedence the README documents.
+  precedence the [Checking access](../guides/checking-access.md#laravels-gate) guide documents.
 - A new setting, seam or integration is added to what `authorization:check` reports (`Diagnostics\Inspector`).
 - Mapping a policy method's name to an action, raising the step-up exception from the policy-class trait, or turning
   a denial into a not-found response would change what a policy class's response means and must update this note
-  and the README.
+  and the [Checking access](../guides/checking-access.md#laravel-policy-classes) guide.

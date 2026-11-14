@@ -1,9 +1,10 @@
 # Design Notes
 
-These notes document the package's authorization-specific contracts and invariants that are easy to miss if you only read
-the quick-start material or skim the test suite.
+These notes document the package's authorization-specific contracts and invariants that are easy to miss if you only
+read the guides or skim the test suite.
 
-Each note is intentionally short and follows the same structure:
+The notes are built from these sections, though not every note has all of them and some add sections of their own
+for their subject:
 
 - `Purpose`
 - `Invariants`
@@ -12,6 +13,8 @@ Each note is intentionally short and follows the same structure:
 - `Implementation Anchors`
 - `Authoritative Tests`
 - `Change Triggers`
+
+The Spatie compatibility and model extension notes are organised by topic instead.
 
 The notes are:
 
@@ -30,9 +33,10 @@ The notes are:
   and cap) and the resources it reaches by its grant's tenant, subtree, application and expiry.
 - `polymorphic-identity-pivots.md`: why role, permission, and policy pivots use plain `string`
   `authorizable_type`/`authorizable_id` columns so that integer, UUID, and ULID identities all work.
-- `subject-resolver-contract.md`: the one seam with `sinemacula/laravel-authentication` for the subject, its tenant
-  and its application; the shipped default (Laravel's signed-in user, no tenant), the Gate's translation of its user,
-  and how the umbrella package wires its own resolver.
+- `subject-resolver-contract.md`: the one seam with authentication (`sinemacula/laravel-authentication` or any other)
+  for the subject, its tenant and its application; the shipped default (Laravel's signed-in user, no tenant), the
+  Gate's translation of its user, and which binding wins when a sibling package or the configuration supplies its own
+  resolver.
 - `model-extension.md`: replacing the shipped `Role`, `Permission` and `Policy` models with subclasses through
   `authorization.models`, the check at boot, what a subclass inherits, and the schema changes it owns.
 - `impersonation.md`: `Authorization::for()` as a scoped clone that decides checks for another principal, the tenant
@@ -43,12 +47,11 @@ The notes are:
   `not_resources`), resource-less checks, the four match outcomes (matches, does not match, undecidable, invalid), the
   check's namespaced context (`authentication`, `request`, `environment`, `subject` and `resource` with their
   built-ins and attribute providers, `input` and application namespaces from a `ContextSource`), built lazily and once a
-  check, with caller values confined to `input`, and the context key catalogue
-  with its types and the operators each type allows, `${…}` interpolation, the write-time refusals, limits and action
-  catalogue, and the operator-first condition catalogue (`eq`, `neq`, `in`, `not_in`, `starts_with`, `ends_with`,
-  `like`, `gt`, `gte`, `lt`, `lte`, `before`, `after`, `between`, `bool`, `null`, `ip_in`, `ip_not_in`, `any_value_in`,
-  `all_values_in`, and the `_if_exists` suffix), the `authentication_requirement` operator, and the assurance keys no
-  condition may test.
+  check, with caller values confined to `input`, and the context key catalogue with its types and the operators each
+  type allows, `${...}` interpolation, the write-time refusals, limits and action catalogue, and the operator-first
+  condition catalogue (`eq`, `neq`, `in`, `not_in`, `starts_with`, `ends_with`, `like`, `gt`, `gte`, `lt`, `lte`,
+  `before`, `after`, `between`, `bool`, `null`, `ip_in`, `ip_not_in`, `any_value_in`, `all_values_in`, and the
+  `_if_exists` suffix), the `authentication_requirement` operator, and the assurance keys no condition may test.
 - `gate-authority.md`: the one `Gate::before` hook through which the package answers the abilities it declares, what
   falls through to Laravel, the registration order that decides precedence, the guest, the switch that turns it off,
   and the trait through which a Laravel policy class decides the abilities left to it.
@@ -60,8 +63,9 @@ The notes are:
   attached to resources and resource types, permission boundaries set on principals and identities, and guardrails
   set on tenants and the platform by an acting subject allowed to.
 - `delegated-administration.md`: the administration actions, the acting context, trusted and delegated calls, the
-  operation resource and its attributes, the administration stage of a decision, what each part of BL-65 enforces,
-  the reasons and the audit.
+  operation resource and its attributes, the administration stage of a decision, the scope, rank, self, expiry,
+  possession and owner rules, the impact of a change on existing holders, the concurrency protocol, the reasons and
+  the audit.
 - `events.md`: the one marker every event implements, the snapshot payloads, the call's operation and actor, one
   operation id per call, dispatch after commit, the grantees a delete reports, the boundary and guardrail events and the
   document digests.

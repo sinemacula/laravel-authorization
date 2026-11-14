@@ -1,7 +1,7 @@
 # Separation of duties
 
-Two roles may be declared mutually exclusive (AUTHZ-11.8), so that no grantee holds both where their reach overlaps: a
-clerk who raises payments and an approver who signs them off, say. A pair is declared and removed through
+Two roles may be declared mutually exclusive, so that no grantee holds both where their reach overlaps: a clerk who
+raises payments and an approver who signs them off, say. A pair is declared and removed through
 `RoleExclusionService`, which also reports who holds both roles of a pair, and once declared it is enforced on every
 write that could let someone hold both (see [Enforcement](#enforcement) below).
 
@@ -18,7 +18,7 @@ try {
     foreach ($exception->getReport()->conflicts as $conflict) {
         $conflict->holder;   // Reference to the principal or grantee holding both
         $conflict->identity; // Reference to the identity one role came through, or null
-        $conflict->first;    // ExclusionRoute to the pair's first role: grantee, path, scope and expiry
+        $conflict->first;    // ExclusionRoute to the pair's first role: grantee, path, scope, reach and expiry
         $conflict->second;   // ExclusionRoute to the second
     }
 }
@@ -37,7 +37,7 @@ saved. A role paired with itself is refused with `InvalidRoleExclusionException`
 `UnknownRoleException`, and a role naming half a tenant with `InvalidTenantColumnsException`. Deleting a role takes its
 pairs with it.
 
-**Owners.** A pair is a definition, owned as the others are (D20). A definition may name the platform's roles and those
+**Owners.** A pair is a definition, owned as the others are. A definition may name the platform's roles and those
 of its own tenant and its tenant's ancestors, as a role takes its parent and its permissions, so a pair is owned by the
 owner of its role owned furthest down: the platform for two platform roles, else the tenant whose role is paired with
 one of the platform's, its own or an ancestor's. Two roles owned by tenants neither of which lies within the other, two
@@ -56,7 +56,7 @@ node, as a guardrail set is. Each call is one operation, recorded on the row it 
 `Role\ExclusionDeclared` or `Role\ExclusionRemoved` once it commits, only when it changed something, with the two roles,
 their names, the owner and the actor.
 
-**The conflict report.** Two roles conflict for a holder where its routes to them overlap (N136):
+**The conflict report.** Two roles conflict for a holder where its routes to them overlap:
 
 - **Reach.** Two grants overlap where a check sees both roles held: in the same tenant, where one reaches below a
   tenant the other is in or below, per the bound tenant tree, or where either is platform-wide. A grant in a parent
@@ -77,16 +77,18 @@ their names, the owner and the actor.
   principals, and a principal holding one role itself and the other through its identity conflicts, the identity
   named. Sibling principals of one identity are never weighed together. A report is `isComplete` only when the
   directory listed every holder's principals completely.
-- **What holds nothing.** An expired grant, and a grant naming half a tenant, which grants nowhere (N130), hold no role.
+- **Break-glass.** An activation not ended or expired holds its role as a grant in its scope would, even while
+  break-glass is switched off; one naming a machine holds nothing, and an identity's never reaches its principals.
+- **What holds nothing.** An expired grant, and a grant naming half a tenant, which grants nowhere, hold no role.
 
 The report reads every holder of both roles, and of every role below either, in a fixed number of queries on the write
 connection, never one for each holder or tenant, through the access reviews' role chains; the tree is asked about every
 pair of tenants the routes weigh together in one query, a chunk of pairs at a time, and the identity directory once for
-each holder. `declare()` reads it under the locks it writes under, both roles' rows locked first, so a delegated grant
-of either waits for it, and reads each role and grant row under a shared lock, so a grant another session commits while
-the declaration runs is still found, whatever snapshot the transaction holds. It refuses with
-`RoleExclusionConflictException`, carrying the report, when it holds any conflict: nothing is written and nothing is
-removed, so an administrator resolves each conflict, revoking a grant or narrowing its reach, and declares the pair
+each holder. `declare()` reads it under the locks it writes under, both roles' rows locked first and then every role
+below them, so a grant of any of them waits for it, and reads each role and grant row under a shared lock, so a grant
+another session commits while the declaration runs is still found, whatever snapshot the transaction holds. It refuses
+with `RoleExclusionConflictException`, carrying the report, when it holds any conflict: nothing is written and nothing
+is removed, so an administrator resolves each conflict, revoking a grant or narrowing its reach, and declares the pair
 again. `conflictsForAll()` finds the conflicts a tenant moved, an identity linked to a principal, or a grant written
 past the package left behind. The reads, `pairs()`, `conflicts()` and `conflictsForAll()`, are trusted and not decided:
 they read every pair and grant stored, whatever tenant owns it, so show them only to those who should see them.
@@ -94,7 +96,7 @@ they read every pair and grant stored, whatever tenant owns it, so show them onl
 ## Enforcement
 
 Once a pair is declared, every write that could let someone hold both its roles where their reach overlaps is refused
-with `RoleExclusionConflictException`, trusted or delegated, with no override (N136):
+with `RoleExclusionConflictException`, trusted or delegated, with no override:
 
 - **Role grants.** `GrantService::grantRole()` and `syncRoles()`, and `assignRole()` and `syncRoles()` on the
   `HasRoles` trait, which call them; a re-armed grant, a later expiry and a reach widened below its tenant count as

@@ -27,7 +27,8 @@ Each command's class names its command in a public `NAME` constant, the name its
 test or a sibling package can refer to it without repeating the string: `PruneGrantsCommand::NAME` is
 `authorization:prune`, and so on for `CheckConfigurationCommand`, `GrantRoleCommand`, `RevokeRoleCommand`,
 `ListRolesCommand`, `ListPermissionsCommand`, `SyncPermissionsCommand`, `MigrateSpatieCommand`,
-`ValidatePolicyCommand`, `WhyCommand` and `ReviewCommand`, all in `SineMacula\Laravel\Authorization\Console`.
+`ValidatePolicyCommand`, `WhyCommand`, `ReviewCommand`, `UsageHeartbeatCommand` and `UsagePruneCommand`, all in
+`SineMacula\Laravel\Authorization\Console`.
 
 The listing commands are administrative views: they list every role or permission, platform-wide and tenant-owned alike,
 and show each one's owner. `grant` and `revoke` write through the grant service and look the role up within the tenant
@@ -41,12 +42,12 @@ administration](administration.md#delegated-administration)), so a role grant pa
 identity and may hand out everything the role carries; for `authorization:sync` it is recorded on the trusted
 operation's events alone.
 
-`authorization:prune` removes the grants that no longer count: expired grants, reported as `RoleExpired`,
-`PermissionExpired` or `PolicyExpired` with no actor, a role's expired grants of permissions, reported as
-`Role\PermissionExpired`, the permission boundaries of a grantee deleted without its model events, such as by a raw
-query, reported as `Identity\BoundaryRemoved` and counted apart from its grants, a grantee whose only rows are
-boundaries included, then its grants, reported as revoked, then the inline policies of such a grantee, reported as
-deleted, and last the resource policy attachments of a record that no longer exists, reported as
+`authorization:prune` removes the grants that no longer count: a role's expired grants of permissions, reported as
+`Role\PermissionExpired`, and the other expired grants, reported as `RoleExpired`, `PermissionExpired` or
+`PolicyExpired`, each with no actor, then the permission boundaries of a grantee deleted without its model events,
+such as by a raw query, reported as `Identity\BoundaryRemoved` and counted apart from its grants, a grantee whose only
+rows are boundaries included, then its grants, reported as revoked, then the inline policies of such a grantee,
+reported as deleted, and last the resource policy attachments of a record that no longer exists, reported as
 `Resource\PolicyDetached`. The record's morph type is resolved to its model class as a grantee's is; a type that names
 no model class is reported and its records' attachments are left, and a whole type's attachments are never removed. A
 soft-deleted grantee keeps its grants, its boundaries and its inline policies, and a soft-deleted record its
@@ -68,8 +69,8 @@ grants that no longer exist and coverage older than `authorization.usage.retenti
 
 `authorization:migrate-spatie` copies roles, permissions and grants from `spatie/laravel-permission` through the
 management services, its `guard_name` becoming `guard`. It reports and skips any role or permission whose name the
-package refuses, and any permission whose name contains `*`, along with its grants. The aliases kept for a port are
-listed in [Spatie compatibility](../design/spatie-compatibility.md).
+package refuses, and any permission whose name contains `*`, along with its grants. `--dry-run` reports the counts
+without writing. The aliases kept for a port are listed in [Spatie compatibility](../design/spatie-compatibility.md).
 
 ## Checking the configuration
 
@@ -235,8 +236,7 @@ is `instance_over_it` while the declared closure is bound but an instance handed
 contract. Each part of `connection` is null when the connection could not be read, and `redacted` lists the fields
 of a part withheld as they are not names. `tables.prefix` is empty when no prefix is set, and null, as is a table's
 `name`, when it is not shown; `explicit` is true for a name set to something other than the table's own. `exception`
-names the class alone of what a check that could not be
-completed threw.
+names the class alone of what a check that could not be completed threw.
 
 **Exit codes.**
 
@@ -259,6 +259,7 @@ report names the adapter and its owner rather than custom code. It declares in i
 contract, through `Diagnostics\Declarations`, a container instance each application holds its own of:
 
 ```php
+use Illuminate\Contracts\Foundation\Application;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Diagnostics\Declarations;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\Lifetime;
@@ -381,8 +382,8 @@ seam, reads a cache or returns early:
 - `TenantScope`'s `apply()`, `within()` and tenant getters, and the `ResolvedTenant` factory;
 - `ApplicationAccess::mayUse()`, on every path, and `GrantScopeQuery`'s `forIdentity()`, `hasGrantIn()`,
   `granteesReaching()` and `granteesWithin()`;
-- the management services: grants, revocations, roles, permissions, policies, resource policies, boundaries and
-  guardrails;
+- the management services: grants, revocations, roles, permissions, policies, resource policies, boundaries,
+  guardrails, role exclusions and break-glass activations;
 - the access reviews' public methods and the grant pruner;
 - the grant usage recorder and the package's usage store, when the container builds them;
 - `PermissionCatalogue::definitions()`, which runs the permission providers, and `PermissionCatalogue::declared()` and
@@ -417,8 +418,8 @@ nothing.
 
 ## Explaining a check from the console
 
-`authorization:why` prints the explanation of a check about a saved subject (AUTHZ-11.5), the `Explanation` that
-`explain()` returns (see [Explanations](preview-and-explanations.md#explanations)):
+`authorization:why` prints the explanation of a check about a saved subject, the `Explanation` that `explain()`
+returns (see [Explanations](preview-and-explanations.md#explanations)):
 
 ```bash
 php artisan authorization:why user:1 posts:publish --tenant=team:7
@@ -457,9 +458,9 @@ class, loads the row with the key, and maps the model to its principal and ident
 application's resolver with principals, a person is mapped to the principal it acts as. It refuses a reference not in
 that format, a type that names no model, a key no row has, a mapping about neither the model's principal nor its
 identity (ambiguous), a principal that is not a saved authorizable identity (unsupported), and a lookup or mapping that
-fails (unresolvable), keeping the failure as the previous exception. The subject keeps its principal, identity and
-guard, and nothing else the resolver gives it: the command adds the tenant and application, and there is never a
-session.
+fails (unresolvable), keeping the failure as the previous exception. The subject keeps its principal, identity, guard
+and platform marker, and nothing else the resolver gives it: the command adds the tenant and application, and there is
+never a session.
 
 **The scope.** `--tenant` omitted is the platform: a tenant resolved for the console, or one a job left in place, is
 never inherited. A type the morph map or a class name resolves to an Eloquent model must name a row that exists, and

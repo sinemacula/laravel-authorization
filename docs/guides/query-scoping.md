@@ -64,6 +64,7 @@ own runs after the scope's last check, and is the application's to keep honest.
 A model whose queries are scoped implements `QueryableResource` and declares where its records keep their tenant:
 
 ```php
+use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Contracts\QueryableResource;
 use SineMacula\Laravel\Authorization\Support\ResourceTenancy;
 
@@ -105,11 +106,12 @@ The scope compiles every statement it can compare with each row's key in SQL exa
 - conditions on `input`, on the subject's namespace, built-in keys included, when the subject's type has no attribute
   provider or one marked `ScopeInvariant`, and on the namespaces of sources marked `ScopeInvariant`, the package's
   defaults included, and authentication requirements a checker so marked judges;
-- the permissions held, the subject's and its identity's policies, its roles' policies, permission boundaries,
-  guardrails (except for `authorization:guardrail.manage`), session caps and the policies attached to the model's
-  type or to its records, whose allows apply to the subjects their `principals` name, by reference or by role, and
-  whose denies apply to everyone; a policy attached to a record weighs on that record alone, compared in SQL under
-  the attachment column's own collation, and a `withPolicies()` override reads no attachment;
+- the permissions held, the subject's and its identity's policies, its roles' policies (a role held through a
+  break-glass activation included), permission boundaries, guardrails (except for `authorization:guardrail.manage`),
+  session caps and the policies attached to the model's type or to its records, whose allows apply to the subjects their
+  `principals` name, by reference or by role, and whose denies apply to everyone; a policy attached to a record weighs
+  on that record alone, compared in SQL under the attachment column's own collation, and a `withPolicies()` override
+  reads no attachment;
 - tenantless models, and tenant-bearing models under any tenant tree: the rows of no tenant are decided in the
   request's scope; the rows within the active tenant's subtree in their own tenant's scope, every grant there, above
   them reaching below, or platform-wide counting; and, when the subject holds the action through a platform-wide
@@ -139,9 +141,11 @@ time the query runs, so the number of tenants and classes is bounded:
 ```
 
 `max_anchors` counts the active tenant and every other tenant the decision's sources may sit at: those of the grants,
-policies and boundaries of the subject and its identity, of the policies of the roles they hold and every role above
-those, of the tenants owning those roles and the granted permissions, of the guardrails, and of the policies attached to
-the type or its records. Under the flat tree, where only a platform-wide grant cuts the rows, only the guardrail and
+break-glass activations (while break-glass is enabled), policies and boundaries of the subject and its identity, of the
+policies of the roles they hold, through a grant or an activation, and every role above those, of the tenants owning
+those roles and the granted permissions, of the guardrails, and of the policies attached to the type or its records.
+Through a preview, the previewer's tenants of the same kinds count as well, with those of every policy attached to
+preview resources. Under the flat tree, where only a platform-wide grant cuts the rows, only the guardrail and
 attached-policy tenants count. Both limits are checked before any class is cut, so the work of cutting is bounded by
 them. `max_attachments` bounds the policies attached to records of the type, in one scope, that name the action; the
 read also stops, and refuses as `too_many_attachments`, once four times as many are attached there whatever their
@@ -232,8 +236,8 @@ a model the decision reads while deciding (the grants, roles, policies and tenan
 
 `QueryScopeRefusedException` is a `RuntimeException`, not an `AuthorizationException`, thrown alike by
 `whereAuthorized()` and `AuthorizedScope`: a refusal is a developer or configuration fault, which Laravel renders as a
-500. It carries the `action`, the model's `resourceType` (its morph
-type, through the morph map when it has one) and every `refusal`, each with its `reason`, the `policy` and `statement`
-it names, the condition key, namespace, column or seam class (`key`) and a fixed `detail`, and `reasons()` lists their
-reasons. Neither it nor its message ever carries an operand, a pattern, a context value, a row's value or a tenant id,
-and a refusal for record attachments names no policy, however many there are.
+500. It carries the `action`, the model's `resourceType` (its morph type, through the morph map when it has one) and its
+`refusals`, each with its `reason`, the `policy` and `statement` it names, the condition key, namespace, column or seam
+class (`key`) and a fixed `detail`, and `reasons()` lists their reasons. Neither it nor its message ever carries an
+operand, a pattern, a context value, a row's value or a tenant id, and a refusal for record attachments names no policy,
+however many there are.

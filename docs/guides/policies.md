@@ -11,18 +11,18 @@ the permission directives (`role:` and `@role` check membership only, so no stag
 boundaries included). It runs these stages in order, and the first that decides ends it, except that the
 administration stage can still refuse an allow; no allow is weighed before every deny and every cap has run:
 
-| Stage            | What it weighs                                                                                                    | Denies as                                                                                                                                                                                                                     |
-|------------------|-------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `subject`        | Whether there is a subject, and whether it and its identity are active                                            | `subject_unresolved`, `subject_inactive`                                                                                                                                                                                      |
-| `resource`       | Whether the resource argument can be identified                                                                   | `resource_unresolved`                                                                                                                                                                                                         |
-| `tenant`         | Whether the resource's tenant is within the check's, or a platform-wide grant of the permission admits it         | `tenant_scope`                                                                                                                                                                                                                |
-| `deny`           | Every deny: the subject's, its identity's of either kind, their roles', the resource's, guardrails', boundaries'  | `explicit_deny`, `invalid_policy`                                                                                                                                                                                             |
-| `guardrail`      | Every guardrail on the check's tenant, its ancestors and the platform must allow the check, unless it is exempt   | `guardrail`, `invalid_policy`                                                                                                                                                                                                 |
-| `boundary`       | Every permission boundary of the principal and of its identity that applies must allow the check                  | `boundary`, `invalid_policy`                                                                                                                                                                                                  |
-| `session`        | Every session cap, the credential's scopes and each set of actions `capped()` was given, must cover the action    | `session_policy`                                                                                                                                                                                                              |
-| `allow`          | Every allow statement that applies to the subject, a resource policy's naming it included, then a permission held | `invalid_policy`                                                                                                                                                                                                              |
-| `administration` | The operation's constraints, for an administration action on its own operation resource; refuses only             | `administration.scope`, `administration.rank_uncomparable`, `administration.rank`, `administration.self`, `administration.owner`, `administration.not_grantable`, `administration.unprovable`, `administration.impersonating` |
-| `implicit`       | Nothing allowed                                                                                                   | `insufficient_authentication`, `condition_failed`, `no_match`                                                                                                                                                                 |
+| Stage            | What it weighs                                                                                                                                                      | Denies as                                                                                                                                                                                                                     |
+|------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `subject`        | Whether there is a subject, and whether it and its identity are active                                                                                              | `subject_unresolved`, `subject_inactive`                                                                                                                                                                                      |
+| `resource`       | Whether the resource argument can be identified                                                                                                                     | `resource_unresolved`                                                                                                                                                                                                         |
+| `tenant`         | Whether the resource's tenant is within the check's, or a platform-wide grant of the permission admits it                                                           | `tenant_scope`                                                                                                                                                                                                                |
+| `deny`           | Every deny: the subject's, its identity's of either kind, their roles', the resource's, guardrails', boundaries'                                                    | `explicit_deny`, `invalid_policy`                                                                                                                                                                                             |
+| `guardrail`      | Every guardrail on the check's tenant, its ancestors and the platform must allow the check, unless it is exempt                                                     | `guardrail`, `invalid_policy`                                                                                                                                                                                                 |
+| `boundary`       | Every permission boundary of the principal and of its identity that applies must allow the check                                                                    | `boundary`, `invalid_policy`                                                                                                                                                                                                  |
+| `session`        | Every session cap, the credential's scopes and each set of actions `capped()` was given, must cover the action                                                      | `session_policy`                                                                                                                                                                                                              |
+| `allow`          | Every allow statement that applies to the subject, a resource policy's naming it included, then a permission held                                                   | `invalid_policy`                                                                                                                                                                                                              |
+| `administration` | The operation's constraints, for an administration action on its own operation resource, or a review's reach, for a review right on a review resource; refuses only | `administration.scope`, `administration.rank_uncomparable`, `administration.rank`, `administration.self`, `administration.owner`, `administration.not_grantable`, `administration.unprovable`, `administration.impersonating` |
+| `implicit`       | Nothing allowed                                                                                                                                                     | `insufficient_authentication`, `condition_failed`, `no_match`                                                                                                                                                                 |
 
 Within each stage, the policies are assessed in a fixed order (name, stored key, resource, then document) and each
 statement by its position, so the decision and its trace never depend on the order the policies were read in. The
@@ -34,11 +34,12 @@ matched and none was invalid, and the administration stage as `satisfied` when t
 `refused`, naming the reason, when one does not:
 
 ```text
-DENY (boundary: a permission boundary does not allow it) at the boundary stage.
+DENY (boundary: a permission boundary does not allow it) at the boundary stage by boundary "support-read-only[<key>]".
   [deny] support-read-only[<key>]#1 sid="no-exports": not_applicable
   [guardrail] guardrails: uncapped
   [boundary] support-read-only[<key>]#0 sid="read": not_applicable
   [boundary] support-read-only[<key>]: refused
+  not evaluated: session, allow, administration, implicit
 ```
 
 The full contract, and why a deny and a cap always win, is in [Evaluation order and deny
@@ -53,7 +54,7 @@ permission held, a `*` included. The permission step names the held permission t
 wildcard says which pattern let the action through:
 
 ```text
-ALLOW at the allow stage.
+ALLOW at the allow stage by permission "posts:*".
   [guardrail] guardrails: uncapped
   [boundary] boundaries: uncapped
   [session] session caps: uncapped
@@ -105,10 +106,10 @@ A policy document is a `version` (1, the default) and a list of `statements`. Ea
 
 A statement takes exactly one of `actions` and `not_actions`, and at most one of `resources` and `not_resources`; each
 is a non-empty list of non-empty strings. Without either resource list a statement names every resource and a check that
-names none. `not_resources` still scopes the statement to resources, so it never covers a check without one. The `sid`
-names the statement in the decision and the trace, and never changes how it is evaluated. `principals` belongs to the
-allow statements of a policy attached to a resource, and to nothing else (see [Resource-based
-policies](#resource-based-policies)).
+names none, as do `resources` that include `*`. `not_resources` still scopes the statement to resources, so it never
+covers a check without one. The `sid` names the statement in the decision and the trace, and never changes how it is
+evaluated. `principals` belongs to the allow statements of a policy attached to a resource, and to nothing else (see
+[Resource-based policies](#resource-based-policies)).
 
 Conditions name the operator first, then each context key it tests, as a dot path into the check's context:
 
@@ -122,19 +123,19 @@ Conditions name the operator first, then each context key it tests, as a dot pat
 ],
 ```
 
-| Operator                        | Operand                               | Holds when the context value                                   |
-|---------------------------------|---------------------------------------|----------------------------------------------------------------|
-| `eq`, `neq`                     | one scalar                            | is a scalar or null that is, or is not, strictly equal to it   |
-| `in`, `not_in`                  | a non-empty list of scalars           | is a scalar or null that is, or is not, in the list (strictly) |
-| `starts_with`, `ends_with`      | a non-empty string                    | is a string that starts, or ends, with it                      |
-| `like`                          | a non-empty glob                      | is a string that matches it                                    |
-| `gt`, `gte`, `lt`, `lte`        | a number or numeric string            | is a number above, at least, below or at most it               |
-| `before`, `after`               | a time                                | is a time before, or after, it                                 |
-| `between`                       | a pair of times                       | is a time within them, inclusive                               |
-| `bool`                          | `true`, `false`, `1`, `0`, `'true'` … | has the same boolean meaning                                   |
-| `null`                          | `true` or `false`                     | `true`: is missing or null; `false`: is present and not null   |
-| `ip_in`, `ip_not_in`            | an address or range, or a list        | is an IPv4 or IPv6 address within any, or within none, of them |
-| `any_value_in`, `all_values_in` | a non-empty list of scalars           | is a list with some element, or only elements, in it           |
+| Operator                        | Operand                                                        | Holds when the context value                                   |
+|---------------------------------|----------------------------------------------------------------|----------------------------------------------------------------|
+| `eq`, `neq`                     | one scalar                                                     | is a scalar or null that is, or is not, strictly equal to it   |
+| `in`, `not_in`                  | a non-empty list of scalars                                    | is a scalar or null that is, or is not, in the list (strictly) |
+| `starts_with`, `ends_with`      | a non-empty string                                             | is a string that starts, or ends, with it                      |
+| `like`                          | a non-empty glob                                               | is a string that matches it                                    |
+| `gt`, `gte`, `lt`, `lte`        | a number or numeric string                                     | is a number above, at least, below or at most it               |
+| `before`, `after`               | a time                                                         | is a time before, or after, it                                 |
+| `between`                       | a pair of times                                                | is a time within them, inclusive                               |
+| `bool`                          | `true`, `false`, `1`, `0`, `'1'`, `'0'`, `'true'` or `'false'` | has the same boolean meaning                                   |
+| `null`                          | `true` or `false`                                              | `true`: is missing or null; `false`: is present and not null   |
+| `ip_in`, `ip_not_in`            | an address or range, or a list                                 | is an IPv4 or IPv6 address within any, or within none, of them |
+| `any_value_in`, `all_values_in` | a non-empty list of scalars                                    | is a list with some element, or only elements, in it           |
 
 - A condition key is a dot path read one segment at a time, never a literal key: `input.post.status` reads the
   `status` of the `post` of `input`, and a caller passing `['post.status' => 'draft']` supplies a key named
@@ -146,28 +147,27 @@ Conditions name the operator first, then each context key it tests, as a dot pat
   an unreadable address as outside every range. PHP's `FILTER_VALIDATE_IP` decides what an address is, on every
   platform, so a zone id (`fe80::1%en0`) or an IPv4 part with a leading zero (`010.0.0.1`) is not one.
 - A NUL byte is refused in a `starts_with`, `ends_with`, `like` or time operand and in a resource pattern, and a
-  context value holding one is undecidable for them and for `ip_in` and `ip_not_in`. A `${…}` value holding one leaves
+  context value holding one is undecidable for them and for `ip_in` and `ip_not_in`. A `${...}` value holding one leaves
   a resource pattern unresolved.
 - `any_value_in` and `all_values_in` need the context value to be a list, such as a token's scopes. An empty list never
   passes `all_values_in`.
-- `eq` and `neq` never take a list: use `in` or `not_in`. String operands may use `${…}` interpolation; list operands
+- `eq` and `neq` never take a list: use `in` or `not_in`. String operands may use `${...}` interpolation; list operands
   are literal. A reference reads the same dot paths a condition key does, through the same resolver (`${request.ip}`,
   `${input.post.id}`, `${subject.id}`, `${resource.owner.id}`); a missing, null or non-scalar value leaves it
   unresolved, which makes the test undecidable.
 - `authentication_requirement` tests only the reserved key `authentication`, and its operand is a requirement rather
   than a value: see [Authentication requirements](context.md#authentication-requirements).
 
-A policy is checked whenever it is saved, through the model or `PolicyService`, and refused with every limit,
-context-key and catalogue reason at once, or, for a malformed document, the first structural fault found and any limit
-it breaks. The reasons are a malformed document; a condition key or `${…}` reference that the context key catalogue
-does not declare; a condition on a key that may not be tested; a condition on, or a `${…}` reference to, an assurance
-key; an operator that does not suit the key's type; an
-`actions` or `not_actions` pattern that matches no declared permission; or a document over the limits in
-`policies.limits` (`AUTHORIZATION_POLICY_DOCUMENT_BYTES`, `_STATEMENTS`, `_CONDITIONS` and `_PATTERN_LENGTH`: 64 KiB of
-JSON, 100 statements, 50 key tests a statement and 512 characters a pattern or string operand). The limits are checked
-again when a stored policy is read, and the resolution cache keys cached policies by the limits they were checked
-under, so lowering one makes the stored policies over it deny as `invalid_policy` until they are fixed. To find them, or
-to check policy files before you deploy them:
+A policy's document is checked whenever it is written, through the model or `PolicyService`, and refused with every
+limit, context-key and catalogue reason at once, or, for a malformed document, the first structural fault found and any
+limit it breaks. The reasons are a malformed document; a condition key or `${...}` reference that the context key
+catalogue does not declare; a condition on a key that may not be tested; a condition on, or a `${...}` reference to, an
+assurance key; an operator that does not suit the key's type; an `actions` or `not_actions` pattern that matches no
+declared permission; or a document over the limits in `policies.limits` (`AUTHORIZATION_POLICY_DOCUMENT_BYTES`,
+`_STATEMENTS`, `_CONDITIONS` and `_PATTERN_LENGTH`: 64 KiB of JSON, 100 statements, 50 key tests a statement and 512
+characters a pattern or string operand). The limits are checked again when a stored policy is read, and the resolution
+cache keys cached policies by the limits they were checked under, so lowering one makes the stored policies over it deny
+as `invalid_policy` until they are fixed. To find them, or to check policy files before you deploy them:
 
 ```bash
 php artisan authorization:policy:validate --database
@@ -245,10 +245,11 @@ policies with the rest.
 A check gathers its policies from four places: the bound policy store (`policy_store`, for policies shipped in code or
 kept elsewhere), the identity's own attachments, managed and inline, its roles' policies, and the policies attached to
 the check's resource and to its type (see [Resource-based policies](#resource-based-policies)), plus those of a separate
-identity, own and role-attached alike (see `docs/design/evaluation-order-and-deny-precedence.md`). A policy attached
-both to the identity and to one of its roles counts once. The order they are gathered in never changes the decision:
-each stage assesses them by name, then stored key, then the resource a resource policy is attached to, then document.
-The grantee's permission boundaries are read apart from them, so a custom resolver never drops them (see [Permission
+identity, own and role-attached alike (see [Where policies come
+from](../design/evaluation-order-and-deny-precedence.md#where-policies-come-from)). A policy attached both to the
+identity and to one of its roles counts once. The order they are gathered in never changes the decision: each stage
+assesses them by name, then stored key, then the resource a resource policy is attached to, then document. The grantee's
+permission boundaries are read apart from them, so a custom resolver never drops them (see [Permission
 boundaries](caps.md#permission-boundaries)).
 
 ## Resource-based policies
@@ -327,10 +328,10 @@ whom it applies to:
   application, names no one. The roles a subject holds are read through the resolution cache, as its roles are, so
   once warm a check that matches a role selector reads no role.
 
-A selector is an exact name, never a pattern: a space, `*` or `${` in one is refused, and each part is 1 to 191 bytes. A
-deny statement takes no `principals` (refused when the policy is saved) and applies to everyone checking the resource,
-wherever the check is decided. A statement that names principals applies only as part of a resource policy, so the rule
-is held at every write:
+A selector is an exact name, never a pattern: whitespace, `*`, a NUL byte or `${` in one is refused, and each part is 1
+to 191 bytes. A deny statement takes no `principals` (refused when the policy is saved) and applies to everyone checking
+the resource, wherever the check is decided. A statement that names principals applies only as part of a resource
+policy, so the rule is held at every write:
 
 - Attaching an inline policy to a resource, or a policy with an allow statement that names no principals, is refused
   with `ResourcePolicyException`.
@@ -351,8 +352,8 @@ boundaries are weighed before any allow, so they cap a resource policy's allow a
 is admitted to such a resource through a platform-wide permission, and the check runs at platform scope, a deny attached
 to the resource in its own tenant still applies: the resource's owner can lock it against everyone, a support user with
 a platform-wide grant included. That tenant's resource-policy allows do not reach the subject there. `withPolicies()`
-bypasses the resource's policies with the rest; give a supplied policy a resource with `Policy::withResource('post:42')`
-to have it evaluated as one.
+bypasses the resource's policies with the rest; give a supplied policy a resource with
+`$policy->withResource('post:42')`, on the `Evaluation\Policy` that `withPolicies()` takes, to have it evaluated as one.
 
 The decision, the trace and `explain()` name a resource policy's statements as they name any other, with the resource
 the policy is attached to: `post-42-sharing[<its key>]#0 sid="reviewers-read" on "post:42"`. `authorization:why`

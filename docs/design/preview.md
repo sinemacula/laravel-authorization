@@ -3,22 +3,24 @@
 ## Purpose
 
 A "what can this person do?" screen needs the decisions another subject would get, without the caller becoming that
-subject (AUTHZ-11.4). This note explains `Authorization::previewFor()`: who previews whom and where, how a preview is
+subject. This note explains `Authorization::previewFor()`: who previews whom and where, how a preview is
 admitted and admitted again, what it records and reports, and why it never confers authority. The package never
 impersonates: the guard, the session, the Gate and Blade stay the caller's.
 
 ## Invariants
 
-1. **A scoped manager with fixed parties (N87).** `previewFor(object $subject, ?AuthorizationScope $scope = null)`
-   returns a clone of the manager carrying an immutable `Preview\PreviewContext`. The context holds the previewer, the
-   real caller, the subject the manager it is called on decides about, captured with its session and never inferred
-   later from the target, the authenticated user or a listener; the target; and the scope, given or captured with
-   `AuthorizationScope::current()` when the preview is built. A job previews through an explicitly named caller,
+1. **A scoped manager with fixed parties.** `previewFor(object $subject, ?AuthorizationScope $scope = null)` returns a
+   clone of the manager carrying an immutable `Preview\PreviewContext`. The context holds the previewer, the real
+   caller, the subject the manager it is called on decides about, captured with its session and never inferred later
+   from the target, the authenticated user or a listener; the target; and the scope. That is the scope given, or, when
+   none is, the platform on the target's application for a `Subject` carrying the platform marker, and otherwise the
+   request's, captured with `AuthorizationScope::current()` when the preview is built. A job previews through an
+   explicitly named caller,
    `Authorization::for($resolvedSubject)->previewFor($target)`. The previewer's own manager, which decides each
-   admission, is built without the scope a `Subject` given to `for()` names (N109), so a preview made from such a
-   manager is admitted in the preview's scope and the scopes its decisions are made in, as before. A previewer that
-   names no record, a guest included, is refused as `subject_unresolved`, and a target that names no record with
-   `InvalidPreviewException`, since no event could name either.
+   admission, is built without the scope a `Subject` given to `for()` names, so a preview made from such a manager is
+   admitted in the preview's scope and the scopes its decisions are made in. A previewer that names no record, a guest
+   included, is refused as `subject_unresolved`, and a target that names no record with `InvalidPreviewException`,
+   since no event could name either.
 
 2. **The target has no session.** A resolved `Subject` keeps its principal and identity but loses its session, and a
    model gets `for()` semantics, in the previewer's request. No authentication requirement made of the target is met,
@@ -26,13 +28,16 @@ impersonates: the guard, the session, the Gate and Blade stay the caller's.
    applies, so `insufficient_authentication` is the reason only when the requirement alone kept an allow from applying.
    A preview's `authorize()` never throws `InsufficientAuthenticationException`: such a denial throws a plain
    `AuthorizationException`, carrying the decision, since no step-up by the caller could meet a requirement made of the
-   target.
+   target. What the target's credential carries still caps its checks: a target that says nothing of its scopes but
+   names a credential (a session, or a guard whose caller is its own model) has them asked of the `SessionPolicySource`
+   before the session is dropped, and the answer is kept, so a credential the source cannot establish allows nothing.
 
 3. **The caller's request context.** The `authentication`, `request` and `environment` namespaces are the caller's
    request's, read as they are now. A preview shows the target evaluated in the caller's request context, which is no
-   prediction of what the target would see when signed in; a simulator of the target's own request is separate work.
+   prediction of what the target would see when signed in. The package offers no simulator of the target's own
+   request.
 
-4. **Admission is a check about the previewer (N84).** `authorization:subject.preview`, declared by
+4. **Admission is a check about the previewer.** `authorization:subject.preview`, declared by
    `PackagePermissions` with the catalogue's `authorization:<noun>.<verb>` spelling (the subject its noun), is decided
    through `check()` as the previewer, through the previewer's own manager, with its session, denies, boundaries,
    guardrails and caps, on a `Preview\PreviewResource` naming the target's principal and identity and the tenant and
@@ -60,7 +65,8 @@ impersonates: the guard, the session, the Gate and Blade stay the caller's.
    for both, and each is admitted where it is decided; a class refused refuses the query, whether it holds rows or
    not. Each scope is admitted once per use, keyed as the resolution cache keys it (tenant, below or not, application),
    so a batch over many resources of one tenant costs one admission, not one per resource; a scope is never kept from
-   one use to the next.
+   one use to the next, and once the request's decisions are forgotten (`DecisionMemory`) the use admits each scope
+   again at its next decision there.
 
 6. **Revalidated at every use.** `PreviewContext::run()` is one use: each check, each batch, each listing and each
    compile of a query scoped through the preview. It admits the preview in its own scope first, then wherever a
@@ -76,36 +82,38 @@ impersonates: the guard, the session, the Gate and Blade stay the caller's.
    which returns nothing, though the decisions made in it before are reported as any decision is. The refusal is
    decided, recorded and reported as a normal check about the previewer.
 
-8. **One decision path (D22).** `check()`, `can()`, `cannot()`, `any()`, `all()`, `authorize()`, `explain()`,
+8. **One decision path.** `check()`, `can()`, `cannot()`, `any()`, `all()`, `authorize()`, `explain()`,
    `checkMany()`, `canEach()`, `filterAuthorized()`, `permissionsFor(null, ...)` and `whereAuthorized()` given the
    preview go through the manager's one path: once admitted, the scope is put in place for the tenant and application
    (`AuthorizationScope::within()`) and the target is decided in it (`subjectIn()`), the request's scope restored
    afterwards, even when the use throws. A preview's answers equal those of `for($target)` under the same scope and
    state; only admission and recording differ, and a preview refuses where its previewer is not admitted.
 
-9. **Recording (N85, N86).** Every decision about the target dispatches `DecisionEvaluated` while
-   `events.decisions.previews` is on, as it is by default, reported as a preview, and `AuthorizationFailed` for every
-   `authorize()` refusal, with `subject` the target and `previewer` the caller: `CheckBatch` takes the previewer and
-   puts it in every provenance it records. When a listener has meanwhile recorded another decision, the
-   `AuthorizationFailed` names the preview's scope and its previewer. Previews dispatch whatever `allows` sets. A
-   preview `check()` or `checkMany()` stores the last decision with its provenance as usual. A preview
-   `permissionsFor()` dispatches one event per action it evaluates, an exception to N70 for previews alone, and stores
-   none of them, through the dispatch-only switch, so the last decision stays the admission's. The admission is a real
-   check about the previewer: it records and dispatches as normal, with no previewer. Payloads are references, names and
-   keys, never a value or a session.
+9. **Recording.** Every decision about the target dispatches `DecisionEvaluated` while `events.decisions.previews` is
+   on, as it is by default, reported as `PREVIEW` whatever `allows` sets (as `BREAK_GLASS` when it used break-glass),
+   and `AuthorizationFailed` for every `authorize()` refusal, with `subject` the target and `previewer` the caller:
+   `CheckBatch` takes the previewer and puts it in every provenance it records. With `previews` off, a preview's
+   decisions are reported as the other settings select. When a listener has meanwhile recorded another decision, the
+   `AuthorizationFailed` names the preview's scope and its previewer. A preview `check()` or `checkMany()` stores the
+   last decision with its provenance as usual. A preview `permissionsFor()` or `heldPermissionsFor()` reports each
+   action it evaluates as `events.decisions` selects, unlike any other listing, which reports nothing, and stores none
+   of them, through the dispatch-only switch, so the last decision stays the admission's. The admission is a real check
+   about the previewer: it records and dispatches as normal, with no previewer. Payloads are references, names and keys,
+   never a value or a session.
 
-10. **Explanations (N85).** The right to preview discloses the target's explanation and trace (statements,
+10. **Explanations.** The right to preview discloses the target's explanation and trace (statements,
     conditions, caps and requirements), never an attribute value or a session detail, which no trace holds. A refused
     preview explains nothing.
 
-11. **Refused in v1.** On a preview, `for()`, `forActor()`, `forUser()`, `previewFor()` and `permissionsFor()` naming
-    a subject would change the target, a listing in another tenant or application would change the scope, and
-    `withPolicies()` would answer through hypothetical policies: each throws `InvalidPreviewException` before anything
-    is decided. A manager carrying a policy override cannot build a preview either, so an override never stands in for
-    the previewer's policies. `capped()` is allowed: it caps the target's checks alone, never the previewer's
-    admission, and a cap on the caller's manager still caps the admission.
+11. **Refused on a preview.** On a preview, `for()`, `forActor()`, `forUser()`, `previewFor()`, and `permissionsFor()`
+    or `heldPermissionsFor()` naming a subject would change the target, a listing in another tenant or application
+    would change the scope, `withPolicies()` would answer through hypothetical policies, and `withoutSessionCaps()`
+    would lift the target's credential caps: each throws `InvalidPreviewException` before anything is decided. A
+    manager carrying a policy override, or built by `withoutSessionCaps()`, cannot build a preview either, so neither
+    party is decided through hypothetical policies or without session caps. `capped()` is allowed: it caps the target's
+    checks alone, never the previewer's admission, and a cap on the caller's manager still caps the admission.
 
-12. **No authority from a preview (N87).** A preview never converts into an `ActingContext`: one built while a preview
+12. **No authority from a preview.** A preview never converts into an `ActingContext`: one built while a preview
     is evaluated, or built from a preview's target (the subject `currentSubject()` returns on it), is refused as
     `administration.previewing`. Every management service call made while a preview is evaluated, from its admission to
     its last decision and the report of its refusal (a callback or a listener it runs, a listener of its
@@ -146,10 +154,11 @@ again by each of the four uses.
   answers what the target could do, and the application decides what of it to show, by its own check of the previewer
   or by returning constrained metadata.
 - **SQL taken in as text.** A preview-scoped query taken into another as SQL text (`whereIn()`, `fromSub()`,
-  `joinSub()`, `selectSub()`, `withCount()` or `has()` with a count) is compiled, and admitted, when it is taken in,
-  and the other query reuses that text, as for any scoped query (see `query-scoping.md`): nothing revalidates it when
-  the other query runs, and it is not refused as `preview_write` when the other query writes, so
-  `Post::query()->whereIn('id', $previewQuery->select('id'))->delete()` deletes the rows the target may see.
+  `joinSub()`, `selectSub()`, a `withCount()` or `withExists()` constraint, or `has()` with a count) is compiled, and
+  admitted, when it is taken in, and the other query reuses that text, as for any scoped query (see
+  [Query Scoping](query-scoping.md)): nothing revalidates it when the other query runs, and it is not refused as
+  `preview_write` when the other query writes, so `Post::query()->whereIn('id', $previewQuery->select('id'))->delete()`
+  deletes the rows the target may see.
 - **What a clone cannot sandbox.** A preview guards the package's management services, acting contexts and its own
   queries. It cannot stop a raw Eloquent write on the package's models, pivots or tables, nor a trusted actorless
   service the application calls outside the preview's evaluation: both stay the trusted integration surfaces they
@@ -167,7 +176,8 @@ again by each of the four uses.
 - `Preview\Previewing` -- the evaluation mark, the targets and each running use's subject, scoped to the request or
   job; `admit()`, which `Evaluation\DecisionPipeline::sources()` calls.
 - `Query\ScopeAnchors` -- the previewer's anchors beside the target's.
-- `AuthorizationManager::check()`, `checkMany()`, `permissionsFor()`, `queryScope()` -- the preview path.
+- `AuthorizationManager::check()`, `checkMany()`, `explain()`, `queryScope()`, and `Concerns\ListsPermissions::listed()`
+  -- the preview path.
 - `Evaluation\CheckBatch` -- the previewer in every provenance, and the dispatch-only switch for listings.
 - `Query\AuthorizedQuery` -- the refusal of a preview query's own writes, `preview_write`.
 - `Administration\ActingContext`, `Support\OperationScope::run()` -- `administration.previewing`.
@@ -188,10 +198,16 @@ again by each of the four uses.
   and the Gate, Blade and guard staying the caller's.
 - `Preview\PreviewingTest` (Feature) -- a mutation during evaluation refused, acting contexts refused, the evaluation
   mark, each use's subject held with its admission, and the isolation of requests and jobs.
+- `ForgettingDecisions\PreviewAdmissionTest` (Feature) -- a scope admitted again once the decisions are forgotten.
+- `PermissionsFor\ListsPermissionsTest` (Feature) -- a preview listing the target's actions and reporting each, and
+  refusing a subject or another scope.
+- `Preview\PreviewResourceTest`, `Preview\PreviewAttributesTest` (Unit) -- the preview reference in the scope's tenant
+  and the attributes a policy reads.
 
 ## Change Triggers
 
 - A simulator of the target's own request context, or a target session, would replace invariant 3.
 - Hypothetical policies on a preview would need results marked hypothetical before `withPolicies()` is allowed.
-- Configurable decision events (BL-72) must keep preview events non-disableable.
+- A change to `events.decisions.previews` or to `DecisionReport`'s order changes which preview decisions are
+  reported, and as what.
 - A rank rule for previews would reuse `RankComparison`, never another comparison.

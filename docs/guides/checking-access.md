@@ -36,7 +36,7 @@ or about the subject of the scoped manager it is called on:
 | `GrantScopeQuery::forIdentity()`, `hasGrantIn()`  | Not on the manager: grant scope and presence in a tenant (see [Grant scope query](administration.md#grant-scope-query))                |
 | `granteesReaching()`, `granteesWithin()`          | Not on the manager: whose grants reach a tenant or lie within it (see [Grant scope query](administration.md#grant-scope-query))        |
 | `AccessReview::review()`, `trusted()`             | Not on the manager: holders, holdings, expiries, grants by actor, unused (see [Access reviews](access-reviews.md#access-reviews))      |
-| `AccessReview::page()`, `stream()`, `export()`    | Not on the manager: a review a keyset page, a lazy stream or JSON Lines at a time, each with a `trusted…()` counterpart                |
+| `AccessReview::page()`, `stream()`, `export()`    | Not on the manager: a review a keyset page, a lazy stream or JSON Lines at a time, each with a `trusted*()` counterpart                |
 
 `check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` deciding as `checkMany()`
 decides a batch of one: every other method but `queryScope()` and the listings adapts one of them, and each decision
@@ -103,7 +103,7 @@ $member = new Subject($principal, $person, $account, 'admin');
 
 Authorization::for($member)->can('posts:update', $post);   // decided in $account, on the admin application
 
-// The same decision, as callers wrote it before: wrapping the call still gives the same result.
+// The same decision, with the call wrapped in the scope.
 $scope = AuthorizationScope::tenant($account, 'admin');
 $scope->within(fn () => Authorization::for($scope->subjectIn($member))->can('posts:update', $post));
 ```
@@ -181,10 +181,10 @@ The Gate's arguments reach the check as the package's own API takes them: a mode
 `input` (see [The check's context](context.md#the-checks-context)).
 
 Every other ability falls through to Laravel unchanged: the hook answers nothing, so the application's defines and
-policy classes decide it as they always have. A name is matched exactly, never as a pattern, so `posts:*` is the
-package's only when a permission of that name is declared. A permission row that exists only in the database, declared
-by no enum or provider, is not the package's either: the Gate leaves it to Laravel, while `Authorization::can()` still
-decides it.
+policy classes decide it as they would without the package. A name is matched exactly, never as a pattern, so
+`posts:*` is the package's only when a permission of that name is declared. A permission row that exists only in the
+database, declared by no enum or provider, is not the package's either: the Gate leaves it to Laravel, while
+`Authorization::can()` still decides it.
 
 The Gate's user is translated into the subject through the subject resolver's `forUser()`, so the check is about the
 principal the user acts as. A guest (no user) is decided as no subject, which denies as `subject_unresolved`; it is
@@ -334,11 +334,13 @@ The Blade directives make the same checks on the same subject:
 @endrole
 ```
 
-The permission directives (`@permission`, `@anypermission`, `@allpermissions` and their Spatie-shaped `@has…` aliases)
-decide each action on the full decision, as `@can` does: the any forms need one allowed, the all forms every one. The
-role directives check membership as `role:` does and take a guard; a permission directive refuses one. Every directive
-takes a string or a list, with `|` between names in either, and refuses a third argument. With no subject, every
-directive is false.
+The permission directives (`@permission`, `@anypermission`, `@allpermissions` and their Spatie-style aliases
+`@haspermission`, `@hasanypermission` and `@hasallpermissions`) decide each action on the full decision, as `@can` does:
+the any forms need one allowed, the all forms every one. The role directives (`@role`, `@anyrole`, `@allroles`,
+`@hasrole`, `@hasanyrole` and `@hasallroles`) check membership as `role:` does and take a guard; a permission directive
+refuses one. Every directive takes a string or a list, with `|` between names in either, and refuses a third argument.
+With no subject, every directive is false. Each has an `@unless` form too, `@unlessrole` say, closed with `@endrole` or
+Spatie's `@endunlessrole`.
 
 ## Bulk checks
 
@@ -395,7 +397,7 @@ one for the policies attached to them and one for their attributes. A tenant tre
 tenant's place in it once for the batch, however many of its resources are decided, and a persistent cache store is
 read and written for the records' attachments together, in the same number of round trips for one record as for 100.
 A single check, `check()` or a batch of one, reads nothing ahead and holds nothing for later: it reads its resource's
-tenant, attached policies and attributes on its own, as it always has.
+tenant, attached policies and attributes on its own.
 
 Reading in bulk needs the resource tenant resolver and the attribute providers to read in bulk. The package's own
 resolvers do. A resolver of your own implements `Contracts\BulkResourceTenantResolver`: `tenantsOf($models)` and
@@ -405,6 +407,7 @@ cannot tell. A resource attribute provider implements `Contracts\BulkResourceAtt
 each, keyed by token:
 
 ```php
+use App\Models\Post;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Contracts\BulkResourceAttributeProvider;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;

@@ -1,9 +1,9 @@
 # Access reviews
 
-`AccessReview` lists, for periodic reviews and their sign-off (AUTHZ-11.6), who holds a role, a permission or a policy
-in a scope, what a subject holds and where, which grants expire within a window, which grants an actor last granted or
-changed, and, with [usage tracking](#usage-tracking) on, which grants show no use. Resolve it from the container, where
-it is a singleton, and run a typed `ReviewQuery`:
+`AccessReview` lists, for periodic reviews and their sign-off, who holds a role, a permission or a policy in a scope,
+what a subject holds and where, which grants expire within a window, which grants an actor last granted or changed, and,
+with [usage tracking](#usage-tracking) on, which grants show no use. Resolve it from the container, where it is a
+singleton, and run a typed `ReviewQuery`:
 
 ```php
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
@@ -46,10 +46,10 @@ A grant or attachment row that names half a tenant (a type without a key, or the
 writes, is listed as damaged, never as a clean platform origin: its `grant_state` is `malformed` and its `origin_scope`
 shows the tenant columns as stored, the missing half null. A check applies what grants of such a row nowhere and what
 restricts of it everywhere (see [Managing roles, permissions and
-grants](grants.md#managing-roles-permissions-and-grants)), so it is never a placed grant of a review of what applies; a
-review of everywhere, which needs platform-wide admission, lists it all the same, and no review rooted within a tenant
-does, since it cannot be shown to lie there. A route resting on such a row is `malformed` too, and reaches a holder only
-through a row that holds everywhere.
+grants](grants.md#managing-roles-permissions-and-grants)), so no review of what applies lists it; a review of
+everywhere, which needs platform-wide admission, lists it all the same, and no review rooted within a tenant does, since
+it cannot be shown to lie there. A route resting on such a row is `malformed` too, and such a row meets a role's grant
+or attachment only where the other row is the platform's.
 
 | Stored tenant    | `appliesIn()` (any tenant, or the platform) | `rootedWithin()` (any tenant) | `everywhere()` |
 |------------------|---------------------------------------------|-------------------------------|----------------|
@@ -58,17 +58,25 @@ through a row that holds everywhere.
 
 Holders, holdings, expiries and an actor's grants each follow their scope selection.
 
+**Break-glass activations.** Every [break-glass](break-glass.md) activation not ended or expired at the review's instant
+is reviewed as a holding of its role in its scope, whether break-glass is enabled or not, since it grants again once it
+is. Holders, holdings, expiries, an actor's grants and the unused review list it as a row of its own beside any grant of
+the same role in the same scope, with its own `source_key`, its activation as `created_at`, its expiry as `expires_at`,
+its granter as `granted_by`, and a `break_glass` field holding its key (`activation`) and justification code, never the
+note. Its `usage` is always `unknown`, since an activation's use is never tracked. In principal mode an identity's
+activation is left out, as it never reaches a principal through the identity.
+
 **The queries.**
 
-| Query                                            | Lists                                                                                                  |
-|--------------------------------------------------|--------------------------------------------------------------------------------------------------------|
-| `ReviewQuery::holders($target, $scope, $direct)` | Every route to a role, permission or policy (a model or reference), or its direct grants alone         |
-| `ReviewQuery::holdings($subject, $scope)`        | A `Subject`'s own grants and its identity's that reach it; or an identity's and its listed principals' |
-| `ReviewQuery::expiring($scope, $from, $until)`   | Grants, attachments and role permission edges expiring within `[from, until)`, in UTC                  |
-| `ReviewQuery::grantedBy($actor, $scope)`         | Grants whose `granted_by` pair is exactly the actor's                                                  |
-| `ReviewQuery::unused($scope, $since)`            | Live grants with no observed use since the instant (see [Usage tracking](#usage-tracking))             |
-| `forAction($action)`                             | Of holdings, the routes giving the action (see [below](#where-a-subject-holds-an-action))              |
-| `withLimit($limit)`                              | The same review returning at most that many rows                                                       |
+| Query                                                | Lists                                                                                                  |
+|------------------------------------------------------|--------------------------------------------------------------------------------------------------------|
+| `ReviewQuery::holders($target, $scope, $directOnly)` | Every route to a role, permission or policy (a model or reference), or its direct grants alone         |
+| `ReviewQuery::holdings($subject, $scope)`            | A `Subject`'s own grants and its identity's that reach it; or an identity's and its listed principals' |
+| `ReviewQuery::expiring($scope, $from, $until)`       | Grants, attachments and role permission edges expiring within `[from, until)`, in UTC                  |
+| `ReviewQuery::grantedBy($actor, $scope)`             | Grants whose `granted_by` pair is exactly the actor's                                                  |
+| `ReviewQuery::unused($scope, $since)`                | Live grants with no observed use since the instant (see [Usage tracking](#usage-tracking))             |
+| `forAction($action)`                                 | Of holdings, the routes giving the action (see [below](#where-a-subject-holds-an-action))              |
+| `withLimit($limit)`                                  | The same review returning at most that many rows                                                       |
 
 A permission target means that definition, never a policy statement or wildcard grant that might authorise its action,
 and a definition is named by its key, so two sharing a name under another guard or owner are never confused. Holders are
@@ -121,17 +129,17 @@ document or value. Its shape is versioned (`version: 1`):
 | `action_evidence`                        | Only in a review narrowed to an action, what gives it and where (see below)                  |
 
 The rows come in one total order, the same on SQLite, PostgreSQL and MySQL: by source kind, target, grantee, origin
-scope (the platform before a tenant, every application before a named one, a role grant before a break-glass
-activation of the same scope, and activations by key) and route (the first role of its chain, how many roles the chain
-runs through, then the rows it rests on), every string compared byte for byte. A review returns at
-most `authorization.reviews.limit` rows (1000 by default; a whole number of at least 1, or boot fails), or the limit
-`withLimit()` sets, and reads at least one more to say exactly whether any was left out. Every grant is read on the
-write connection, never one query per holder: the roles a review involves are read in a fixed number of queries, then
-the grants of all of them together, a page of the limit at a time. Each grant read adds a row for every carrying role or
-attachment in its chain, so a page may hold more rows than the limit before they are cut. For a policy, only the role
-grants that reach one of its attachments are read, and whether they meet in some tenant is settled once for each
-attachment's tenant, never once for each tenant a grant is held in. One subject's holdings are read whole, an identity's
-principals 500 at a time.
+scope (the platform before a tenant, every application before a named one, a role grant before a break-glass activation
+of the same scope, and activations by key) and route (the first role of its chain, how many roles the chain runs
+through, then the rows it rests on), every string compared byte for byte. A review returns at most
+`authorization.reviews.limit` rows (`AUTHORIZATION_REVIEWS_LIMIT`, 1000 by default; a whole number of at least 1, or
+boot fails), or the limit `withLimit()` sets, and reads at least one more to say exactly whether any was left out. Every
+grant is read on the write connection, never one query per holder: the roles a review involves are read in a fixed
+number of queries, then the grants of all of them together, a page of the limit at a time. Each grant read adds a row
+for every carrying role or attachment in its chain, so a page may hold more rows than the limit before they are cut. For
+a policy, only the role grants that reach one of its attachments are read, and whether they meet in some tenant is
+settled once for each attachment's tenant, never once for each tenant a grant is held in. One subject's holdings are
+read whole, an identity's principals 500 at a time.
 
 **The review rights.** The package declares `authorization:review.read`, the right to run a review, and
 `authorization:review.export`, the right to export one, which needs both. `review()` admits the review before anything
@@ -139,16 +147,16 @@ is read, through `check()` as the reviewer, with its real session, denies, bound
 resource `authorization:review:{query}` in the reviewed tenant and application. No rank rule applies, and policies read
 these keys of it to restrict who may review what:
 
-| Key                                                                               | Value                                                                               |
-|-----------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
-| `resource.id`, `resource.type`                                                    | The query (`holders`, `holdings`, `expiring`, `granted_by`), `authorization:review` |
-| `resource.tenant.type`, `resource.tenant.id`                                      | The reviewed tenant; missing for the platform and everywhere                        |
-| `resource.query`, `resource.scope`                                                | The query, and `applies_in`, `rooted_within` or `everywhere`                        |
-| `resource.application_selection`, `resource.application`                          | `none`, `named` or `any`, and the application named                                 |
-| `resource.target_type`, `resource.target_id`                                      | The role, permission or policy whose holders are listed                             |
-| `resource.subject_type`, `resource.subject_id`                                    | The principal or identity whose holdings are listed                                 |
-| `resource.actor_type`, `resource.actor_id`                                        | The actor whose last grants are listed                                              |
-| `resource.impersonated`, `resource.impersonator_type`, `resource.impersonator_id` | Whether the reviewer is impersonated, and by whom                                   |
+| Key                                                                               | Value                                                                                         |
+|-----------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------|
+| `resource.id`, `resource.type`                                                    | The query (`holders`, `holdings`, `expiring`, `granted_by`, `unused`), `authorization:review` |
+| `resource.tenant.type`, `resource.tenant.id`                                      | The reviewed tenant; missing for the platform and everywhere                                  |
+| `resource.query`, `resource.scope`                                                | The query, and `applies_in`, `rooted_within` or `everywhere`                                  |
+| `resource.application_selection`, `resource.application`                          | `none`, `named` or `any`, and the application named                                           |
+| `resource.target_type`, `resource.target_id`                                      | The role, permission or policy whose holders are listed                                       |
+| `resource.subject_type`, `resource.subject_id`                                    | The principal or identity whose holdings are listed                                           |
+| `resource.actor_type`, `resource.actor_id`                                        | The actor whose last grants are listed                                                        |
+| `resource.impersonated`, `resource.impersonator_type`, `resource.impersonator_id` | Whether the reviewer is impersonated, and by whom                                             |
 
 A review of one tenant, in one application or none, is decided at that tenant. A review across a reach, rooted within a
 tenant, applying at the platform or of everywhere, is decided again across the reach by the rule delegated
@@ -157,8 +165,8 @@ and refused as `administration.scope` when anything that denies or caps the revi
 the right, a conditional deny included. So a deny the reviewer holds in one child tenant refuses a review of its
 parent's subtree. Applications are weighed the same way: a review of `ApplicationSelector::any()` in one tenant needs
 the right held for every application, and is refused when a deny, boundary or guardrail held for any one application
-could limit it. A review run while the reviewer is impersonated (`ActingContext::impersonatedBy()`) is refused as
-`administration.impersonating` unless the reviewer is also allowed `authorization:administration.impersonated` on it,
+could limit it. A review run while the reviewer is impersonated (an `ActingContext` from `impersonatedBy()`) is refused
+as `administration.impersonating` unless the reviewer is also allowed `authorization:administration.impersonated` on it,
 across the review's whole reach by the same rule, as a delegated change is, since the impersonator is the one shown what
 it discloses. A refused review throws `AuthorizationException` with the one generic line, carrying the reviewer's own
 decision (a step-up the right needs included), after recording and reporting it as any refused check, and discloses no
@@ -185,13 +193,13 @@ do {
 } while ($cursor !== null);
 ```
 
-| `ReviewPage` | Holds                                                                                                 |
-|--------------|-------------------------------------------------------------------------------------------------------|
-| `rows`       | At most the page's limit of rows (the query's own, `withLimit()` or the configured one, unless given) |
-| `nextCursor` | The cursor of the next page; null on the last, so a page followed by no row ends the review           |
-| `reviewedAt` | The review's instant, frozen when its first page is read and the same on every page                   |
-| `isComplete` | As a result's: false only when an identity's principals could not all be listed                       |
-| `isLast()`   | Whether `nextCursor` is null                                                                          |
+| `ReviewPage` | Holds                                                                                                       |
+|--------------|-------------------------------------------------------------------------------------------------------------|
+| `rows`       | At most the page's limit of rows: the `limit` given, else the query's (`withLimit()` or the configured one) |
+| `nextCursor` | The cursor of the next page; null on the last, so a page followed by no row ends the review                 |
+| `reviewedAt` | The review's instant, frozen when its first page is read and the same on every page                         |
+| `isComplete` | As a result's: false only when an identity's principals could not all be listed                             |
+| `isLast()`   | Whether `nextCursor` is null                                                                                |
 
 A page of a review narrowed to an action also says `isStoredInventoryOnly`, as its result does.
 
@@ -234,11 +242,10 @@ a stream holds in memory is bounded by the chunk, however large the tenant; one 
 each chunk, by design.
 
 **Exports.** `export($query, $reviewer, $sink, $chunk = 1000)` and `trustedExport($query, $sink, $chunk)` write the
-review as versioned JSON Lines to a writable stream resource, each line written whole, or to a callback given each
-line, and return how many rows they wrote. Exporting needs both `authorization:review.read` and
-`authorization:review.export` (N96): the two are decided together before the header is written and again before every
-chunk, each across a broad reach as the read right is. The first line is a header, then one line a row, in the
-review's order, then a footer:
+review as versioned JSON Lines to a writable stream resource, each line written whole, or to a callback given each line,
+and return how many rows they wrote. Exporting needs both `authorization:review.read` and `authorization:review.export`:
+the two are decided together before the header is written and again before every chunk, each across a broad reach as the
+read right is. The first line is a header, then one line a row, in the review's order, then a footer:
 
 ```json lines
 {"record":"header","version":1,"query":"holders","scope":{"selection":"applies_in","tenant":{"type":"tenant","id":"acct1"},"application":{"selection":"named","name":"admin"}},"reviewed_at":"2026-11-08T12:00:00.250000Z","scan_started_at":"2026-11-08T12:00:00.250000Z","consistency":"live"}
@@ -257,9 +264,11 @@ to the end of its header, the `action` and `stored_inventory_only`, always true;
 
 The output is UTF-8 and deterministic: the same rows at the same instants give the same bytes. Each line is one JSON
 object with its keys in a fixed order, slashes and Unicode unescaped, the line and paragraph separators escaped, and
-invalid UTF-8 refused with `JsonException` rather than replaced. An export the reviewer stops being admitted to part
-way (a revoked right, a step-up no longer met, a session cap that no longer covers the rights), or that fails, stops
-there with no footer, so a reader can tell it is incomplete. CSV is not offered yet (N97).
+invalid UTF-8 refused with `JsonException` rather than replaced. A sink that is neither a stream resource nor a callback
+is refused with `InvalidArgumentException`, and a stream that takes none of a line throws `ReviewExportException`. An
+export the reviewer stops being admitted to part way (a revoked right, a step-up no longer met, a session cap that no
+longer covers the rights), or that fails, stops there with no footer, so a reader can tell it is incomplete. CSV is not
+offered.
 
 **From the console.** `authorization:review` exports a review as JSON Lines on the trusted path (see
 [Exporting an access review from the console](console.md#exporting-an-access-review-from-the-console)).
@@ -282,6 +291,7 @@ but are not held, so no review lists them. Snapshot exports and CSV are not offe
 tenant, subtree and platform record where a subject holds, say, `audit:read`, without reading each membership in turn:
 
 ```php
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 
@@ -365,6 +375,8 @@ operation with `check()`:
 ```php
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
+use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Subject;
 
 $query    = ReviewQuery::holdings($person, ReviewScope::everywhere())->forAction('audit:read');
@@ -402,9 +414,9 @@ mode, not in the identity mode `$person` gives above.
 ## Usage tracking
 
 Usage tracking records which grants are used, so a review can tell a grant nobody uses from one whose use was never
-watched (N94, N100 to N102). It is off by default, and free when off: a check does no extra work and allocates nothing
-for it, no listener is registered and no usage table is read, and every review row's `usage` reads `unknown`. Turn it on
-in `config/authorization.php`, or with `AUTHORIZATION_USAGE_ENABLED=true`:
+watched. It is off by default, and free when off: a check does no extra work and allocates nothing for it, no listener
+is registered and no usage table is read, and every review row's `usage` reads `unknown`. Turn it on in
+`config/authorization.php`, or with `AUTHORIZATION_USAGE_ENABLED=true`:
 
 ```php
 'usage' => [
@@ -443,8 +455,8 @@ a delegated change's own check. A role check (`hasRole()`, `@role`, `role:`) is 
 | Path                                                                           | Why it never counts                                                                     |
 |--------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
 | `previewFor()` and its admission                                               | A preview decides about another subject as the caller, who uses none of its grants      |
-| `explain()` and `authorization:why`                                            | An explanation runs the check to show it, not to act on it (N89)                        |
-| `permissionsFor()` and `heldPermissionsFor()`                                  | A listing of what a subject may do is introspection (N70)                               |
+| `explain()` and `authorization:why`                                            | An explanation runs the check to show it, not to act on it                              |
+| `permissionsFor()` and `heldPermissionsFor()`                                  | A listing of what a subject may do is introspection                                     |
 | `whereAuthorized()` and `queryScope()`                                         | A scoped query compiles SQL and decides no record                                       |
 | A review's admission and its reads                                             | Reviewing who holds what is introspection, and must not create the use it reports       |
 | A delegated change's administration stage                                      | Its further checks weigh the change, and a refused change counts nothing it was allowed |
@@ -476,7 +488,8 @@ last use backwards, so a job delivered twice or out of order changes nothing. Th
 their keys, a hundred to a transaction, with no row read under a lock, so two workers take their locks in the same
 order; a transaction that deadlocks or waits too long for a lock is tried again, three times in all, and a job that
 still fails extends no coverage. `authorization:usage-prune` removes the usage of every route whose stored grant no
-longer exists and the coverage older than `retention` days.
+longer exists and the coverage that ended more than `retention` days ago; `--pretend` reports what it would remove. It
+prunes the package's own tables, whatever store is bound.
 
 **The heartbeat.** Each recording job extends the current coverage period, or opens a new one when the gap since the
 last one ended exceeds two intervals. A site that is tracking but quiet sends no jobs, so schedule the heartbeat at
@@ -511,9 +524,9 @@ use.
 **The unused review.** `ReviewQuery::unused($scope, $since)` lists the live grants in the scope (roles and permissions
 granted, policies attached to grantees) with no observed use since the instant, each `unused` or `unknown`, and leaves
 out those used. It pages, streams and exports as every review does, admitted by the same `authorization:review.read`
-right, which never counts as use; `authorization:review unused --since=…` exports one. It reads the grants a fixed
-chunk at a time, never fewer for the rows a page has kept, so the reads grow with the grants it passes over, never one
-for each. Every review row carries `usage`, read in one batched lookup a page, or a chunk for the unused review. The
+right, which never counts as use; `authorization:review unused --since=<instant>` exports one. It reads the grants a
+fixed chunk at a time, never fewer for the rows a page has kept, so the reads grow with the grants it passes over, never
+one for each. Every review row carries `usage`, read in one batched lookup a page, or a chunk for the unused review. The
 row's shape stays `version: 1`, since the package is unreleased.
 
 ```php
