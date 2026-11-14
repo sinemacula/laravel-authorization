@@ -13,7 +13,7 @@ Each note is intentionally short and follows the same structure:
 - `Authoritative Tests`
 - `Change Triggers`
 
-The planned note set (populated during implementation — see `ISSUES.md` item #7) is:
+The notes are:
 
 - `evaluation-order-and-deny-precedence.md`: the staged decision order (subject, resource, tenant, then the denies, the
   caps, the allows and the implicit deny), why an explicit DENY always wins over an RBAC allow, and why an undecidable
@@ -33,6 +33,12 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
 - `subject-resolver-contract.md`: the one seam with `sinemacula/laravel-authentication` for the subject, its tenant
   and its application; the shipped default (Laravel's signed-in user, no tenant), the Gate's translation of its user,
   and how the umbrella package wires its own resolver.
+- `model-extension.md`: replacing the shipped `Role`, `Permission` and `Policy` models with subclasses through
+  `authorization.models`, the check at boot, what a subclass inherits, and the schema changes it owns.
+- `impersonation.md`: `Authorization::for()` as a scoped clone that decides checks for another principal, the tenant
+  and application it keeps, its composition with `withPolicies()`, and the line between it and the request's user.
+- `spatie-compatibility.md`: the aliases kept for teams moving from `spatie/laravel-permission`, grouped by surface,
+  and the deliberate omissions.
 - `wildcard-and-condition-semantics.md`: fnmatch semantics and escaping, the statement keys (`sid`, `not_actions`,
   `not_resources`), resource-less checks, the four match outcomes (matches, does not match, undecidable, invalid), the
   check's namespaced context (`authentication`, `request`, `environment`, `subject` and `resource` with their
