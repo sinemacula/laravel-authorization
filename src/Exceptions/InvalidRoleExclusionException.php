@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
  * Thrown when a role would be declared mutually exclusive with itself, or such
- * a pair removed or reported: a role excludes only another role (AUTHZ-11.8).
+ * a pair removed or reported: a role excludes only another role.
  *
  * The roles come from the calling code, so this is a programming error rather
  * than a client-facing outcome.

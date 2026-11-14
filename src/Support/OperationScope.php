@@ -49,19 +49,19 @@ use SineMacula\Laravel\Authorization\Preview\Previewing;
  * already committed: it is invalidated the same way, and a failure of the first
  * bump is thrown.
  *
- * A delegated operation runs under the concurrency protocol (AUTHZ-11.1): each
- * try runs in a transaction of its own and holds `DependencyPins`, which lock
- * and pin what its decisions read and validate it before the write, and a try
- * that conflicts is rolled back and tried again, then refused as
- * `administration.conflict`, recorded and reported as the actor's refusal (see
- * `ConflictRetries`). The work starts inside the transaction before the service
- * reads or locks anything, and the protocol takes no lock until the service
- * first reads what the operation changes, so the grant hooks (AUTHZ-11.3), run
- * first in a grant's work (see `Hooks\WideningPhase`), run before every lock
- * the package takes for the call. A trusted operation runs with no pins and no
- * extra lock, once, unless its grant hooks were not run for a grant it is about
- * to write that now widens an identity's scope: that try conflicts, and is
- * rolled back and tried again the same way.
+ * A delegated operation runs under the concurrency protocol: each try runs in a
+ * transaction of its own and holds `DependencyPins`, which lock and pin what
+ * its decisions read and validate it before the write, and a try that conflicts
+ * is rolled back and tried again, then refused as `administration.conflict`,
+ * recorded and reported as the actor's refusal (see `ConflictRetries`). The
+ * work starts inside the transaction before the service reads or locks
+ * anything, and the protocol takes no lock until the service first reads what
+ * the operation changes, so the grant hooks, run first in a grant's work (see
+ * `Hooks\WideningPhase`), run before every lock the package takes for the call.
+ * A trusted operation runs with no pins and no extra lock, once, unless its
+ * grant hooks were not run for a grant it is about to write that now widens an
+ * identity's scope: that try conflicts, and is rolled back and tried again the
+ * same way.
  *
  * Inside a transaction the application opened, a try that conflicts is rolled
  * back to its savepoint, and the row locks it took stay held until that
@@ -76,10 +76,9 @@ use SineMacula\Laravel\Authorization\Preview\Previewing;
  * a hook only vetoes. A grant made while another operation's work runs is
  * nested in it (`isNested()`), and may run after that operation took locks.
  *
- * While a preview is evaluated (AUTHZ-11.4, see `Preview\Previewing`), `run()`
- * refuses every operation, delegated or trusted, as
- * `administration.previewing`, with no override, so a callback or a listener a
- * preview runs changes nothing.
+ * While a preview is evaluated (see `Preview\Previewing`), `run()` refuses
+ * every operation, delegated or trusted, as `administration.previewing`, with
+ * no override, so a callback or a listener a preview runs changes nothing.
  *
  * @managed-static
  *

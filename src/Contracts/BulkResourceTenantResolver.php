@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Contracts;
 
 /**
- * Bulk resource tenant resolver contract (AUTHZ-4.4, AUTHZ-10.3).
+ * Bulk resource tenant resolver contract.
  *
  * An optional addition to `ResourceTenantResolver` for a resolver that can
  * answer many records at once, which bulk checks (`checkMany()`, `canEach()`

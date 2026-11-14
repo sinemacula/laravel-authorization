@@ -25,7 +25,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for `RankComparison`, the one comparison of rank delegated
- * administration makes (N76).
+ * administration makes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

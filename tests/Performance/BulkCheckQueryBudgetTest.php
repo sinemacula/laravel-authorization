@@ -29,13 +29,13 @@ use Tests\Fixtures\QueryScoping\TenantScopedPost;
 use Tests\TestCase;
 
 /**
- * Query budget of a bulk check (AUTHZ-10.3): a check over many resources of one
- * type and tenant reads the subject's grants and policies once, and the
- * resources' tenants, the policies attached to them and their attributes in
- * bulk, so it costs exactly the queries a check over one of them costs, never
- * one more per resource. Over a tenant tree that is read from the database,
- * each tenant's place in the tree is read once, so the tree costs what the
- * distinct tenants cost, whatever the number of resources.
+ * Query budget of a bulk check: a check over many resources of one type and
+ * tenant reads the subject's grants and policies once, and the resources'
+ * tenants, the policies attached to them and their attributes in bulk, so it
+ * costs exactly the queries a check over one of them costs, never one more per
+ * resource. Over a tenant tree that is read from the database, each tenant's
+ * place in the tree is read once, so the tree costs what the distinct tenants
+ * cost, whatever the number of resources.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -21,7 +21,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the tenant scope holding the tenant in place while the
- * decisions of the request are forgotten (N112): `pinned()` keeps it until the
+ * decisions of the request are forgotten: `pinned()` keeps it until the
  * callback returns, and the request's tenant, and what the resolution cache
  * took in the held one, are read afresh afterwards.
  *

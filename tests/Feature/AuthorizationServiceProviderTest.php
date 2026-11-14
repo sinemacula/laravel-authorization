@@ -347,7 +347,7 @@ final class AuthorizationServiceProviderTest extends TestCase
 
     /**
      * A binding a sibling package or the application makes before the package
-     * registers stands, however it was made (N103).
+     * registers stands, however it was made.
      *
      * @param  class-string  $contract
      * @param  string  $method
@@ -440,7 +440,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     /**
      * Provide every seam the package has a default of its own for, which is
      * every seam but the policy store: the package has no store, and binds the
-     * configured one over an earlier binding (N106).
+     * configured one over an earlier binding.
      *
      * @return iterable<string, array{class-string}>
      */
@@ -498,7 +498,7 @@ final class AuthorizationServiceProviderTest extends TestCase
      * default for it, and the class it then resolves: the configured class, or
      * the declared resolver around the configured resource tenant resolver. The
      * grant hooks, run before whatever the contract resolves to rather than
-     * replacing it (N108), are tested in `Feature\Hooks\ListedGrantHooksTest`.
+     * replacing it, are tested in `Feature\Hooks\ListedGrantHooksTest`.
      *
      * @return iterable<string, array{class-string, string, class-string, class-string, string}>
      */
@@ -516,7 +516,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     /**
      * A class the configuration names in place of the package's default
      * replaces a binding a sibling package made before the package registered,
-     * however it was made, and is reached through the package-owned key (N106).
+     * however it was made, and is reached through the package-owned key.
      *
      * @param  class-string  $contract
      * @param  string  $key
@@ -540,7 +540,7 @@ final class AuthorizationServiceProviderTest extends TestCase
 
     /**
      * A binding made after the package registered replaces the class the
-     * configuration names, however it was made (N106).
+     * configuration names, however it was made.
      *
      * @param  class-string  $contract
      * @param  string  $key
@@ -583,7 +583,7 @@ final class AuthorizationServiceProviderTest extends TestCase
 
     /**
      * Configuration that names the package's own default leaves a binding made
-     * before the package registered standing (N106).
+     * before the package registered standing.
      *
      * @param  class-string  $contract
      * @param  string  $key
@@ -613,7 +613,7 @@ final class AuthorizationServiceProviderTest extends TestCase
 
     /**
      * Configuration that names nothing for a seam leaves a binding made before
-     * the package registered standing (N106).
+     * the package registered standing.
      *
      * @param  class-string  $contract
      * @param  string  $key
@@ -662,7 +662,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     /**
      * A class the configuration names replaces the binding of a deferred
      * provider the application knows of when the package registers: the
-     * provider is loaded first, and its binding replaced (N106).
+     * provider is loaded first, and its binding replaced.
      *
      * @param  class-string  $contract
      * @param  string  $key
@@ -689,7 +689,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     /**
      * A seam the configuration leaves to the package's default leaves a
      * deferred provider that binds it deferred, and its binding stands once the
-     * seam is resolved (N103).
+     * seam is resolved.
      *
      * @param  class-string  $contract
      * @param  string  $key
@@ -712,7 +712,7 @@ final class AuthorizationServiceProviderTest extends TestCase
      * The application learns of the deferred providers of its configuration and
      * of package discovery only once it has registered every eager provider, so
      * a class the configuration names replaces the binding of one it learns of
-     * after the package registered as it boots (N106).
+     * after the package registered as it boots.
      *
      * @return void
      */
@@ -741,7 +741,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     /**
      * A binding made after the package registered still replaces the class the
      * configuration names once the application boots, when no deferred provider
-     * binds the seam (N106).
+     * binds the seam.
      *
      * @return void
      */
@@ -861,7 +861,7 @@ final class AuthorizationServiceProviderTest extends TestCase
      * A subject resolver or tenant tree the configuration names in place of one
      * a sibling package bound before the package registered is not resolved
      * while it registers, and rebinding it once it has been resolved still
-     * empties the resolution cache's memo (N106).
+     * empties the resolution cache's memo.
      *
      * @param  class-string  $contract
      * @param  string  $method
@@ -890,7 +890,7 @@ final class AuthorizationServiceProviderTest extends TestCase
      * configuration names a class for in place of one a sibling package bound
      * before the package registered, so a rebinding in the first request it is
      * resolved in empties that request's memo, and the seam is never resolved
-     * on the application itself (N106).
+     * on the application itself.
      *
      * @param  class-string  $contract
      * @param  string  $method
@@ -1047,7 +1047,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     /**
      * The authentication context a provider registering after the package binds
      * is the one whose namespaces and assurance keys the catalogue reads, even
-     * when another provider resolved the catalogue before it registered (N104).
+     * when another provider resolved the catalogue before it registered.
      *
      * @return void
      */
@@ -1094,7 +1094,7 @@ final class AuthorizationServiceProviderTest extends TestCase
      * register reads no authentication context, so the catalogue reads the one
      * a provider registering later binds: an assurance key of a namespace it
      * contributes stays untestable, and one declared again before it was bound
-     * is accepted (N104).
+     * is accepted.
      *
      * @param  array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType>  $untestable
      * @return void
@@ -1132,7 +1132,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     /**
      * The boot-time validation reads the authentication context a provider
      * registering after the package binds, so its malformed assurance keys are
-     * refused at boot (N104).
+     * refused at boot.
      *
      * @return void
      */
@@ -1587,8 +1587,8 @@ final class AuthorizationServiceProviderTest extends TestCase
     /**
      * The grant hook is the composite holding no hook by default, rebuilt for
      * each job; once the configuration lists hooks, the package registered
-     * again wraps it so they run first (N108), and a hook the application binds
-     * on the contract is wrapped in its place.
+     * again wraps it so they run first, and a hook the application binds on the
+     * contract is wrapped in its place.
      *
      * @return void
      */

@@ -17,8 +17,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * The grant routes behind what a grantee's resolution finds, while grant usage
- * is tracked (N100): for each permission, by its name, and each policy, by its
- * key, every live route that gives it, redundant ones included.
+ * is tracked: for each permission, by its name, and each policy, by its key,
+ * every live route that gives it, redundant ones included.
  *
  * - A direct grant, or a policy attached to the grantee, is one route.
  * - A role held gives a route for each permission or policy a role of its chain

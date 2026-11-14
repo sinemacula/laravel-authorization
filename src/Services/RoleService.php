@@ -66,25 +66,25 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * Each method takes the acting context making the call as `$actor`, the reads
  * as well as the writes: null for trusted system work, such as seeders,
- * migrations and console commands (N75). A write with an acting context is
- * delegated administration (AUTHZ-11.1): each change it makes is decided as the
- * actor, through `check()`, on the change's operation resource, inside the
- * write's transaction before anything is written, and the first refused throws
- * the decision's `AuthorizationException`, leaving nothing written. A change to
- * the role itself is decided under `authorization:role.create`, `.rename`,
- * `.update`, `.delete` or `.parent.set`; adding a permission, a new grant or a
- * changed expiry, under `authorization:permission.grant`, and removing one
- * under `authorization:permission.revoke`, each in the tenant that owns the
- * role. A sync decides a grant of each listed permission the role does not
- * carry live and a revocation of each it drops; one it carries live decides
- * nothing. A revocation by name decides each permission the role carries of
- * that name; one by model decides that permission whether the role carries it
- * or not. Every change is made only from the tenant that owns the role, a
- * platform role's from the platform, or it is refused as `administration.owner`
- * (D20). Removing a permission only narrows, so it is then allowed on its
- * action alone. Adding one, or setting or replacing the parent, hands something
- * new to every holder of the role and of the roles below it: each must be one
- * the actor administers, junior to it and not itself without
+ * migrations and console commands. A write with an acting context is delegated
+ * administration: each change it makes is decided as the actor, through
+ * `check()`, on the change's operation resource, inside the write's transaction
+ * before anything is written, and the first refused throws the decision's
+ * `AuthorizationException`, leaving nothing written. A change to the role
+ * itself is decided under `authorization:role.create`, `.rename`, `.update`,
+ * `.delete` or `.parent.set`; adding a permission, a new grant or a changed
+ * expiry, under `authorization:permission.grant`, and removing one under
+ * `authorization:permission.revoke`, each in the tenant that owns the role. A
+ * sync decides a grant of each listed permission the role does not carry live
+ * and a revocation of each it drops; one it carries live decides nothing. A
+ * revocation by name decides each permission the role carries of that name; one
+ * by model decides that permission whether the role carries it or not. Every
+ * change is made only from the tenant that owns the role, a platform role's
+ * from the platform, or it is refused as `administration.owner`. Removing a
+ * permission only narrows, so it is then allowed on its action alone. Adding
+ * one, or setting or replacing the parent, hands something new to every holder
+ * of the role and of the roles below it: each must be one the actor
+ * administers, junior to it and not itself without
  * `authorization:administration.self` (the impact check), and the actor must be
  * able to hand out what is added, the parent's whole authority included, or it
  * is refused as the first rule that fails refuses it; a parent replaced or

@@ -41,12 +41,11 @@ use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
- * Feature tests for delegated changes to roles, policies and definitions (BL-65
- * part 3, AUTHZ-11.1, D20, N77, N78): role grants judged on the role's whole
- * authority, the policy route and `policy.grantable` bound to a digest, the
- * owner rule, the impact check over every holder and its limit, policy
- * rewrites, boundaries and resource-policy attachments, each decided by a
- * screen exactly as the service decides it.
+ * Feature tests for delegated changes to roles, policies and definitions: role
+ * grants judged on the role's whole authority, the policy route and
+ * `policy.grantable` bound to a digest, the owner rule, the impact check over
+ * every holder and its limit, policy rewrites, boundaries and resource-policy
+ * attachments, each decided by a screen exactly as the service decides it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -249,8 +248,8 @@ final class DelegatedDefinitionsTest extends TestCase
     }
 
     /**
-     * Only the owner edits (D20): a role a parent tenant owns is edited from
-     * that tenant alone, never from a tenant below it, another tenant or the
+     * Only the owner edits: a role a parent tenant owns is edited from that
+     * tenant alone, never from a tenant below it, another tenant or the
      * platform, whatever authority the actor holds, and a platform role from
      * the platform alone.
      *

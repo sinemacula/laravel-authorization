@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 
 /**
  * Tries a delegated operation again when it conflicts with a concurrent write,
- * a bounded number of times (AUTHZ-11.1, the concurrency protocol).
+ * a bounded number of times (the concurrency protocol).
  *
  * A try conflicts when something its decisions read changed before it wrote
  * (`DependencyChangedException`, see `DependencyPins`), or, when the operation

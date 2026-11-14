@@ -11,18 +11,18 @@ use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 
 /**
- * Turns a decision into the response a Laravel policy method returns
- * (AUTHZ-9.2), for the `DecidesThroughAuthorization` trait.
+ * Turns a decision into the response a Laravel policy method returns, for the
+ * `DecidesThroughAuthorization` trait.
  *
  * An allowed decision is `Response::allow()`. A denied one is
  * `Response::deny()` with the decision's reason code as its code and, as its
  * message, the generic `denied` line of the package's `authorization` language
- * file (AUTHZ-9.7, N61), whatever the reason, in the translator's current
- * locale; an application that words a message per reason reads the code.
- * Without a translator, or when it has no line for the key, the message is left
- * to Laravel's English default. An `insufficient_authentication` denial keeps
- * its own code, and carries neither the requirements nor the step-up exception
- * `authorize()` raises. A denial is never turned into a not-found response.
+ * file, whatever the reason, in the translator's current locale; an application
+ * that words a message per reason reads the code. Without a translator, or when
+ * it has no line for the key, the message is left to Laravel's English default.
+ * An `insufficient_authentication` denial keeps its own code, and carries
+ * neither the requirements nor the step-up exception `authorize()` raises. A
+ * denial is never turned into a not-found response.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

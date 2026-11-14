@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  *   in which case `database.default` must name one;
  * - `defaults.guard`: the guard a name is looked up under when none is given, a
  *   name under `auth.guards`, `web` by default; the `defaults` block sets no
- *   other key (N116);
+ *   other key;
  * - `log_channel`: the channel the package logs to, a name under
  *   `logging.channels`, or null for the default channel;
  * - `usage.connection`: the queue connection grant usage is recorded through,

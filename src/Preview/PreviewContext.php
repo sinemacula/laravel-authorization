@@ -24,8 +24,8 @@ use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Who is previewing whom, and where (AUTHZ-11.4, N84 to N87): what a preview
- * manager from `Authorization::previewFor()` carries, fixed when it is built.
+ * Who is previewing whom, and where: what a preview manager from
+ * `Authorization::previewFor()` carries, fixed when it is built.
  *
  * The previewer is the real caller, the subject the manager `previewFor()` was
  * called on decides about, its session kept, never inferred later from the
@@ -38,12 +38,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * that says nothing of its credential's scopes but names a credential, a
  * session or a guard whose caller is its own model, has them asked of the
  * session policy source before the session goes, and the answer kept on it as
- * said (N126): null as no cap, and a list as those scopes, an empty one for a
+ * said: null as no cap, and a list as those scopes, an empty one for a
  * credential the source cannot establish, so the preview then allows nothing.
  * The scope is the tenant and application the target is evaluated in, given,
  * or, when none is, the platform for a `Subject` given carrying the platform
- * marker (N120), and the request's when the preview was built for any other
- * target, a model included, whatever marker it carries.
+ * marker, and the request's when the preview was built for any other target, a
+ * model included, whatever marker it carries.
  *
  * Every use of the preview (`run()`), each check, each batch, each listing and
  * each compile of a query scoped through it, is admitted afresh (see
@@ -109,7 +109,7 @@ final readonly class PreviewContext
      * Return the preview of the target, a resolved `Subject` or a model, by the
      * previewer, admitted through the previewer's manager, in the scope, or,
      * for none, on the platform, on the target's application, for a `Subject`
-     * given carrying the platform marker (N120), and the request's tenant and
+     * given carrying the platform marker, and the request's tenant and
      * application, captured now, for any other target, a model included. The
      * target loses any session, and keeps its platform marker and what its
      * credential carries, asked of the session policy source before the session
@@ -215,12 +215,12 @@ final readonly class PreviewContext
 
     /**
      * Return what the target's credential carries, kept on the copy that loses
-     * its session (N126): what the target says, or, when it says nothing and
-     * names a credential, the bound session policy source's answer about the
-     * target with its session still on it, null as no cap and a list as those
-     * scopes, an empty one for a credential the source cannot establish; and
-     * nothing said for a target naming no credential, which the source is not
-     * asked about.
+     * its session: what the target says, or, when it says nothing and names a
+     * credential, the bound session policy source's answer about the target
+     * with its session still on it, null as no cap and a list as those scopes,
+     * an empty one for a credential the source cannot establish; and nothing
+     * said for a target naming no credential, which the source is not asked
+     * about.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $named
      * @return \SineMacula\Laravel\Authorization\Support\CredentialScopes|null

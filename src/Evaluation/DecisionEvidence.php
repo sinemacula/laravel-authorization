@@ -5,10 +5,10 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * The evidence an explained check records beside its decision (N89): where each
- * grant that allowed it came from (see `GrantProvenance`), and what the check
- * asked (see `ExplanationRequest`). Each condition test the check made is
- * recorded on its trace (see `TraceEntry::$tests`).
+ * The evidence an explained check records beside its decision: where each grant
+ * that allowed it came from (see `GrantProvenance`), and what the check asked
+ * (see `ExplanationRequest`). Each condition test the check made is recorded on
+ * its trace (see `TraceEntry::$tests`).
  *
  * An everyday check records none, and costs what it did before explanations;
  * its decision explains with the evidence it has.

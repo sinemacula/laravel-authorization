@@ -85,9 +85,9 @@ final class SiblingSeamsTest extends TestCase
 
     /**
      * A class the application names in the configuration stands over the
-     * sibling's adapter whichever registers first (N106): the package binds it
-     * through a closure its provider does not declare, so the sibling keeps it,
-     * and isPackageDefault() says it is not the package's default.
+     * sibling's adapter whichever registers first: the package binds it through
+     * a closure its provider does not declare, so the sibling keeps it, and
+     * isPackageDefault() says it is not the package's default.
      *
      * @param  list<class-string<\Illuminate\Support\ServiceProvider>>  $providers
      * @return void

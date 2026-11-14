@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 
 /**
- * Make the package the authority of Laravel's Gate (AUTHZ-9.1) through a single
+ * Make the package the authority of Laravel's Gate through a single
  * `Gate::before` hook.
  *
  * The hook answers every ability whose exact name the declared catalogue holds

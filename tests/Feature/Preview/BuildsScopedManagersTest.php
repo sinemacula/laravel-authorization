@@ -28,9 +28,8 @@ use Tests\TestCase;
 
 /**
  * Feature tests for `previewFor()`, the preview clone of the authorization
- * manager (AUTHZ-11.4): it is admitted as it is built, keeps its two parties
- * and its scope, and leaves the caller, the facade, the Gate and Blade as they
- * were.
+ * manager: it is admitted as it is built, keeps its two parties and its scope,
+ * and leaves the caller, the facade, the Gate and Blade as they were.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

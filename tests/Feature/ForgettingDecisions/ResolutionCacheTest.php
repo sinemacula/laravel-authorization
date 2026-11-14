@@ -16,9 +16,8 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the resolution cache forgetting its memo with the decisions
- * of the request or job (N112): every entry, in every scope, set aside or not,
- * and the tenant tree's answers go, while the persistent store is left as it
- * is.
+ * of the request or job: every entry, in every scope, set aside or not, and the
+ * tenant tree's answers go, while the persistent store is left as it is.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -11,14 +11,14 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 
 /**
- * Why a decision was made (AUTHZ-11.5, N88): the verdict, its reason and the
- * stage that decided it; the statements that decided it, every one when several
- * did, or the cause that is no statement (a cap that refused, the permission
- * held, the reason of an early refusal); the evidence of each stage the
- * decision reached, in order; the stages it never reached, marked as not
- * evaluated rather than guessed at; where each grant that allowed it came from;
- * each authentication requirement that alone kept an allow from applying, by
- * its part names and unmet parts; and what the check asked.
+ * Why a decision was made: the verdict, its reason and the stage that decided
+ * it; the statements that decided it, every one when several did, or the cause
+ * that is no statement (a cap that refused, the permission held, the reason of
+ * an early refusal); the evidence of each stage the decision reached, in order;
+ * the stages it never reached, marked as not evaluated rather than guessed at;
+ * where each grant that allowed it came from; each authentication requirement
+ * that alone kept an allow from applying, by its part names and unmet parts;
+ * and what the check asked.
  *
  * It is a projection of the decision alone: nothing is evaluated, read,
  * recorded or dispatched to make or render it. A decision made in explain mode
@@ -28,12 +28,12 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  * with what it has, and marks the rest `not recorded (explain mode off)`.
  *
  * It never holds a value: no context or attribute value, operand, interpolated
- * string, model, raw context, session or fingerprint (AUTHZ-8.8), only names,
- * references and outcomes, which still disclose how the policies are built, so
- * it is for those allowed to see them. `toText()` renders it for reading, every
- * name escaped so none can inject markup or control characters, and
- * `toArray()`, which `jsonSerialize()` returns, renders it in a stable schema
- * carrying its `version`.
+ * string, model, raw context, session or fingerprint, only names, references
+ * and outcomes, which still disclose how the policies are built, so it is for
+ * those allowed to see them. `toText()` renders it for reading, every name
+ * escaped so none can inject markup or control characters, and `toArray()`,
+ * which `jsonSerialize()` returns, renders it in a stable schema carrying its
+ * `version`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

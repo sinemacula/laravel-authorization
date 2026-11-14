@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Enums;
 
 /**
  * Whether a principal holds a grant that applies in a tenant, as the principal
- * presence helper answers it (AUTHZ-13.8).
+ * presence helper answers it.
  *
  * It says nothing about membership of the tenant or permission to act there.
  *

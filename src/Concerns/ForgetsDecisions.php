@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Evaluation\DecisionMemory;
 /**
  * What the authorization manager forgets of the decisions of the current
  * request or job: the last decision alone, with `forgetLastDecision()`, or
- * everything remembered towards them, with `forgetDecisionsFor()` (N112).
+ * everything remembered towards them, with `forgetDecisionsFor()`.
  *
  * Neither is a decision, so neither refuses while the package is not healthy
  * (see `PackageState`): forgetting is always safe. Both clear the state every

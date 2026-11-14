@@ -10,8 +10,8 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * What every change to a pair of mutually exclusive roles carries (AUTHZ-11.8):
- * the operation, with the actor that made the change, the pair's two roles and
+ * What every change to a pair of mutually exclusive roles carries: the
+ * operation, with the actor that made the change, the pair's two roles and
  * their names, the role with the lower key first, and the tenant that owns the
  * pair, as `ExclusionDeclared` and `ExclusionRemoved` report them.
  *

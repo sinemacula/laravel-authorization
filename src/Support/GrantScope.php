@@ -10,10 +10,10 @@ namespace SineMacula\Laravel\Authorization\Support;
  *
  * Every grant event reports the scope of its grant: the tenant its target's
  * owner fixes or the call names, else platform-wide, and whether a grant in a
- * tenant also reaches the tenants below it in the tenant tree (AUTHZ-5.3). A
- * platform-wide grant counts everywhere, so it always reaches below. A grant
- * made for one application counts only in checks on that application, the
- * application the subject resolver reports (AUTHZ-5.6).
+ * tenant also reaches the tenants below it in the tenant tree. A platform-wide
+ * grant counts everywhere, so it always reaches below. A grant made for one
+ * application counts only in checks on that application, the application the
+ * subject resolver reports.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

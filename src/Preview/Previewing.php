@@ -13,11 +13,11 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Subject;
 
 /**
- * What the current request or job knows of its previews (AUTHZ-11.4, N84 to
- * N87): whether a preview is being evaluated, which subjects are the targets of
- * its previews, so nothing a preview evaluates, and nothing built from one,
- * acts with authority, and which subject each use of a preview decides about,
- * so each of its decisions is admitted where it is made.
+ * What the current request or job knows of its previews: whether a preview is
+ * being evaluated, which subjects are the targets of its previews, so nothing a
+ * preview evaluates, and nothing built from one, acts with authority, and which
+ * subject each use of a preview decides about, so each of its decisions is
+ * admitted where it is made.
  *
  * While a preview is evaluated (`during()`), from its admission to its last
  * decision and the report of its refusal, a callback or a listener it runs that

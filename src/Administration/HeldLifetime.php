@@ -28,7 +28,7 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 /**
  * How long a subject holds a permission, or a policy, in the current scope,
  * through its grants, for the possession and grantable routes of a delegated
- * grant (N77): until the latest any grant that carries it lasts.
+ * grant: until the latest any grant that carries it lasts.
  *
  * The grants are those the decision resolves in the scope in place (its tenant
  * chain, whether it stands below its tenant, and its application, see

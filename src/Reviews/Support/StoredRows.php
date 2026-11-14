@@ -27,9 +27,9 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageKey;
  *   whole second (see `window()`). An expiring row does not by itself mean
  *   access is lost: another route may keep the target held.
  * - Granted by: the rows whose `granted_by` pair is exactly the actor's: the
- *   last actor to grant or change each (N95), since a regrant, a changed expiry
- *   or a changed reach overwrites it. A trusted write names no actor, so no
- *   actor's review lists it; a revoked row is gone.
+ *   last actor to grant or change each, since a regrant, a changed expiry or a
+ *   changed reach overwrites it. A trusted write names no actor, so no actor's
+ *   review lists it; a revoked row is gone.
  *
  * The roles granted are read with the break-glass activations not ended or
  * expired at the review's instant, each a row of its own (see

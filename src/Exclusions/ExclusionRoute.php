@@ -9,9 +9,9 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * One way a holder holds a role of a pair of mutually exclusive roles
- * (AUTHZ-11.8, N135): a live grant of the role, or of a role below it, which
- * inherits it through its parents while the role hierarchy is enabled.
+ * One way a holder holds a role of a pair of mutually exclusive roles: a live
+ * grant of the role, or of a role below it, which inherits it through its
+ * parents while the role hierarchy is enabled.
  *
  * It names the grantee of the grant, the holder itself or the identity it holds
  * the role through, the role of the pair it reaches, the path from the role

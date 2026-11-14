@@ -18,17 +18,17 @@ use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * The grant hook phase of a grant call (AUTHZ-11.3, N80): the one call point
- * every grant that may widen an identity's scope goes through, trusted and
- * delegated alike, a break-glass activation (AUTHZ-11.7) included.
+ * The grant hook phase of a grant call: the one call point every grant that may
+ * widen an identity's scope goes through, trusted and delegated alike, a
+ * break-glass activation included.
  *
  * A grant call runs its work in the call's transaction (`OperationScope::run`)
  * and, before it reads or locks anything else, hands `before()` a non-locking
  * preliminary proposal of every grant it is about to write. The proposal is
  * classified (see `WideningClassifier`) and, when any grant widens, the bound
  * hook is called once with every widening grant of the call, a batch's
- * included, after the hooks the configuration lists (N108), so every hook runs
- * before any lock and any write. Only then does the call enter the concurrency
+ * included, after the hooks the configuration lists, so every hook runs before
+ * any lock and any write. Only then does the call enter the concurrency
  * protocol: it locks, reads its records again, rebuilds the grants it writes
  * and decides them, and hands them to `assertCovers()` before writing. The
  * final grants are classified again, this time with locking reads, after every
@@ -214,9 +214,9 @@ final readonly class WideningPhase
      * that resolves to anything else, rather than call no hook.
      *
      * When the configuration lists hooks, the hook is wrapped so they run
-     * before it, unless it already is (N108): the package extends the contract
-     * with them, but Laravel applies no extender to an instance it is handed
-     * after the package registers, nor to any hook bound after an instance it
+     * before it, unless it already is: the package extends the contract with
+     * them, but Laravel applies no extender to an instance it is handed after
+     * the package registers, nor to any hook bound after an instance it
      * extended as the package registered.
      *
      * @return \SineMacula\Laravel\Authorization\Contracts\GrantHook|null

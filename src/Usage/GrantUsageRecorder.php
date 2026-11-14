@@ -10,10 +10,10 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 
 /**
  * Notes the grant routes a worker's decisions used and sends them to be
- * recorded (N101), never on a check: one for each container that resolves it,
- * held for as long as that container runs, bound only while usage is tracked. A
- * queue worker or a command resolves it once; under Octane each request's
- * sandbox resolves its own.
+ * recorded, never on a check: one for each container that resolves it, held for
+ * as long as that container runs, bound only while usage is tracked. A queue
+ * worker or a command resolves it once; under Octane each request's sandbox
+ * resolves its own.
  *
  * Each route is noted at most once a bucket (`authorization.usage.interval`
  * seconds, see `UsageTracking::bucketOf()`), by its key and its grant's

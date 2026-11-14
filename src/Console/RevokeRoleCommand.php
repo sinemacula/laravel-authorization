@@ -20,8 +20,8 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
  * `--actor={morphType}:{key}` names the actor making the change: the revocation
  * is then delegated administration, decided as that actor under
  * `authorization:role.revoke` (see `GrantService`), and its event carries the
- * actor. Without it the revocation is trusted system work and records no actor
- * (N75).
+ * actor. Without it the revocation is trusted system work and records no actor.
+ *
  *
  * The role name is revoked from the roles the identity holds within the tenant
  * scope, like any other query: every held role of that name is revoked, the

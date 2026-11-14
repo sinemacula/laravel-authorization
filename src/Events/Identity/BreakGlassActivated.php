@@ -11,9 +11,9 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Dispatched when a break-glass activation grants a grantee an emergency role
- * (AUTHZ-11.7). The operation's actor is the granter, or no one for a trusted
- * call. The activation's note is never carried.
+ * Dispatched when a break-glass activation grants a grantee an emergency role.
+ * The operation's actor is the granter, or no one for a trusted call. The
+ * activation's note is never carried.
  *
  * A snapshot of plain values (references, the name, the scope, the key, the
  * code and times), never a model. It is dispatched once the write commits, on

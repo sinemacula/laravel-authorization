@@ -135,9 +135,9 @@ final class RoleObserver
     }
 
     /**
-     * Refuse to delete a role with children (D18), then read, before the row
-     * goes, every grantee that holds the role and every permission it carries,
-     * which the delete takes with it.
+     * Refuse to delete a role with children, then read, before the row goes,
+     * every grantee that holds the role and every permission it carries, which
+     * the delete takes with it.
      *
      * The children are read outside the tenant scope, so a child the current
      * tenant cannot see still holds the delete back.

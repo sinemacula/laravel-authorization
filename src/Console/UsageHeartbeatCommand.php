@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Usage\UsageBatch;
 use SineMacula\Laravel\Authorization\Usage\UsageTracking;
 
 /**
- * Extends the coverage of grant usage tracking to now (N102), as every flush of
+ * Extends the coverage of grant usage tracking to now, as every flush of
  * observations does, so a site that is quiet but tracking stays covered and its
  * unused grants read as unused rather than unknown.
  *

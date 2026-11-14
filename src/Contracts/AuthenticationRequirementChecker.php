@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Subject;
 
 /**
- * Authentication requirement checker contract (AUTHZ-8.3, N34).
+ * Authentication requirement checker contract.
  *
  * Judges whether the subject's session meets an authentication requirement a
  * policy statement states, as one test: the checker fetches the session's
@@ -29,7 +29,7 @@ use SineMacula\Laravel\Authorization\Subject;
  * deny it guards does.
  *
  * The shipped default, `RefusingRequirementChecker`, finds every part unmet.
- * Under the suite it is `laravel-mfa`'s requirement check (AUTHZ-14.1).
+ * Under the suite it is `laravel-mfa`'s requirement check.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

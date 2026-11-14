@@ -17,8 +17,8 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Whether a delegated rewrite of a policy's document hands out only what the
- * actor may hand out, to holders it administers (AUTHZ-11.1), as the
- * administration stage weighs it for a policy the actor's context owns (see
+ * actor may hand out, to holders it administers, as the administration stage
+ * weighs it for a policy the actor's context owns (see
  * `DefinitionConstraints`). The old document is read as stored, on the write
  * connection, and compared with the new one conservatively (see
  * `DocumentComparison`):

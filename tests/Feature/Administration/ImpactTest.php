@@ -179,8 +179,8 @@ final class ImpactTest extends TestCase
 
     /**
      * The self right is weighed across the definition's whole reach, as the
-     * action is (N79): a change to a platform role the actor holds, which
-     * reaches it everywhere, is allowed while nothing limits
+     * action is: a change to a platform role the actor holds, which reaches it
+     * everywhere, is allowed while nothing limits
      * `authorization:administration.self`, and refused as self once the actor
      * holds a role in one tenant whose policy denies it, though the right is
      * allowed at the node the change is decided at; a reach that does not hold

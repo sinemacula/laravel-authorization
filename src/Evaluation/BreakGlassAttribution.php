@@ -10,9 +10,9 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\HeldPermissions;
 
 /**
- * The break-glass activations behind the allow of one check (N142), found from
- * what the resolution cache keeps beside the principal's permissions, policies
- * and role keys (see `ResolutionCache::activationsOf()`), so a check names them
+ * The break-glass activations behind the allow of one check, found from what
+ * the resolution cache keeps beside the principal's permissions, policies and
+ * role keys (see `ResolutionCache::activationsOf()`), so a check names them
  * with no query.
  *
  * The decision pipeline builds one with a check's sources, and notes the

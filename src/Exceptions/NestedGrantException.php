@@ -7,7 +7,7 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 /**
  * Thrown when a grant that widens an identity's scope is made inside another
  * management call's work, such as from a model observer or a listener that
- * call's own writes fire (AUTHZ-11.3).
+ * call's own writes fire.
  *
  * The outer call may already hold the package's locks, so the grant's hook
  * cannot run before every lock the package takes, and is never skipped instead.

@@ -14,8 +14,8 @@ use Carbon\CarbonImmutable;
  *
  * `isTruncated` is exact: true only when at least one row was left out.
  * `isComplete` is false only for a review of an identity's holdings whose
- * directory could not list every principal (N81); a principal left out of that
- * list may hold grants the review could not read.
+ * directory could not list every principal; a principal left out of that list
+ * may hold grants the review could not read.
  *
  * `isStoredInventoryOnly` is true for a review of holdings filtered by an
  * action (see `ReviewQuery::forAction()`): its rows are the stored grant routes

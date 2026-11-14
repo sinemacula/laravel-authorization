@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * Makes the context of each check from its sources (N26, N27).
+ * Makes the context of each check from its sources.
  *
  * The trusted sources supply `authentication` (and any namespace the
  * authentication context contributes), `request` and `environment`; the check's
@@ -30,7 +30,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * statement of the check reads it, at most once.
  *
  * Each context judges the check's authentication requirements with the bound
- * requirement checker, for the check's subject and its session (N34); without a
+ * requirement checker, for the check's subject and its session; without a
  * checker every requirement is unmet.
  *
  * A source claiming a namespace that is not a name (letters, digits and `_`),
@@ -142,10 +142,10 @@ final readonly class CheckContextFactory
     /**
      * Determine whether a namespace of a check about the subject depends on the
      * request alone, so `whereAuthorized()` may read it once for a query rather
-     * than once per row (AUTHZ-10.1): `input`, a namespace whose source is
-     * marked `ScopeInvariant`, the subject's when its attribute provider is
-     * absent or marked, and one no source supplies, which is always missing.
-     * The resource's never is.
+     * than once per row: `input`, a namespace whose source is marked
+     * `ScopeInvariant`, the subject's when its attribute provider is absent or
+     * marked, and one no source supplies, which is always missing. The
+     * resource's never is.
      *
      * @param  string  $namespace
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject

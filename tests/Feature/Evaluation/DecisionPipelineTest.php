@@ -617,7 +617,7 @@ final class DecisionPipelineTest extends TestCase
      * A change to a grant row is decided in the row's tenant, whatever tenant
      * the check is made from: an actor whose platform-wide authority reaches
      * the row revokes it from the row's tenant and from the platform alike, no
-     * owner standing in the way (N79).
+     * owner standing in the way.
      *
      * @return void
      *

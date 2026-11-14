@@ -14,10 +14,10 @@ use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 
 /**
  * The scope `whereAuthorized()` puts on a query, and the model-level
- * `AuthorizedScope` applies to each query of its model (AUTHZ-10.1, N64, N68):
- * it keeps exactly the rows of the query's candidate set, before any limit or
- * offset, that `check()` would allow on the record loaded with every column,
- * under the state at the instant the query runs.
+ * `AuthorizedScope` applies to each query of its model: it keeps exactly the
+ * rows of the query's candidate set, before any limit or offset, that `check()`
+ * would allow on the record loaded with every column, under the state at the
+ * instant the query runs.
  *
  * It is compiled when `whereAuthorized()` is called, so a refusal throws there,
  * before the builder is changed, and again every time the query is compiled to

@@ -25,13 +25,13 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Who holds each of a set of roles, and through which grants (AUTHZ-11.8,
- * N135), as the conflict report reads them: every live grant, in every tenant
- * and application, of the role or of a role below it, which inherits it while
- * the role hierarchy is enabled, each one route. A live break-glass activation
- * is read as the grant it stands for (see `BreakGlassActivations`): one naming
- * a machine counts for nothing, and one held by an identity never reaches its
- * principals (see `of()`).
+ * Who holds each of a set of roles, and through which grants, as the conflict
+ * report reads them: every live grant, in every tenant and application, of the
+ * role or of a role below it, which inherits it while the role hierarchy is
+ * enabled, each one route. A live break-glass activation is read as the grant
+ * it stands for (see `BreakGlassActivations`): one naming a machine counts for
+ * nothing, and one held by an identity never reaches its principals (see
+ * `of()`).
  *
  * A grant holds the roles of its chain, from the role granted up through its
  * parents, as a check walks it (see `RoleGraph`) in a tenant the grant holds
@@ -45,7 +45,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * owned below it there. The chain ends at a role that is missing, that names
  * half a tenant, or that no check holding the roles before it sees, so a tenant
  * moved under another parent stops holding what a role of its old parent's
- * carries. A grant naming half a tenant holds nothing anywhere (N130).
+ * carries. A grant naming half a tenant holds nothing anywhere.
  *
  * It reads in a fixed number of queries, never one for each holder or tenant:
  * the roles below the set in one recursive query (`RoleChains`), then one read
@@ -421,7 +421,7 @@ final readonly class ExclusionHoldings
      * activations of them as the grants they stand for, in every tenant and
      * application, a chunk of the roles at a time, under a shared lock when
      * asked. An activation counts while break-glass is disabled, since it
-     * grants again once break-glass is enabled (N141).
+     * grants again once break-glass is enabled.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun  $run
      * @param  list<string>  $roles

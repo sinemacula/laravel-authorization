@@ -22,10 +22,9 @@ use SineMacula\Laravel\Authorization\Usage\ObservedUse;
 use SineMacula\Laravel\Authorization\Usage\UsageTracking;
 
 /**
- * What one read of an access review knows of its rows' use (N94): each row's
- * `usage` (see `RowUsage`), read from the bound usage store in one batched
- * lookup of the page's routes and one read of the coverage, never one for each
- * row.
+ * What one read of an access review knows of its rows' use: each row's `usage`
+ * (see `RowUsage`), read from the bound usage store in one batched lookup of
+ * the page's routes and one read of the coverage, never one for each row.
  *
  * A row's window runs from the later of the review's `since` (an unused
  * review's) and its grant's creation to the review's instant. The route was

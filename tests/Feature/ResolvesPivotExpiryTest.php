@@ -53,7 +53,7 @@ final class ResolvesPivotExpiryTest extends TestCase
     /**
      * A grant counts only in its scope: "admin in A, viewer in B" for one
      * identity and two platform roles, while a platform-wide grant counts in
-     * every tenant and with none (AUTHZ-5.1, AUTHZ-5.7).
+     * every tenant and with none.
      *
      * @return void
      */
@@ -114,7 +114,7 @@ final class ResolvesPivotExpiryTest extends TestCase
 
     /**
      * A grant made for one application counts only on that application, and a
-     * grant for every application on all of them and with none (AUTHZ-5.6).
+     * grant for every application on all of them and with none.
      *
      * @return void
      */

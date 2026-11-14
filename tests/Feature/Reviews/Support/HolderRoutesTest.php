@@ -28,8 +28,8 @@ use Tests\Feature\Stubs\StubMachine;
 use Tests\TestCase;
 
 /**
- * Feature tests for the holders of a role, a permission or a policy (N93): one
- * row for each route, direct grants, grants of roles below a role, of roles
+ * Feature tests for the holders of a role, a permission or a policy: one row
+ * for each route, direct grants, grants of roles below a role, of roles
  * carrying a permission or policy and of the roles below them, every edge live,
  * alternative routes kept, a deny-only policy held, boundaries and resource
  * policies left out.

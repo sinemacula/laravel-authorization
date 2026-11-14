@@ -20,9 +20,9 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the switches of the authorization config, `gate`,
- * `hierarchy` and `rank`: validated strictly at boot (N117), and read at run
- * time through one strict accessor by every reader of the role hierarchy and
- * rank switches, so none tests a value for its truthiness or fails with a
+ * `hierarchy` and `rank`: validated strictly at boot, and read at run time
+ * through one strict accessor by every reader of the role hierarchy and rank
+ * switches, so none tests a value for its truthiness or fails with a
  * `TypeError`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

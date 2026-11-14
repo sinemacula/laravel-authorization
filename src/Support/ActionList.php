@@ -7,8 +7,8 @@ namespace SineMacula\Laravel\Authorization\Support;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 
 /**
- * The actions a check over several actions decides (AUTHZ-9.5): the manager's
- * `any()` and `all()`.
+ * The actions a check over several actions decides: the manager's `any()` and
+ * `all()`.
  *
  * The actions are decided one at a time, in the order given, and the walk stops
  * at the first decision that settles the answer: `any()` at the first allow,

@@ -10,10 +10,9 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * The administered-scope rule (N79): a change that may widen authority is made
- * only by an actor that administers the whole of its reach, so its action is
- * allowed everywhere the change reaches, never just at the node it is decided
- * at.
+ * The administered-scope rule: a change that may widen authority is made only
+ * by an actor that administers the whole of its reach, so its action is allowed
+ * everywhere the change reaches, never just at the node it is decided at.
  *
  * The change's own action is decided again in the reach's tenant, standing just
  * below it for a reach that includes the tenants below, so only authority that

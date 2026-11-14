@@ -8,7 +8,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
- * Read a whole-number setting as it is written (N117).
+ * Read a whole-number setting as it is written.
  *
  * The config file reads each whole-number setting from the environment without
  * a cast, so a malformed value is refused rather than quietly read as another

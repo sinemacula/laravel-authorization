@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Services\GrantPruner;
 /**
  * Removes the grants that no longer count: those that have expired, those whose
  * grantee no longer exists, and the resource policy attachments whose record no
- * longer exists (AUTHZ-17.6).
+ * longer exists.
  *
  * Schedulable, and shaped like Laravel's `model:prune`: `--pretend` reports
  * what would be removed without removing it, and `--chunk` sets how many rows

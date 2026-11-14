@@ -5,8 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown by a grant hook to refuse a grant that widens an identity's scope
- * (AUTHZ-11.3, N80).
+ * Thrown by a grant hook to refuse a grant that widens an identity's scope.
  *
  * The package throws it on to the caller as the hook threw it: the call's
  * transaction rolls back, nothing is written, no change event is dispatched and

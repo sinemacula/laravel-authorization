@@ -8,7 +8,7 @@ use Illuminate\Contracts\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Tenant tree contract (AUTHZ-5.3).
+ * Tenant tree contract.
  *
  * The tenant tree is the application's: this package never stores it, and
  * learns it only through this seam. A grant in a tenant applies there and,

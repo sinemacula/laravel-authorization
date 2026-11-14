@@ -46,12 +46,11 @@ use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
- * Feature tests for the `authorization:why` Artisan command (AUTHZ-11.5, N90,
- * N91): the explanation of a saved subject's check, in the scope its options
- * name and never the one in place, with `--context` as the `input` namespace
- * alone, printed once as text or as its versioned JSON, exiting 0 for any
- * explanation, 2 for an invalid invocation and 1 for a failure, and never
- * printing a value.
+ * Feature tests for the `authorization:why` Artisan command: the explanation of
+ * a saved subject's check, in the scope its options name and never the one in
+ * place, with `--context` as the `input` namespace alone, printed once as text
+ * or as its versioned JSON, exiting 0 for any explanation, 2 for an invalid
+ * invocation and 1 for a failure, and never printing a value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

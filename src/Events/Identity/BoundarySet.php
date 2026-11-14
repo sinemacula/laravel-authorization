@@ -9,9 +9,9 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Dispatched when a policy is set as a grantee's permission boundary in a scope
- * (AUTHZ-7.4): a new boundary, one that replaces another policy there, or the
- * same boundary with a new reach.
+ * Dispatched when a policy is set as a grantee's permission boundary in a
+ * scope: a new boundary, one that replaces another policy there, or the same
+ * boundary with a new reach.
  *
  * It carries what every change to a boundary does (see `BoundaryEvent`), and
  * the policy it replaced, when it replaced another.

@@ -47,8 +47,8 @@ final class LastDecisionStore
      * Return the most recent decision, or null when the current request or job
      * has not yet evaluated a decision (or the store was explicitly cleared),
      * or when an authentication requirement the decision read has since stopped
-     * being met (N37). Whether it was recorded in the current request's session
-     * is for the reader to ask, with `wasRecordedIn()`.
+     * being met. Whether it was recorded in the current request's session is
+     * for the reader to ask, with `wasRecordedIn()`.
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
      */

@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
 
 /**
- * Why a decision event was reported (BL-72): what
- * `DecisionEvent::reportedBecause()` returns.
+ * Why a decision event was reported: what `DecisionEvent::reportedBecause()`
+ * returns.
  *
  * A decision may have several of these reasons at once, a preview's denial of a
  * sensitive action say; the event names the most specific one the settings

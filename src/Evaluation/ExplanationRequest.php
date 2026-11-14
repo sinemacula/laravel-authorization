@@ -5,11 +5,11 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * What an explained check asked, as references (AUTHZ-11.5): the action, the
- * resource, who it was about and who previewed it, the scope it was asked in
- * and the scope it was decided in, which differ when a resource of a tenant
- * below the request's is decided in its own tenant, or one admitted from
- * outside at platform scope (see `DecisionProvenance`).
+ * What an explained check asked, as references: the action, the resource, who
+ * it was about and who previewed it, the scope it was asked in and the scope it
+ * was decided in, which differ when a resource of a tenant below the request's
+ * is decided in its own tenant, or one admitted from outside at platform scope
+ * (see `DecisionProvenance`).
  *
  * It is captured with the decision, as the check is made, never read back from
  * the state around it. It holds references and names alone, never a model, a

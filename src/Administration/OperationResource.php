@@ -18,7 +18,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * The resource a delegated administration check is about (D22): one change a
+ * The resource a delegated administration check is about: one change a
  * management service is to make, named by what it changes, so the decision of
  * its action is the decision of that change.
  *
@@ -282,7 +282,7 @@ final readonly class OperationResource implements AuthorizableResource
 
     /**
      * Return the descriptor of the delegation of a permission this change
-     * proposes, as the explicit grantable right is decided on (N77): the same
+     * proposes, as the explicit grantable right is decided on: the same
      * operation, named by the same attributes, the grantee and the reach
      * included, under `authorization:permission.grantable`, naming the
      * permission given, such as one a granted role carries, or the change's
@@ -299,10 +299,10 @@ final readonly class OperationResource implements AuthorizableResource
 
     /**
      * Return the descriptor of the delegation of a policy this change proposes,
-     * as `authorization:policy.grantable` is decided on (N77): the same
-     * operation, naming the policy and the digest of its document (see
-     * `DocumentDigest`), so a right a policy allows for one document, by a
-     * condition on `resource.digest`, never covers the policy rewritten.
+     * as `authorization:policy.grantable` is decided on: the same operation,
+     * naming the policy and the digest of its document (see `DocumentDigest`),
+     * so a right a policy allows for one document, by a condition on
+     * `resource.digest`, never covers the policy rewritten.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  string  $digest

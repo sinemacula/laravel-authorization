@@ -14,7 +14,7 @@ use Tests\Concerns\ReadsRefusedSettings;
 
 /**
  * Unit tests for reading a block of the authorization config whose keys the
- * package defines (N116).
+ * package defines.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -13,11 +13,11 @@ use Tests\Concerns\ReadsRefusedSettings;
 use Tests\TestCase;
 
 /**
- * Feature tests for the validation and reading of `authorization.break_glass`
- * (AUTHZ-11.7, N133): every setting optional with its default, each checked as
- * it is written, a key the package does not define refused, `enabled` true
- * accepted, a role's maximum above the global one refused, and the
- * justification codes required once enabled.
+ * Feature tests for the validation and reading of `authorization.break_glass`:
+ * every setting optional with its default, each checked as it is written, a key
+ * the package does not define refused, `enabled` true accepted, a role's
+ * maximum above the global one refused, and the justification codes required
+ * once enabled.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

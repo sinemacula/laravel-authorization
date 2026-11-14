@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 use Tests\Concerns\ReadsRefusedSettings;
 
 /**
- * Unit tests for reading a whole-number setting as it is written (N117).
+ * Unit tests for reading a whole-number setting as it is written.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

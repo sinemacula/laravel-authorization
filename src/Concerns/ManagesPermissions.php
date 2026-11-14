@@ -28,8 +28,8 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * listener keeps the resolution cache coherent and audit consumers receive one
  * signal per change. Each write helper takes an optional `actor:`, an acting
  * context it hands to the service, so the change is delegated and decided as
- * that actor (AUTHZ-11.1); without one it is trusted system work, never an
- * endpoint for user-controlled administration. A raw relation write
+ * that actor; without one it is trusted system work, never an endpoint for
+ * user-controlled administration. A raw relation write
  * (`$role->permissions()->attach()`, `detach()` or `sync()`) bypasses the
  * service: it fires none of those events, decides nothing and leaves the
  * resolution cache stale, so it is unsupported for any change that must be

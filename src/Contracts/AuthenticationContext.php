@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Contracts;
 
 /**
- * Authentication context contract (AUTHZ-8.2, AUTHZ-13.2).
+ * Authentication context contract.
  *
  * Supplies the `authentication` namespace of the context, and any namespace it
  * contributes beside it (`mfa` or `sso`, under their own names), whose keys it
@@ -17,9 +17,9 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  * the signed-in user's key and morph type. Under the suite it is
  * `laravel-authentication`'s authentication context, with its key names.
  *
- * It also declares the names that make a key of its namespaces an assurance key
- * (AUTHZ-8.9, N104), beside the package's fixed `AssuranceKeys::NAMES`, so a
- * sibling package's assurance keys are as untestable as the package's own.
+ * It also declares the names that make a key of its namespaces an assurance
+ * key, beside the package's fixed `AssuranceKeys::NAMES`, so a sibling
+ * package's assurance keys are as untestable as the package's own.
  *
  * `namespaces()` and `assuranceKeys()` must answer the same for the life of the
  * process, and should be cheap and free of side effects: the package reads them

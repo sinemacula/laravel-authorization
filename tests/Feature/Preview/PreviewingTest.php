@@ -25,10 +25,10 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature tests for `Previewing`, what the request or job knows of its previews
- * (N84, N87): nothing a preview evaluates, and nothing built from one, acts
- * with authority, each use's subject is admitted where its sources are
- * gathered, and nothing of a request's previews reaches the next.
+ * Feature tests for `Previewing`, what the request or job knows of its
+ * previews: nothing a preview evaluates, and nothing built from one, acts with
+ * authority, each use's subject is admitted where its sources are gathered, and
+ * nothing of a request's previews reaches the next.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

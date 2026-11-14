@@ -20,9 +20,8 @@ use SineMacula\Laravel\Authorization\Reviews\ReviewResource;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * The attribute providers an application registers, by morph type (N30): those
- * of `authorization.attributes.resources` and
- * `authorization.attributes.subjects`.
+ * The attribute providers an application registers, by morph type: those of
+ * `authorization.attributes.resources` and `authorization.attributes.subjects`.
  *
  * Each provider is resolved from the container the first time it is needed,
  * then kept. Its values are read afresh for every check that reads its

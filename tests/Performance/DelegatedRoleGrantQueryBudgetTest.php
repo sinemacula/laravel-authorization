@@ -19,11 +19,11 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Query budget of a delegated role grant (BL-65 part 3): the whole authority a
- * role hands out is weighed in one pass, every permission it carries, and every
- * action a policy attached to it allows, decided together, so granting a role
- * that carries thirty permissions, or a policy allowing thirty actions, runs
- * the same number of queries as one that carries three, whether the actor holds
+ * Query budget of a delegated role grant: the whole authority a role hands out
+ * is weighed in one pass, every permission it carries, and every action a
+ * policy attached to it allows, decided together, so granting a role that
+ * carries thirty permissions, or a policy allowing thirty actions, runs the
+ * same number of queries as one that carries three, whether the actor holds
  * them or may grant them explicitly.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

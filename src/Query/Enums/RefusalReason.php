@@ -6,9 +6,9 @@ namespace SineMacula\Laravel\Authorization\Query\Enums;
 
 /**
  * Why an authorized scope, `whereAuthorized()` or the model-level
- * `AuthorizedScope`, refused to scope a query (AUTHZ-10.2, N64): the scope
- * cannot prove that the rows it keeps are exactly those `check()` allows, so it
- * changes nothing and throws instead.
+ * `AuthorizedScope`, refused to scope a query: the scope cannot prove that the
+ * rows it keeps are exactly those `check()` allows, so it changes nothing and
+ * throws instead.
  *
  * Each code is lower-case letters and `_`, and names a developer or
  * configuration fault, never a denial.

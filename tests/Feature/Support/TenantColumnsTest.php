@@ -16,9 +16,9 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the pair of tenant columns a stored row holds, read as the
- * package fails closed on a row naming half a tenant (N130): what grants of it
- * applies nowhere, what restricts of it everywhere, and an attachment of it, or
- * of a policy naming half a tenant, counts for its denies alone.
+ * package fails closed on a row naming half a tenant: what grants of it applies
+ * nowhere, what restricts of it everywhere, and an attachment of it, or of a
+ * policy naming half a tenant, counts for its denies alone.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

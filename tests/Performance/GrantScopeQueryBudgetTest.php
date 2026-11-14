@@ -24,10 +24,9 @@ use Tests\TestCase;
 
 /**
  * Query budget of the grant scope query, the principal presence helper and the
- * lists of grantees (AUTHZ-14.2, AUTHZ-13.8, N131): each reads the grants in
- * one query, with the tenant's subtree nested in it, so the count is the same
- * for one grant as for thirty, and for a tenant two levels down as for one
- * eight levels down.
+ * lists of grantees: each reads the grants in one query, with the tenant's
+ * subtree nested in it, so the count is the same for one grant as for thirty,
+ * and for a tenant two levels down as for one eight levels down.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

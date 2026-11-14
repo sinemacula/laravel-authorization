@@ -8,8 +8,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Who holds both roles of a pair of mutually exclusive roles where their reach
- * overlaps (AUTHZ-11.8, N135, N136): one conflict for each pair of routes, one
- * to each role, that hold together somewhere, in a fixed order.
+ * overlaps: one conflict for each pair of routes, one to each role, that hold
+ * together somewhere, in a fixed order.
  *
  * The report is complete when the identity directory listed every principal of
  * every holder of either role completely; otherwise a principal holding one

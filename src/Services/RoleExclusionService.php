@@ -37,8 +37,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Declares, removes and lists pairs of mutually exclusive roles, and reports
- * who holds both roles of a pair (AUTHZ-11.8, N135, N136): separation of
- * duties, so no grantee holds both roles where their reach overlaps.
+ * who holds both roles of a pair: separation of duties, so no grantee holds
+ * both roles where their reach overlaps.
  *
  * A pair names its two roles by key, in a canonical order, the lower key first,
  * so the pair stays what it is when a role is renamed, and the pair (A, B) is
@@ -47,11 +47,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * model must be saved (`UnsavedRecordException`). A role is never paired with
  * itself (`InvalidRoleExclusionException`), nor is a role naming half a tenant
  * (`InvalidTenantColumnsException`). A pair is a definition, owned as the
- * others are (D20): by the owner of its role owned furthest down, which may
- * name a role its own tenant, an ancestor or the platform owns, as a role takes
- * its parent, and two roles owned by tenants neither of which lies within the
- * other are refused with `OwnerMismatchException` (see
- * `Support\ExclusionPair`). A role deleted takes its pairs with it.
+ * others are: by the owner of its role owned furthest down, which may name a
+ * role its own tenant, an ancestor or the platform owns, as a role takes its
+ * parent, and two roles owned by tenants neither of which lies within the other
+ * are refused with `OwnerMismatchException` (see `Support\ExclusionPair`). A
+ * role deleted takes its pairs with it.
  *
  * Declaring a pair already declared changes nothing and is reported as
  * `UNCHANGED`, as an idempotent grant is; a new pair is `GRANTED`. Declaring a
@@ -67,8 +67,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * weighed against the pair (see `Exclusions\Support\ExclusionGuard`).
  *
  * Each write takes the acting context making the call as `$actor`: null for
- * trusted system work (N75), else a delegated change (AUTHZ-11.1), decided as
- * the actor through `check()` on the pair's operation resource (see
+ * trusted system work, else a delegated change, decided as the actor through
+ * `check()` on the pair's operation resource (see
  * `OperationResource::exclusion()`), under
  * `authorization:role-exclusion.declare` or `.remove`, inside the write's
  * transaction before anything is read for the report or written, under the

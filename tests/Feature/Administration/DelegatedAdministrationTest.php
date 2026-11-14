@@ -38,12 +38,11 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature tests for delegated administration (AUTHZ-11.1) through every
- * management service: each change a call names an acting context for is decided
- * through `check()` under its administration action, before anything is
- * written, and refused, leaving nothing written and dispatching no change
- * event, when it is not allowed or, widening authority, cannot be proved
- * permitted.
+ * Feature tests for delegated administration through every management service:
+ * each change a call names an acting context for is decided through `check()`
+ * under its administration action, before anything is written, and refused,
+ * leaving nothing written and dispatching no change event, when it is not
+ * allowed or, widening authority, cannot be proved permitted.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

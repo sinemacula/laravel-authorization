@@ -10,9 +10,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * The default resource tenant resolver: no record has a tenant, so no check is
- * refused for its resource's tenant until the application binds a resolver
- * (N10). A tenant a resource reference already carries is kept. It answers a
- * bulk check's resources at once, with no tenant for any.
+ * refused for its resource's tenant until the application binds a resolver. A
+ * tenant a resource reference already carries is kept. It answers a bulk
+ * check's resources at once, with no tenant for any.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

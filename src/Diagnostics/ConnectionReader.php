@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\Settings\ValueRenderer;
 
 /**
  * Read which database connection, cache store and queue connection the package
- * uses, from the configuration alone (N119).
+ * uses, from the configuration alone.
  *
  * Each is shown by its name, how it was chosen (`configured`, `default`, or
  * `none` for a cache store not configured, which keeps resolutions in memory

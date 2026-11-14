@@ -48,10 +48,10 @@ use Tests\Fixtures\TenantTrees\ClashingTenants;
 use Tests\TestCase;
 
 /**
- * Feature tests for the grant scope query (AUTHZ-14.2), the principal presence
- * helper (AUTHZ-13.8) and the lists of the grantees reaching a tenant or within
- * it (N131), over a closure-table tree of two organisations, the first with two
- * accounts and a team below the first account, and over the flat tree.
+ * Feature tests for the grant scope query, the principal presence helper and
+ * the lists of the grantees reaching a tenant or within it, over a
+ * closure-table tree of two organisations, the first with two accounts and a
+ * team below the first account, and over the flat tree.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

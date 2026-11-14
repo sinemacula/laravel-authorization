@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * Resource attribute provider contract (N30, AUTHZ-8.4).
+ * Resource attribute provider contract.
  *
  * Supplies the attributes of the records of one resource type (its owner,
  * status, classification and the like), which conditions and `${…}` references

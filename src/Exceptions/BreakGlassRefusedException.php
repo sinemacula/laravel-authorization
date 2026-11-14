@@ -8,8 +8,8 @@ use SineMacula\Laravel\Authorization\Enums\BreakGlassRefusal;
 
 /**
  * Thrown when a break-glass activation, or a surrender, is refused before
- * anything is written (AUTHZ-11.7): break-glass is disabled, or the call breaks
- * one of its limits, each named by its reason.
+ * anything is written: break-glass is disabled, or the call breaks one of its
+ * limits, each named by its reason.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

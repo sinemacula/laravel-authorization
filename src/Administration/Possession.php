@@ -11,8 +11,8 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
  * Whether a delegated grant of a permission hands out only what the actor may
- * hand out (N77): a direct grant to a principal or an identity, each permission
- * a granted role carries, each action a policy handed out allows (see
+ * hand out: a direct grant to a principal or an identity, each permission a
+ * granted role carries, each action a policy handed out allows (see
  * `PolicyRoute`), and a permission a change to a definition hands to its
  * holders (see `DefinitionConstraints`), by one of two routes, each decided
  * across the grant's whole reach: its tenant, standing just below it for a

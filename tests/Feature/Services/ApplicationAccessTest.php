@@ -32,7 +32,7 @@ use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
- * Feature tests for whether a principal may use an application (D23).
+ * Feature tests for whether a principal may use an application.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -9,8 +9,8 @@ use Illuminate\Database\DeadlockException;
 /**
  * Thrown when the database refuses a delegated administration call that runs
  * inside a transaction the application opened, as a concurrency error: a
- * deadlock, a serialisation failure or a lock wait timeout (AUTHZ-11.1, the
- * concurrency protocol).
+ * deadlock, a serialisation failure or a lock wait timeout (the concurrency
+ * protocol).
  *
  * The database has rolled back, or needs to roll back, the whole transaction,
  * not just the call, so only the application can try it again: it should
@@ -20,12 +20,12 @@ use Illuminate\Database\DeadlockException;
  * own error is kept as the previous exception.
  *
  * Thrown too, inside such a transaction, by a grant, trusted or delegated, that
- * would otherwise call its grant hook again (AUTHZ-11.3): when a grant it is
- * about to write now widens an identity's scope with no hook run for it, or
- * when a try of it made again after a conflict would call the hook. The failed
- * try's row locks stay held until the application's transaction ends, and a
- * hook is never called under the package's locks, so the application restarts
- * its transaction instead. The conflict is kept as the previous exception.
+ * would otherwise call its grant hook again: when a grant it is about to write
+ * now widens an identity's scope with no hook run for it, or when a try of it
+ * made again after a conflict would call the hook. The failed try's row locks
+ * stay held until the application's transaction ends, and a hook is never
+ * called under the package's locks, so the application restarts its transaction
+ * instead. The conflict is kept as the previous exception.
  *
  * A call that opened the outermost transaction itself never throws this: it is
  * tried again, then refused as `administration.conflict`.

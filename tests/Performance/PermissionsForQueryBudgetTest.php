@@ -32,11 +32,11 @@ use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
 /**
- * Query budget of `permissionsFor()` (AUTHZ-10.4): the subject's grants, roles,
- * policies and boundaries, the guardrails and the resource's policies and
- * attributes are read once for the listing, not once per action, so listing
- * fifty actions costs exactly the queries listing five costs; and a listing
- * keeps what the request has resolved.
+ * Query budget of `permissionsFor()`: the subject's grants, roles, policies and
+ * boundaries, the guardrails and the resource's policies and attributes are
+ * read once for the listing, not once per action, so listing fifty actions
+ * costs exactly the queries listing five costs; and a listing keeps what the
+ * request has resolved.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

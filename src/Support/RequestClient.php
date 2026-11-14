@@ -16,7 +16,7 @@ use Illuminate\Http\Request;
  * A request that has not been routed, such as the one a console command or a
  * queued job holds, has no client, so neither is read. The request is read when
  * asked, never kept, so a long-lived worker reads the request it is serving. It
- * is the helper that turns the request into plain values for the core (D22):
+ * is the helper that turns the request into plain values for the core:
  * `Operation::begin()` asks it, and nothing else reads the request for an
  * operation.
  *

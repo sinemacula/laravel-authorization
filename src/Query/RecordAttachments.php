@@ -31,11 +31,11 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  * `GrantApplications::only()`), so it is the resolver's own predicate on the
  * row; and the key one an attachment can name, at most 191 bytes, not `*` (as
  * `ResourcePolicyResolver` stores no other). A policy whose denies count on the
- * type's records in every scope, as the resolver reads them (N130, see
- * `inScope()`), is compiled with what attaches it so; with no such policy, each
- * policy is compiled once, with the scope's own predicate alone. Every value of
- * that predicate is inlined as the dialect writes a bound value
- * (`InlinedQuery`), never through the connection's escaping.
+ * type's records in every scope, as the resolver reads them (see `inScope()`),
+ * is compiled with what attaches it so; with no such policy, each policy is
+ * compiled once, with the scope's own predicate alone. Every value of that
+ * predicate is inlined as the dialect writes a bound value (`InlinedQuery`),
+ * never through the connection's escaping.
  *
  * The key's text is compared with the attachment's under the attachment
  * column's own collation, as the resolver's comparison with that text is: byte

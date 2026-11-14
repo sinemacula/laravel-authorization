@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
  * An authentication requirement that alone kept an allow statement from
- * applying, with the parts of it that are unmet (N35): one candidate of an
+ * applying, with the parts of it that are unmet: one candidate of an
  * `insufficient_authentication` decision, which meeting would allow the check.
  *
  * It holds the requirement and the part names only: never the statement or the

@@ -10,8 +10,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 use SineMacula\Laravel\Authorization\Support\ClassName;
 
 /**
- * Boot-time validator for the `authorization.grant_hooks` config (AUTHZ-11.3),
- * run by `ConfigValidator`.
+ * Boot-time validator for the `authorization.grant_hooks` config, run by
+ * `ConfigValidator`.
  *
  * The value must be a list of class names, in the order the hooks run, each an
  * existing class implementing `GrantHook`, and each listed once, whatever the

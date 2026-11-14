@@ -6,13 +6,13 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
  * Thrown when an attribute provider fails to supply the attributes a check
- * reads (N31): it could not be resolved, or it threw.
+ * reads: it could not be resolved, or it threw.
  *
  * The check is aborted rather than decided with the attributes missing, so a
  * failing provider never allows anything. The message names the provider's
  * class and the namespace it supplies, never an attribute value, and nothing of
  * the original failure, which is kept as the previous exception, reaches a
- * decision, an event or the trace (AUTHZ-8.8).
+ * decision, an event or the trace.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

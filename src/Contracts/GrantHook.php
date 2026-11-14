@@ -7,12 +7,12 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 use SineMacula\Laravel\Authorization\Hooks\GrantWidening;
 
 /**
- * Grant hook contract (AUTHZ-11.3, N80).
+ * Grant hook contract.
  *
  * Before a grant that widens an identity's scope is written, the grant service
  * calls the bound hook with the proposed widening, inside the call's
  * transaction and before the package takes any lock of its own for the call.
- * Under the suite it is bound to `laravel-sso`'s scope widening (AUTHZ-14.2).
+ * Under the suite it is bound to `laravel-sso`'s scope widening.
  *
  * A hook may only veto: it refuses by throwing, `GrantRefusedException` for a
  * refusal it means, or any other exception, and the whole call rolls back with
@@ -38,10 +38,9 @@ use SineMacula\Laravel\Authorization\Hooks\GrantWidening;
  * which does nothing; an application or a sibling package may bind its own on
  * the contract instead, before the package registers or after. When
  * `authorization.grant_hooks` lists hooks, they run first, in order, then the
- * bound hook (N108): the package extends the contract so whatever it resolves
- * to is wrapped in `Hooks\ListedGrantHooks`, and the grant service wraps the
- * hook it calls unless it already is, for an instance Laravel applies no
- * extender to.
+ * bound hook: the package extends the contract so whatever it resolves to is
+ * wrapped in `Hooks\ListedGrantHooks`, and the grant service wraps the hook it
+ * calls unless it already is, for an instance Laravel applies no extender to.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

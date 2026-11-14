@@ -64,8 +64,8 @@ return new class extends Migration {
             // The parent role, for role hierarchy. A child role inherits every
             // permission of its ancestors when
             // `authorization.hierarchy.enabled` is true. Null marks the role as
-            // a root. A role with children cannot be deleted (D18): the role
-            // observer refuses it, and the foreign key restricts it.
+            // a root. A role with children cannot be deleted: the role observer
+            // refuses it, and the foreign key restricts it.
             $blueprint->uuid('parent_id')->nullable();
 
             // Role seniority. Lower values denote more senior roles (0 is the

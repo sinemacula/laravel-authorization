@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * `AuthorizationEvent` marker, and that every event, the decision events
  * included, is a final readonly snapshot of plain values: scalars, backed
  * enums, arrays of them or of the package's value objects, those value objects
- * and dates, never a model or any other object (AUTHZ-15.3, AUTHZ-15.4).
+ * and dates, never a model or any other object.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

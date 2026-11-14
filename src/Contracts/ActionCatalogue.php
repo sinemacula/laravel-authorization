@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Contracts;
 
 /**
- * Action catalogue contract (AUTHZ-6.2).
+ * Action catalogue contract.
  *
  * The actions the application lets a policy name. Every `actions` and
  * `not_actions` pattern of a policy document must cover at least one of them,

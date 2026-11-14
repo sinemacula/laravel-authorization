@@ -291,7 +291,7 @@ final class RoleServiceTest extends TestCase
      * A change to a platform role's permissions is decided at platform scope,
      * so an actor holding the action only in the tenant the request is in is
      * refused it, and one holding it platform-wide makes it from the platform,
-     * which owns the role, but not from the tenant (D20); a change to a role an
+     * which owns the role, but not from the tenant; a change to a role an
      * ancestor of the request's tenant owns is out of scope.
      *
      * @return void

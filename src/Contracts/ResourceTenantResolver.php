@@ -8,14 +8,14 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Resource tenant resolver contract (AUTHZ-4.4).
+ * Resource tenant resolver contract.
  *
  * Answers which tenant owns the record a check is about, whether it is named by
  * its model or by a `(type, id)` pair, so a decision about a tenant-owned
  * object is made in the object's tenant and one outside the subject's scope is
- * refused as `tenant_scope` (AUTHZ-5.5), however the caller names it (N17). The
- * shipped default knows no tenant for any record (N10); an application binds
- * its own, reading a tenant column or looking the record up.
+ * refused as `tenant_scope`, however the caller names it. The shipped default
+ * knows no tenant for any record; an application binds its own, reading a
+ * tenant column or looking the record up.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -33,7 +33,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for what the authorization manager's decisions count as grant
- * use while usage tracking is on (N100): every live route behind an allowed
+ * use while usage tracking is on: every live route behind an allowed
  * permission, redundant ones included, and every policy whose statement
  * decided, each everyday form of check alike; and every excluded path (a
  * preview, an explanation, `authorization:why`, a listing of permissions, a

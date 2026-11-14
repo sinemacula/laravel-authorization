@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
 /**
  * Tells whether a resource policy's `principals` selectors name the subject of
- * one check (AUTHZ-7.3).
+ * one check.
  *
  * A selector names the subject when it is the subject's principal or identity
  * (only one whose grants reach the principal: a person's never names a machine,

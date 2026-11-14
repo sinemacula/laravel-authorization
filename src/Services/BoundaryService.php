@@ -36,7 +36,7 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
  * Sets, replaces and removes the permission boundaries of principals and
- * identities (AUTHZ-7.4).
+ * identities.
  *
  * A boundary is a managed policy that caps what its grantee may do: a check
  * about a subject passes the boundary stage only when every boundary of its
@@ -45,15 +45,15 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  * deny stage. A boundary grants nothing: what passes it is still decided by the
  * allows. With no boundary, nothing is capped.
  *
- * A grantee has at most one boundary per scope (AUTHZ-5.1): platform-wide, or
- * one tenant, reaching the tenants below it unless `$includeSubtree` is false.
- * Setting a boundary where the grantee has one replaces it; every boundary
- * whose scope covers the tenant a check is decided in applies, so a tenant's
- * boundary never replaces the platform's. A policy one tenant owns is set in
- * that tenant, or a tenant below it that the call names, and naming any other
- * is refused with `GrantScopeMismatchException`; one the platform owns is set
- * in the tenant named, else platform-wide. A removal finds the boundary in the
- * tenant named, else platform-wide.
+ * A grantee has at most one boundary per scope: platform-wide, or one tenant,
+ * reaching the tenants below it unless `$includeSubtree` is false. Setting a
+ * boundary where the grantee has one replaces it; every boundary whose scope
+ * covers the tenant a check is decided in applies, so a tenant's boundary never
+ * replaces the platform's. A policy one tenant owns is set in that tenant, or a
+ * tenant below it that the call names, and naming any other is refused with
+ * `GrantScopeMismatchException`; one the platform owns is set in the tenant
+ * named, else platform-wide. A removal finds the boundary in the tenant named,
+ * else platform-wide.
  *
  * The grantee is a saved model or a reference with a type and a key, else
  * `InvalidGranteeException` is thrown. A boundary caps a principal or an
@@ -73,15 +73,15 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  *
  * Every call runs in one transaction on the package's connection, is one
  * operation for the acting context the call names, or trusted system work with
- * none (N75), recorded on the row it writes, and dispatches `BoundarySet`
- * (carrying the policy it replaced, when it replaced one) or `BoundaryRemoved`
- * once it commits, only when it changed something. The grantee's cached
- * resolutions are invalidated through its version, as a grant's are, so the
- * change takes effect on the next check in every worker.
+ * none, recorded on the row it writes, and dispatches `BoundarySet` (carrying
+ * the policy it replaced, when it replaced one) or `BoundaryRemoved` once it
+ * commits, only when it changed something. The grantee's cached resolutions are
+ * invalidated through its version, as a grant's are, so the change takes effect
+ * on the next check in every worker.
  *
- * A call with an acting context is delegated administration (AUTHZ-11.1): the
- * set is decided under `authorization:boundary.set`, and each removal, of the
- * boundary the grantee has in the scope or of every one it has, under
+ * A call with an acting context is delegated administration: the set is decided
+ * under `authorization:boundary.set`, and each removal, of the boundary the
+ * grantee has in the scope or of every one it has, under
  * `authorization:boundary.remove`, as the actor, through `check()`, on the
  * change's operation resource, inside the transaction once the boundary is read
  * and before anything is written; the first refused throws the decision's

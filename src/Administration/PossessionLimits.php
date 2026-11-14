@@ -30,10 +30,10 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
 /**
  * Whether anything that caps or denies a subject could limit a permission
  * anywhere a delegated grant of it would reach, for the possession route of the
- * grant (N77), and for the administration action itself across a reach wider
- * than the node it is decided at (see `AdministeredScope`). The route proves
- * the grant contained, and the actor administers the reach, only when nothing
- * could: when in doubt, the permission is limited.
+ * grant, and for the administration action itself across a reach wider than the
+ * node it is decided at (see `AdministeredScope`). The route proves the grant
+ * contained, and the actor administers the reach, only when nothing could: when
+ * in doubt, the permission is limited.
  *
  * What is read:
  *

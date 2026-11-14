@@ -32,7 +32,7 @@ use Tests\Fixtures\Usage\CountingUsageStore;
 use Tests\TestCase;
 
 /**
- * Feature tests for what an access review says of each row's use (N94): `used`,
+ * Feature tests for what an access review says of each row's use: `used`,
  * `unused` only over a fully covered window, `unknown` otherwise, a regrant
  * never inheriting the old grant's use while an expiry or reach rewrite keeps
  * it, the unused review listing only the grants with no observed use, paged,

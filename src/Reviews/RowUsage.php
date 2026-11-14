@@ -8,7 +8,7 @@ use Carbon\CarbonImmutable;
 use SineMacula\Laravel\Authorization\Reviews\Enums\UsageStatus;
 
 /**
- * What an access review knows of one row's use (N94), its `usage` field:
+ * What an access review knows of one row's use, its `usage` field:
  *
  * - `status`: `used` when the route was observed in use within the window,
  *   `unused` only when tracking covered the whole window and the route was

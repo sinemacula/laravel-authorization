@@ -16,9 +16,9 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * The admissions of one use of a preview (N84): each check, each batch, each
- * listing and each compile of a query scoped through the preview is one use,
- * and is admitted wherever one of its decisions is made.
+ * The admissions of one use of a preview: each check, each batch, each listing
+ * and each compile of a query scoped through the preview is one use, and is
+ * admitted wherever one of its decisions is made.
  *
  * A decision about the target is made where `ResourceScope` puts it: in the
  * preview's scope, in the tenant of a resource of that scope's subtree, a child

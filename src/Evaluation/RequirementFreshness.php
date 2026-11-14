@@ -7,9 +7,9 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 use Illuminate\Support\Carbon;
 
 /**
- * How long a decision that read an authentication requirement may be reused
- * (AUTHZ-12.3, N37): within the session it was made in, and until the earliest
- * instant a met requirement it read stops being met.
+ * How long a decision that read an authentication requirement may be reused:
+ * within the session it was made in, and until the earliest instant a met
+ * requirement it read stops being met.
  *
  * The session is kept only as a non-reversible fingerprint, its SHA-256 hash,
  * never the session id itself, so a decision carrying it is still safe to log,

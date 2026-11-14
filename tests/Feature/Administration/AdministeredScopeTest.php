@@ -35,8 +35,8 @@ use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
- * Feature tests for `AdministeredScope`, the administered-scope rule (N79): an
- * actor must administer the whole reach of a change that may widen authority.
+ * Feature tests for `AdministeredScope`, the administered-scope rule: an actor
+ * must administer the whole reach of a change that may widen authority.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

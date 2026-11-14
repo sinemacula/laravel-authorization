@@ -24,13 +24,13 @@ use Tests\Concerns\ReportsEveryDecision;
 use Tests\TestCase;
 
 /**
- * The bulk check parity property (AUTHZ-10.3, D22): for random scenarios, the
- * decision `checkMany()` makes for each check is exactly the one a fresh
- * `check()` makes for it, its effect, reason, stage, deciding statements,
- * requirements, freshness and trace alike; a batch whose check throws stops at
- * that check, having decided and reported exactly the checks before it, and
- * throws what `check()` throws for it. Each batch is decided with a cold cache
- * and again with the cache it warmed, with and without a persistent store.
+ * The bulk check parity property: for random scenarios, the decision
+ * `checkMany()` makes for each check is exactly the one a fresh `check()` makes
+ * for it, its effect, reason, stage, deciding statements, requirements,
+ * freshness and trace alike; a batch whose check throws stops at that check,
+ * having decided and reported exactly the checks before it, and throws what
+ * `check()` throws for it. Each batch is decided with a cold cache and again
+ * with the cache it warmed, with and without a persistent store.
  *
  * The scenarios are drawn from `AUTHZ_PARITY_SEED`, a random seed when it is
  * not set, and there are `AUTHZ_PARITY_RUNS` of them, 150 by default; a failure

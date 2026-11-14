@@ -5,9 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Usage;
 
 /**
- * A batch of grant usage observations one worker flushes as one queued job
- * (N101), as compact plain values, so it travels through any queue well within
- * its limit on a job's size: each stored grant the routes start from once (see
+ * A batch of grant usage observations one worker flushes as one queued job, as
+ * compact plain values, so it travels through any queue well within its limit
+ * on a job's size: each stored grant the routes start from once (see
  * `StoredGrant`), and each observation as its route's key (see
  * `GrantUsageKey`), the index of its grant and the start of the bucket it was
  * observed in. The batch names the instant it was flushed at, to which the

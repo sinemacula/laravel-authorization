@@ -25,7 +25,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
  * must be senior to the identity, and able to hand out the role's whole
  * authority, or the grant is refused and nothing is written. A grant it makes
  * carries the actor in its event, and its row records it. Without it the grant
- * is trusted system work and records no actor (N75).
+ * is trusted system work and records no actor.
  *
  * A grant that would leave the identity, or a principal of it, holding both
  * roles of a declared pair where their reach overlaps is refused, trusted or

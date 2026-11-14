@@ -46,13 +46,13 @@ use Tests\Fixtures\Reviews\SwitchableSessionPolicySource;
 use Tests\TestCase;
 
 /**
- * Feature tests for the access review service (AUTHZ-11.6): a review run as a
- * reviewer once admitted, or as trusted work; its rows bounded by a limit with
- * an exact truncation flag, in one total order the same on every database,
- * naming references alone, read on the write connection; its pages read by
- * signed cursors bound to their review, each admitted again, at an instant
- * frozen for the review, over a live scan; its stream, lazy and admitted for
- * each chunk; and its export as JSON Lines, needing both review rights.
+ * Feature tests for the access review service: a review run as a reviewer once
+ * admitted, or as trusted work; its rows bounded by a limit with an exact
+ * truncation flag, in one total order the same on every database, naming
+ * references alone, read on the write connection; its pages read by signed
+ * cursors bound to their review, each admitted again, at an instant frozen for
+ * the review, over a live scan; its stream, lazy and admitted for each chunk;
+ * and its export as JSON Lines, needing both review rights.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -41,9 +41,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleParity;
 
 /**
- * Activates, surrenders and revokes break-glass activations (AUTHZ-11.7, N133):
- * emergency access to a configured role, for a human principal, for a limited
- * time, with a justification code, granted through the role grant path (see
+ * Activates, surrenders and revokes break-glass activations: emergency access
+ * to a configured role, for a human principal, for a limited time, with a
+ * justification code, granted through the role grant path (see
  * `Database\BreakGlassActivations`).
  *
  * `activate()` writes a record of its own, beside any grant of the role, live
@@ -63,20 +63,20 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * under the role's lock (see `ExclusionGuard::assertActivatable()`).
  *
  * Each call takes the acting context making it as `$actor`: null for trusted
- * system work (N75), which skips the right but none of the other refusals. A
- * delegated activation is decided through `check()` (D22), in the activation's
- * tenant and application, under `authorization:break-glass.activate` for the
- * actor itself and `authorization:break-glass.grant` for another, and a
- * delegated revocation under `authorization:break-glass.revoke`. Holding the
- * right across the reach is the gate (N140): the rank, self and possession
- * rules of a role grant are not weighed, while denies, boundaries, guardrails
- * and caps still apply to what the role grants. The grant hooks are asked about
- * an activation as about a grant of its role in its scope until its expiry, and
- * a refusal refuses it. A delegated call locks what a delegated role grant
- * locks, in the same order: the actor's authority, then the grantee's rows and
- * the role, and an activation locks the role before it is written, so it races
- * a role's deletion, a revocation of the right or another activation as a grant
- * does. A delegated call weighs a role given as a model on its row as stored.
+ * system work, which skips the right but none of the other refusals. A
+ * delegated activation is decided through `check()`, in the activation's tenant
+ * and application, under `authorization:break-glass.activate` for the actor
+ * itself and `authorization:break-glass.grant` for another, and a delegated
+ * revocation under `authorization:break-glass.revoke`. Holding the right across
+ * the reach is the gate: the rank, self and possession rules of a role grant
+ * are not weighed, while denies, boundaries, guardrails and caps still apply to
+ * what the role grants. The grant hooks are asked about an activation as about
+ * a grant of its role in its scope until its expiry, and a refusal refuses it.
+ * A delegated call locks what a delegated role grant locks, in the same order:
+ * the actor's authority, then the grantee's rows and the role, and an
+ * activation locks the role before it is written, so it races a role's
+ * deletion, a revocation of the right or another activation as a grant does. A
+ * delegated call weighs a role given as a model on its row as stored.
  *
  * `surrender()` ends an activation for its own grantee alone, acting as itself
  * and not impersonated, and `revoke()` for a holder of the revoke right in the
@@ -84,8 +84,8 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * own, deciding no right. Each returns how many it ended, as a revocation does:
  * ending one already ended or expired changes nothing and returns 0, and one
  * that does not exist throws `ModelNotFoundException`. Either may end an
- * activation while break-glass is disabled, when none counts anyway (N139).
- * Every write goes through the model, so the next check sees it.
+ * activation while break-glass is disabled, when none counts anyway. Every
+ * write goes through the model, so the next check sees it.
  *
  * An activation dispatches `BreakGlassActivated`, and an end that ended one
  * `BreakGlassSurrendered` or `BreakGlassRevoked`, once the write commits, the

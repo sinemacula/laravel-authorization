@@ -10,8 +10,8 @@ use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 
 /**
  * The actions the application declares: every permission name of the configured
- * permission enums and providers (AUTHZ-3.8), whatever its guard, read through
- * the permission catalogue. The package's own permissions (see
+ * permission enums and providers, whatever its guard, read through the
+ * permission catalogue. The package's own permissions (see
  * `PackagePermissions`), which the permission catalogue holds too, are left
  * out: they are not the application's, so with nothing configured the catalogue
  * is empty and covers no pattern, not even `*`. The policy validator accepts a

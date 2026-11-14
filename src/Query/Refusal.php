@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
  * One reason an authorized scope refused to scope a query, naming what it could
  * not compile: the policy and statement, the condition key, namespace, column
  * or seam class, and a fixed phrase. It never carries an operand, a pattern, a
- * context value, a row's value or a tenant id (N64).
+ * context value, a row's value or a tenant id.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

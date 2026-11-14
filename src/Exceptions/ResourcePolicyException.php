@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
  * Thrown when a policy would be attached, or rewritten, against the rule for
- * the `principals` of its statements (AUTHZ-7.3).
+ * the `principals` of its statements.
  *
  * A policy attached to a resource or a resource type is a managed policy whose
  * every allow statement names its principals, the subjects it applies to; its

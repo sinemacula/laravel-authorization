@@ -17,25 +17,25 @@ use SineMacula\Laravel\Authorization\Support\CredentialScopes;
  * tenant, null for none, so only platform-wide rows count. The application and
  * the guard say where the request came in. The session is the current request's
  * session id when the subject is the request's authenticated user, which an
- * authentication requirement checker judges the proofs of (N34); it is null for
- * a subject the caller names and outside a session, and every authentication
+ * authentication requirement checker judges the proofs of; it is null for a
+ * subject the caller names and outside a session, and every authentication
  * requirement is then unmet.
  *
  * The scopes say what the credential the subject acts with carries, as the
  * subject resolver read it, for the session policy source to cap its checks
- * with (N121, N126): `CredentialScopes::uncapped()` when the credential carries
- * no cap, and `CredentialScopes::of()` with the scopes it carries, where an
- * empty list carries none granted and allows nothing. Null says nothing about
- * them, which is not the same as no cap: the source then establishes the scopes
- * of the credential the subject names, its session or its guard's caller, and
- * fails closed when it cannot (see `SessionPolicySource`).
+ * with: `CredentialScopes::uncapped()` when the credential carries no cap, and
+ * `CredentialScopes::of()` with the scopes it carries, where an empty list
+ * carries none granted and allows nothing. Null says nothing about them, which
+ * is not the same as no cap: the source then establishes the scopes of the
+ * credential the subject names, its session or its guard's caller, and fails
+ * closed when it cannot (see `SessionPolicySource`).
  *
  * The platform marker says the subject acts on the platform, as a job or a
- * console command acting for no tenant does (N120): `for()` of it decides on
- * the platform, with no tenant, on its application, or on none, whatever tenant
- * the request is in, and the request's scope is restored afterwards. A subject
- * on the platform names no tenant. A subject without the marker is decided in
- * its own tenant or application when `for()` names it with either, and in the
+ * console command acting for no tenant does: `for()` of it decides on the
+ * platform, with no tenant, on its application, or on none, whatever tenant the
+ * request is in, and the request's scope is restored afterwards. A subject on
+ * the platform names no tenant. A subject without the marker is decided in its
+ * own tenant or application when `for()` names it with either, and in the
  * request's scope otherwise.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

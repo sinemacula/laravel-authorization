@@ -36,12 +36,12 @@ use Tests\TestCase;
  * coverage for §12.2 of the spec.
  *
  * A permission allows a check on a resource only where the grant it came from
- * reaches the resource (AUTHZ-7.7). That reach costs no query of its own: the
- * permissions are resolved per scope, keyed by the scope's tenant and
- * application, so each tenant's entry already holds only the grants that reach
- * it, and a check on a resource of a tenant reads that tenant's entry. The
- * budgets are unchanged: five queries for one scope's permissions, and none
- * once every scope a check reads is warm.
+ * reaches the resource. That reach costs no query of its own: the permissions
+ * are resolved per scope, keyed by the scope's tenant and application, so each
+ * tenant's entry already holds only the grants that reach it, and a check on a
+ * resource of a tenant reads that tenant's entry. The budgets are unchanged:
+ * five queries for one scope's permissions, and none once every scope a check
+ * reads is warm.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

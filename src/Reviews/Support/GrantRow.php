@@ -27,7 +27,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * row naming half a tenant, a type without a key or a key without a type, which
  * the package never writes: its scope names no tenant, but a check applies its
  * grants nowhere, as `TenantChain` reads neither half as the platform's, and
- * its restrictions everywhere (N130, see `Support\TenantColumns`), so it is not
+ * its restrictions everywhere (see `Support\TenantColumns`), so it is not
  * placed (see `isPlaced()`), and meets an attachment, or a grant, only one that
  * holds everywhere (see `canMeet()`).
  *

@@ -5,9 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
 
 /**
- * What one condition test of a statement found, as an explanation records it
- * (AUTHZ-11.5): that it held or failed, or why it could not be decided, never
- * the value it read or the operand it compared it with (AUTHZ-8.8).
+ * What one condition test of a statement found, as an explanation records it:
+ * that it held or failed, or why it could not be decided, never the value it
+ * read or the operand it compared it with.
  *
  * A key the context lacks is `missing` when the test cannot be decided without
  * it. A test that passes on a missing key, under `_if_exists` or as `null:

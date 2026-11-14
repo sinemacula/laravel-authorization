@@ -27,8 +27,8 @@ use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\TestCase;
 
 /**
- * Feature tests for what a subject holds, and where (N93): a principal's own
- * grants and its identity's when they reach it, never a sibling principal's; an
+ * Feature tests for what a subject holds, and where: a principal's own grants
+ * and its identity's when they reach it, never a sibling principal's; an
  * identity's and every principal's the directory lists, with completeness;
  * every route through a role and the roles above it, in the review's order.
  *

@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
 use SineMacula\Laravel\Authorization\Usage\UsageTracking;
 
 /**
- * Wires grant usage tracking (N94, N101, N102) into the application.
+ * Wires grant usage tracking into the application.
  *
  * `register()` binds the usage store and the recorder. The store, the package's
  * own on its tables by default, is a seam bound through `SeamBindings`: its

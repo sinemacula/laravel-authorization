@@ -18,7 +18,7 @@ use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
- * Reads the policies an identity gets through its roles (AUTHZ-7.2).
+ * Reads the policies an identity gets through its roles.
  *
  * A policy attached to a role, through the `authorizable_policies` table with
  * the role as the grantee, applies to whoever holds the role, and to whoever

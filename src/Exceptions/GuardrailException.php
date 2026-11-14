@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Thrown when a guardrail would be changed, or the policy one is edited or
- * deleted, against the rules guardrails keep (AUTHZ-7.6), naming the reason.
+ * deleted, against the rules guardrails keep, naming the reason.
  *
  * - `not_permitted`: the actor may not change the guardrails of the scope. It
  *   must hold `authorization:guardrail.manage` effectively, through a grant

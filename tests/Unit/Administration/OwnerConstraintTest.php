@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Administration\OwnerConstraint;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Unit tests for `OwnerConstraint`: only the owner edits (D20).
+ * Unit tests for `OwnerConstraint`: only the owner edits.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

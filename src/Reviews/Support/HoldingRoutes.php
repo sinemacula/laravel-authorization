@@ -16,8 +16,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
 /**
- * What a subject holds in a review's scope, and where (N93), one row for each
- * route: each role granted, and each role above it it inherits; each permission
+ * What a subject holds in a review's scope, and where, one row for each route:
+ * each role granted, and each role above it it inherits; each permission
  * granted, and each one a role of its chain carries; each policy attached, and
  * each one attached to a role of its chain where both hold.
  *

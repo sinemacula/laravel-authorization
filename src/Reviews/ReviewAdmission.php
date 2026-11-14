@@ -20,8 +20,8 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * The admission of an access review (N96): the reviewer is decided the review
- * right through ordinary `check()`, as itself, with its real session, denies,
+ * The admission of an access review: the reviewer is decided the review right
+ * through ordinary `check()`, as itself, with its real session, denies,
  * boundaries, guardrails and caps, on the review's resource (see
  * `ReviewResource`), with the reviewed scope in place: the reviewed tenant, or
  * the platform for a review of the platform or of everywhere, and the

@@ -13,12 +13,12 @@ use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * Export an access review as JSON Lines (AUTHZ-11.6, N96, N97): who holds a
- * role, permission or policy, what a saved subject holds, what expires within a
- * window, what an actor last granted, or which grants show no observed use
- * since an instant (N94), in the scope the options name; a subject's holdings
- * narrowed with `--action` to the routes giving one action, where the subject
- * holds it, never whether a check allows it.
+ * Export an access review as JSON Lines: who holds a role, permission or
+ * policy, what a saved subject holds, what expires within a window, what an
+ * actor last granted, or which grants show no observed use since an instant, in
+ * the scope the options name; a subject's holdings narrowed with `--action` to
+ * the routes giving one action, where the subject holds it, never whether a
+ * check allows it.
  *
  * The review runs on the trusted path (`AccessReview::trustedExport()`), as
  * scheduled system work, never as whoever is signed in to the console: the

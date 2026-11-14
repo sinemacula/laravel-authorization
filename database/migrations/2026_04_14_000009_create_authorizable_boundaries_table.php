@@ -2,7 +2,7 @@
 
 /**
  * Create the `authorizable_boundaries` table: the permission boundaries of
- * authorizable grantees (AUTHZ-7.4).
+ * authorizable grantees.
  *
  * Each row sets one managed policy as one grantee's boundary within one scope:
  * platform-wide (null tenant columns) or one tenant, and that tenant's subtree

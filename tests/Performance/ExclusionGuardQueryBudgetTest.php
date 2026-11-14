@@ -17,11 +17,11 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Query budget of separation of duties on a grant (AUTHZ-11.8, N136): a grant
- * no pair touches, of a role with no parent, costs one query more, whatever it
- * writes and whatever pairs are declared elsewhere, and a grant a pair touches
- * reads the report in a fixed number of queries, the same for two holders of
- * the pair's roles as for forty.
+ * Query budget of separation of duties on a grant: a grant no pair touches, of
+ * a role with no parent, costs one query more, whatever it writes and whatever
+ * pairs are declared elsewhere, and a grant a pair touches reads the report in
+ * a fixed number of queries, the same for two holders of the pair's roles as
+ * for forty.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -12,9 +12,9 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * What every change to a resource policy attachment carries (AUTHZ-7.3): the
- * operation, the resource, a record or a whole resource type, the policy, its
- * name and the scope, as `PolicyAttached` and `PolicyDetached` report them.
+ * What every change to a resource policy attachment carries: the operation, the
+ * resource, a record or a whole resource type, the policy, its name and the
+ * scope, as `PolicyAttached` and `PolicyDetached` report them.
  *
  * A snapshot of plain values (references, the name and the scope), never a
  * model. It is dispatched once the write commits, on the package's connection,

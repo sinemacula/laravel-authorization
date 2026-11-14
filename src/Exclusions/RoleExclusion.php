@@ -8,10 +8,10 @@ use Carbon\CarbonImmutable;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * A pair of roles declared mutually exclusive (AUTHZ-11.8, N135), as stored:
- * the two roles, by reference, in the pair's canonical order, the lower key
- * first, so the pair reads the same whichever order it was declared in; the
- * tenant that owns it, or the platform; who declared it and when.
+ * A pair of roles declared mutually exclusive, as stored: the two roles, by
+ * reference, in the pair's canonical order, the lower key first, so the pair
+ * reads the same whichever order it was declared in; the tenant that owns it,
+ * or the platform; who declared it and when.
  *
  * A snapshot of plain values, never a model, as the role exclusion service
  * lists it.

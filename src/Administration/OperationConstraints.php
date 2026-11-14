@@ -17,10 +17,10 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * The administration stage of a decision (AUTHZ-11.1): the constraints of the
- * administration operation a check is about, weighed after the allow, inside
- * the one decision path (D22), so they can only refuse what the allow
- * permitted, and a screen asking the same check gets the same refusal.
+ * The administration stage of a decision: the constraints of the administration
+ * operation a check is about, weighed after the allow, inside the one decision
+ * path, so they can only refuse what the allow permitted, and a screen asking
+ * the same check gets the same refusal.
  *
  * The stage applies to a check of an administration action on an operation
  * resource of that action (see `OperationResource`), but never to a grantable
@@ -46,16 +46,16 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * 3. any other operation, a change to a definition or to a role's permissions,
  *    policies or parent, is weighed by the owner rule and by what it changes,
  *    and a change to a resource's policies by what it changes alone, which the
- *    owner rule never weighs (N79) (see `DefinitionConstraints`).
+ *    owner rule never weighs (see `DefinitionConstraints`).
  *
  * A break-glass activation or its end is weighed by the scope rule alone:
  * holding the right across the reach is the gate, so neither rank, self nor
- * what the role hands out is weighed (N140), while denies, boundaries,
- * guardrails and caps still apply to what the activated role grants.
+ * what the role hands out is weighed, while denies, boundaries, guardrails and
+ * caps still apply to what the activated role grants.
  *
  * The constraints of a change to a subject, in order:
  *
- * - **scope** (N79): a change that may widen authority is refused as
+ * - **scope**: a change that may widen authority is refused as
  *   `administration.scope` unless the actor administers its whole reach (see
  *   `AdministeredScope`): its action decided again in the grant's tenant,
  *   standing just below it for a grant that reaches the tenants below, so only
@@ -64,14 +64,13 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *   application needs authority in every application; and, for a reach wider
  *   than its node, nothing that denies or caps the actor anywhere in it could
  *   limit the action;
- * - **rank** (N76): unless the grantee is the actor, the actor, ranked in the
- *   grant's own tenant and application, must be strictly senior to the most
- *   senior rank the grantee holds anywhere the change reaches, and to the rank
- *   a role grant would give it, or the change is refused as
- *   `administration.rank`, or `administration.rank_uncomparable` when either
- *   side's rank, or the reach, cannot be read (see `RankComparison`); a change
- *   that changes nothing included, so the refusal never depends on what the
- *   grantee holds;
+ * - **rank**: unless the grantee is the actor, the actor, ranked in the grant's
+ *   own tenant and application, must be strictly senior to the most senior rank
+ *   the grantee holds anywhere the change reaches, and to the rank a role grant
+ *   would give it, or the change is refused as `administration.rank`, or
+ *   `administration.rank_uncomparable` when either side's rank, or the reach,
+ *   cannot be read (see `RankComparison`); a change that changes nothing
+ *   included, so the refusal never depends on what the grantee holds;
  * - **self**: a change to the actor itself, its principal or its identity, that
  *   may widen authority is refused as `administration.self` unless
  *   `authorization:administration.self` is also allowed on the operation, at
@@ -79,9 +78,9 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *   so a self right denied or limited in any tenant the change reaches refuses
  *   it;
  * - a change that can only narrow (see `Narrowing`) is then allowed;
- * - **possession** (N77): a direct grant of a permission must be provably held
- *   by the actor across its reach and lifetime, or explicitly grantable there
- *   (see `Possession`), or it is refused as `administration.not_grantable` or
+ * - **possession**: a direct grant of a permission must be provably held by the
+ *   actor across its reach and lifetime, or explicitly grantable there (see
+ *   `Possession`), or it is refused as `administration.not_grantable` or
  *   `administration.unprovable`;
  * - **roles**: a role grant hands out the role's whole authority, every
  *   permission and policy it and its ancestors carry, and every allow of a
@@ -102,8 +101,8 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * - every other change that may widen authority, a detach of a denying policy
  *   included, is refused as `administration.unprovable`.
  *
- * The owner rule (D20, see `OwnerConstraint`) governs definitions and what a
- * role carries, its permissions, policies and parent, never a resource policy's
+ * The owner rule (see `OwnerConstraint`) governs definitions and what a role
+ * carries, its permissions, policies and parent, never a resource policy's
  * attachment or a grant row: who may change a grant row is the administered
  * scope alone.
  *

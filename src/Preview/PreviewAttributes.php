@@ -12,8 +12,8 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 /**
  * The package's resource attribute provider for preview resources (see
  * `PreviewResource`), registered for their type whatever the application
- * configures, so a policy can restrict who may be previewed, and where (N84),
- * under `resource`:
+ * configures, so a policy can restrict who may be previewed, and where, under
+ * `resource`:
  *
  * - `target_type`, `target_id`: the principal previewed, by morph type and key;
  * - `identity_type`, `identity_id`: the identity behind it, missing for none;

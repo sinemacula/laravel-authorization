@@ -8,13 +8,12 @@ use SineMacula\Laravel\Authorization\Exclusions\ConflictReport;
 
 /**
  * Thrown when two roles are declared mutually exclusive while someone holds
- * both where their reach overlaps (AUTHZ-11.8, N135): the pair is refused, and
- * nothing is written or removed, until an administrator resolves every
- * conflict, by revoking a grant or narrowing its reach, and declares it again.
- * Also thrown, as `written()` builds it, for a role grant, a re-parenting or a
- * break-glass activation that would leave someone holding both roles of a
- * declared pair where their reach overlaps: the write is refused and nothing is
- * written.
+ * both where their reach overlaps: the pair is refused, and nothing is written
+ * or removed, until an administrator resolves every conflict, by revoking a
+ * grant or narrowing its reach, and declares it again. Also thrown, as
+ * `written()` builds it, for a role grant, a re-parenting or a break-glass
+ * activation that would leave someone holding both roles of a declared pair
+ * where their reach overlaps: the write is refused and nothing is written.
  *
  * It carries the conflict report, references and scopes only, never a model:
  * who holds both, with the identity a conflict came through, and the two routes

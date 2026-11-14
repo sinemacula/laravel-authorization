@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * Builds the `subject` and `resource` namespaces of a check (N29 to N32).
+ * Builds the `subject` and `resource` namespaces of a check.
  *
  * Each holds the package's built-in keys and the attributes the provider
  * registered for its morph type declares:

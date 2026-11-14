@@ -29,7 +29,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\Settings\SettingsReader;
 
 /**
  * Build the configuration report from the container, the live configuration and
- * what the package recorded as it registered, without building any seam (N113).
+ * what the package recorded as it registered, without building any seam.
  *
  * When the application booted for diagnosis (see `DiagnosticMode`), the report
  * holds what that boot found, every issue and the outcome of each check it ran

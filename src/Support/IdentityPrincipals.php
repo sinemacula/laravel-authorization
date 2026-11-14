@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Support;
 
 /**
  * The principals an identity owns, as the identity directory lists them, and
- * whether that list is complete (N81).
+ * whether that list is complete.
  *
  * An incomplete list may still name the principals the directory knows: their
  * grants are read all the same, so a grant of theirs outside a tenant still

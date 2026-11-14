@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Contracts\GrantUsageStore;
 
 /**
  * The queued job that hands one worker's batch of grant usage observations to
- * the bound usage store (N101), on the queue connection and queue
+ * the bound usage store, on the queue connection and queue
  * `authorization.usage` names. Recording is monotonic and idempotent (see
  * `Contracts\GrantUsageStore`), so a job retried, delivered twice or run after
  * a later one changes nothing it should not; a job that fails or waits never

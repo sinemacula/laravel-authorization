@@ -17,13 +17,12 @@ use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 
 /**
- * The whole active authority a role hands out (AUTHZ-3.3, AUTHZ-7.2,
- * AUTHZ-7.3): the permissions it carries live, the policies attached to it
- * live, each with its ancestors' when the hierarchy is enabled, and the allows
- * of every policy attached to a resource that name the role, or one of its
- * ancestors, by a `role:KEY` principal selector, since such an allow reaches
- * whoever holds the role, now or later. A delegated role grant, or a new
- * parent, is judged on everything a holder would get (see
+ * The whole active authority a role hands out: the permissions it carries live,
+ * the policies attached to it live, each with its ancestors' when the hierarchy
+ * is enabled, and the allows of every policy attached to a resource that name
+ * the role, or one of its ancestors, by a `role:KEY` principal selector, since
+ * such an allow reaches whoever holds the role, now or later. A delegated role
+ * grant, or a new parent, is judged on everything a holder would get (see
  * `DefinitionConstraints` and `OperationConstraints`).
  *
  * It is read in a fixed number of queries, however many roles, permissions and

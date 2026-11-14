@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Role;
 
 /**
- * Dispatched once two roles are declared mutually exclusive (AUTHZ-11.8), by
- * the role exclusion service; declaring a pair already declared dispatches
- * nothing.
+ * Dispatched once two roles are declared mutually exclusive, by the role
+ * exclusion service; declaring a pair already declared dispatches nothing.
  *
  * It carries what every change to a pair does (see `ExclusionEvent`): the
  * operation, with the actor that declared it, the two roles, their names and

@@ -17,7 +17,7 @@ use Tests\TestCase;
  * Feature tests for the queries resource policy attachments are read with: the
  * scope's own, and, united with them, those whose denies count in every scope,
  * an attachment naming half a tenant and any attachment of a policy naming half
- * a tenant (N130).
+ * a tenant.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

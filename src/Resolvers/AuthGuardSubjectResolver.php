@@ -33,8 +33,8 @@ use SineMacula\Laravel\Authorization\Subject;
  * session (through `once()`, `onceUsingId()`, `onceBasic()` or `setUser()`), a
  * user a token or request guard returns, any other user, and every user outside
  * a session (a console command, a queued job, a stateless request), has none,
- * so no authentication requirement is met for it (N34). The request is read
- * from the container on every resolution, never kept.
+ * so no authentication requirement is met for it. The request is read from the
+ * container on every resolution, never kept.
  *
  * A deployment that wants another guard binds the contract to an instance built
  * with that guard's name.

@@ -10,9 +10,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * What a grant call proposes that widens an identity's scope, as the grant hook
- * is handed it (AUTHZ-11.3): the operation and who makes it, the identity whose
- * scope widens and the grantee the rows are written for, each grant that widens
- * it with its reasons, and when it was observed.
+ * is handed it: the operation and who makes it, the identity whose scope widens
+ * and the grantee the rows are written for, each grant that widens it with its
+ * reasons, and when it was observed.
  *
  * The recipient identity and the grantee are told apart: a grant to the
  * identity itself names it as both, and a grant to one of its principals names
@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * It is an immutable value of references, strings and immutable instants, with
  * no model and no mutable date, so a hook can neither change the grant through
  * it nor read more than the proposal says. An application calling the hook on
- * its own membership path (AUTHZ-13.9) builds one itself, with the reason
+ * its own membership path builds one itself, with the reason
  * `WideningReason::MEMBERSHIP`.
  *
  * The client, the IP address and the user agent of the operation, is that of
@@ -60,7 +60,7 @@ final readonly class GrantWidening
         /** The id of the operation the call runs as, shared by its decisions and events. */
         public string $operationId,
 
-        /** Whether the call is trusted system work, made without an acting context (N75). */
+        /** Whether the call is trusted system work, made without an acting context. */
         public bool $isTrusted,
 
         /** The acting principal, or the reference a trusted command names, or null for none. */

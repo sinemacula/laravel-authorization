@@ -8,9 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 
 /**
- * The resource a check is about (AUTHZ-4.2): its type, its id and, where it has
- * one, its tenant, with the identifier statements match their resource patterns
- * against.
+ * The resource a check is about: its type, its id and, where it has one, its
+ * tenant, with the identifier statements match their resource patterns against.
  *
  * A model is identified as `type:id`, a `(type, id)` pair the same way, and a
  * type alone ("create a post") as `type:*`, so a pattern naming the type covers
@@ -18,10 +17,10 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
  * an opaque identifier, used as given, with no type, id or tenant (N7).
  *
  * A reference made from a model keeps the model, so the resource attribute
- * provider of its type can read it rather than query for it (N30). A resource
- * that identifies itself and is no model can hand itself on as its source in
- * the same way, as an administration operation resource does, so its own
- * attribute provider and the constraints of the operation can read it.
+ * provider of its type can read it rather than query for it. A resource that
+ * identifies itself and is no model can hand itself on as its source in the
+ * same way, as an administration operation resource does, so its own attribute
+ * provider and the constraints of the operation can read it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

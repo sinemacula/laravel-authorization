@@ -27,7 +27,7 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
 /**
  * Removes the grants that no longer count: those that have expired, those whose
  * grantee no longer exists, and the resource policy attachments whose record no
- * longer exists (AUTHZ-3.6, AUTHZ-2.5, AUTHZ-7.3, AUTHZ-17.6).
+ * longer exists.
  *
  * An expired grant already stopped counting at its expiry; removing it keeps
  * the grant tables small. Each is reported with a `RoleExpired`,
@@ -36,7 +36,7 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  * between the read and the delete is kept. The grants of a grantee that no
  * longer exists, such as one deleted by a raw query rather than through the
  * model, are revoked through `GrantService::revokeAll()`, so each is reported
- * as revoked. Its permission boundaries (AUTHZ-7.4) are removed first, through
+ * as revoked. Its permission boundaries are removed first, through
  * `BoundaryService::removeAll()`, each reported as removed and counted apart
  * from the grants: a grantee whose only rows are boundaries is found too, so a
  * boundary it leaves behind never keeps its policy undeletable. A soft-deleted
@@ -49,11 +49,11 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  * `ExpiredActivations`).
  *
  * The inline policies of a grantee that no longer exists are deleted too, each
- * through the model so it is reported as deleted and its attachments go with it
- * (AUTHZ-6.9): the owner columns are a morph with no foreign key, so a grantee
- * removed without its model's `deleted` event leaves them behind. They are
- * deleted last, once the orphaned grants are revoked, so a policy that cannot
- * be deleted never keeps the grants of a grantee that is gone.
+ * through the model so it is reported as deleted and its attachments go with
+ * it: the owner columns are a morph with no foreign key, so a grantee removed
+ * without its model's `deleted` event leaves them behind. They are deleted
+ * last, once the orphaned grants are revoked, so a policy that cannot be
+ * deleted never keeps the grants of a grantee that is gone.
  *
  * The resource policy attachments of a record that no longer exists are
  * detached too, through `ResourcePolicyService::detachAll()`, so each is

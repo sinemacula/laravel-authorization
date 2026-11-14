@@ -18,7 +18,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * class name, and the actor's row is loaded, so a mistyped actor is refused
  * rather than recorded; the reference names it by its morph class under the
  * morph map. Without the option the command records no actor, as trusted
- * console and system work does (N75).
+ * console and system work does.
  *
  * A command that writes through a management service names the actor as an
  * acting context (`acting()`), so the change is decided as that actor, as

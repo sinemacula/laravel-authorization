@@ -17,18 +17,18 @@ use SineMacula\Laravel\Authorization\Subject;
  *
  * A resolver that knows the credential the subject acts with fills the
  * subject's `scopes` from it, for the session policy source to cap its checks
- * with (N121, N126): `CredentialScopes::uncapped()` for a credential carrying
- * no cap, and `CredentialScopes::of()` with the scopes it carries, an empty
- * list for one carrying none granted. Leaving `scopes` null says nothing about
- * them, so the source establishes them from the subject's session or guard, and
- * fails closed when it cannot. A resolver may mark the request's subject acting
- * on the platform, a job's or a console command's acting for no tenant, with
- * `platform` (N120), which names no tenant. The marker does not move
- * `forUser()` or a model named through `for()`: both are decided in the scope
- * in place, which for a request whose subject names no tenant is already the
- * platform, and which an explicit `AuthorizationScope::within()` replaces. Only
- * a `Subject` a caller passes to `for()` carrying the marker is decided on the
- * platform whatever scope is in place.
+ * with: `CredentialScopes::uncapped()` for a credential carrying no cap, and
+ * `CredentialScopes::of()` with the scopes it carries, an empty list for one
+ * carrying none granted. Leaving `scopes` null says nothing about them, so the
+ * source establishes them from the subject's session or guard, and fails closed
+ * when it cannot. A resolver may mark the request's subject acting on the
+ * platform, a job's or a console command's acting for no tenant, with
+ * `platform`, which names no tenant. The marker does not move `forUser()` or a
+ * model named through `for()`: both are decided in the scope in place, which
+ * for a request whose subject names no tenant is already the platform, and
+ * which an explicit `AuthorizationScope::within()` replaces. Only a `Subject` a
+ * caller passes to `for()` carrying the marker is decided on the platform
+ * whatever scope is in place.
  *
  * The shipped default reads Laravel's authenticated user on the default guard,
  * with no tenant and the guard's name as the application, and fills neither the

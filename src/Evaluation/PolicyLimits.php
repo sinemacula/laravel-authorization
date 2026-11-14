@@ -7,8 +7,8 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 use SineMacula\Laravel\Authorization\Config\ConfigValue;
 
 /**
- * The size limits of a policy document (AUTHZ-6.10), so a policy cannot be made
- * expensive to store or evaluate.
+ * The size limits of a policy document, so a policy cannot be made expensive to
+ * store or evaluate.
  *
  * A document may take up so many bytes, measured on its JSON encoding, and hold
  * so many statements; a statement may hold so many conditions, each key test of

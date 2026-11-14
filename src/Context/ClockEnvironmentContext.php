@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 
 /**
- * The default environment context: the current time (AUTHZ-8.6).
+ * The default environment context: the current time.
  *
  * Supplies `time`, the instant Laravel's `now()` gives (so a test that freezes
  * or travels in time decides as of that time), in UTC as ISO 8601

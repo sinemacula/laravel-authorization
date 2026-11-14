@@ -11,8 +11,8 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * What a break-glass activation ended before its expiry carries (AUTHZ-11.7),
- * as `BreakGlassSurrendered` and `BreakGlassRevoked` report it. The operation's
+ * What a break-glass activation ended before its expiry carries, as
+ * `BreakGlassSurrendered` and `BreakGlassRevoked` report it. The operation's
  * actor is the one who ended it, or no one for a trusted call. The activation's
  * note is never carried.
  *

@@ -11,22 +11,22 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * The constraints of a pair of mutually exclusive roles declared or removed
- * (AUTHZ-11.8, N135), weighed by the administration stage once the owner rule
- * has passed (see `DefinitionConstraints`): the rank and administered-scope
- * rules the package applies to a role definition.
+ * The constraints of a pair of mutually exclusive roles declared or removed,
+ * weighed by the administration stage once the owner rule has passed (see
+ * `DefinitionConstraints`): the rank and administered-scope rules the package
+ * applies to a role definition.
  *
  * A pair hands out nothing, so neither change needs the impact check, but each
  * changes what may be granted later, so neither only narrows:
  *
- * - **rank** (N76): both roles must be junior to the actor, ranked in the
- *   pair's owner, as a role whose rank changes must be (see
- *   `Impact::juniorRank()`), so an actor never constrains, or frees, a role
- *   senior to it; an unranked role is junior to everyone, and the more senior
- *   of the two ranks is the one weighed;
- * - **scope** (N79): a removal lifts the pair across the whole reach of its
- *   owner, the owner and every tenant below it in every application, or the
- *   platform for a platform pair, so the actor must administer it (see
+ * - **rank**: both roles must be junior to the actor, ranked in the pair's
+ *   owner, as a role whose rank changes must be (see `Impact::juniorRank()`),
+ *   so an actor never constrains, or frees, a role senior to it; an unranked
+ *   role is junior to everyone, and the more senior of the two ranks is the one
+ *   weighed;
+ * - **scope**: a removal lifts the pair across the whole reach of its owner,
+ *   the owner and every tenant below it in every application, or the platform
+ *   for a platform pair, so the actor must administer it (see
  *   `AdministeredScope`), and, while impersonating, be allowed
  *   `authorization:administration.impersonated` across it too; a declaration
  *   only adds a constraint, and is decided at its node alone, as a guardrail

@@ -18,11 +18,11 @@ use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\TestCase;
 
 /**
- * Performance budget for a check while grant usage is tracked (N94): a cold
- * check reads what it reads with tracking off, the routes behind its grants
- * read from the same rows; a warm check reads nothing, and its routes come from
- * what the resolution cache keeps beside its grants, so 1,000 warm tracked
- * checks stay within the budget an untracked check is held to (see
+ * Performance budget for a check while grant usage is tracked: a cold check
+ * reads what it reads with tracking off, the routes behind its grants read from
+ * the same rows; a warm check reads nothing, and its routes come from what the
+ * resolution cache keeps beside its grants, so 1,000 warm tracked checks stay
+ * within the budget an untracked check is held to (see
  * `SingleCheckBudgetTest`), at a constant extra cost.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

@@ -34,40 +34,40 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
 use SineMacula\Laravel\Authorization\Usage\WeighedGrants;
 
 /**
- * Decides a check for the authorization manager, stage by stage (AUTHZ-7.1).
+ * Decides a check for the authorization manager, stage by stage.
  *
  * The pipeline admits the check (the subject, resource and tenant stages) and
  * gathers every source, the session caps included; the policy evaluator runs
  * the rest of the stages, the denies, the caps, the allows and the implicit
  * deny, each recorded in the decision's trace. It records nothing and reports
- * nothing: the manager's `check()` is the one decision entry point (D22), and
+ * nothing: the manager's `check()` is the one decision entry point, and
  * `checkMany()` the same over many checks, and `CheckBatch` owns the recording
  * for both, so every decision the pipeline makes reaches the caller through it.
  *
  * A pipeline is immutable: `withPolicies()`, `capped()`, `withoutSessionCaps()`
  * and `explaining()` return a new one, as the manager's scoped clones do.
  *
- * A pipeline `explaining()` returns decides its one check in explain mode
- * (N89): exactly as any other, through the same stages and the same sources,
- * recording besides the evidence an explanation needs, where each grant that
- * allowed it came from, read by the grant resolution itself (see
+ * A pipeline `explaining()` returns decides its one check in explain mode:
+ * exactly as any other, through the same stages and the same sources, recording
+ * besides the evidence an explanation needs, where each grant that allowed it
+ * came from, read by the grant resolution itself (see
  * `GrantProvenanceResolver`), and each condition test with what it found (see
  * `CheckContext::explain()`), and returning the decision with it (see
  * `DecisionEvidence`). Every other pipeline records none, and costs what it did
  * before explanations.
  *
  * A pipeline `tracking()` returns notes, while grant usage is tracked, the
- * grant routes each decision it makes rested on (N100, see
- * `Usage\DecisionRoutes`): the check notes which grantee's permission matched
- * as it asks for it (see `Usage\WeighedGrants`), and the routes are read in the
- * scope the decision was made in from what the resolution cache keeps, then
- * noted once its administration stage, if any, is passed. Neither step reads
- * anything the check did not, and neither ever throws into it: a failure is
- * written to the log channel and the decision returned as it was made. The
- * manager hands its everyday checks to one; a preview, an explanation, a
- * listing of permissions, a scoped query and a review's admission are never
- * tracked, and neither is a further check an administration stage makes. Every
- * other pipeline notes nothing, and costs what it did before usage tracking.
+ * grant routes each decision it makes rested on (see `Usage\DecisionRoutes`):
+ * the check notes which grantee's permission matched as it asks for it (see
+ * `Usage\WeighedGrants`), and the routes are read in the scope the decision was
+ * made in from what the resolution cache keeps, then noted once its
+ * administration stage, if any, is passed. Neither step reads anything the
+ * check did not, and neither ever throws into it: a failure is written to the
+ * log channel and the decision returned as it was made. The manager hands its
+ * everyday checks to one; a preview, an explanation, a listing of permissions,
+ * a scoped query and a review's admission are never tracked, and neither is a
+ * further check an administration stage makes. Every other pipeline notes
+ * nothing, and costs what it did before usage tracking.
  *
  * A bulk check decides each of its checks through `decide()` too, exactly as a
  * single check is decided; `prepare()` only reads ahead, in bulk, what those
@@ -179,11 +179,11 @@ final class DecisionPipeline
 
     /**
      * Return a pipeline whose checks are decided as for a principal that holds
-     * no session yet (N105): the session policy source is not asked for the
-     * subject's credential scopes, so neither a credential's scopes nor a
-     * machine's missing ones cap a check, while the explicit caps of `capped()`
-     * still do. Every other stage, the denies, guardrails and boundaries among
-     * them, decides as for any check.
+     * no session yet: the session policy source is not asked for the subject's
+     * credential scopes, so neither a credential's scopes nor a machine's
+     * missing ones cap a check, while the explicit caps of `capped()` still do.
+     * Every other stage, the denies, guardrails and boundaries among them,
+     * decides as for any check.
      *
      * @return self
      */
@@ -237,13 +237,13 @@ final class DecisionPipeline
     }
 
     /**
-     * Decide the action for the supplied subject, stage by stage (AUTHZ-7.1),
-     * admitting the check first: a subject that is missing, or inactive (it or
-     * its identity), is denied before anything else is read; a resource that
-     * cannot be identified is denied next; a tenant-owned resource is decided
-     * in its tenant's scope, or denied as out of scope (see `ResourceScope`);
-     * then the grants decide. A check of a bulk check reads its resource's
-     * attributes through the batch's.
+     * Decide the action for the supplied subject, stage by stage, admitting the
+     * check first: a subject that is missing, or inactive (it or its identity),
+     * is denied before anything else is read; a resource that cannot be
+     * identified is denied next; a tenant-owned resource is decided in its
+     * tenant's scope, or denied as out of scope (see `ResourceScope`); then the
+     * grants decide. A check of a bulk check reads its resource's attributes
+     * through the batch's.
      *
      * A witness given is called in the scope the grants are weighed in, just
      * before they are, so the caller can read where the check was decided: the
@@ -334,7 +334,7 @@ final class DecisionPipeline
      *
      * Given a recorder, the check is explained: the policies and the permission
      * held are resolved with where each came from, noted with the recorder, and
-     * the context records each condition test (N89). Given what a tracked check
+     * the context records each condition test. Given what a tracked check
      * weighed, the grantee whose permission matched is noted on it, as the
      * check asks for the permission (see `Usage\WeighedGrants`). While the
      * principal's break-glass activations count, the activations behind its
@@ -374,8 +374,8 @@ final class DecisionPipeline
 
         // What the caller passes is held under `input` alone, never promoted
         // into another namespace, so it cannot stand in for the request, the
-        // authentication, the subject, the resource or any source's values
-        // (N27). Without a factory, the subject and resource still supply their
+        // authentication, the subject, the resource or any source's values.
+        // Without a factory, the subject and resource still supply their
         // built-in keys.
         $checkContext = $this->contexts?->make($context, $subject, $resource, $attributes)
             ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
@@ -412,11 +412,10 @@ final class DecisionPipeline
 
     /**
      * Return the compiler that scopes a query to the records this pipeline
-     * would allow (AUTHZ-10.1), with this pipeline's sources: its context
-     * factory, its guardrails, which it reads for the tenant chain of a record
-     * admitted from outside the scope, and, unless a `withPolicies()` override
-     * replaces them, its resource policies, whose record attachments it must
-     * see.
+     * would allow, with this pipeline's sources: its context factory, its
+     * guardrails, which it reads for the tenant chain of a record admitted from
+     * outside the scope, and, unless a `withPolicies()` override replaces them,
+     * its resource policies, whose record attachments it must see.
      *
      * @return \SineMacula\Laravel\Authorization\Query\QueryAuthorizer
      *
@@ -496,12 +495,12 @@ final class DecisionPipeline
      * subject holds; then the implicit deny. No allow is weighed before every
      * deny and cap, so a guardrail, a boundary or a session cap caps a resource
      * policy's allow and a permission held as it caps a policy's. A permission
-     * held is asked for at the allow stage alone (AUTHZ-7.7), and its step
-     * names the permission that allowed. It counts only when the grant it came
-     * from reaches the check: the permissions are resolved in the scope the
-     * check is decided in (see `ResourceScope`): for a resource within the
-     * active tenant's subtree, its own tenant, so a grant there, an ancestor's
-     * grant that reaches its subtree, or a platform-wide grant; for a resource
+     * held is asked for at the allow stage alone, and its step names the
+     * permission that allowed. It counts only when the grant it came from
+     * reaches the check: the permissions are resolved in the scope the check is
+     * decided in (see `ResourceScope`): for a resource within the active
+     * tenant's subtree, its own tenant, so a grant there, an ancestor's grant
+     * that reaches its subtree, or a platform-wide grant; for a resource
      * admitted from outside the scope, platform scope, so only a platform-wide
      * grant; for a resource with no tenant, a type alone, an opaque identifier
      * or no resource, the grants that hold in the active tenant, or only
@@ -568,9 +567,8 @@ final class DecisionPipeline
     ): Decision {
         $source = $resource?->source;
 
-        // A review's admission is introspection, never use (N94), and a
-        // preview's admission is part of the preview (N100), so neither is
-        // tracked.
+        // A review's admission is introspection, never use, and a preview's
+        // admission is part of the preview, so neither is tracked.
         $weighed = $this->usage === null || $source instanceof ReviewResource || $source instanceof PreviewResource
             ? null
             : new WeighedGrants($this->policyOverride === null && $this->policyResolver instanceof DefaultPolicyResolver, $this->policyOverride === null);

@@ -7,9 +7,9 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 use SineMacula\Laravel\Authorization\Support\ResourceTenancy;
 
 /**
- * Contract for an Eloquent model whose queries `whereAuthorized()` may scope
- * (AUTHZ-10.1): it declares where its records' tenant is, or that they have
- * none, so the scope and `check()` read the same tenant.
+ * Contract for an Eloquent model whose queries `whereAuthorized()` may scope:
+ * it declares where its records' tenant is, or that they have none, so the
+ * scope and `check()` read the same tenant.
  *
  * The declaration is static, so it never depends on a record. The resource
  * tenant resolver the package binds answers the tenant of a declared model's

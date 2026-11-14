@@ -23,8 +23,8 @@ final class DecisionStageTest extends TestCase
 {
     /**
      * The enum defines exactly the ten stages, in the order a decision runs
-     * them (AUTHZ-7.1): subject, resource, tenant, deny, guardrail, boundary,
-     * session, allow, administration, implicit.
+     * them: subject, resource, tenant, deny, guardrail, boundary, session,
+     * allow, administration, implicit.
      *
      * @return void
      */

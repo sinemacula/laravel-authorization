@@ -7,8 +7,8 @@ namespace SineMacula\Laravel\Authorization\Administration;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Only the owner edits (D20): a delegated change to a definition is made from
- * the tenant that owns it, the platform's definitions from the platform.
+ * Only the owner edits: a delegated change to a definition is made from the
+ * tenant that owns it, the platform's definitions from the platform.
  *
  * A tenant sees its own records, its ancestors' and the platform's, counts them
  * in its checks and may grant them where the grant scopes allow, but seeing a
@@ -18,7 +18,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * administration stage applies the rule to every change to a definition, its
  * creation included, and to a role's permissions, policies or parent (see
  * `DefinitionConstraints`). A grant row is never such a record, and nor is a
- * resource policy's attachment (N79): who may change one is the scope the actor
+ * resource policy's attachment: who may change one is the scope the actor
  * administers (see `OperationConstraints`), so this rule never weighs a grant.
  *
  * The context is the tenant the check is made from (see `FurtherChecks`),

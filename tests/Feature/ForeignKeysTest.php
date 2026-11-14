@@ -76,7 +76,7 @@ final class ForeignKeysTest extends TestCase
 
     /**
      * The database refuses to delete a parent role with children, however the
-     * delete is made (D18).
+     * delete is made.
      *
      * @return void
      *

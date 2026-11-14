@@ -7,7 +7,7 @@
  * the whole type (a null `resource_id`), within one scope: platform-wide (null
  * tenant columns) or one tenant, optionally that tenant's subtree, and
  * optionally one application. The same policy may be attached to the same
- * resource once per scope (AUTHZ-7.3).
+ * resource once per scope.
  *
  * The resource, tenant and application columns compare their exact bytes on
  * every database: on MySQL they are collated `utf8mb4_0900_bin`, which neither

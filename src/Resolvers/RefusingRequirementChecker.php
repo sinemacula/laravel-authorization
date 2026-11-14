@@ -12,8 +12,8 @@ use SineMacula\Laravel\Authorization\Subject;
 
 /**
  * The default requirement checker: it knows no proofs, so every part of every
- * requirement is unmet, with no instant it is met until (N34). An allow that
- * states a requirement never applies until the application binds a checker.
+ * requirement is unmet, with no instant it is met until. An allow that states a
+ * requirement never applies until the application binds a checker.
  *
  * It is marked `ScopeInvariant`: it reads the request alone, never the record a
  * check is about, so `whereAuthorized()` reads it once for a query.

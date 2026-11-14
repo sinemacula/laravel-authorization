@@ -37,12 +37,12 @@ use Tests\Fixtures\QueryScoping\TenantScopedPost;
 use Tests\TestCase;
 
 /**
- * Feature tests for `PreviewAdmission`, the admissions of a preview's use
- * (N84): the right to preview is decided as the caller, as an ordinary check,
- * in every scope one of the use's decisions about the target is made in, the
- * preview's tenant, a resource's own tenant below it, the tenants just below an
- * anchor or the platform, each once in the use; applications restrict who may
- * be previewed, and where, by policy.
+ * Feature tests for `PreviewAdmission`, the admissions of a preview's use: the
+ * right to preview is decided as the caller, as an ordinary check, in every
+ * scope one of the use's decisions about the target is made in, the preview's
+ * tenant, a resource's own tenant below it, the tenants just below an anchor or
+ * the platform, each once in the use; applications restrict who may be
+ * previewed, and where, by policy.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

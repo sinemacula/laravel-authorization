@@ -8,7 +8,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
- * Boot-time validator for the `authorization.usage` config (N94, N101), run by
+ * Boot-time validator for the `authorization.usage` config, run by
  * `ConfigValidator`.
  *
  * The block must be an array of these settings, each optional:
@@ -24,11 +24,11 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  *   400 by default.
  *
  * Whole numbers are ints or strings written as whole numbers, as the
- * environment gives them, and `enabled` a real boolean (N117). A setting set to
- * null is refused, but for `connection` and `queue`. Any other key is refused,
- * naming its path (N116), so a misspelt setting fails at boot rather than
- * leaving the default in place. The same checks refuse a setting changed after
- * boot when it is read (see `Usage\UsageTracking`).
+ * environment gives them, and `enabled` a real boolean. A setting set to null
+ * is refused, but for `connection` and `queue`. Any other key is refused,
+ * naming its path, so a misspelt setting fails at boot rather than leaving the
+ * default in place. The same checks refuse a setting changed after boot when it
+ * is read (see `Usage\UsageTracking`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

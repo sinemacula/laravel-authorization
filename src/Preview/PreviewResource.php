@@ -9,10 +9,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * The resource a preview's admission is decided on (AUTHZ-11.4, N84): the
- * subject previewed, by references to its principal and to the identity behind
- * it, and the scope one of the target's decisions is made in, its tenant and
- * application, and whether it is decided just below that tenant.
+ * The resource a preview's admission is decided on: the subject previewed, by
+ * references to its principal and to the identity behind it, and the scope one
+ * of the target's decisions is made in, its tenant and application, and whether
+ * it is decided just below that tenant.
  *
  * Its reference is a record of type `authorization:preview` whose id is the
  * principal's morph type and key (`user:42`), so a statement's resource pattern

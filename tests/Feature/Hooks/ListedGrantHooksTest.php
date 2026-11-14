@@ -24,7 +24,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the hooks the configuration lists, run before whatever the
- * grant hook contract resolves to (N108).
+ * grant hook contract resolves to.
  *
  * The package extends the contract, so the listed hooks run first, in order,
  * then the hook bound on it, however and whenever that was bound: before the

@@ -8,7 +8,7 @@ use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 
 /**
  * A declared context key: its full dot path, its type and whether a condition
- * may test it (N25).
+ * may test it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

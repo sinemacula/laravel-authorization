@@ -2,7 +2,7 @@
 
 /**
  * Create the `guardrails` table: the guardrails set on tenants and on the
- * platform (AUTHZ-7.6).
+ * platform.
  *
  * Each row sets one managed policy as a guardrail within one scope:
  * platform-wide (null tenant columns) or one tenant, and that tenant's subtree

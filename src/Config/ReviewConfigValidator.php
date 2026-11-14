@@ -7,17 +7,17 @@ namespace SineMacula\Laravel\Authorization\Config;
 use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 
 /**
- * Boot-time validator for the `authorization.reviews` config (AUTHZ-11.6), run
- * by `ConfigValidator`.
+ * Boot-time validator for the `authorization.reviews` config, run by
+ * `ConfigValidator`.
  *
  * The block must be an array, and its one setting, `limit`, the most rows an
  * access review returns unless it sets its own (see `Reviews\ReviewQuery`), a
  * whole number of at least 1, an int or a string written as a whole number, as
- * the environment gives one (N117). A block that does not set it takes the
- * default, and one that sets it to null is refused; any other key is refused,
- * naming its path (N116), so a misspelt setting fails at boot rather than
- * leaving the default in place. The same check refuses a limit changed after
- * boot when a review reads it, so a review never falls back to another bound.
+ * the environment gives one. A block that does not set it takes the default,
+ * and one that sets it to null is refused; any other key is refused, naming its
+ * path, so a misspelt setting fails at boot rather than leaving the default in
+ * place. The same check refuses a limit changed after boot when a review reads
+ * it, so a review never falls back to another bound.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

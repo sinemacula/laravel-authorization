@@ -12,8 +12,8 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 /**
  * The package's resource attribute provider for review resources (see
  * `ReviewResource`), registered for their type whatever the application
- * configures, so a policy can restrict who may review what, and where (N96),
- * under `resource`:
+ * configures, so a policy can restrict who may review what, and where, under
+ * `resource`:
  *
  * - `query`: `holders`, `holdings`, `expiring` or `granted_by`;
  * - `scope`: `applies_in`, `rooted_within` or `everywhere`;

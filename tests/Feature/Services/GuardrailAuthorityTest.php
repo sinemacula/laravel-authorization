@@ -338,11 +338,11 @@ final class GuardrailAuthorityTest extends TestCase
 
     /**
      * A removal reaches the tenant's whole subtree, so the right is weighed
-     * across it (N79): an actor holding the right at the organisation, but
-     * denied it by a role it holds in the team, is refused the account's and
-     * the team's guardrails, though allowed from above them, and the platform's
-     * for a platform-wide grant; a guardrail set only adds a cap, so it is
-     * decided from above alone and permitted.
+     * across it: an actor holding the right at the organisation, but denied it
+     * by a role it holds in the team, is refused the account's and the team's
+     * guardrails, though allowed from above them, and the platform's for a
+     * platform-wide grant; a guardrail set only adds a cap, so it is decided
+     * from above alone and permitted.
      *
      * @return void
      *

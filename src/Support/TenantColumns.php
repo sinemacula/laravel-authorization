@@ -13,7 +13,7 @@ use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 /**
  * The pair of tenant columns a stored row holds, read the way the package fails
  * closed on a row naming half a tenant, a type without a key or a key without a
- * type, which the package never writes (N130).
+ * type, which the package never writes.
  *
  * Such a row is neither the platform's nor any tenant's. A row of it that
  * grants (a role, permission or policy grant, a role's policy attachment, a

@@ -34,22 +34,20 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
- * Answers where an identity's grants lie against a tenant (AUTHZ-14.2), whether
- * a principal holds a grant that applies in one (AUTHZ-13.8), and whose grants
- * reach a tenant or lie within its subtree (N131): factual questions about
- * grants, for a trusted integration such as `laravel-iam` composing SSO's
- * principal scope or tenant admission, or reporting the grantees a move of a
- * tenant widens.
+ * Answers where an identity's grants lie against a tenant, whether a principal
+ * holds a grant that applies in one, and whose grants reach a tenant or lie
+ * within its subtree: factual questions about grants, for a trusted integration
+ * such as `laravel-iam` composing SSO's principal scope or tenant admission, or
+ * reporting the grantees a move of a tenant widens.
  *
- * None authorises anything: `check()` stays the one decision path (D22). None
- * says whether a principal is a member of a tenant, which is the application's
- * (AUTHZ-13.9), nor whether it may act there. A grant is a live role, direct
- * permission or policy attachment, a policy that only denies included; an
- * expired row, a boundary and a guardrail are not (N82, see `GrantRoots`). A
- * live break-glass activation counts as a grant of its role in its scope, for
- * the grantee it names, as a check reads it: none while break-glass is
- * disabled, none of a machine, and an identity's reaches none of its principals
- * (see `BreakGlassActivations`).
+ * None authorises anything: `check()` stays the one decision path. None says
+ * whether a principal is a member of a tenant, which is the application's, nor
+ * whether it may act there. A grant is a live role, direct permission or policy
+ * attachment, a policy that only denies included; an expired row, a boundary
+ * and a guardrail are not (see `GrantRoots`). A live break-glass activation
+ * counts as a grant of its role in its scope, for the grantee it names, as a
+ * check reads it: none while break-glass is disabled, none of a machine, and an
+ * identity's reaches none of its principals (see `BreakGlassActivations`).
  *
  * This is a trusted service, not an endpoint for users: even its bare answer
  * tells a caller something about grants in other tenants, so it is never
@@ -93,7 +91,7 @@ final readonly class GrantScopeQuery
      * answer is `OUTSIDE` as soon as one grant is proven outside, whether or
      * not the principals are all known. It is `WITHIN` only when the identity
      * directory lists the principals completely and every grant is within, or
-     * there is none (N82). Otherwise it is `UNKNOWN`: an incomplete list of
+     * there is none. Otherwise it is `UNKNOWN`: an incomplete list of
      * principals, a tree that cannot be read (its subtree query failing as it
      * runs included, written to the log), or a grant row naming half a tenant.
      *
@@ -167,8 +165,8 @@ final readonly class GrantScopeQuery
      * Return every grantee, a principal or an identity as its rows store it,
      * holding a live grant that reaches the tenant: one made in the tenant, one
      * made in an ancestor that reaches below it, or a platform-wide one, as a
-     * check there reads them (N131). A grant made in an ancestor for that
-     * ancestor alone, and a row naming half a tenant, never reach it.
+     * check there reads them. A grant made in an ancestor for that ancestor
+     * alone, and a row naming half a tenant, never reach it.
      *
      * A subtree moved under a new parent comes to be reached by the grants that
      * reach the parent from above it or were made there reaching below it, so a
@@ -204,9 +202,9 @@ final readonly class GrantScopeQuery
     /**
      * Return every grantee, a principal or an identity as its rows store it,
      * holding a live grant made in the tenant or in any tenant below it in the
-     * bound tree, whether or not it reaches below its own tenant (N131). A
-     * grant made in an ancestor, one platform-wide, and a row naming half a
-     * tenant, are not within.
+     * bound tree, whether or not it reaches below its own tenant. A grant made
+     * in an ancestor, one platform-wide, and a row naming half a tenant, are
+     * not within.
      *
      * The subtree is nested whole in the grant query, as `forIdentity()` nests
      * it, never loaded, so it must be a query on the package's connection; any

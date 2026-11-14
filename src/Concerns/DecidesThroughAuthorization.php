@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Support\PolicyResponses;
 
 /**
- * Lets a Laravel policy class decide through the package (AUTHZ-9.2).
+ * Lets a Laravel policy class decide through the package.
  *
  * Each policy method names its action explicitly and hands the user Laravel
  * gives it, and its model or any other resource, to `decide()`, which makes

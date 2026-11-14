@@ -49,13 +49,13 @@ use Tests\Fixtures\GrantHooks\SecondGrantHook;
 use Tests\TestCase;
 
 /**
- * Feature tests for the grant hook phase (AUTHZ-11.3, N80): the hook called for
- * the widening grants of a call before the package takes any lock, a veto
- * rolling everything back, the check of the final grants under the lock after
- * every other, a race it catches, the retry with the hook or, inside the
- * application's transaction, the conflict thrown for it, the recursion guard,
- * nested calls, a binding that is no hook, and the hooks the configuration
- * lists run before the bound hook however it was bound (N108).
+ * Feature tests for the grant hook phase: the hook called for the widening
+ * grants of a call before the package takes any lock, a veto rolling everything
+ * back, the check of the final grants under the lock after every other, a race
+ * it catches, the retry with the hook or, inside the application's transaction,
+ * the conflict thrown for it, the recursion guard, nested calls, a binding that
+ * is no hook, and the hooks the configuration lists run before the bound hook
+ * however it was bound.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -614,7 +614,7 @@ final class WideningPhaseTest extends TestCase
 
     /**
      * With hooks listed, a hook bound with `instance()` after the package
-     * registered, which Laravel applies no extender to, runs after them (N108).
+     * registered, which Laravel applies no extender to, runs after them.
      *
      * @return void
      *
@@ -632,8 +632,7 @@ final class WideningPhaseTest extends TestCase
 
     /**
      * With hooks listed, a hook bound after an instance the package wrapped as
-     * it registered, which Laravel applies no extender to, runs after them
-     * (N108).
+     * it registered, which Laravel applies no extender to, runs after them.
      *
      * @return void
      *
@@ -654,7 +653,7 @@ final class WideningPhaseTest extends TestCase
     /**
      * With hooks listed, a hook the package extended and an extender registered
      * after the package decorated runs after them once, though the grant
-     * service wraps the decoration again (N108).
+     * service wraps the decoration again.
      *
      * @return void
      *

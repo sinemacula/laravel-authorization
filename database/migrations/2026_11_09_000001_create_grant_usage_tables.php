@@ -1,9 +1,8 @@
 <?php
 
 /**
- * Create the grant usage tables (N102): `grant_usage`, the last observed use of
- * each grant route, and `usage_coverage`, the periods grant usage tracking was
- * on.
+ * Create the grant usage tables: `grant_usage`, the last observed use of each
+ * grant route, and `usage_coverage`, the periods grant usage tracking was on.
  *
  * A usage row is keyed by the route's key (see `Usage\GrantUsageKey`), a stable
  * digest of its source kind, target, grantee, tenant, application and reach,

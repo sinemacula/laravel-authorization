@@ -33,16 +33,16 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * The `permissionsFor()` parity property (AUTHZ-10.4, N69, N70): for random
- * scenarios, the actions `permissionsFor()` lists are exactly those of the
- * catalogue, in its order, each once, for which a fresh `check()` in the same
- * scope (entered with `TenantScope::within()`), about the same subject, with
- * the same context, allows; when one of those checks throws, the listing throws
- * what it throws. `heldPermissionsFor()` lists the same actions, each with the
- * requirements the fresh check's decision read, and throws alike (N129). Each
- * listing records nothing: the last decision is the one recorded before it, and
- * no decision event is dispatched. Each listing is made with a cold cache and
- * again with the cache it warmed, with and without a persistent store.
+ * The `permissionsFor()` parity property: for random scenarios, the actions
+ * `permissionsFor()` lists are exactly those of the catalogue, in its order,
+ * each once, for which a fresh `check()` in the same scope (entered with
+ * `TenantScope::within()`), about the same subject, with the same context,
+ * allows; when one of those checks throws, the listing throws what it throws.
+ * `heldPermissionsFor()` lists the same actions, each with the requirements the
+ * fresh check's decision read, and throws alike. Each listing records nothing:
+ * the last decision is the one recorded before it, and no decision event is
+ * dispatched. Each listing is made with a cold cache and again with the cache
+ * it warmed, with and without a persistent store.
  *
  * The scenarios are drawn from `AUTHZ_PARITY_SEED`, a random seed when it is
  * not set, and there are `AUTHZ_PARITY_RUNS` of them, 150 by default; a failure

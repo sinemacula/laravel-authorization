@@ -20,10 +20,10 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Query budget of the impact check (BL-65 part 3): the holders a change to a
- * shared definition reaches are read set by set, and weighed together, so
- * adding a permission to a role, renaming a permission and rewriting a policy
- * each run the same number of queries for thirty holders as for three.
+ * Query budget of the impact check: the holders a change to a shared definition
+ * reaches are read set by set, and weighed together, so adding a permission to
+ * a role, renaming a permission and rewriting a policy each run the same number
+ * of queries for thirty holders as for three.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

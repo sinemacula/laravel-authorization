@@ -16,12 +16,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceTenancy;
 
 /**
- * The resource tenant resolver the package binds (AUTHZ-4.4, AUTHZ-10.1): a
- * model that declares its tenancy (`QueryableResource`) is answered from its
- * declaration, so `check()` reads a record's tenant from the same columns, raw,
- * as `whereAuthorized()` compares; every other model, and every pair naming
- * one, is answered by the resolver the application configures, which this one
- * wraps. No tenant is inferred for a model that declares none (N10).
+ * The resource tenant resolver the package binds: a model that declares its
+ * tenancy (`QueryableResource`) is answered from its declaration, so `check()`
+ * reads a record's tenant from the same columns, raw, as `whereAuthorized()`
+ * compares; every other model, and every pair naming one, is answered by the
+ * resolver the application configures, which this one wraps. No tenant is
+ * inferred for a model that declares none.
  *
  * A pair names a declared model by its morph type, through the morph map, or by
  * its class: the record is looked up for its tenant columns alone, with no

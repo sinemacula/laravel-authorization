@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Contracts;
 
 /**
- * Context source contract (N26, AUTHZ-8.6).
+ * Context source contract.
  *
  * Supplies one namespace of the context an application adds, such as `tenant`
  * or `device`, listed in `authorization.context.sources` and resolved from the

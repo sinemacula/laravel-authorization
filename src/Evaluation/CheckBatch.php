@@ -20,8 +20,8 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 
 /**
- * Decides the checks of the authorization manager, one or many at a time (D22,
- * AUTHZ-10.3): the one path every check takes, `check()` as a batch of one.
+ * Decides the checks of the authorization manager, one or many at a time: the
+ * one path every check takes, `check()` as a batch of one.
  *
  * Each check is decided by the decision pipeline, in the order given, exactly
  * as it would be on its own: the same admission stages, the same scope and the
@@ -80,28 +80,28 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * batch that does neither decides its checks the same way, through the same
  * stages, but records nothing: the last decision is left untouched and no
  * `DecisionEvaluated` is dispatched. `permissionsFor()` lists a subject's
- * actions through one, since listing them is introspection, not a check (N70),
- * so an allow it lists that used break-glass is reported by none. A batch may
- * also dispatch without storing, leaving the last decision untouched while each
+ * actions through one, since listing them is introspection, not a check, so an
+ * allow it lists that used break-glass is reported by none. A batch may also
+ * dispatch without storing, leaving the last decision untouched while each
  * decision the settings report is dispatched, or store without dispatching. A
- * preview's listing dispatches without storing (N86): each action it evaluates
- * is reported as the settings select (every one while `previews` is on), naming
+ * preview's listing dispatches without storing: each action it evaluates is
+ * reported as the settings select (every one while `previews` is on), naming
  * both parties, and the last decision is left untouched; an allow that used
  * break-glass is reported whatever the settings, with `usedBreakGlass` set, as
- * any decision that dispatches is (N142).
+ * any decision that dispatches is.
  *
  * The checks of a preview are made with its previewer, which every decision's
  * provenance, and so its event and the last decision, names beside the subject
  * (see `DecisionProvenance`); any other batch names none.
  *
- * A batch may explain its checks (N89), as `Authorization::explain()` decides
- * its one: each is decided by a pipeline in explain mode, through the same
- * stages, from the same sources, so its verdict is the one any other check
- * gets, and its decision carries the evidence an explanation needs, with what
- * it asked: the action, the resource, who it was about and the scope it was
- * asked in and decided in (see `ExplanationRequest`). It is recorded and
- * reported as any other. Every other batch records no evidence, and its checks
- * cost what they did before explanations.
+ * A batch may explain its checks, as `Authorization::explain()` decides its
+ * one: each is decided by a pipeline in explain mode, through the same stages,
+ * from the same sources, so its verdict is the one any other check gets, and
+ * its decision carries the evidence an explanation needs, with what it asked:
+ * the action, the resource, who it was about and the scope it was asked in and
+ * decided in (see `ExplanationRequest`). It is recorded and reported as any
+ * other. Every other batch records no evidence, and its checks cost what they
+ * did before explanations.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

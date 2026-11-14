@@ -10,9 +10,9 @@ use SineMacula\Laravel\Authorization\Exceptions\GuardrailException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
- * The rule a policy in use as a guardrail keeps (AUTHZ-7.6): it changes only
- * through the guardrail service, which checks who changes it, so it is neither
- * edited nor deleted, which would change or lift the cap past that check.
+ * The rule a policy in use as a guardrail keeps: it changes only through the
+ * guardrail service, which checks who changes it, so it is neither edited nor
+ * deleted, which would change or lift the cap past that check.
  *
  * The policy observer refuses an edit or a deletion of such a policy with
  * `GuardrailException`, naming every scope it is a guardrail on, and counting

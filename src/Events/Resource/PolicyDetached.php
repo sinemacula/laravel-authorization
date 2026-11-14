@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Events\Resource;
 
 /**
  * Dispatched when a policy is detached from a resource, a record or a whole
- * resource type (AUTHZ-7.3), in one scope.
+ * resource type, in one scope.
  *
  * It carries what every change to an attachment does (see
  * `ResourcePolicyEvent`): the operation, the resource's type and key (null for

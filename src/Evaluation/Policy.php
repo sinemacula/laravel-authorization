@@ -16,10 +16,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * other than `version`, `name` and `statements`, and two statements that share
  * a `sid`.
  *
- * A policy attached to a resource or a resource type (AUTHZ-7.3) carries the
- * resource it is attached to, which is not part of its document: its allows
- * apply only to the subjects their `principals` name, and its denies to
- * everyone checking the resource.
+ * A policy attached to a resource or a resource type carries the resource it is
+ * attached to, which is not part of its document: its allows apply only to the
+ * subjects their `principals` name, and its denies to everyone checking the
+ * resource.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

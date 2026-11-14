@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 
 /**
- * The decision of one check (AUTHZ-7.1, AUTHZ-7.9, AUTHZ-7.10, D11).
+ * The decision of one check.
  *
  * It says whether the check is allowed, and, when it is denied, why, as a
  * machine-readable reason. It names the stage that decided it and the
@@ -17,32 +17,31 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
  * allow it, or another denial no statement made), and carries the trace of
  * every step the decision took, every stage it reached included, in a fixed
  * order whatever order the policies were read in. The trace holds key names and
- * results, never a context or attribute value (AUTHZ-8.8), so it is safe to log
- * or store.
+ * results, never a context or attribute value, so it is safe to log or store.
  *
- * An `insufficient_authentication` denial (AUTHZ-7.8, N35) also carries the
- * requirements that alone kept an allow statement from applying, each with its
- * unmet parts: alternatives, any one of which met would allow the check. A
- * decision that read an authentication requirement carries how long it may be
- * reused (N37): never beyond the instant a met requirement stops being met, nor
- * in another session. It keeps that session only as a non-reversible
- * fingerprint, never the session id, so the decision stays safe to log or
- * store. It also names every authentication requirement it read, by the names
- * of its parts, whether on a statement that allowed or one that denied, or in a
- * further check made for it, and whether met or not: what could change its
- * answer were the session's authentication state another, and none for a
- * decision no requirement could change (see `HeldPermission`).
+ * An `insufficient_authentication` denial also carries the requirements that
+ * alone kept an allow statement from applying, each with its unmet parts:
+ * alternatives, any one of which met would allow the check. A decision that
+ * read an authentication requirement carries how long it may be reused: never
+ * beyond the instant a met requirement stops being met, nor in another session.
+ * It keeps that session only as a non-reversible fingerprint, never the session
+ * id, so the decision stays safe to log or store. It also names every
+ * authentication requirement it read, by the names of its parts, whether on a
+ * statement that allowed or one that denied, or in a further check made for it,
+ * and whether met or not: what could change its answer were the session's
+ * authentication state another, and none for a decision no requirement could
+ * change (see `HeldPermission`).
  *
- * A decision made in explain mode (N89), as `Authorization::explain()` makes
- * it, also carries its evidence: where each grant that allowed it came from,
- * what the check asked, and, on its trace, each condition test with what it
- * found (see `DecisionEvidence`). Any other decision carries none, and
- * `explain()` explains it with what it has, marking the rest as not recorded,
- * never evaluating anything again.
+ * A decision made in explain mode, as `Authorization::explain()` makes it, also
+ * carries its evidence: where each grant that allowed it came from, what the
+ * check asked, and, on its trace, each condition test with what it found (see
+ * `DecisionEvidence`). Any other decision carries none, and `explain()`
+ * explains it with what it has, marking the rest as not recorded, never
+ * evaluating anything again.
  *
- * An allow names the key of each break-glass activation behind it (N142): one a
- * role read through an activation gave an allowing permission or policy
- * through, whether or not another grant gave it too. A denial names none.
+ * An allow names the key of each break-glass activation behind it: one a role
+ * read through an activation gave an allowing permission or policy through,
+ * whether or not another grant gave it too. A denial names none.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -164,7 +163,7 @@ final readonly class Decision
      * Return the name of each context key the decision depended on: every
      * condition key a step of its trace tested, whether or not its test held,
      * and every `${…}` reference a statement it assessed names, each once, in
-     * the order first met. Names alone, never a value (AUTHZ-15.4).
+     * the order first met. Names alone, never a value.
      *
      * @return list<string>
      */
@@ -300,12 +299,11 @@ final readonly class Decision
     }
 
     /**
-     * Return the decision's explanation (AUTHZ-11.5): the verdict, what decided
-     * it, the evidence of every stage it reached and the stages it never
-     * reached, from what the decision carries alone (see `Explanation`). A
-     * decision made without explain mode explains with the evidence it has, the
-     * rest marked as not recorded. Nothing is evaluated, read, recorded or
-     * dispatched.
+     * Return the decision's explanation: the verdict, what decided it, the
+     * evidence of every stage it reached and the stages it never reached, from
+     * what the decision carries alone (see `Explanation`). A decision made
+     * without explain mode explains with the evidence it has, the rest marked
+     * as not recorded. Nothing is evaluated, read, recorded or dispatched.
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\Explanation
      */

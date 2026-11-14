@@ -136,21 +136,21 @@ use SineMacula\Laravel\Authorization\Usage\UsageTracking;
  * resolver, the action catalogue, the authentication requirement checker, the
  * session policy source and the trusted context sources) resolve through a
  * package-owned key that holds the scoped default. Each contract is bound to
- * that key only when nothing is bound to it yet (N103), so a binding a sibling
- * package or the application made before this provider registers stands,
- * `instance()` included, and one made afterwards replaces the default. A
- * contract the application names a class other than the package's default for
- * in the configuration is bound to that key whatever was bound before (N106), a
- * deferred provider's binding included, so the application's configuration
- * replaces a sibling package's binding, and a binding made afterwards still
- * replaces it. The grant hook is the one exception: when the configuration
- * lists hooks, they run before whatever hook the contract resolves to, before
- * the package registers or after (N108). Either way a binding made outside the
- * package is not scoped by it, so an instance it binds survives the reset
- * between jobs. The context key catalogue is bound only when nothing is bound
- * to it yet. The closure a contract is bound to is declared by this provider,
- * as a sibling package that binds over the package's defaults tells them from
- * the application's own bindings by that closure's declaring class.
+ * that key only when nothing is bound to it yet, so a binding a sibling package
+ * or the application made before this provider registers stands, `instance()`
+ * included, and one made afterwards replaces the default. A contract the
+ * application names a class other than the package's default for in the
+ * configuration is bound to that key whatever was bound before, a deferred
+ * provider's binding included, so the application's configuration replaces a
+ * sibling package's binding, and a binding made afterwards still replaces it.
+ * The grant hook is the one exception: when the configuration lists hooks, they
+ * run before whatever hook the contract resolves to, before the package
+ * registers or after. Either way a binding made outside the package is not
+ * scoped by it, so an instance it binds survives the reset between jobs. The
+ * context key catalogue is bound only when nothing is bound to it yet. The
+ * closure a contract is bound to is declared by this provider, as a sibling
+ * package that binds over the package's defaults tells them from the
+ * application's own bindings by that closure's declaring class.
  *
  * Registering binds the defaults alone. Binding a class the configuration names
  * in place of a default, which autoloads it, may load a deferred provider and
@@ -345,10 +345,9 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * each giving way to a binding a sibling package or the application makes
      * on its contract, before the package registers or after. A class the
      * configuration names in place of the package's default replaces a binding
-     * made before the package registers instead (N106), and grant hooks it
-     * lists run before whatever hook the contract resolves to (N108). Rebinding
-     * the subject resolver or the tenant tree forgets the resolutions read
-     * through it.
+     * made before the package registers instead, and grant hooks it lists run
+     * before whatever hook the contract resolves to. Rebinding the subject
+     * resolver or the tenant tree forgets the resolutions read through it.
      *
      * @return void
      */
@@ -379,9 +378,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * resolver, which answers a model that declares its tenancy from its
      * declaration, as `whereAuthorized()` reads it, and passes every other to
      * the configured one. A class the configuration names in place of the
-     * package's default replaces a binding made before the package registers
-     * (N106). A value naming no such class binds the default, for the boot to
-     * refuse.
+     * package's default replaces a binding made before the package registers. A
+     * value naming no such class binds the default, for the boot to refuse.
      *
      * @return void
      */
@@ -422,9 +420,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * Bind the configured policy store, when there is one, scoped to the
      * request or job so any state it keeps does not reach the next one. The
      * package has no store of its own, so a configured one replaces a binding
-     * made before the package registers (N106), and gives way to one made
-     * afterwards. A value naming no such class binds none, for the boot to
-     * refuse.
+     * made before the package registers, and gives way to one made afterwards.
+     * A value naming no such class binds none, for the boot to refuse.
      *
      * @return void
      */
@@ -514,8 +511,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * `authorization.session.scopes`. Each contract is bound as a default an
      * application may replace, the checker and the session policy source over a
      * binding made before the package registers when the configuration names a
-     * class other than the package's default (N106), and the context key
-     * catalogue only when nothing is bound to it yet. The catalogue reads the
+     * class other than the package's default, and the context key catalogue
+     * only when nothing is bound to it yet. The catalogue reads the
      * authentication context's namespaces and assurance keys at its first use,
      * never here, so a context a later provider binds is the one it reads.
      *
@@ -700,11 +697,11 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * application before the package registered, `instance()` included, is
      * watched from its first resolution in each container that resolves it,
      * whether that binding stands or the class the configuration names replaced
-     * it (N106), the earliest a rebinding could change anything that
-     * container's memo holds: the watch is added before the resolution, on the
-     * container resolving it, so a sandbox is watched in its own right and
-     * nothing is built on the application it was cloned from. Only the abstract
-     * itself starts the watch, never a class that implements it, and only when
+     * it, the earliest a rebinding could change anything that container's memo
+     * holds: the watch is added before the resolution, on the container
+     * resolving it, so a sandbox is watched in its own right and nothing is
+     * built on the application it was cloned from. Only the abstract itself
+     * starts the watch, never a class that implements it, and only when
      * resolved without parameters, since starting it resolves the abstract
      * again without them.
      *

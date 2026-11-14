@@ -28,8 +28,8 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * `RoleObserver` wired via `#[ObservedBy]`.
  *
  * A role takes policies as an identity does, through the same
- * `authorizable_policies` table with the role as the grantee (AUTHZ-7.2). They
- * apply to whoever holds the role, where both the role's grant and the policy's
+ * `authorizable_policies` table with the role as the grantee. They apply to
+ * whoever holds the role, where both the role's grant and the policy's
  * attachment hold, and are inherited down the hierarchy as the role's
  * permissions are. A role may own inline policies, deleted with it.
  *

@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Console\CheckConfigurationCommand;
 /**
  * Whether the application boots the package for diagnosis: to report what is
  * wrong with its configuration, every operation refusing while it is, rather
- * than refusing to boot (N113).
+ * than refusing to boot.
  *
  * It does only while the process runs a check command, which is decided as the
  * application boots, after every provider registered, from:

@@ -11,8 +11,7 @@ use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
- * The rule a policy's `principals` keep about where the policy is attached
- * (AUTHZ-7.3).
+ * The rule a policy's `principals` keep about where the policy is attached.
  *
  * A policy attached to a resource or a resource type is managed, and each of
  * its allow statements names its principals; a policy attached to a grantee or

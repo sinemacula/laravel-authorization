@@ -24,27 +24,27 @@ use SineMacula\Laravel\Authorization\Reviews\Support\SubjectStates;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 
 /**
- * Runs access reviews (AUTHZ-11.6, N93 to N98): who holds a role, permission or
- * policy, what a subject holds, what expires, what an actor last granted, and
- * what shows no observed use, for periodic reviews and their sign-off. Every
- * row says what is known of its use (N94, see `RowUsage`): reading it is
- * introspection, so neither a review nor its admission ever counts as use.
+ * Runs access reviews: who holds a role, permission or policy, what a subject
+ * holds, what expires, what an actor last granted, and what shows no observed
+ * use, for periodic reviews and their sign-off. Every row says what is known of
+ * its use (see `RowUsage`): reading it is introspection, so neither a review
+ * nor its admission ever counts as use.
  *
  * A review lists grant routes, never effective access: one row for each route
  * by which a subject holds a target through the stored grants, every row it
  * rests on live at the review's instant. It reads structure alone, the same
  * tenant chain, application matching, live-grant and definition-visibility
- * rules a check reads, and never evaluates a statement, condition, deny or cap
- * (D22), so a policy that only denies is held, and a holder may be denied what
- * it holds; `check()`, `permissionsFor()` and a preview say what a subject may
- * do. Boundaries, guardrails and resource-policy attachments restrict or extend
+ * rules a check reads, and never evaluates a statement, condition, deny or cap,
+ * so a policy that only denies is held, and a holder may be denied what it
+ * holds; `check()`, `permissionsFor()` and a preview say what a subject may do.
+ * Boundaries, guardrails and resource-policy attachments restrict or extend
  * what is decided, but are not held, so no review lists them.
  *
  * `review()` runs a review as the reviewer, admitted first (see
  * `ReviewAdmission`): a refused review throws `AuthorizationException` before
  * anything is read, so it discloses no row, count, truncation or completeness.
  * It returns the review's first page, at most its limit of rows, saying whether
- * more were left out. `trusted()` runs one as trusted system work (N75), for a
+ * more were left out. `trusted()` runs one as trusted system work, for a
  * scheduled job or a command, with no reviewer and no admission; nothing else
  * falls back to it, and an acting context that cannot be resolved is refused
  * before a review is reached. Each entry point has its trusted counterpart:
@@ -68,9 +68,9 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  * read whole, by design). `export()` writes the rows as versioned JSON Lines, a
  * header, one line a row and a footer (see `Support\JsonLinesExport`), to a
  * stream resource or a callback, and needs both `authorization:review.read` and
- * `authorization:review.export` (N96, N97), decided together before the header
- * and again before every chunk; an export refused or failing part way stops
- * with no footer.
+ * `authorization:review.export`, decided together before the header and again
+ * before every chunk; an export refused or failing part way stops with no
+ * footer.
  *
  * Every read is on the write connection, as every other grant read is, never
  * one query per holder: the grants are read a page of the limit at a time, and
@@ -80,7 +80,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  * time, then ordered). The rows come in one deterministic order, the same on
  * every supported database (see `Support\ReviewOrder`), and a review, a page, a
  * stream and an export share one read: one query construction, admission and
- * projection (D22).
+ * projection.
  *
  * Every review refuses while the package is not healthy (see `PackageState`),
  * before the reviewer is admitted or a row read.
@@ -355,11 +355,11 @@ final readonly class AccessReview
 
     /**
      * Read one page of the review from the position: the one read every review,
-     * page, stream and export shares (D22). Its rows are collected in the
-     * review's order after the position's last row, at most the limit of them
-     * and at least one more to know whether any is left, with what is known of
-     * their subjects and of their use (one batched lookup of the page's routes,
-     * see `Support\ReviewUsage`), at the position's frozen instant. A review of
+     * page, stream and export shares. Its rows are collected in the review's
+     * order after the position's last row, at most the limit of them and at
+     * least one more to know whether any is left, with what is known of their
+     * subjects and of their use (one batched lookup of the page's routes, see
+     * `Support\ReviewUsage`), at the position's frozen instant. A review of
      * unused grants keeps only the rows with no observed use.
      *
      * @param  \SineMacula\Laravel\Authorization\Reviews\ReviewQuery  $query

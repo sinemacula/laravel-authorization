@@ -11,19 +11,19 @@ use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 
 /**
- * Decides whether a policy document may be written (AUTHZ-6.2, AUTHZ-6.10).
+ * Decides whether a policy document may be written.
  *
  * A document may be written only when it is a valid policy (its keys, version,
  * statements, operators and operands, and no two statements sharing a sid), is
  * within the configured limits, reads only context keys the bound context key
- * catalogue declares (AUTHZ-8.1), and has every `actions` and `not_actions`
- * pattern cover at least one action of the bound action catalogue, or one of
- * the package's own permissions (see `PackagePermissions`), which the catalogue
- * never holds, so a policy written at runtime can only refer to actions the
- * code checks and context the application supplies. With no actions declared by
- * the application, a document whose patterns need any action but the package's
- * own is refused with the one reason that nothing is declared, and one naming
- * only the package's own may still be written.
+ * catalogue declares, and has every `actions` and `not_actions` pattern cover
+ * at least one action of the bound action catalogue, or one of the package's
+ * own permissions (see `PackagePermissions`), which the catalogue never holds,
+ * so a policy written at runtime can only refer to actions the code checks and
+ * context the application supplies. With no actions declared by the
+ * application, a document whose patterns need any action but the package's own
+ * is refused with the one reason that nothing is declared, and one naming only
+ * the package's own may still be written.
  *
  * Every condition key must be declared, may be tested, and be of a type its
  * operator suits (`ContextKeyType`), and every `${…}` reference in an operand
@@ -35,7 +35,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  * is not asked about its key `authentication`. An assurance key of the
  * authentication context (see `AssuranceKeys`), under the fixed names or those
  * the context declares, may never be tested or read through a `${…}` reference,
- * whatever the catalogue declares (AUTHZ-8.9, N37, N104): the reason points at
+ * whatever the catalogue declares: the reason points at
  * `authentication_requirement`. The context's namespaces and assurance keys are
  * read when a document is checked, never when the validator is built; a
  * malformed declaration refuses every document, with its reason.

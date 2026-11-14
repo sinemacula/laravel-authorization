@@ -9,11 +9,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\GrantSource;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Renders an explanation as text, for reading (AUTHZ-11.5): the verdict and
- * what decided it, each requirement, each step of every stage reached with its
- * condition tests, the stages not evaluated, the grants' provenance, the keys
- * found missing and the request, and, for a decision made without explain mode,
- * that the rest was not recorded.
+ * Renders an explanation as text, for reading: the verdict and what decided it,
+ * each requirement, each step of every stage reached with its condition tests,
+ * the stages not evaluated, the grants' provenance, the keys found missing and
+ * the request, and, for a decision made without explain mode, that the rest was
+ * not recorded.
  *
  * Every name is escaped as a JSON string is: `<`, `>`, `&` and non-ASCII
  * characters as `\uXXXX`, a quote and a backslash with a backslash, and a

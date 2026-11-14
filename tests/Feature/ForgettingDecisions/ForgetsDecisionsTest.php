@@ -39,7 +39,7 @@ use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
- * Feature tests for what the authorization manager forgets (N112):
+ * Feature tests for what the authorization manager forgets:
  * `forgetDecisionsFor()`, which has the rest of the request decide afresh once
  * a proof, the session or the tenant changed, and `forgetLastDecision()`, which
  * clears the last decision alone. Neither is a decision, so neither refuses.

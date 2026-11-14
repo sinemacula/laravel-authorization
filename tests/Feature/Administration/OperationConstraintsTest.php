@@ -226,11 +226,11 @@ final class OperationConstraintsTest extends TestCase
     }
 
     /**
-     * No owner stands in the way of a change to a grant row (N79): a revocation
-     * of a tenant's row, or of a platform-wide one, passes the stage whatever
-     * tenant the check is made from, the action's own decision having admitted
-     * it; and a change that fails both the scope and the rank rule is refused
-     * as out of scope, the first constraint weighed.
+     * No owner stands in the way of a change to a grant row: a revocation of a
+     * tenant's row, or of a platform-wide one, passes the stage whatever tenant
+     * the check is made from, the action's own decision having admitted it; and
+     * a change that fails both the scope and the rank rule is refused as out of
+     * scope, the first constraint weighed.
      *
      * @return void
      *
@@ -297,7 +297,7 @@ final class OperationConstraintsTest extends TestCase
     }
 
     /**
-     * The administered scope is the whole reach (N79): an actor allowed
+     * The administered scope is the whole reach: an actor allowed
      * `authorization:*` at the platform, but holding a role in one tenant whose
      * policy denies `authorization:role.grant`, is refused a platform-wide role
      * grant, and a subtree grant from a parent of that tenant, as out of scope,
@@ -553,8 +553,8 @@ final class OperationConstraintsTest extends TestCase
 
     /**
      * The self right is weighed across the change's whole reach, as its action
-     * is (N79): an actor allowed `authorization:*` at the platform, but holding
-     * a role in one tenant whose policy denies
+     * is: an actor allowed `authorization:*` at the platform, but holding a
+     * role in one tenant whose policy denies
      * `authorization:administration.self`, is refused a platform-wide grant to
      * itself as self, though the right is allowed at the node the grant is
      * decided at; with nothing to limit the right it is allowed, a grant in a
@@ -777,10 +777,10 @@ final class OperationConstraintsTest extends TestCase
     }
 
     /**
-     * A break-glass activation is weighed by the scope rule alone (N140): an
-     * unranked actor activates a senior role for a senior peer, or for itself,
-     * asking nothing but its own right again across the reach, and is refused
-     * only where that right does not reach; ending one only narrows, so it asks
+     * A break-glass activation is weighed by the scope rule alone: an unranked
+     * actor activates a senior role for a senior peer, or for itself, asking
+     * nothing but its own right again across the reach, and is refused only
+     * where that right does not reach; ending one only narrows, so it asks
      * nothing.
      *
      * @return void

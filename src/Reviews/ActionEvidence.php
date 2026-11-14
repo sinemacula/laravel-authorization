@@ -12,12 +12,12 @@ use SineMacula\Laravel\Authorization\Reviews\Enums\EvidenceKind;
  * `ReviewQuery::forAction()`), on each of its rows, and where the route giving
  * it reaches.
  *
- * It is evidence of a stored grant route, never a decision (D22): a permission
- * or an allow statement may still be defeated by a deny, a boundary, a
- * guardrail, a resource restriction or a session cap, and conditions, resource
- * patterns and requirements are reported as present but never evaluated; only
- * `check()` says whether an operation is allowed. Its shape, under the row's
- * `action_evidence` key:
+ * It is evidence of a stored grant route, never a decision: a permission or an
+ * allow statement may still be defeated by a deny, a boundary, a guardrail, a
+ * resource restriction or a session cap, and conditions, resource patterns and
+ * requirements are reported as present but never evaluated; only `check()` says
+ * whether an operation is allowed. Its shape, under the row's `action_evidence`
+ * key:
  *
  * - `action`: the action asked about, literal;
  * - `evidence`: `permission` or `policy_statement` (see `Enums\EvidenceKind`);

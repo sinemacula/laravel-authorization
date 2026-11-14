@@ -19,8 +19,8 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * What one try of a delegated operation's decisions read, locked and pinned, so
- * the operation never commits on authority that changed under it (AUTHZ-11.1,
- * the concurrency protocol).
+ * the operation never commits on authority that changed under it (the
+ * concurrency protocol).
  *
  * Every set of rows a decision depends on is read with `lockForUpdate()` on the
  * write connection before the decision reads it, and the digest of what was

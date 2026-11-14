@@ -13,10 +13,9 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 
 /**
- * Checks policy documents with the validator every write goes through
- * (AUTHZ-6.2, AUTHZ-6.10), so a document can be checked before it ships and a
- * stored one that no longer passes, after a limit was lowered or a permission
- * was removed, can be found.
+ * Checks policy documents with the validator every write goes through, so a
+ * document can be checked before it ships and a stored one that no longer
+ * passes, after a limit was lowered or a permission was removed, can be found.
  *
  * Each path is a JSON file holding one document or a JSON array of them, or a
  * directory whose `*.json` files are read. `--database` checks every stored

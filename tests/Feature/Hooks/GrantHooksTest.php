@@ -16,7 +16,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the ordered composite of grant hooks, the default binding
- * of the grant hook contract (AUTHZ-11.3).
+ * of the grant hook contract.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

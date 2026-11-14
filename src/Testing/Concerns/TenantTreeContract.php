@@ -16,8 +16,8 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Contract tests for a tenant tree (AUTHZ-5.3, N111), for the test case of an
- * implementation of `Contracts\TenantTree` to use.
+ * Contract tests for a tenant tree, for the test case of an implementation of
+ * `Contracts\TenantTree` to use.
  *
  * The test case supplies the tree under test (`tenantTree()`), built once its
  * fixture rows are in place, and the shape it was seeded with, as data

@@ -12,10 +12,10 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the migration adding the indexes the rows naming half a
- * tenant are found through (N130): an index on `tenant_id` and then
- * `tenant_type` of the guardrails, the resource policies and the policies, on
- * the tables configured under their custom names, created and dropped cleanly,
- * and run again harmlessly, on every database.
+ * tenant are found through: an index on `tenant_id` and then `tenant_type` of
+ * the guardrails, the resource policies and the policies, on the tables
+ * configured under their custom names, created and dropped cleanly, and run
+ * again harmlessly, on every database.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Enums;
 
 /**
  * Where an identity's grants lie against a tenant, as the grant scope query
- * answers it (AUTHZ-14.2).
+ * answers it.
  *
  * It carries the answer alone, never which grant, tenant or how many decided
  * it.

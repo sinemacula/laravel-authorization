@@ -14,10 +14,10 @@ namespace SineMacula\Laravel\Authorization\Reviews\Enums;
  *   tenant type without a key or a key without a type, which the package never
  *   writes. Its origin scope shows the columns as they are stored. A check
  *   applies what grants of such a row nowhere, neither at the platform nor in
- *   any tenant, and what restricts of it everywhere (N130, see
+ *   any tenant, and what restricts of it everywhere (see
  *   `Support\TenantColumns`), so it is never a placed grant and no review of
  *   what applies lists it; a review of everywhere does, of holders, holdings,
- *   expiries or an actor's grants, never one rooted within a tenant (N96). A
+ *   expiries or an actor's grants, never one rooted within a tenant. A
  *   malformed row is marked so whether or not it has expired.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

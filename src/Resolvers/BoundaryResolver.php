@@ -16,19 +16,17 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
- * Resolves the permission boundaries of a grantee that apply to a check
- * (AUTHZ-7.4).
+ * Resolves the permission boundaries of a grantee that apply to a check.
  *
  * A grantee has at most one boundary per scope, and every boundary whose scope
  * covers the tenant the check is decided in applies: the platform-wide one, the
  * tenant's own, and an ancestor's that reaches the tenants below it, as a grant
- * reaches down (AUTHZ-5.3). A tenant's boundary never replaces the platform's:
- * every one that applies is intersected at the boundary stage, so a check
- * passes only what each of them allows. With no tenant, only the platform-wide
- * one applies (AUTHZ-5.7). A boundary naming half a tenant, a type without a
- * key or a key without a type, which the package never writes, applies
- * everywhere, as a platform-wide one does, since what restricts fails closed
- * (see `Support\TenantColumns`).
+ * reaches down. A tenant's boundary never replaces the platform's: every one
+ * that applies is intersected at the boundary stage, so a check passes only
+ * what each of them allows. With no tenant, only the platform-wide one applies.
+ * A boundary naming half a tenant, a type without a key or a key without a
+ * type, which the package never writes, applies everywhere, as a platform-wide
+ * one does, since what restricts fails closed (see `Support\TenantColumns`).
  *
  * The boundaries of every saved model are read, whichever contracts it
  * implements, so a boundary set on a grantee always caps the checks about it,

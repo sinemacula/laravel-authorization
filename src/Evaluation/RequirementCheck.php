@@ -10,8 +10,8 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 
 /**
- * Judges the authentication requirements one check reads (N34), and records
- * what the decision may be reused for (N37).
+ * Judges the authentication requirements one check reads, and records what the
+ * decision may be reused for.
  *
  * A requirement is met only when the checker says so for the subject's session:
  * with no checker, no subject, or a subject without a session, every part is

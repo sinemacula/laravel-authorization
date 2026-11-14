@@ -55,9 +55,9 @@ use SineMacula\Laravel\Authorization\Usage\RouteSources;
  * resolution whose hierarchy moved while it ran says none.
  *
  * A role held through a break-glass activation has each permission and policy
- * it gives named with the activation's key (N142), read by role in the same
- * queries as for the routes, so a decision can name the activations behind it;
- * a grantee holding none is resolved as it was before.
+ * it gives named with the activation's key, read by role in the same queries as
+ * for the routes, so a decision can name the activations behind it; a grantee
+ * holding none is resolved as it was before.
  *
  * @phpstan-type PolicyGrants \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, covariant \Illuminate\Database\Eloquent\Model, *>
  * @phpstan-type RoleGrants \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, covariant \Illuminate\Database\Eloquent\Model, *>
@@ -98,7 +98,7 @@ final class GrantResolver
      * unstable, so it is kept for the request or job alone and never stored.
      *
      * A role held through a break-glass activation has its key and each key
-     * above it named with the activation's key (N142).
+     * above it named with the activation's key.
      *
      * @param  RoleGrants  $grants
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins

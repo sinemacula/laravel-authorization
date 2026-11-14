@@ -5,9 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * The session caps of one check (AUTHZ-7.5): the scopes of the subject's
- * credential, as the action patterns they map to, and each set of actions the
- * caller passed to `Authorization::capped()`, outermost first.
+ * The session caps of one check: the scopes of the subject's credential, as the
+ * action patterns they map to, and each set of actions the caller passed to
+ * `Authorization::capped()`, outermost first.
  *
  * Every cap present must cover the action for the check to pass the session
  * stage, so the caps intersect; a cap covers an action when one of its patterns

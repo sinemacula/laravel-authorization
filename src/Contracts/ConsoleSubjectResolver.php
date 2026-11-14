@@ -7,7 +7,7 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 use SineMacula\Laravel\Authorization\Subject;
 
 /**
- * Console subject resolver contract (AUTHZ-11.5, N91).
+ * Console subject resolver contract.
  *
  * Turns the saved subject reference an operator types on the command line,
  * `authorization:why`'s `{subject}` argument, into the subject a check is

@@ -8,8 +8,8 @@ use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 
 /**
- * The assurance keys of the authentication context, which no condition may test
- * (AUTHZ-8.9, N37, N104).
+ * The assurance keys of the authentication context, which no condition may
+ * test.
  *
  * An assurance key is a key of `authentication`, or of a namespace the
  * authentication context contributes beside it (such as `mfa`), any segment of

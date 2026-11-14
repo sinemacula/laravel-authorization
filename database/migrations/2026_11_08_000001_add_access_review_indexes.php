@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Add the indexes access reviews read through (AUTHZ-11.6, N95, N98).
+ * Add the indexes access reviews read through.
  *
  * - `{table}_granted_by_index` on `granted_by_type` and `granted_by_id` of each
  *   grant table (`authorizable_roles`, `authorizable_permissions` and

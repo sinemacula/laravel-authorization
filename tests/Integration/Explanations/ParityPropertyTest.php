@@ -22,11 +22,11 @@ use Tests\Integration\BulkChecks\ParityScenario;
 use Tests\TestCase;
 
 /**
- * The explain mode parity property (N89, D22): for random scenarios, drawn as
- * the bulk check parity property draws them, the check `explain()` makes is
- * exactly the one `check()` makes, its effect, reason, stage, deciding
- * statements, requirements, freshness and trace alike, once the evidence only
- * explain mode records is set aside; and a check that throws throws the same.
+ * The explain mode parity property: for random scenarios, drawn as the bulk
+ * check parity property draws them, the check `explain()` makes is exactly the
+ * one `check()` makes, its effect, reason, stage, deciding statements,
+ * requirements, freshness and trace alike, once the evidence only explain mode
+ * records is set aside; and a check that throws throws the same.
  *
  * The scenarios are drawn from `AUTHZ_PARITY_SEED`, a random seed when it is
  * not set, and there are `AUTHZ_PARITY_RUNS` of them, 60 by default; a failure

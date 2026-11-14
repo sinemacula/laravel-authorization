@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\Checks\RootChecks;
 
 /**
  * Check the authorization configuration as the boot does, collecting every
- * refusal instead of throwing the first (N113).
+ * refusal instead of throwing the first.
  *
  * Each setting and each entry of a list is checked on its own, so one refused
  * value does not hide its siblings: a key the package does not define is

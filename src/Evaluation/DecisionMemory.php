@@ -11,9 +11,9 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 
 /**
  * Everything the current request or job remembers towards its decisions, and
- * the one call that has it forgotten (N112), so the rest of the request or job
- * decides afresh once a proof is recorded or revoked, a session signs in or
- * out, or the tenant is switched inside it.
+ * the one call that has it forgotten, so the rest of the request or job decides
+ * afresh once a proof is recorded or revoked, a session signs in or out, or the
+ * tenant is switched inside it.
  *
  * Forgetting clears the last decision, with its provenance and the session it
  * was recorded in (see `LastDecisionStore`); empties the resolution cache's

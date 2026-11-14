@@ -18,10 +18,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *
  * A step of an explained check also carries each condition test on its own,
  * with what it found (see `ConditionResult`), and the `${…}` references of the
- * statement's resource patterns that could not be resolved, by key (N89). An
- * everyday check's steps carry neither.
+ * statement's resource patterns that could not be resolved, by key. An everyday
+ * check's steps carry neither.
  *
- * Never a value: only key names and results reach the trace (AUTHZ-8.8).
+ * Never a value: only key names and results reach the trace.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

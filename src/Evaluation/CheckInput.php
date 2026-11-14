@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * One check of a bulk check (AUTHZ-10.3): the action, the resource and the
- * caller's context, exactly as `check()` takes them.
+ * One check of a bulk check: the action, the resource and the caller's context,
+ * exactly as `check()` takes them.
  *
  * `checkMany()` takes a list of them and decides each as `check()` would,
  * returning one decision for each, keyed as they are.

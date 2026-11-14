@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * What a requirement checker found for one authentication requirement (N34):
- * whether it is met, the parts that are not, and the instant until which a met
+ * What a requirement checker found for one authentication requirement: whether
+ * it is met, the parts that are not, and the instant until which a met
  * requirement stays met.
  *
  * A met requirement has no unmet parts, and only a met one has an instant it

@@ -10,9 +10,9 @@ use SineMacula\Laravel\Authorization\Query\Refusal;
 /**
  * Thrown when an authorized scope, `whereAuthorized()` or the model-level
  * `AuthorizedScope`, cannot prove that the rows it would keep are exactly those
- * `check()` allows (AUTHZ-10.2, N64): from `whereAuthorized()` before the
- * builder is changed, and from the call that runs the query when either is
- * compiled then. It never filters rows after loading them.
+ * `check()` allows: from `whereAuthorized()` before the builder is changed, and
+ * from the call that runs the query when either is compiled then. It never
+ * filters rows after loading them.
  *
  * A refusal is a developer or configuration fault, not a denial, so this is not
  * an `AuthorizationException`: Laravel renders it as a 500, never a 403. Its

@@ -1,8 +1,8 @@
 <?php
 
 /**
- * Create the break-glass activations table (AUTHZ-11.7, N133): each row one
- * activation of an emergency role for one principal, for a limited time.
+ * Create the break-glass activations table: each row one activation of an
+ * emergency role for one principal, for a limited time.
  *
  * Every activation is its own record with its own expiry, beside any normal
  * grant of the same role, so it is never deduplicated: the table has no unique

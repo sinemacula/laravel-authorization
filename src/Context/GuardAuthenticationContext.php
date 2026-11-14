@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 
 /**
- * The default authentication context: what Laravel knows (AUTHZ-13.2).
+ * The default authentication context: what Laravel knows.
  *
  * Supplies the `authentication` namespace alone: the name of the guard read
  * (`guard`), and, when a user is signed in on it, the user's key (`user_id`, as

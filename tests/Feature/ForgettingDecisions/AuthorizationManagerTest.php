@@ -27,9 +27,9 @@ use Tests\TestCase;
 
 /**
  * Feature tests for a batch of the authorization manager running when the
- * decisions of the request are forgotten (N112): a batch about the request's
- * subject is about the subject the resolver gives afresh from its next chunk,
- * while a manager naming its subject keeps it.
+ * decisions of the request are forgotten: a batch about the request's subject
+ * is about the subject the resolver gives afresh from its next chunk, while a
+ * manager naming its subject keeps it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

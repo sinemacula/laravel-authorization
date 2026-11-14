@@ -19,8 +19,8 @@ use Tests\TestCase;
 
 /**
  * Feature tests for an authorization scope already in place when the decisions
- * of the request are forgotten while it runs (N112): it is held in place until
- * its callback returns, and the request's tenant is read afresh afterwards.
+ * of the request are forgotten while it runs: it is held in place until its
+ * callback returns, and the request's tenant is read afresh afterwards.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

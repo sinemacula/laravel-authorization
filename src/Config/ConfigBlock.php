@@ -8,8 +8,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
- * Read a block of the authorization config whose keys the package defines
- * (N116).
+ * Read a block of the authorization config whose keys the package defines.
  *
  * A block must be an array, and every key it sets must be one the package
  * defines, so a misspelt key is refused at boot, naming its full path, rather

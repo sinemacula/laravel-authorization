@@ -5,8 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown when a package mutation service is called while a grant hook runs
- * (AUTHZ-11.3, N80).
+ * Thrown when a package mutation service is called while a grant hook runs.
  *
  * A hook may only veto: it never changes the grant, and it must not change any
  * other record of the package's either, since a call without an acting context

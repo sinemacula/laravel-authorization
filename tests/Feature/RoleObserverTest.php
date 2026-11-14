@@ -81,7 +81,7 @@ final class RoleObserverTest extends TestCase
 
     /**
      * A role with children is not deleted, even when the current tenant cannot
-     * see a child, and once its children are gone it is (D18).
+     * see a child, and once its children are gone it is.
      *
      * @return void
      */

@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 
 /**
  * Where the package stands in the application that registered it, which every
- * operation the package offers consults before it runs (N124).
+ * operation the package offers consults before it runs.
  *
  * The package's service provider holds one, as an instance of the container,
  * from the start of its `register()`: pending until the configuration is

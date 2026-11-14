@@ -22,10 +22,10 @@ use Tests\Fixtures\GrantHooks\RefusingGrantHook;
 use Tests\TestCase;
 
 /**
- * The grant hook (AUTHZ-11.3) from the grant entry points beyond the grant
- * service itself: the trait helpers and the `authorization:grant` command,
- * trusted and delegated, each calling it when the grant widens the identity's
- * scope and not otherwise.
+ * The grant hook from the grant entry points beyond the grant service itself:
+ * the trait helpers and the `authorization:grant` command, trusted and
+ * delegated, each calling it when the grant widens the identity's scope and not
+ * otherwise.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

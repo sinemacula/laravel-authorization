@@ -33,7 +33,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for `Possession`, whether a delegated direct grant of a
- * permission hands out only what the actor may hand out (N77).
+ * permission hands out only what the actor may hand out.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -170,11 +170,11 @@ final class PossessionTest extends TestCase
 
     /**
      * The grantable right is weighed across the grant's whole reach, as the
-     * action is (N79): allowed at the platform, it allows a platform-wide grant
-     * while nothing limits it, but once the actor holds a role in one tenant
-     * whose policy denies the grantable rights, it allows no grant reaching
-     * that tenant, of a permission or of a policy, while a grant in a tenant
-     * the deny does not reach is still allowed.
+     * action is: allowed at the platform, it allows a platform-wide grant while
+     * nothing limits it, but once the actor holds a role in one tenant whose
+     * policy denies the grantable rights, it allows no grant reaching that
+     * tenant, of a permission or of a policy, while a grant in a tenant the
+     * deny does not reach is still allowed.
      *
      * @return void
      *
