@@ -2,25 +2,29 @@
 
 `sinemacula/laravel-authorization` ships a deliberate Spatie-compatibility layer so teams migrating from
 `spatie/laravel-permission` can move views, controllers, and route declarations verbatim. This note catalogues every
-alias the package currently ships, grouped by surface, and flags the intentional omissions.
+alias the package ships, grouped by surface, and flags the intentional omissions.
 
 The canonical API is ours (`givePermission`, `revokePermission`, `hasPermission`, `getPermissions`, `assignRole`,
 `revokeRole`, `hasRole`, `getRoles`, `attachPolicy`, `detachPolicy`). Spatie aliases forward to the canonical helper
-and are a porting convenience, not a separate code path — they share the same events, cache, and validation.
+and are a porting convenience with no code path of their own: they share the same events, cache, and validation.
 
 ## Trait method aliases
 
-Source: `src/Traits/HasPermissions.php`, `src/Traits/HasRoles.php`, and `src/Models/Role.php` (the role model has its
-own permission-attachment surface and mirrors the same four permission aliases).
+Source: `src/Concerns/HasPermissions.php`, `src/Concerns/HasRoles.php`, and `src/Concerns/ManagesPermissions.php`
+(the trait the `Role` model uses for its own permissions, which mirrors the same four permission aliases).
 
-| Spatie call            | Our equivalent         | Surface                                     |
-|------------------------|------------------------|---------------------------------------------|
-| `givePermissionTo()`   | `givePermission()`     | `HasPermissions` trait, `Role` model        |
-| `revokePermissionTo()` | `revokePermission()`   | `HasPermissions` trait, `Role` model        |
-| `hasPermissionTo()`    | `hasPermission()`      | `HasPermissions` trait, `Role` model        |
-| `getPermissionNames()` | `getPermissions()`     | `HasPermissions` trait, `Role` model        |
-| `removeRole()`         | `revokeRole()`         | `HasRoles` trait                            |
-| `getRoleNames()`       | `getRoles()`           | `HasRoles` trait                            |
+| Spatie call            | Our equivalent       | Surface                              |
+|------------------------|----------------------|--------------------------------------|
+| `givePermissionTo()`   | `givePermission()`   | `HasPermissions` trait, `Role` model |
+| `revokePermissionTo()` | `revokePermission()` | `HasPermissions` trait, `Role` model |
+| `hasPermissionTo()`    | `hasPermission()`    | `HasPermissions` trait, `Role` model |
+| `getPermissionNames()` | `getPermissions()`   | `HasPermissions` trait, `Role` model |
+| `removeRole()`         | `revokeRole()`       | `HasRoles` trait                     |
+| `getRoleNames()`       | `getRoles()`         | `HasRoles` trait                     |
+
+An identity's aliases take the permission or role and an optional acting context alone, so a call that names a tenant,
+an application or an expiry uses the canonical method; the role's `givePermissionTo()` takes an expiry as
+`givePermission()` does.
 
 Porting example:
 
@@ -33,7 +37,7 @@ $user->getPermissionNames();
 $user->removeRole('editor');
 $user->getRoleNames();
 
-// Ours (canonical) — aliases above forward to these verbatim
+// Ours (canonical): the aliases above forward to these
 $user->givePermission('posts.edit');
 $user->revokePermission('posts.edit');
 $user->hasPermission('posts.edit');
@@ -42,19 +46,20 @@ $user->revokeRole('editor');
 $user->getRoles();
 ```
 
-`hasPermission()` (and therefore `hasPermissionTo()`) consults both direct grants and role-inherited permissions —
-Spatie's split between `hasPermissionTo` and `hasPermissionThroughRole` is folded into a single check; see the
-*Deliberate omissions* section.
+`hasPermission()` (and therefore `hasPermissionTo()`) consults both direct grants and role-inherited permissions, so
+Spatie's split between `hasPermissionTo` and `hasPermissionThroughRole` is folded into a single check; see
+[Deliberate omissions](#deliberate-omissions). It reports what is granted in the current scope and weighs no policy; to
+decide an action, use `Authorization::check()` or `can()`.
 
 ## Blade directives
 
 Source: `BladeDirectiveRegistrar::register()` and `BladeHelpers`.
 
 The package registers both the canonical short-form directives (`@role`, `@permission`, `@anyrole`, `@allroles`,
-`@anypermission`, `@allpermissions`) and the Spatie-shaped `@has…` aliases in parallel. Both families support
+`@anypermission`, `@allpermissions`) and the Spatie-shaped `@has...` aliases in parallel. Both families support
 `@unless<name>` / `@else<name>` / `@end<name>` automatically via `Blade::if`, and every directive ships a matching
-`@endunless<name>` alias so Spatie's `@endunlessrole` / `@endunlesspermission` spellings compile cleanly too
-(issue \#86).
+`@endunless<name>` alias so Spatie's `@endunlessrole` / `@endunlesspermission` spellings compile cleanly too. The
+directives are registered only when the `blade.compiler` binding is present.
 
 Full directive list:
 
@@ -75,20 +80,20 @@ Porting example:
 ```blade
 {{-- Spatie --}}
 @hasrole('admin|editor')
-    …
+    ...
 @endhasrole
 
 @hasanypermission(['posts.edit', 'posts.delete'])
-    …
+    ...
 @endhasanypermission
 
 @unlessrole('admin')
-    …
+    ...
 @endunlessrole
 
-{{-- Ours — the exact same markup works verbatim --}}
+{{-- Ours: the exact same markup works verbatim --}}
 @hasrole('admin|editor')
-    …
+    ...
 @endhasrole
 ```
 
@@ -125,7 +130,7 @@ Route::delete('/posts/{post}', [PostController::class, 'destroy'])
 Route::get('/api/posts', [PostController::class, 'index'])
     ->middleware('role:admin|editor,api');
 
-// Ours — the exact same declarations work verbatim.
+// Ours: the exact same declarations work verbatim.
 ```
 
 A comma does not list alternatives: as in Spatie, the second argument is the guard. `role:` honours it, limiting the
@@ -145,69 +150,70 @@ its middleware.
 
 ## Event names
 
-The package deliberately scopes its events by namespace rather than adopting Spatie's unqualified
-names. The difference is intentional — a `RoleAssigned` listener that expected the role-catalogue lifecycle trio in
-Spatie would silently bind to identity-level assignments in this package, so the namespace makes the scope explicit
-on purpose.
+The package scopes its events by namespace rather than adopting Spatie's unqualified names, so a listener names the
+scope it expects: an identity's grant, a role's permission or a catalogue row's lifecycle.
 
-| Spatie event                | Our event                                | Why the name differs               |
-|-----------------------------|------------------------------------------|------------------------------------|
-| `RoleAssigned`              | `Events\Identity\RoleAssigned`           | Explicit identity scope            |
-| `RoleRevoked`               | `Events\Identity\RoleRevoked`            | Explicit identity scope            |
-| `PermissionAssigned`        | `Events\Identity\PermissionGranted`      | Scope + "granted" per IAM vocab    |
-| `PermissionRevoked`         | `Events\Identity\PermissionRevoked`      | Explicit identity scope            |
+| Spatie event         | Our event                                                              | Why the name differs            |
+|----------------------|------------------------------------------------------------------------|---------------------------------|
+| `RoleAttached`       | `Events\Identity\RoleAssigned`                                         | Explicit identity scope         |
+| `RoleDetached`       | `Events\Identity\RoleRevoked`                                          | Explicit identity scope         |
+| `PermissionAttached` | `Events\Identity\PermissionGranted` or `Events\Role\PermissionGranted` | Identity or role grantee        |
+| `PermissionDetached` | `Events\Identity\PermissionRevoked` or `Events\Role\PermissionRevoked` | Identity or role grantee        |
+
+Spatie's names are those of its version 6; version 7 adds an `Event` suffix (`RoleAttachedEvent`), and either version
+dispatches them only when its `events_enabled` setting is on. The package always dispatches its own.
 
 The `Events\Role\*`, `Events\Permission\*`, and `Events\Policy\*` lifecycle events (`Created`, `Updated`, `Deleted`)
-cover the *catalogue* lifecycle — the role/permission/policy rows themselves — and are distinct from the
+cover the *catalogue* lifecycle (the role, permission and policy rows themselves) and are distinct from the
 identity-level events. The `Events\Role\PermissionGranted` / `Events\Role\PermissionRevoked` pair fires when
 permissions are attached to or detached from a role, which Spatie does not emit as a distinct event.
 
 The package also ships `AuthorizationFailed` (hard-denial, fired from `authorize()`, and from the `permission` and
 `authorize` middleware, before the exception is thrown; a `role` denial is not a decision and fires none) and
 `DecisionEvaluated` (every evaluation path, denials, previews and allows as `events.decisions` selects, including a Gate
-check whose argument cannot be identified as a resource, which is recorded as an implicit deny with a `null` resource) —
+check whose argument cannot be identified as a resource, which is recorded as an implicit deny with a `null` resource).
 Spatie has no equivalents; audit consumers subscribe to these to persist who each decision was about, its reason, the
 statements that decided it and the context keys it read, never their values. The decision itself, with its trace, is
 read from `Authorization::lastDecision()`.
 
-See each event class under `src/Events/` for the full audit payload — every event carries a stable `@api` contract
-and breaking changes require a major version bump.
+See each event class under `src/Events/` for the full audit payload. An event class marked `@api` is a stable
+contract, and a breaking change to it requires a major version bump.
 
 ## Deliberate omissions
 
 The package deliberately does **not** ship the following Spatie surface:
 
-- **`hasPermissionThroughRole()`** — folded into `hasPermission()`. The canonical check always consults both direct
+- **`hasPermissionThroughRole()`**: folded into `hasPermission()`. The canonical check always consults both direct
   grants and role-inherited permissions; exposing a separate "through role" check would encourage consumers to ask
   the wrong question for policy evaluation. The `permissions()` relation (direct grants only) and the `roles()`
-  relation (role-inherited, transitively resolvable) are both available when a consumer genuinely needs to separate
-  the two sources.
-- **`hasDirectPermission()`** — consumers that need the direct-only view use the `permissions` relation on the
+  relation (the roles held, whose permissions are the inherited ones) are both available when a consumer needs to
+  separate the two sources.
+- **`hasDirectPermission()`**: consumers that need the direct-only view use the `permissions` relation on the
   identity; the short-circuiting check is not a primitive of the canonical API.
-- **`hasExactRoles()`** — not shipped; expressible via `count($user->getRoles()) === N && $user->hasAllRoles([…])`.
-- **Role-model role helpers** — Spatie ships `$role->assignRole()` / `$role->hasRole()` for nested role hierarchies.
-  This package treats roles as a flat namespace; nested roles are out of scope and there is no role-on-role API.
-- **`Role::findByName()` / `Role::findById()` / `Role::findOrCreate()`** — consumers use the Eloquent model's native
-  `where()` and `firstOrCreate()` builders; the wrapper methods don't add enough value to justify the API surface.
-  The same applies to `Permission` lookups.
-- **Guard auto-detection from the HTTP auth stack** — the package resolves the guard via the
+- **`hasExactRoles()`**: not shipped; compare the names `getRoles()` returns with the expected list.
+- **Role-model role helpers**: a role holds no roles, so there is no `$role->assignRole()` or `$role->hasRole()`.
+  Roles nest through a parent instead (`RoleService::setParent()`), and with `authorization.hierarchy.enabled` (the
+  default) a role inherits the permissions and policies of its ancestors.
+- **`Role::findByName()` / `Role::findById()` / `Role::findOrCreate()`**: `RoleService::find()` and
+  `PermissionService::find()` look a name up under a guard, the current tenant's row before the platform's, and the
+  services' `create()` makes a record; otherwise use the Eloquent model's `where()` and `find()`.
+- **Guard auto-detection from the HTTP auth stack**: the package resolves the guard via the
   `getAuthorizationGuard()` opt-in hook on the identity model, not by sniffing the active web/api guard at
   authorization time. Multi-guard deployments declare the guard on the model; there is no implicit request-scoped
   guard resolution.
-- **Teams / tenancy columns** — Spatie's optional `team_id` scoping column is not shipped. Roles, permissions and
+- **Teams / tenancy columns**: Spatie's optional `team_id` scoping column is not shipped. Roles, permissions and
   policies are owned by the platform or by one tenant through their own `tenant_type` / `tenant_id` columns, and each
   grant carries a scope of its own; `authorization:migrate-spatie` imports Spatie's rows and grants platform-wide,
   through the management services, so each is validated and reported as any other write is. Spatie's string ids are
   kept, but its timestamps are not: each imported role and permission is created through its service, so its
   `created_at` and `updated_at` are the time of the import rather than Spatie's.
-- **`guard_name`** — the guard column is `guard`. `authorization:migrate-spatie` maps Spatie's `guard_name` onto it,
+- **`guard_name`**: the guard column is `guard`. `authorization:migrate-spatie` maps Spatie's `guard_name` onto it,
   so code that reads `$role->guard_name` reads `$role->guard` instead.
-- **Wildcard permission classes** — Spatie's `WildcardPermission` helper is not needed; wildcard matching is the
-  default behaviour of `hasPermission()` (fnmatch semantics, see `docs/design/wildcard-and-condition-semantics.md`
-  when that note lands).
+- **Wildcard permission classes**: Spatie's `WildcardPermission` helper is not needed; wildcard matching is the
+  default behaviour of `hasPermission()` (fnmatch semantics, see
+  [Wildcard and Condition Semantics](wildcard-and-condition-semantics.md#wildcard-matching)).
 
 ## Not included
 
-Anything not listed above is **not** part of the Spatie compat surface. If you hit a Spatie idiom that doesn't port
-cleanly, file an issue — the compat layer exists to make the migration boring, and a gap is a bug in the mapping,
-not a sign that you should rewrite the call site.
+Anything not listed above is **not** part of the Spatie compat surface. A Spatie idiom that does not port cleanly is
+a gap in the mapping: file an issue rather than rewriting the call site.

@@ -5,7 +5,7 @@ the authentication requirements an allow can carry.
 
 ## The check's context
 
-A policy's conditions and `${…}` references read the check's context: nested namespaces, each key a dot path within
+A policy's conditions and `${...}` references read the check's context: nested namespaces, each key a dot path within
 one. A namespace is built only when a statement under evaluation reads it, through a condition key or a reference, and
 at most once a check, so a check whose policies read nothing of the request never looks at it.
 
@@ -22,16 +22,17 @@ at most once a check, so a check whose policies read nothing of the request neve
 The shipped defaults supply what Laravel knows. `authentication` holds the default guard's name and, when someone is
 signed in on it, the user's key as a string and morph type (the morph alias, or the class name); with nobody signed in
 only `guard` is present. `request` holds Laravel's `ip()`, resolved through your trusted proxies, the method and the
-route's name, and only once the request has been routed: in a queued job or a console command the namespace is absent,
-so every `request` key is missing. `environment.time` is `now()` in UTC as `Y-m-d\TH:i:s\Z`, fixed the first time the
-check reads `environment`, then kept for the rest of the check, so `Carbon::setTestNow()` freezes it in tests.
-`subject` and `resource` describe who the check is about and what it is on; see [Subject and resource
-attributes](#subject-and-resource-attributes).
+route's name (missing for an unnamed route), and only once the request has been routed: in a queued job or a console
+command the namespace is absent, so every `request` key is missing. `environment.time` is `now()` in UTC as
+`Y-m-d\TH:i:s\Z`, fixed the first time the check reads `environment`, then kept for the rest of the check, so
+`Carbon::setTestNow()` freezes it in tests. `subject` and `resource` describe who the check is about and what it is on;
+see [Subject and resource attributes](#subject-and-resource-attributes).
 
 What the caller passes lands under `input`, and only there: the `$context` of `check()`, `can()`, `cannot()`, `any()`,
 `all()`, `authorize()`, `explain()`, `canEach()`, `filterAuthorized()`, each `CheckInput` of `checkMany()`,
-`permissionsFor()` and a policy class's `decide()`, the string-keyed and associative arguments of a Gate check,
-and the context of `assertCan()` and `assertCannot()`. A caller can never supply a trusted value:
+`permissionsFor()`, `queryScope()` and `whereAuthorized()`, and a policy class's `decide()`, the string-keyed and
+associative arguments of a Gate check, and the context of `assertCan()` and `assertCannot()`. A caller can never supply
+a trusted value:
 
 ```php
 Authorization::can('posts:publish', $post, ['post' => ['status' => 'draft']]); // input.post.status
@@ -115,15 +116,16 @@ final class TenantContext implements ContextSource
 }
 ```
 
-A source that does not implement the contract, one that claims a reserved namespace (`authentication`, `request`,
-`environment`, `input`, `subject` or `resource`), two sources claiming one namespace, and a source claiming a namespace
-your `AuthenticationContext` adds are refused at boot. The trusted namespaces are replaced only by rebinding
-their own contracts. To supply `authentication` from your authentication layer, along with any namespace it adds
-beside it such as `mfa` or `sso`, bind your own `AuthenticationContext`. Its `namespaces()` lists every namespace it
-supplies and `values()` returns their values keyed by namespace; declare the keys of any namespace it adds in the
-catalogue. `assuranceKeys()` declares the names that make a key of those namespaces an assurance key (see
-[Assurance keys](#assurance-keys)). It is resolved at boot, which refuses a namespace it adds that is not a name, is
-reserved or is listed twice, and a malformed assurance key name. Bind it in a service provider's `register()`:
+A source that does not implement the contract, one whose namespace is not a name (letters, digits and `_`, not starting
+with a digit), one that claims a reserved namespace (`authentication`, `request`, `environment`, `input`, `subject` or
+`resource`), two sources claiming one namespace, and a source claiming a namespace your `AuthenticationContext` adds are
+refused at boot. The trusted namespaces are replaced only by rebinding their own contracts. To supply `authentication`
+from your authentication layer, along with any namespace it adds beside it such as `mfa` or `sso`, bind your own
+`AuthenticationContext`. Its `namespaces()` lists every namespace it supplies and `values()` returns their values keyed
+by namespace; declare the keys of any namespace it adds in the catalogue. `assuranceKeys()` declares the names that make
+a key of those namespaces an assurance key (see [Assurance keys](#assurance-keys)). It is resolved at boot, which
+refuses a namespace it adds that is not a name, is reserved or is listed twice, and a malformed assurance key name. Bind
+it in a service provider's `register()`:
 
 ```php
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
@@ -221,7 +223,7 @@ are resolved from the container:
 ],
 ```
 
-A policy then reads them like any other key, through a condition or a `${…}` reference:
+A policy then reads them like any other key, through a condition or a `${...}` reference:
 
 ```php
 'conditions' => [
@@ -236,7 +238,7 @@ another key it declares (`owner` and `owner.id`), and two providers declaring on
 at boot; two providers may declare one key alike. Only the keys a provider declares are exposed: a value it returns
 for any other key is dropped, and so is everything under a declared key. A declared key holds a scalar or `null`, or,
 for a `list`, a list of them; a map, or a list under any other type, stays present but cannot be read into, so a test
-of the key is undecidable, `${…}` does not resolve it and none of the keys under it can be read. A value of the wrong
+of the key is undecidable, `${...}` does not resolve it and none of the keys under it can be read. A value of the wrong
 type is undecidable when the policy is evaluated, as for any context value.
 
 A namespace is built the first time a statement under evaluation reads any of its keys, built-in or not, and at most
@@ -343,37 +345,40 @@ message or anything the checker held.
 
 ### Sessions
 
-`Subject::$session` is the session the checker judges. The shipped resolver sets it to the current request's session
-id only when that session signed in that very user: the guard is a `SessionGuard` using the request's session, and the
+`Subject::$session` is the session the checker judges. The shipped resolver sets it to the current request's session id
+only when that session signed in that very user: the guard is a `SessionGuard` using the request's session, and the
 session's login key names the user, compared strictly as strings. That holds for the user signed in on its guard,
 including when the Gate hands it that same user. It is null for a user set on the guard without the session
-(`Auth::once()`, `onceUsingId()`, `onceBasic()`, the `auth.basic.once` middleware or `setUser()`), whatever login the
-session holds; for a user a token or request guard returns; for a subject you name (`Authorization::for($user)`, or
-`Gate::forUser()` with another user); and outside a session (a console command, a queued job, a request without a
-started session). A subject without a session meets no requirement: every part is unmet and the checker is not asked.
-A resolver of your own sets `session` to whatever its checker knows the proofs by, and only for the user that session
-authenticated. Your checker should still confirm the proofs it finds belong to `$subject->subject`.
+(`Auth::once()`, `onceUsingId()`, `onceBasic()` or `setUser()`), whatever login the session holds; for a user a token or
+request guard returns; for a subject you name (`Authorization::for($user)`, or `Gate::forUser()` with another user); and
+outside a session (a console command, a queued job, a request without a started session). A subject without a session
+meets no requirement: every part is unmet and the checker is not asked. A resolver of your own sets `session` to
+whatever its checker knows the proofs by, and only for the user that session authenticated. Your checker should still
+confirm the proofs it finds belong to `$subject->subject`.
 
 ### The decision and the exception
 
-A check is denied as `insufficient_authentication` when no deny applies, no invalid policy blocks it, every permission
-boundary allows it, nothing else allows it (no other allow statement and no permission held), and at least one allow
-statement names the action and the resource with every other condition holding and only its requirement unmet. It ranks
-above `condition_failed`, and deny precedence always wins. A requirement that cannot be checked is undecidable, not
-unmet, so its statement is no candidate and, alone, leaves the check `condition_failed`. The decision's `requirements`
-lists each such statement's requirement with its unmet parts, as an `UnmetRequirement`: they are alternatives, any one
-of which met would allow the check. On a deny statement an unmet requirement is a test that does not hold, so the deny
-does not apply, while one that cannot be checked applies it, as any undecidable test does. The trace records the
-requirement as the key `authentication`, with whether it held, and never a proof.
+A check is denied as `insufficient_authentication` when no deny applies, no invalid policy blocks it, every guardrail,
+permission boundary and session cap allows it, nothing else allows it (no other allow statement and no permission held),
+and at least one allow statement names the action and the resource with every other condition holding and only its
+requirement unmet. It ranks above `condition_failed`, and deny precedence always wins. A requirement that cannot be
+checked is undecidable, not unmet, so its statement is no candidate and, alone, leaves the check `condition_failed`. The
+decision's `requirements` lists each such statement's requirement with its unmet parts, as an `UnmetRequirement`: they
+are alternatives, any one of which met would allow the check. On a deny statement an unmet requirement is a test that
+does not hold, so the deny does not apply, while one that cannot be checked applies it, as any undecidable test does.
+The trace records the requirement as the key `authentication`, with whether it held, and never a proof.
 
 `authorize()`, and the `permission:` and `authorize:` middleware, throw
-`SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException` for it. It extends Laravel's
+`SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException` for it, except in a preview, which
+throws the package's `AuthorizationException` instead. It extends Laravel's
 `Illuminate\Auth\Access\AuthorizationException`, not the package's, so a handler that maps the package's denials does
-not catch it, and an application that maps it to nothing still answers `403`. It carries the reason code (`getReason()`)
-and the candidate requirements, once each (`requirements()`); never a policy, a statement, the trace or a proof. Its
-message is the generic `authorization::authorization.denied` line, as every denial's is, so a step-up prompt is the
-application's own to word (see [Localisation](localisation.md#localisation)). Like any denial, it is recorded as the
-last decision and fires `AuthorizationFailed` first. Map it to your step-up response, such as RFC 9470's
+not catch it, and an application that maps it to nothing still answers `403`. It carries the reason code
+(`getReason()`), the candidate requirements, once each (`requirements()`), and the decision for audit (`getDecision()`),
+whose detail is not for the client; it never carries a proof. Its message is the generic
+`authorization::authorization.denied` line, as every denial's is, so a step-up prompt is the application's own to word
+(see [Localisation](localisation.md#localisation)). Like any denial, it is recorded as the last decision and fires
+`AuthorizationFailed` first. Laravel turns it into an `AccessDeniedHttpException` before render callbacks run, so
+render that, with the denial as its previous exception, as your step-up response, such as RFC 9470's
 `insufficient_user_authentication` challenge:
 
 ```php
@@ -381,19 +386,28 @@ last decision and fires `AuthorizationFailed` first. Map it to your step-up resp
 use Illuminate\Foundation\Configuration\Exceptions;
 use SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 ->withExceptions(function (Exceptions $exceptions): void {
-    $exceptions->render(fn (InsufficientAuthenticationException $exception) => response()->json(
-        [
-            'message'      => __('Confirm your identity to continue.'),
-            'requirements' => array_map(
-                fn (UnmetRequirement $candidate): array => $candidate->toArray(),
-                $exception->requirements(),
-            ),
-        ],
-        401,
-        ['WWW-Authenticate' => 'Bearer error="insufficient_user_authentication"'],
-    ));
+    $exceptions->render(function (AccessDeniedHttpException $exception) {
+        $denial = $exception->getPrevious();
+
+        if (! $denial instanceof InsufficientAuthenticationException) {
+            return null;
+        }
+
+        return response()->json(
+            [
+                'message'      => __('Confirm your identity to continue.'),
+                'requirements' => array_map(
+                    fn (UnmetRequirement $candidate): array => $candidate->toArray(),
+                    $denial->requirements(),
+                ),
+            ],
+            401,
+            ['WWW-Authenticate' => 'Bearer error="insufficient_user_authentication"'],
+        );
+    });
 })
 ```
 
@@ -401,9 +415,9 @@ A decision that read a requirement is reused only while it still holds. `Authori
 in the session of the request that recorded it, whichever subject it was about (one named with `for()` included), and
 until the earliest instant a met requirement it read stops being met. The decision's own `$decision->freshness` keeps a
 fingerprint of the session it was made in (its SHA-256 hash, never the session id, so the decision stays safe to log)
-and that instant, and `isFreshFor($session)` says whether it may be reused in a session. Nothing else keeps a decision:
-`can()`, `cannot()`, `any()`, `all()`, `checkMany()`, `canEach()`, `filterAuthorized()`, the Gate, a policy class's
-`decide()`, the Blade directives and `permissionsFor()` decide afresh every time, and the resolution cache holds
+and that instant, and `$decision->isFreshFor($session)` says whether it may be reused in a session. Nothing else keeps a
+decision: `can()`, `cannot()`, `any()`, `all()`, `checkMany()`, `canEach()`, `filterAuthorized()`, the Gate, a policy
+class's `decide()`, the Blade directives and `permissionsFor()` decide afresh every time, and the resolution cache holds
 grants and policies, never decisions.
 
 ### Forgetting decisions
@@ -457,7 +471,7 @@ your `AuthenticationContext` adds beside it (such as `mfa`), is an assurance key
 namespace is `assurance_level`, `auth_time`, `seconds_since_step_up`, `last_verified_at`, `verification_age`,
 `multifactor` or `amr`, so `authentication.amr` and `mfa.multifactor.enabled` both are. The package declares none of
 them, and whatever the declaring context or configuration says, the catalogue declares each one untestable. A policy
-with a condition on one, or a `${…}` reference to one in an operand or a resource pattern, is refused when it is
+with a condition on one, or a `${...}` reference to one in an operand or a resource pattern, is refused when it is
 saved, and when `authorization:policy:validate` reads it, with a reason that points at `authentication_requirement`.
 
 Your `AuthenticationContext` declares its own assurance key names in `assuranceKeys()`, beside these fixed ones, which

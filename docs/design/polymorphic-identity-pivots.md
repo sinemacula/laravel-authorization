@@ -32,15 +32,15 @@ scope each grant carries, the temporal-grant mechanism, the pivot class hierarch
    therefore leaves its rows behind, and `authorization:prune` revokes them.
 
 5. **Temporal grants are a pivot-level concern, not a model-level one.** A grant with `expires_at = null` is permanent.
-   A grant with a future `expires_at` is live until the clock passes that instant, at which point the relation's
-   `where()` clause filters it out on read. No sweeper job is required for correctness -- the package ships query-time
-   filtering on every relation access.
+   A grant with a future `expires_at` is live until the clock passes that instant, at which point the relation filters
+   it out on read (`Database\LiveGrants`). No sweeper job is required for correctness -- the package ships query-time
+   filtering on every relation access, and `authorization:prune` only removes rows that no longer count.
 
 6. **A role is a grantee of policies too.** `authorizable_policies` takes a role as its grantee as readily as an
    identity, with the role's morph class and key, so a role's policies are scoped, expire and are reported like any
-   other attachment (AUTHZ-7.2). An inline policy names the one grantee it belongs to in the policy's own `owner_type`
+   other attachment. An inline policy names the one grantee it belongs to in the policy's own `owner_type`
    and `owner_id`, a morph with no foreign key for the same reason, kept apart from the policy's tenant columns; its
-   deletion with that grantee is the package's work, not the database's (AUTHZ-6.9).
+   deletion with that grantee is the package's work, not the database's.
 
 7. **References compare their exact bytes on every database.** The grantee, tenant, application and granted-by
    columns, like every reference column of the package's tables, are matched byte for byte, as the package compares
@@ -108,10 +108,11 @@ check's application.
 A shared abstract base, `AuthorizableGrantPivot`, extends Laravel's `MorphPivot` and casts `expires_at` with
 `UtcDateTime`, so consumers inspecting `$role->pivot->expires_at` receive a UTC `Carbon|null`. It also names the
 package's connection (the application's default when `authorization.connection` is unset), since Laravel would
-otherwise hand a pivot the connection of the grantee the relation starts from. Three leaf subclasses
-exist -- one per table:
+otherwise hand a pivot the connection of the grantee the relation starts from. Three leaf subclasses exist -- one per
+table:
 
-- `AuthorizableRolePivot` -- bound via `->using(...)` on `HasRoles::roles()`.
+- `AuthorizableRolePivot` -- bound via `->using(...)` on `HasRoles::roles()`, which also reads the grantee's live
+  break-glass activations as role grants, each pivot carrying its `break_glass_id` (null on a stored grant).
 - `AuthorizablePermissionPivot` -- bound via `->using(...)` on `HasPermissions::permissions()`.
 - `AuthorizablePolicyPivot` -- bound via `->using(...)` on `HasPolicies::policies()`.
 
@@ -144,33 +145,38 @@ The column names are fixed: the relations, the migrations and the grant reads al
 ## Temporal Grant Mechanics
 
 Each grant method (`assignRole`, `givePermission`, `attachPolicy`) accepts an optional `$expiresAt` parameter. The
-relation's `where()` clause filters expired rows at query time -- rows whose `expires_at` is null or in the future are
-included; everything else is invisible. The resolution cache honours this by inspecting the nearest `expires_at` across
-the role, permission and policy pivot rows and capping the lifetime of both the in-memory and the persistent cache entry
-accordingly, so a temporal grant that lapses at 3:00 PM does not remain cached past 3:00 PM, even within a long-running
-job. Once an in-memory entry has lapsed, the grants are read from the database again rather than from relations already
-loaded on the identity, so the lapse holds when the same identity instance is reused.
+relation filters expired rows at query time -- rows whose `expires_at` is null or in the future are included; everything
+else is invisible. The resolution cache honours this by inspecting the nearest `expires_at` across the role, permission
+and policy pivot rows and capping the lifetime of both the in-memory and the persistent cache entry accordingly
+(`Support\GrantExpiry`), so a temporal grant that lapses at 3:00 PM does not remain cached past 3:00 PM, even within a
+long-running job. Once an in-memory entry has lapsed, the grants are read from the database again rather than from
+relations already loaded on the identity, so the lapse holds when the same identity instance is reused.
 
 ## Trade-offs
 
 - **No FK on the authorizable side.** Orphaned pivot rows can accumulate when an identity model is deleted without
-  cascading the pivot. Consumers should clean up via model events or a periodic sweep.
+  its model events. Schedule `authorization:prune`, which revokes the grants of a grantee that no longer exists.
 - **String `authorizable_id`.** Slightly wider than a typed integer column, but necessary to accommodate UUID, ULID,
   and integer keys in the same table without schema branching.
 - **A digested key on MySQL.** The scope columns take part in MySQL's unique key as SHA-256 digests, to keep the key
   within InnoDB's limit. A digest is of the column's bytes, so it keeps apart what the byte-exact collation does.
 - **Byte-exact references on MySQL.** A host query that compares a reference column with one of its own columns
   compares them by bytes, since MySQL prefers a `_bin` collation over a `_ci` one of the same character set.
-- **No sweeper shipped in v1.0.0.** Expired rows are invisible at query time but remain in the database. The
-  `expires_at` index exists so a consumer-side purge job can `DELETE WHERE expires_at < NOW()` efficiently.
+- **Expired rows stay until pruned.** Expired rows are invisible at query time but remain in the database until
+  `authorization:prune` removes them; the `expires_at` index keeps that sweep cheap.
 
 ## Implementation Anchors
 
 - `AuthorizableGrantPivot` -- shared base with the `expires_at` cast and the connection.
 - `AuthorizableRolePivot`, `AuthorizablePermissionPivot`, `AuthorizablePolicyPivot` -- per-table leaf classes.
-- `HasRoles::roles()`, `HasPermissions::permissions()`, `HasPolicies::policies()` -- the `morphToMany` definitions
-  with `->using(...)`, the grant timestamps and the expiry filter `where()` clause.
-- `ResolvesPivotExpiry` -- the shared trait that computes nearest-expiry TTL and resolves the grant service.
+- `HasRoles::roles()`, `HasPermissions::permissions()`, `HasPolicies::policies()` -- the grant relations with
+  `->using(...)` and the grant timestamps.
+- `Concerns\ResolvesPivotExpiry` -- the shared trait that builds each grant relation (`Database\GrantRelation`, a
+  `MorphToMany` keyed by the grantee's key as a string) with its scope, application and expiry filters, and resolves
+  the grant service.
+- `Database\LiveGrants` -- the expiry filter; `Support\GrantExpiry` -- the nearest expiry a resolution is cached by.
+- `Database\BreakGlassActivations` -- the live activations the roles relation reads as role grants.
+- `Console\PruneGrantsCommand` -- `authorization:prune`, removing expired grants and those of missing grantees.
 - `Services\Support\GrantTable` -- the grant service's scoped row writes and locked read-back.
 - `NullFoldingUniqueIndex` -- the unique key in which a null counts as a value.
 - `ExactReferences` -- the byte-exact collation of the reference columns on MySQL.
@@ -188,11 +194,13 @@ loaded on the identity, so the lapse holds when the same identity instance is re
 - `TemporalGrantsTest::testForeverGrantIsTheDefaultBehaviour` -- null `expires_at` creates a permanent grant.
 - `TemporalGrantsTest::testForeverAndTemporalGrantsCoexist` -- permanent and temporal grants on the same identity
   coexist correctly.
+- `PruneGrantsCommandTest` -- expired grants and the grants of a missing grantee removed.
 
 ## Change Triggers
 
 - Adding a new entity type to the pivot surface (e.g. a `scope` grant) requires a new migration, a new pivot subclass,
   and a new trait method following the same pattern.
-- Introducing a sweeper command requires reading the `expires_at` index and should not change the query-time filter.
+- Changing `authorization:prune` must keep the query-time expiry filter: pruning keeps the tables small, it never
+  decides whether a grant counts.
 - Moving from polymorphic pivots to per-model join tables would eliminate the no-FK trade-off but require a migration
   and a breaking config change.

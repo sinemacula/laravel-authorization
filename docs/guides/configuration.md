@@ -86,13 +86,14 @@ and configured classes, the context key catalogue aside, are built afresh for ea
 **When the configured classes are bound.** The package's `register()` records what your configuration names, as names
 alone: it loads no class, loads no deferred provider, binds no configured class over another binding and extends no
 contract. All of that runs as the application boots, in a `booting()` callback, after every provider has registered and
-before any boots, so a provider registered after the package counts exactly as one registered before it, and the
-precedence above holds whatever order providers register in. Until then, each contract a configured class will be bound
-to resolves to the package's default, and a contract with no default, the policy store's, stays unbound, so a provider
-that resolves a seam in its own `register()` gets the package's default, or nothing, rather than your class; resolve
-seams in `boot()`, or later, as Laravel advises. When the application boots for `authorization:check` on a refused
-configuration, none of this runs (see [The diagnostic boot](console.md#the-diagnostic-boot)), and the policy store stays
-unbound.
+before any boots, so a deferred provider the application learns of only after the package registers is loaded as one it
+knew of before, and the precedence above holds whatever order providers register in. Until then, each contract a
+configured class will be bound to resolves to a binding made before the package registered, or else to the package's
+default, and the policy store, which has no default, stays unbound unless something bound it, so a provider that
+resolves a seam in its own `register()` gets that binding, the package's default or nothing, rather than your class;
+resolve seams in `boot()`, or later, as Laravel advises. When the application boots for `authorization:check` on a
+refused configuration, none of this runs (see [The diagnostic boot](console.md#the-diagnostic-boot)), and the policy
+store your configuration names is never bound.
 
 **When the package decides.** Resolving a seam is not deciding. In an application where this package's provider
 registered, every operation the package offers (each listed under [The diagnostic boot](console.md#the-diagnostic-boot))
@@ -106,12 +107,12 @@ A sibling package that registers after this one and wants to replace only the pa
 application made, asks `AuthorizationServiceProvider::isPackageDefault($app, $contract)`, and so may a check that runs
 once the application has booted. It is true exactly when `authorization:check` shows the seam as the package's default,
 as it reads what the package recorded when it bound the seam: before the default is resolved and after, whether an
-instance of it is held or not. A class your configuration names answers false from the moment the package registers,
-also after a refused boot (see [The diagnostic boot](console.md#the-diagnostic-boot)) never binds it and the default
-resolves in its place. An instance you hand the container, a sibling's declared adapter, any other binding made before
-the package registered or after, an alias, a deferred provider and an unbound contract all answer false. It builds
-nothing. The context key catalogue is the one default the container holds once resolved, so an instance handed over it
-after that cannot be told from the default, and answers true, as the report shows it.
+instance of it is held or not. A class your configuration names answers false from the moment the package registers, and
+still does after a refused boot (see [The diagnostic boot](console.md#the-diagnostic-boot)) has left it unbound and the
+default resolves in its place. An instance you hand the container, a sibling's declared adapter, any other binding made
+before the package registered or after, an alias, a deferred provider and an unbound contract all answer false. It
+builds nothing. The context key catalogue is the one default the container holds once resolved, so an instance handed
+over it after that cannot be told from the default, and answers true, as the report shows it.
 
 List the enums whose cases are the application's permissions, and any permission providers; the Gate asks the package
 about every permission either declares:
@@ -156,11 +157,13 @@ To add columns or behaviour to the `Role`, `Permission` or `Policy` model, name 
 [Model extension](../design/model-extension.md)).
 
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
-Gate switch, the policy store, the policy limits, the context keys and sources, the attribute providers, the subject
-resolver, the identity directory, the authentication requirement checker, the session policy source and the scope map,
-the cache, the bulk checks' chunk size, the role hierarchy and rank, the access reviews' limit, grant usage tracking
-(see [Usage tracking](access-reviews.md#usage-tracking)) and which decisions `DecisionEvaluated` reports (see [Which
-decisions are reported](events.md#which-decisions-are-reported)).
+Gate switch, the policy store, the policy limits, the query scoping limits, the context keys and sources, the attribute
+providers, the subject resolver, the tenant tree, the identity directory, application access, the resource tenant
+resolver, the authentication requirement checker, the session policy source and the scope map, the cache, the bulk
+checks' chunk size, the role hierarchy and rank, the delegated administration limits, the access reviews' limit, grant
+usage tracking (see [Usage tracking](access-reviews.md#usage-tracking)), break-glass, which decisions
+`DecisionEvaluated` reports (see [Which decisions are reported](events.md#which-decisions-are-reported)) and the grant
+hooks.
 
 ## Configuration checks
 
@@ -171,10 +174,12 @@ is a boot for `authorization:check`, which reports every issue while the package
 
 - A key the package does not define is refused, at the top level and in every block whose keys the package defines
   (`models`, `tables`, `defaults`, `gate`, `policies` and `policies.limits`, `context`, `attributes`, `session`,
-  `cache`, `hierarchy`, `rank`, `query_scoping`, `bulk`, `administration`, `reviews`, `usage`, `events` and
-  `events.decisions`), naming its full path, such as `authorization.models.rol`, so a misspelt key never leaves its
-  default in place. The maps you fill in (`context.keys`, `context.sources`, the attribute providers, `session.scopes`
-  and `application_access`) take any key; each entry is checked against its own shape instead.
+  `cache`, `hierarchy`, `rank`, `query_scoping`, `bulk`, `administration`, `reviews`, `usage`, `break_glass`, each
+  role's settings under `break_glass.roles`, `events` and `events.decisions`), naming its full path, such as
+  `authorization.models.rol`, so a misspelt key never leaves its default in place. The maps you fill in
+  (`context.keys`, `context.sources`, the attribute providers, `session.scopes`, `application_access` and
+  `break_glass.roles`) take keys of your own; each entry is checked against its own shape instead, and a break-glass
+  role's key must be a valid role name.
 - A setting left out takes its default, also when the configuration was cached without the package's defaults merged
   into it. A setting set to null is refused, a block set to null among them, except where null means the default or
   none: `connection`, `policy_store`, `cache.store`, `usage.connection`, `usage.queue`, a break-glass role's

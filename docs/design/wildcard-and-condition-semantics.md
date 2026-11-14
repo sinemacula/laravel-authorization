@@ -4,7 +4,7 @@ Permission checks and policy statement matching both use `fnmatch` for pattern e
 a condition operator catalogue for context-sensitive decisions. This note documents the wildcard matching direction, how
 backslashes and substituted values are kept literal, the four outcomes a statement test can have, the check's context
 (the subject and resource attributes among it) and the keys a policy may read from it, the condition operator set,
-the authentication requirement and the assurance keys no condition may test, `${…}` interpolation, and the interaction
+the authentication requirement and the assurance keys no condition may test, `${...}` interpolation, and the interaction
 between wildcards and the permission step.
 
 ## Invariants
@@ -35,17 +35,17 @@ between wildcards and the permission step.
    can be escaped (see invariant 5); the pattern's own text has every backslash doubled first, which gives the same
    literal comparison.
 
-5. **A substituted value only ever matches itself.** When a resource pattern or a `like` operand contains a `${…}`
+5. **A substituted value only ever matches itself.** When a resource pattern or a `like` operand contains a `${...}`
    reference, the resolved value is escaped (`\`, `*`, `?`, `[` and `]`) before it is spliced into the pattern. A
    context value of `*` therefore matches only a literal `*`; it never turns `posts:${input.post}` into `posts:*`. The
    pattern's own glob characters keep their meaning.
 
 6. **Every statement test has one of four outcomes, and none of them skips a deny by accident.** A test that cannot be
-   decided from the check (a missing context key, an unresolved `${…}` reference, a context value or an interpolated
+   decided from the check (a missing context key, an unresolved `${...}` reference, a context value or an interpolated
    operand of the wrong type) is *undecidable*, not false: a deny statement applies, an allow statement does not. Two
    tests decide a missing key instead: one whose operator carries the `_if_exists` suffix passes, and `null` holds or
    fails by its operand. A malformed test (an unknown operator, conditions that do not map operators to key tests, a
-   literal operand of the wrong type, a malformed `${…}` reference in a condition) is *invalid* whatever the context
+   literal operand of the wrong type, a malformed `${...}` reference in a condition) is *invalid* whatever the context
    holds, and denies the whole check with the `invalid_policy` reason. This deliberately departs from AWS IAM, where a
    missing key is a plain non-match that silently disables a conditional deny.
 
@@ -53,16 +53,15 @@ between wildcards and the permission step.
    unknown keys, a malformed `sid`, both `actions` and `not_actions` (or neither), both `resources` and `not_resources`,
    a pattern list that is empty or holds anything but non-empty strings, conditions that are not a map of operators to
    key tests, an unknown operator, a malformed literal operand, a resource pattern holding a NUL byte, a malformed
-   `${…}` reference in a resource pattern or a condition, and `principals` on a deny or that are not a non-empty list of
-   well-formed selectors. `Policy::fromArray()` refuses statements that share a `sid`.
-   On write, `PolicyValidator` adds the limits, the context key catalogue and the action catalogue (see [Writing a
-   policy](#writing-a-policy)), so a policy row with any of these faults cannot be saved; on read, a stored document
-   over a limit, or one that no longer parses, denies as `invalid_policy`. The evaluation-time `invalid` outcome is the
-   backstop for statements constructed directly; an operand whose value is known only after interpolation is never
-   invalid, only undecidable.
+   `${...}` reference in a resource pattern or a condition, and `principals` on a deny or that are not a non-empty list
+   of well-formed selectors. `Policy::fromArray()` refuses statements that share a `sid`. On write, `PolicyValidator`
+   adds the limits, the context key catalogue and the action catalogue (see [Writing a policy](#writing-a-policy)), so a
+   policy row with any of these faults cannot be saved; on read, a stored document over a limit, or one that no longer
+   parses, denies as `invalid_policy`. The evaluation-time `invalid` outcome is the backstop for statements constructed
+   directly; an operand whose value is known only after interpolation is never invalid, only undecidable.
 
 8. **A condition key is a dot path, and the caller supplies only `input`.** The context of a check is nested
-   namespaces, and a condition key or a `${…}` reference is read one segment at a time through them by one strict
+   namespaces, and a condition key or a `${...}` reference is read one segment at a time through them by one strict
    resolver, never as a literal key. Whatever the caller passes is held under `input` and never promoted into another
    namespace, so `authentication`, `request` and `environment` hold only what their trusted sources supply, and
    `subject` and `resource` only the package's built-ins and the declared attributes of their providers (see [The
@@ -94,9 +93,9 @@ Role and permission names are strings of letters, digits and `_ - : . *`, so `po
 glob metacharacters (`?`, `[`, `]`, `{`, `}`) are refused with an `InvalidAuthorizationNameException` when the name is
 saved, so a malformed name cannot match unrelated permissions. `authorization:migrate-spatie` applies the same rule
 before it writes a row, and reports and skips any role or permission whose name fails it, along with its grants. It also
-reports and skips any permission whose name contains `*`, along with its grants: Spatie compares `*` literally unless its
-wildcard permissions are enabled, while here it would become a wildcard that grants other permissions. Role names are
-compared literally, so a role name containing `*` is migrated.
+reports and skips any permission whose name contains `*`, along with its grants: Spatie compares `*` literally unless
+its wildcard permissions are enabled, while here it would become a wildcard that grants other permissions. Role names
+are compared literally, so a role name containing `*` is migrated.
 
 ### RBAC interaction
 
@@ -104,15 +103,14 @@ Wildcard matching applies when the evaluator asks the permission callback. It do
 every deny and every cap stage (guardrail, boundary, session) has let the check through, and only when no allow
 statement matched and none was invalid; the callback asks for the permission the subject or its identity holds that
 covers the action (`SubjectGrants::permissionFor()`), among the grants that reach the resource (see [Evaluation order
-and deny precedence](evaluation-order-and-deny-precedence.md), invariant 13). A subject holding `posts:*` then
-satisfies the check for `posts:create`, and the decision allows at the allow stage with a `held` permission step that
-names `posts:*`. The subject's own permissions are read first and its granting identity's only when none of the
-subject's covers the action; within that grantee, when several held names cover the action, the step names the action
-itself if it is held, else the first covering pattern in byte order, so the trace never depends on the order the grants
-were read in. An explicit
-deny, including one applied because its test was undecidable, an `invalid_policy` denial and a `boundary` denial all
-win -- a subject holding `posts:*` under a boundary that does not allow `posts:create` is denied as `boundary`, and its
-permissions are never asked. Wildcard grants never override a policy-layer decision or a cap.
+and deny precedence](evaluation-order-and-deny-precedence.md), invariant 13). A subject holding `posts:*` then satisfies
+the check for `posts:create`, and the decision allows at the allow stage with a `held` permission step that names
+`posts:*`. The subject's own permissions are read first and its granting identity's only when none of the subject's
+covers the action; within that grantee, when several held names cover the action, the step names the action itself if it
+is held, else the first covering pattern in byte order, so the trace never depends on the order the grants were read in.
+An explicit deny, including one applied because its test was undecidable, an `invalid_policy` denial and a `boundary`
+denial all win -- a subject holding `posts:*` under a boundary that does not allow `posts:create` is denied as
+`boundary`, and its permissions are never asked. Wildcard grants never override a policy-layer decision or a cap.
 
 ## Statements
 
@@ -130,24 +128,24 @@ A statement is a map of these keys, and any other key is refused:
 | `conditions`    | Optional: a map of operator to key tests (see [Condition Operators](#condition-operators)) |
 
 A statement takes exactly one of `actions` and `not_actions`, and at most one of `resources` and `not_resources`; with
-neither, it names every resource and a check that names none (AUTHZ-6.6). Each list, when present, is a non-empty list
-of non-empty strings. The `sid` names the statement in the decision: its `StatementReference` carries it, and
-`toString()` appends it JSON-encoded, as `name[key]#index sid="deny-deletes"`. It never changes how the statement is
-evaluated or in what order. `Statement::toArray()` returns exactly the keys the statement was given, so a statement
-without `resources` stays without them.
+neither, it names every resource and a check that names none. Each list, when present, is a non-empty list of non-empty
+strings. The `sid` names the statement in the decision: its `StatementReference` carries it, and `toString()` appends it
+JSON-encoded, as `name[key]#index sid="deny-deletes"`. It never changes how the statement is evaluated or in what order.
+`Statement::toArray()` returns exactly the keys the statement was given, so a statement without `resources` stays
+without them.
 
-`principals` (AUTHZ-7.3) is a non-empty list of selectors, each `<morph type>:<id>` (a subject by reference) or
-`role:<role id>` (whoever holds the role, by its key), and each part 1 to 191 bytes with no space, `*`, `${` or NUL
-byte. A selector is an exact name, never a pattern and never interpolated. A deny takes none and is refused with one,
-since a resource policy's deny applies to everyone. Only an allow of a policy attached to a resource applies through
-its principals; an allow with them in any other policy never applies. How they are matched and where they may be
-attached are in [Evaluation Order and Deny Precedence](evaluation-order-and-deny-precedence.md#resource-policies).
+`principals` is a non-empty list of selectors, each `<morph type>:<id>` (a subject by reference) or `role:<role id>`
+(whoever holds the role, by its key), and each part 1 to 191 bytes with no whitespace, `*`, `${` or NUL byte. A selector
+is an exact name, never a pattern and never interpolated. A deny takes none and is refused with one, since a resource
+policy's deny applies to everyone. Only an allow of a policy attached to a resource applies through its principals; an
+allow with them in any other policy never applies. How they are matched and where they may be attached are in
+[Evaluation Order and Deny Precedence](evaluation-order-and-deny-precedence.md#resource-policies).
 
-A resource that names a type alone (`post:*`, N6) is covered only by a pattern that covers every record of the type
-(`*`, `post:*`), never by one that needs an id character (`post:?`). The same rule decides `not_resources`: a type alone
-is excluded when one of its patterns covers it that way, so `not_resources: ["post:?"]` names `post:*`. A
-`not_resources` pattern whose `${…}` reference cannot be resolved makes the resource test undecidable unless another of
-its patterns covers the resource, exactly as for `resources`.
+A resource that names a type alone (`post:*`) is covered only by a pattern that covers every record of the type (`*`,
+`post:*`), never by one that needs an id character (`post:?`). The same rule decides `not_resources`: a type alone is
+excluded when one of its patterns covers it that way, so `not_resources: ["post:?"]` names `post:*`. A `not_resources`
+pattern whose `${...}` reference cannot be resolved makes the resource test undecidable unless another of its patterns
+covers the resource, exactly as for `resources`.
 
 ## Match Outcomes
 
@@ -174,13 +172,13 @@ A test is **undecidable** when:
 
 - its key is missing from the context, unless its operator carries `_if_exists` or is `null` (a key present with a
   `null` value is not missing, although most operators find `null` the wrong type);
-- a `${…}` reference cannot be resolved in a resource pattern (unless another of the statement's patterns covers the
+- a `${...}` reference cannot be resolved in a resource pattern (unless another of the statement's patterns covers the
   resource) or in an operand, or a resource pattern of a directly constructed statement holds a malformed reference;
   a resource pattern left holding a NUL byte, by a substituted value or as written on a directly constructed
   statement, is unresolved the same way;
 - the context value has the wrong type for the operator (see the catalogue below), including a value that is not a valid
   IP address for `ip_in` or `ip_not_in` and one that is not a list of scalars for `any_value_in` or `all_values_in`;
-- an interpolated operand resolves to a value of the wrong type for the operator (for example a `${…}` `ip_in` operand
+- an interpolated operand resolves to a value of the wrong type for the operator (for example a `${...}` `ip_in` operand
   that resolves to something other than an address or range), with the detail
   `condition '<key>': the substituted operand is an invalid operand for operator '<operator>'`;
 - a `starts_with`, `ends_with` or `like` operand is empty after interpolation.
@@ -194,7 +192,7 @@ each of these):
 - a literal operand has the wrong type for the operator, including a list for `eq` or `neq`, an empty string for
   `starts_with`, `ends_with` or `like`, `NAN` or an infinity for `gt`, `gte`, `lt` or `lte`, anything but `true` or
   `false` for `null`, and a set holding `null` or an array;
-- a string operand holds a malformed `${…}` reference.
+- a string operand holds a malformed `${...}` reference.
 
 The detail of an invalid test names it and the fault, in the same words `Statement::fromArray()` uses to refuse it: for
 example `conditions have an unknown operator 'unknown_op'` or
@@ -203,7 +201,7 @@ to name, so it adds no key to the trace; a fault in one key's operand records th
 
 ## The Check's Context
 
-The context a check's statements read is nested namespaces (N24), each made by one source:
+The context a check's statements read is nested namespaces, each made by one source:
 
 | Namespace        | Keys the package declares                 | Source                                                |
 |------------------|-------------------------------------------|-------------------------------------------------------|
@@ -222,68 +220,69 @@ The context a check's statements read is nested namespaces (N24), each made by o
   console command the namespace is absent. `environment.time` is `now()` in UTC as `Y-m-d\TH:i:s\Z`, fixed the first
   time the check reads `environment`, then kept for the rest of the check. Each is replaced only by rebinding its
   contract.
-- **Subject and resource** (N29). `subject` and `resource` describe who the check is about and what it is on, and
-  their built-in keys are strings. `subject.id` is the subject's key (`getKey()` for a model), `subject.type` its morph
-  class or, without one, its class name, and `subject.tenant.type` and `subject.tenant.id` its tenant, as `TenantScope`
+- **Subject and resource**. `subject` and `resource` describe who the check is about and what it is on, and their
+  built-in keys are strings. `subject.id` is the subject's key (`getKey()` for a model), `subject.type` its morph class
+  or, without one, its class name, and `subject.tenant.type` and `subject.tenant.id` its tenant, as `TenantScope`
   extracts it. `resource.id`, `resource.type`, `resource.tenant.type` and `resource.tenant.id` come from the check's
   `ResourceReference`: a record has an id and a type, a type alone has only a type, and an opaque identifier has
   neither, since it is never split at its `:`. A tenant key is absent without a tenant, and the whole namespace without
   a subject or a resource.
-- **Attribute providers** (N30, AUTHZ-8.4, AUTHZ-8.5). Every other key of `subject` and `resource` comes from the
-  provider registered for the subject's or the record's morph type in `authorization.attributes.subjects` or
-  `authorization.attributes.resources`, resolved from the container. Its `attributes()` declares dot paths within the
-  namespace with their types, and its `values()` returns them nested by key: a `SubjectAttributeProvider` is given the
-  subject, and a `ResourceAttributeProvider` the record's reference and the model the check was given, if any, so it
-  need not query for it; a model implementing `AuthorizableResource` is handed on too, when the reference it returns
-  names one record and carries no model. Only the keys the matching provider declares are exposed; any other value it
-  returns is dropped, and so is everything under a declared key. A declared key's value is kept when it is a scalar or
-  null, or a list of them declared as `list`; any other array is swapped for a placeholder no path reads into, so the
-  key stays present but undecidable (never missing, which `_if_exists` would pass) and `${…}` leaves it unresolved. A
-  provider declaring a key under another it declares (`owner` and `owner.id`) is refused at boot. The model's columns
-  are never read directly, and there is no `principal` namespace.
-- **Attribute fallbacks and failures** (N31). A type alone, an opaque identifier, no resource and a type with no
-  provider leave only the built-ins that apply, so an attribute key is missing (undecidable, or decided by `null` and
+- **Attribute providers**. Every other key of `subject` and `resource` comes from the provider registered for the
+  subject's or the record's morph type in `authorization.attributes.subjects` or `authorization.attributes.resources`,
+  resolved from the container. Its `attributes()` declares dot paths within the namespace with their types, and its
+  `values()` returns them nested by key: a `SubjectAttributeProvider` is given the subject, and a
+  `ResourceAttributeProvider` the record's reference and the model the check was given, if any, so it need not query for
+  it; a model implementing `AuthorizableResource` is handed on too, when the reference it returns names one record and
+  carries no model. Only the keys the matching provider declares are exposed; any other value it returns is dropped, and
+  so is everything under a declared key. A declared key's value is kept when it is a scalar or null, or a list of them
+  declared as `list`; any other array is swapped for a placeholder no path reads into, so the key stays present but
+  undecidable (never missing, which `_if_exists` would pass) and `${...}` leaves it unresolved. A provider declaring a
+  key under another it declares (`owner` and `owner.id`) is refused at boot. The model's columns are never read
+  directly, and there is no `principal` namespace.
+- **Attribute fallbacks and failures**. A type alone, an opaque identifier, no resource and a type with no provider
+  leave only the built-ins that apply, so an attribute key is missing (undecidable, or decided by `null` and
   `_if_exists`). A provider that throws, or cannot be resolved, aborts the check with `AttributeProviderFailed`, its
   failure kept as the previous exception: the check is never decided with the attribute missing, so a failing provider
   never allows anything. The message names the provider's class and the namespace, never a value, and nothing the
-  provider returned or threw reaches the decision, an event or the trace (AUTHZ-8.8).
-- **Caller values** (N27). The `$context` of `check()` and every helper over it (`can()`, `cannot()`, `any()`, `all()`,
-  `authorize()`, `explain()`, `permissionsFor()`, a policy class's `decide()`, the Gate's string-keyed and
-  associative arguments and the testing assertions) is wrapped under `input` once, where the manager builds the check's
-  context. A caller passing `['request' => ['ip' => '10.0.0.1']]` supplies `input.request.ip`, never `request.ip`.
-- **Application namespaces** (N26). A `ContextSource` names one namespace and returns its values, nested by key. A
-  source that does not implement the contract, one claiming a reserved namespace (`authentication`, `request`,
-  `environment`, `input`, `subject`, `resource`), two sources claiming one namespace, and a source claiming a namespace
-  the `AuthenticationContext` contributes are refused at boot, as is an `AuthenticationContext` contributing
-  a namespace that is not a name, is reserved or is listed twice. A source returning nothing leaves its namespace
-  absent.
-- **Lazy and once a check** (N32). A namespace is built the first time a check reads a path in it, through a
-  condition key or a `${…}` reference in an operand or a resource pattern, by `CheckContext::find()` and `lookup()`,
-  and kept for the rest of the check. So every statement of one check sees the same values, a namespace is built at
-  most once for the check, and a check that reads nothing of the request never builds it. Reading any key of `subject`
-  or `resource`, a built-in included, builds the whole namespace and so asks its provider, once. A build that throws is
-  not retried: the check is aborted. Each check has a context of its own, and nothing is kept for the next.
+  provider returned or threw reaches the decision, an event or the trace.
+- **Caller values**. The `$context` of `check()` and every helper over it (`can()`, `cannot()`, `any()`, `all()`,
+  `authorize()`, `explain()`, `permissionsFor()`, a policy class's `decide()`, the Gate's string-keyed and associative
+  arguments and the testing assertions), and of `queryScope()` and `whereAuthorized()`, is wrapped under `input` once,
+  where the decision pipeline gathers the check's sources. A caller passing `['request' => ['ip' => '10.0.0.1']]`
+  supplies `input.request.ip`, never `request.ip`.
+- **Application namespaces**. A `ContextSource` names one namespace and returns its values, nested by key. A source that
+  does not implement the contract, one whose namespace is not a name, one claiming a reserved namespace
+  (`authentication`, `request`, `environment`, `input`, `subject`, `resource`), two sources claiming one namespace, and
+  a source claiming a namespace the `AuthenticationContext` contributes are refused at boot, as is an
+  `AuthenticationContext` contributing a namespace that is not a name, is reserved or is listed twice. A source
+  returning nothing leaves its namespace absent.
+- **Lazy and once a check**. A namespace is built the first time a check reads a path in it, through a condition key or
+  a `${...}` reference in an operand or a resource pattern, by `CheckContext::find()` and `lookup()`, and kept for the
+  rest of the check. So every statement of one check sees the same values, a namespace is built at most once for the
+  check, and a check that reads nothing of the request never builds it. Reading any key of `subject` or `resource`, a
+  built-in included, builds the whole namespace and so asks its provider, once. A build that throws is not retried: the
+  check is aborted. Each check has a context of its own, and nothing is kept for the next.
 
 A condition key is a dot path read one segment at a time over these namespaces: `request.ip` reads the `ip` key of the
 `request` namespace. It is never a literal key: a context whose top level holds a key named `request.ip` does not supply
 `request.ip`, and an `input` of `['post.status' => 'draft']` does not supply `input.post.status`. A key is **missing**
 when its namespace is absent, when a segment is absent, or when a segment is read through a value that is not an array;
 a key present with a `null` value is not missing. A missing key makes a test undecidable, passes under `_if_exists`, and
-is decided by `null`. Every `${…}` reference goes through the same resolver, so a condition and a reference naming one
+is decided by `null`. Every `${...}` reference goes through the same resolver, so a condition and a reference naming one
 path always see the same value.
 
 ### The key catalogue
 
-Every key a policy reads must be declared in the bound `ContextKeyCatalogue` (N25), as a full dot path with a type and
-whether a condition may test it (by default it may). The default, `DeclaredContextKeyCatalogue`, is held by the
-container and has no static state. It declares the package's fifteen keys (`PACKAGE_KEYS`: seven of the trusted
-namespaces and the eight built-ins of `subject` and `resource`), those of `authorization.context.keys`
-(`namespace => [path => type]`, checked by the configuration validator at boot) and those the attribute providers
-declare, each under its namespace, and a service provider registers more with `register($namespace, [$path => $type])`
-or `declare($path, $type, $isTestable)`. Keys of `input` are declared like any other. Declaring a key again as it was
-changes nothing; with another type or testability it is refused. A key under `subject` or `resource` is refused when
-declared or registered (`ContextSource::ATTRIBUTE_NAMESPACES`): their keys come only from the package and the
-providers. At boot, `AttributeConfigValidator` refuses a provider that does not implement its contract or cannot be
+Every key a policy reads must be declared in the bound `ContextKeyCatalogue`, as a full dot path with a type and whether
+a condition may test it (by default it may). The default, `DeclaredContextKeyCatalogue`, is held by the container and
+has no static state. It declares the package's fifteen keys (`PACKAGE_KEYS`: seven of the trusted namespaces and the
+eight built-ins of `subject` and `resource`), those of `authorization.context.keys` (`namespace => [path => type]`,
+checked by the configuration validator at boot) and those the attribute providers declare, each under its namespace, and
+a service provider registers more with `register($namespace, [$path => $type])` or `declare($path, $type, $isTestable)`.
+Keys of `input` are declared like any other. Declaring a key again as it was changes nothing; with another type it is
+refused, and so is another testability unless the key is an assurance key. A key under `subject` or `resource` is
+refused when declared or registered (`ContextSource::ATTRIBUTE_NAMESPACES`): their keys come only from the package and
+the providers. At boot, `AttributeConfigValidator` refuses a provider that does not implement its contract or cannot be
 resolved, one declaring a built-in (`id`, `type` or anything under `tenant`), and two declaring one key with different
 types; two providers may declare one key alike.
 
@@ -300,7 +299,7 @@ A key's type decides the operators a condition may test it with. The `_if_exists
 | `list`   | `any_value_in`, `all_values_in`                                 |
 
 The type is a write-time rule only: at evaluation a value is checked exactly as the operator table below says, so a
-value of the wrong type is undecidable whatever the key was declared as. An untestable key may be read by a `${…}`
+value of the wrong type is undecidable whatever the key was declared as. An untestable key may be read by a `${...}`
 reference but not tested by a condition. An assurance key is always untestable, and not even a reference may read it
 (see [Assurance keys](#assurance-keys)). The catalogue is given how to read the authentication context's namespaces and
 assurance keys, and reads them at its first use that needs them, never when it is built, so a context bound by a
@@ -360,10 +359,10 @@ produced by interpolation, that is not of the listed type makes the test undecid
   undecidable (`operator 'gt' needs a number`).
 - **Non-empty `string`** operands are refused when empty as written; an operand that becomes empty only after
   interpolation is undecidable. A NUL byte is refused in a written `starts_with`, `ends_with` or `like` operand, even
-  one with a `${…}` reference, and a context value or substituted operand holding one is undecidable for them, since
+  one with a `${...}` reference, and a context value or substituted operand holding one is undecidable for them, since
   `fnmatch()` cannot test it.
 - **Boolean forms** are `true`, `false`, `1`, `0`, `'1'`, `'0'`, `'true'` and `'false'`, on both sides.
-- **`null`** takes strictly `true` or `false` (N20), and decides a missing key rather than finding it undecidable:
+- **`null`** takes strictly `true` or `false`, and decides a missing key rather than finding it undecidable:
   `{"null": {"input.post.deleted_at": true}}` holds when the context lacks `input.post.deleted_at` or carries it as
   `null`, and `{"null": {"input.user.email": false}}` holds only when `input.user.email` is present and not `null`.
 - **`ip_in` and `ip_not_in`** take one IPv4 or IPv6 address or CIDR range, or a non-empty list of them read as one set
@@ -375,15 +374,14 @@ produced by interpolation, that is not of the listed type makes the test undecid
   `inet_pton()` accepts the first two. A context value that is not a valid address is undecidable for both, so
   `ip_not_in` never reads an unreadable address as outside every range, and a deny written with it still applies.
 - **`any_value_in` and `all_values_in`** test a multi-valued key, such as a token's scopes or a principal's groups. The
-  context value must be a list of scalars; anything else is undecidable. An empty list never holds for `all_values_in`
-  (N22), so a principal with no scopes does not pass a test that every scope is allowed.
+  context value must be a list of scalars; anything else is undecidable. An empty list never holds for `all_values_in`,
+  so a principal with no scopes does not pass a test that every scope is allowed.
 - **`like`** follows invariants 4 and 5: the operand's own backslashes are literal and substituted values are escaped.
 
 ### `authentication_requirement`
 
-The `authentication_requirement` operator (AUTHZ-8.3, N33) states an authentication requirement rather than testing a
-context value. It is valid only on the reserved key `authentication`, and its operand is a non-empty map of parts to
-their options:
+The `authentication_requirement` operator states an authentication requirement rather than testing a context value. It
+is valid only on the reserved key `authentication`, and its operand is a non-empty map of parts to their options:
 
 ```json
 {
@@ -427,17 +425,17 @@ their options:
 
 ### Assurance keys
 
-Scalar assurance keys may be in the context, for display and logging, but no policy may decide on them (AUTHZ-8.9,
-N37). A key is an assurance key when its namespace is `authentication`, or one the bound `AuthenticationContext`
-contributes beside it (such as `mfa`), and any segment of its path after the namespace is one of
-`AssuranceKeys::NAMES`: `assurance_level`, `auth_time`, `seconds_since_step_up`, `last_verified_at`,
-`verification_age`, `multifactor` and `amr`. So `authentication.amr`, `mfa.multifactor` and `mfa.multifactor.enabled`
-are assurance keys, and `request.amr` and `authentication.guard` are not.
+Scalar assurance keys may be in the context, for display and logging, but no policy may decide on them. A key is an
+assurance key when its namespace is `authentication`, or one the bound `AuthenticationContext` contributes beside it
+(such as `mfa`), and any segment of its path after the namespace is one of `AssuranceKeys::NAMES`: `assurance_level`,
+`auth_time`, `seconds_since_step_up`, `last_verified_at`, `verification_age`, `multifactor` and `amr`. So
+`authentication.amr`, `mfa.multifactor` and `mfa.multifactor.enabled` are assurance keys, and `request.amr` and
+`authentication.guard` are not.
 
-The context also declares names of its own in `assuranceKeys()` (N104), merged with the fixed ones under the same
-rule: an exact name, or a name followed by one trailing `*` that matches every segment starting with what comes before
-it, so `provider_*` makes `sso.provider_name` an assurance key. A declared name that is not a string, is empty, holds
-a `.` or has a `*` anywhere but at its end is refused at boot by `ContextConfigValidator`; elsewhere it fails closed,
+The context also declares names of its own in `assuranceKeys()`, merged with the fixed ones under the same rule: an
+exact name, or a name followed by one trailing `*` that matches every segment starting with what comes before it, so
+`provider_*` makes `sso.provider_name` an assurance key. A declared name that is not a string, is empty, holds a `.` or
+has a `*` anywhere but at its end is refused at boot by `ContextConfigValidator`; elsewhere it fails closed,
 `DeclaredContextKeyCatalogue` throwing and `PolicyValidator` refusing every document with the reason. The fixed names
 never move into the context, and no sibling's names are added to `NAMES`. `namespaces()` and `assuranceKeys()` must be
 fixed for the life of the process, and should be cheap and free of side effects, since they are read more than once,
@@ -448,7 +446,7 @@ judged at its first use, since which keys are assurance keys is not known before
 declaration would have thrown, and every later use throws it too.
 
 The package declares no assurance key; `DeclaredContextKeyCatalogue` declares any of them untestable whatever the
-declaring context, provider or configuration says, and `PolicyValidator` refuses a condition on one, and a `${…}`
+declaring context, provider or configuration says, and `PolicyValidator` refuses a condition on one, and a `${...}`
 reference to one in an operand or a resource pattern, whatever the catalogue says, with a reason that names the key and
 points at `authentication_requirement`.
 
@@ -485,12 +483,12 @@ A token is `${`, a body matching `[a-zA-Z_][a-zA-Z0-9_.]*`, and `}`. The namespa
 the path everything after it. Every namespace, `subject` and `resource` included, is read from the check's context by
 the resolver condition keys use, so `${request.ip}` reads `ip` within `request` and never a top-level key named
 `request.ip`, and reading it builds the namespace like a condition would. There is no `context` or `principal`
-namespace. A well-formed token naming a key the catalogue does not declare, `${context.…}` and a token without a path
-(`${input}`, `${input.}`) among them, is refused by `PolicyValidator` when a policy is written, and is unresolved when a
-statement built without the validator is evaluated. Any other `${` that is not the `\${` escape -- `${input.tenant-id}`,
-`${}`, `${1x}`, an unclosed `${foo` -- is a **malformed reference**: `Statement::fromArray()` refuses it in a resource
-pattern or a string operand, and on a directly constructed statement it makes a resource pattern unresolved
-(undecidable) and a condition invalid.
+namespace. A well-formed token naming a key the catalogue does not declare, `${context.<path>}` and a token without a
+path (`${input}`, `${input.}`) among them, is refused by `PolicyValidator` when a policy is written, and is unresolved
+when a statement built without the validator is evaluated. Any other `${` that is not the `\${` escape --
+`${input.tenant-id}`, `${}`, `${1x}`, an unclosed `${foo` -- is a **malformed reference**: `Statement::fromArray()`
+refuses it in a resource pattern or a string operand, and on a directly constructed statement it makes a resource
+pattern unresolved (undecidable) and a condition invalid.
 
 A reference never reads a model's columns or an object's properties: `${subject.department}` resolves only when the
 subject's provider declares `department` and returns a value for it, as `${resource.owner.id}` does for the record's.
@@ -539,32 +537,32 @@ reasons into one `InvalidPolicyDocumentException` message, separated by semicolo
 - **Structure**: whatever `Policy::fromArray()` refuses, including statements sharing a `sid`. This reason stops the
   check: when `Policy::fromArray()` refuses the document, only its first fault and the limits it breaks are reported,
   and the context-key and catalogue checks do not run. Every other reason is reported at once.
-- **Limits** (AUTHZ-6.10), from `authorization.policies.limits`: `document_bytes` (65536) on the document's JSON
-  encoding, `statements` (100), `conditions` (50) on the key tests of one statement, each key of each operator counting
-  as one, and `pattern_length` (512) on the characters of any action or resource pattern and any string operand, strings
-  inside list operands and an authentication requirement's `min` included. A document that cannot be encoded as JSON
-  (one holding NaN, an infinity or a string that is not valid UTF-8) can be neither measured nor stored, so it is
-  refused too. The same limits are checked when a stored document is read (`PolicyDocument::hydrate()`), on the document
-  as it is evaluated, named after its row, so a stored document over a limit denies as `invalid_policy` and is never
-  skipped or partly evaluated. The resolution cache keys cached policies by the limits they were checked under, so a
-  changed limit makes them be read and checked again. Lowering a limit therefore makes every stored document over it
-  deny until it is fixed.
-- **Context keys** (N25): every condition key must be declared in the context key catalogue, may not be one declared
-  untestable, and must be of a type its operator suits; every `${…}` reference in an operand or a resource pattern
-  must name a declared key, so a `${principal.…}` reference is refused (see [The key catalogue](#the-key-catalogue)).
-  A condition key or reference that is an assurance key is refused whatever the catalogue says, and an
-  `authentication_requirement` test skips the catalogue (see [Assurance keys](#assurance-keys)). A
-  declared key is always a valid path: a letter or `_`, then letters, digits and `_`, then any number of `.`-separated
+- **Limits**, from `authorization.policies.limits`: `document_bytes` (65536) on the document's JSON encoding,
+  `statements` (100), `conditions` (50) on the key tests of one statement, each key of each operator counting as one,
+  and `pattern_length` (512) on the characters of any action or resource pattern and any string operand, strings inside
+  list operands and an authentication requirement's `min` included. A document that cannot be encoded as JSON (one
+  holding NaN, an infinity or a string that is not valid UTF-8) can be neither measured nor stored, so it is refused
+  too. The same limits are checked when a stored document is read (`PolicyDocument::hydrate()`), on the document as it
+  is evaluated, named after its row, so a stored document over a limit denies as `invalid_policy` and is never skipped
+  or partly evaluated. The resolution cache keys cached policies by the limits they were checked under, so a changed
+  limit makes them be read and checked again. Lowering a limit therefore makes every stored document over it deny until
+  it is fixed.
+- **Context keys**: every condition key must be declared in the context key catalogue, may not be one declared
+  untestable, and must be of a type its operator suits; every `${...}` reference in an operand or a resource pattern
+  must name a declared key, so a `${principal.<path>}` reference is refused (see [The key
+  catalogue](#the-key-catalogue)). A condition key or reference that is an assurance key is refused whatever the
+  catalogue says, and an `authentication_requirement` test skips the catalogue (see [Assurance keys](#assurance-keys)).
+  A declared key is always a valid path: a letter or `_`, then letters, digits and `_`, then one or more `.`-separated
   segments of letters, digits, `_` and `-`, at most 128 characters, so a malformed key is refused as undeclared. Each
   reason is given once for its statement; a reason naming an undeclared key says how to declare it.
-- **Actions** (N19): every `actions` and `not_actions` pattern must match at least one permission the code declares in
+- **Actions**: every `actions` and `not_actions` pattern must match at least one permission the code declares in
   `permission_enums` or `permission_providers`, or one the package declares itself (its administration actions in
   `Support\PackagePermissions`, `authorization:guardrail.manage` among them), compared with
   `fnmatch($pattern, $name, FNM_NOESCAPE)` or as the same string, so a misspelt action cannot be stored. The bound
   `ActionCatalogue` answers for the application's; the default, `DeclaredActionCatalogue`, reads the declared names once
   per request or job, the package's own left out, which the validator accepts whatever the catalogue holds. With nothing
-  declared by the application, a document whose patterns need any other action is refused with one reason that says
-  so, and one naming only the package's own is written (N50).
+  declared by the application, a document whose patterns need any other action is refused with one reason that says so,
+  and one naming only the package's own is written.
 
 `php artisan authorization:policy:validate` checks documents with the same validator: JSON files given as paths (one
 document, or an array of documents, per file; a directory's `*.json` files, in name order), or every stored policy row
@@ -582,10 +580,10 @@ document, then a summary, and exits 1 when any is invalid.
 - **Unknown statement key** (e.g. a mistyped `condition`): rejected at hydration time, so a typo can never turn a
   conditional statement into an unconditional one.
 - **Key-first or bare-value conditions, a list of conditions, an operator with no key tests, an unknown operator
-  (including `cidr`, `string_like`, `not_null` and `null_if_exists`), a malformed literal operand, a malformed `${…}`
+  (including `cidr`, `string_like`, `not_null` and `null_if_exists`), a malformed literal operand, a malformed `${...}`
   reference:** rejected at hydration time. There is no reader for an earlier shape. A string operand containing a
-  well-formed `${…}` reference is not type-checked, since its value is known only at evaluation time; if it resolves to
-  a value of the wrong type, or to an empty string, the test is undecidable.
+  well-formed `${...}` reference is not type-checked, since its value is known only at evaluation time; if it resolves
+  to a value of the wrong type, or to an empty string, the test is undecidable.
 - **Same faults on a directly constructed statement:** the statement is invalid and the check denies with
   `invalid_policy`, whatever the context holds and even when the test's key is missing. A malformed reference in a
   resource pattern makes the resource test undecidable instead, like an unresolved one.

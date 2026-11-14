@@ -2,23 +2,23 @@
 
 ## Purpose
 
-Periodic access reviews and their sign-off need five lists no check gives (AUTHZ-11.6): who holds a role, permission or
-policy in a scope, what a subject holds and where, which grants expire within a window, which grants an actor last
-granted or changed, and which grants show no use. This note explains what a review means by "holds" (N93), the typed
-query and its scope selections, the rows and their order, how a review is admitted (N96), how it is paged, streamed and
-exported (part 2 of BL-69, N97, N98), how grant usage is tracked and reported (part 3, N94, N100 to N102), and what is
-still left out.
+Periodic access reviews and their sign-off need five lists no check gives: who holds a role, permission or policy in a
+scope, what a subject holds and where, which grants expire within a window, which grants an actor last granted or
+changed, and which grants show no use. This note explains what a review means by "holds", the typed query and its scope
+selections, the rows and their order, how a review is admitted, how it is paged, streamed and exported, how grant usage
+is tracked and reported, where a subject holds an action, how break-glass activations are listed, and what is still left
+out.
 
 ## Invariants
 
-1. **Grant routes, not effective access (N93).** A row is one route by which a subject holds a target through the
+1. **Grant routes, not effective access.** A row is one route by which a subject holds a target through the
    stored grants: a direct grant; a role grant reaching a permission or policy through the role or a role above it,
    and a role held through a role below it, since a child role inherits its ancestors; a grant to an identity reaching
    its principal; a grant at the platform, an ancestor tenant or a subtree's root that applies in the reviewed tenant.
    A policy that only denies is held. Boundaries, guardrails and resource-policy attachments restrict or extend a
    decision but are not held, and no review lists them.
 
-2. **Structural reads only (D22).** A review shares the structural predicates of forward resolution, never copies
+2. **Structural reads only.** A review shares the structural predicates of forward resolution, never copies
    them: `LiveGrants::only()` for expiry, `TenantChain::grants()` for applicability, `TenantChain::owners()` for the
    definitions a tenant sees, `GrantRoots::within()` for a root within a tenant, `GrantApplications::only()` for an
    application, and `InlinePolicies::attachedToTheirGrantee()`. It never evaluates a statement, condition, deny or cap,
@@ -55,15 +55,15 @@ still left out.
    grants and its identity's when `SubjectGrants::grantingIdentity()` says they reach it, naming it as `via_identity`,
    never a sibling principal's. Given an identity it is identity mode: the identity's grants and those of every
    principal the `IdentityDirectory` lists, each row keeping its actual grantee, and the result incomplete when the
-   directory says its list may leave one out (N81). `expiring()` lists the stored grants, attachments and role edges
-   whose expiry falls in the UTC half-open window `[from, until)`, a role's permission edge and its policy attachment
-   kinds of their own, each marked `live`, `expired` or `malformed` at the review's instant. The bounds keep their
-   microseconds: an expiry is stored to the whole second, its fraction dropped, so a bound with a fraction is compared
-   as the next whole second, which selects exactly the stored expiries in the window on every database. In a review
-   applying in a tenant, an edge is listed only when the tenant sees its role and permission, and a role's policy
-   attachment only when it sees the role, as a check reaches either only through that role. `grantedBy()` lists the
-   stored grants whose `granted_by` pair is exactly the actor's: the last writer (N95), since a regrant, a changed
-   expiry or reach overwrites it, a trusted write names no actor, and a revoked grant is gone.
+   directory says its list may leave one out. `expiring()` lists the stored grants, attachments and role edges whose
+   expiry falls in the UTC half-open window `[from, until)`, a role's permission edge and its policy attachment kinds of
+   their own, each marked `live`, `expired` or `malformed` at the review's instant. The bounds keep their microseconds:
+   an expiry is stored to the whole second, its fraction dropped, so a bound with a fraction is compared as the next
+   whole second, which selects exactly the stored expiries in the window on every database. In a review applying in a
+   tenant, an edge is listed only when the tenant sees its role and permission, and a role's policy attachment only when
+   it sees the role, as a check reaches either only through that role. `grantedBy()` lists the stored grants whose
+   `granted_by` pair is exactly the actor's: the last writer, since a regrant, a changed expiry or reach overwrites it,
+   a trusted write names no actor, and a revoked grant is gone.
 
 7. **Reference-only, versioned rows.** A `ReviewRow` names references alone (a morph type and a string key) and plain
    values, never a name, email, description, document or value. Its shape is `version: 1`: `row_key`, `subject`,
@@ -79,17 +79,17 @@ still left out.
    models included. `isComplete` says only whether an identity's principals could all be listed, and is true for every
    other review.
 
-   A grant or attachment row that names half a tenant (a type without a key, or a key without a type), which the
-   package never writes, is listed and marked as damaged (N99), never presented as a clean platform origin: its
-   `grant_state` is `malformed`, whether or not it has expired, and its `origin_scope` shows the tenant columns as
-   stored (`Reviews\OriginScope`), the missing half null. A check reads neither half as the platform's or any
-   tenant's (N130, `Support\TenantColumns`): what grants of such a row applies nowhere, and what restricts of it (a
-   boundary, a guardrail, the denies of an attachment) applies everywhere, so it is never a placed grant and no review
-   of what applies lists it. A review of everywhere, which needs platform-wide admission, lists it all the same, and so
-   do its expiries and an actor's grants. No review rooted within a tenant lists either, since neither can be
-   shown to lie within the tenant, and a scoped review never discloses another tenant's holders (N96). A route resting
-   on such a row is `malformed` too, and such a row meets an attachment, or a grant, only one that holds everywhere. A
-   role naming half a tenant is seen in no review of what applies, as the tenant scope shows it nowhere.
+   A grant or attachment row that names half a tenant (a type without a key, or a key without a type), which the package
+   never writes, is listed and marked as damaged, never presented as a clean platform origin: its `grant_state` is
+   `malformed`, whether or not it has expired, and its `origin_scope` shows the tenant columns as stored
+   (`Reviews\OriginScope`), the missing half null. A check reads neither half as the platform's or any tenant's
+   (`Support\TenantColumns`): what grants of such a row applies nowhere, and what restricts of it (a boundary, a
+   guardrail, the denies of an attachment) applies everywhere, so it is never a placed grant and no review of what
+   applies lists it. A review of everywhere, which needs platform-wide admission, lists it all the same, and so do its
+   expiries and an actor's grants. No review rooted within a tenant lists either, since neither can be shown to lie
+   within the tenant, and a scoped review never discloses another tenant's holders. A route resting on such a row is
+   `malformed` too, and such a row meets an attachment, or a grant, only one that is the platform's. A role naming half
+   a tenant is seen in no review of what applies, as the tenant scope shows it nowhere.
 
    | Stored tenant    | `appliesIn()` (any tenant, or the platform) | `rootedWithin()` (any tenant) | `everywhere()` |
    |------------------|---------------------------------------------|-------------------------------|----------------|
@@ -121,7 +121,7 @@ still left out.
    each tenant a grant is held in. One subject's holdings are read whole, then sorted; an identity's principals a chunk
    of 500 at a time, so no query's bindings grow with them. Every read is on the package's write connection.
 
-10. **Admission through `check()` (N96).** `authorization:review.read` and `authorization:review.export` are package
+10. **Admission through `check()`.** `authorization:review.read` and `authorization:review.export` are package
     permissions; exporting needs both. `AccessReview::review($query, $reviewer)` admits the review before anything is
     read: the reviewer's own manager, with its session, denies, boundaries, guardrails and the acting context's caps,
     decides the right on a `ReviewResource` (`authorization:review:{query}`, in the reviewed tenant), with the reviewed
@@ -130,13 +130,13 @@ still left out.
 
 11. **A broad reach is administered whole.** A review of one tenant's node, in one application or in none, is decided
     there. At the administration stage of the same check, a review rooted within a tenant, applying at the platform or
-    of everywhere is weighed by `AdministeredScope::refusalOf()`, the #122 rule, with no lock, rank or self rule: the
-    right is decided again just below the reach's tenant, or at platform scope, and refused as `administration.scope`
-    when anything that denies or caps the reviewer anywhere in the reach could limit it (`PossessionLimits`), a
-    conditional deny included. The application dimension is treated as the tenant one: a review of any application
-    applying in one tenant is decided at the tenant with no application, and is weighed across every application there,
-    so a deny, boundary or guardrail held for one application refuses it, while a review of none or one application
-    is not.
+    of everywhere is weighed by `AdministeredScope::refusalOf()`, the rule delegated administration weighs a change's
+    reach by, with no lock, rank or self rule: the right is decided again just below the reach's tenant, or at platform
+    scope, and refused as `administration.scope` when anything that denies or caps the reviewer anywhere in the reach
+    could limit it (`PossessionLimits`), a conditional deny included. The application dimension is treated as the tenant
+    one: a review of any application applying in one tenant is decided at the tenant with no application, and is weighed
+    across every application there, so a deny, boundary or guardrail held for one application refuses it, while a review
+    of none or one application is not.
 
     An impersonated reviewer is weighed as a delegated change made while impersonating is: the impersonator is the one
     shown the disclosure, so the review resource names it (`resource.impersonated`, `impersonator_type`,
@@ -149,7 +149,7 @@ still left out.
     refusal and throws `AuthorizationException` with the one generic line, carrying the reviewer's own decision, a
     step-up the right needs included; no row, count, truncation flag or completeness is computed.
 
-13. **An explicit trusted path (N75).** `AccessReview::trusted($query)` runs a review as trusted system work, for a
+13. **An explicit trusted path.** `AccessReview::trusted($query)` runs a review as trusted system work, for a
     scheduled job or a command. Nothing falls back to it: `review()` always takes an `ActingContext`, and one that
     cannot be resolved is refused as `subject_unresolved` before a review is reached.
 
@@ -171,7 +171,7 @@ still left out.
     and every route at or before the position is passed over; a stored row, one row of the review, resumes after itself.
     One subject's holdings are read whole for each page and the rows after the position kept, by design. `review()`
     is the first page of `page()`: every review, page, stream and export reads through one `AccessReview::read()`, one
-    query construction, admission and projection (D22), and only shapes its pages differently.
+    query construction, admission and projection, and only shapes its pages differently.
 
 16. **Signed cursors bound to their review (`Reviews\Support\ReviewCursor`).** A page's cursor carries its position
     between pages: its payload (the row schema version, the review's instant to the microsecond, and the sort key, each
@@ -200,7 +200,7 @@ still left out.
     written where the scan has passed never appears and one written ahead of it does, but a row present for the whole
     scan is returned exactly once, in its place.
 
-18. **Streams and JSON Lines exports (N97).** `stream()` returns a lazy iterable: nothing is read until it is iterated,
+18. **Streams and JSON Lines exports.** `stream()` returns a lazy iterable: nothing is read until it is iterated,
     then each chunk is read through the same pages, so memory is bounded by the chunk, not the tenant (the paging
     budget measures it against what was held before the stream began). `export()`
     writes versioned JSON Lines (`Reviews\Support\JsonLinesExport`) to a writable stream, each line written whole, or
@@ -216,14 +216,14 @@ still left out.
 19. **The console (`Console\ReviewCommand`).** `authorization:review` exports a review on the trusted path, as scheduled
     system work. Its scope options mirror `authorization:why` (`--tenant`, with `--rooted-within` and `--everywhere`
     beside it, at most one, and `--application` `none`, `any` or a name), with `--from` and `--until`, `--actor`,
-    `--direct-only` and `--action` taken by their own queries alone; a holdings subject is resolved by the console
-    subject resolver. It writes nothing but the JSON Lines to the standard output, or to `--output`, created only when
-    it does not exist unless `--force` is given, and exits as `authorization:why` does: 0 written, 2 for an invalid
-    invocation, 1 when the review fails. Its errors name the argument or option alone, never a value given: a subject or
-    tenant that is malformed, names no model or no saved row, or cannot be resolved included
+    `--since`, `--direct-only` and `--action` taken by their own queries alone; a holdings subject is resolved by the
+    console subject resolver. It writes nothing but the JSON Lines to the standard output, or to `--output`, created
+    only when it does not exist unless `--force` is given, and exits as `authorization:why` does: 0 written, 2 for an
+    invalid invocation, 1 when the review fails. Its errors name the argument or option alone, never a value given: a
+    subject or tenant that is malformed, names no model or no saved row, or cannot be resolved included
     (`UnresolvedSubjectException::namingOnly()`).
 
-20. **Indexes and what a page reads (N95).** A new migration, `2026_11_08_000001_add_access_review_indexes`, adds
+20. **Indexes and what a page reads.** The migration `2026_11_08_000001_add_access_review_indexes` adds
     `{table}_granted_by_index` on the `granted_by` pair of each grant table, `{table}_permission_id_index` on the role
     permission edges, whose primary key leads with the role (MySQL already indexes that column for its foreign key and
     keeps that index), and, on PostgreSQL, `{table}_review_order_index` on each grant table's target and its grantee's
@@ -235,21 +235,21 @@ still left out.
     whose columns compare their bytes, but holds digests of the tenant and application, not their values, so a page
     reads the target's grants from its keyset on and sorts them: its work grows with the target's grants after the page,
     never with those before it or with the tenant's. A page of routes through the roles below a target, of an expiry
-    window (each table's `expires_at` index) or of an actor's grants (the new `granted_by` index) reads the rows its
-    filter matches from its keyset on and sorts them, so its work grows with the rows those roles, that window or that
-    actor match; only the sort's top rows are bounded by the page. A grantee's holdings are read on its morph index. The
+    window (each table's `expires_at` index) or of an actor's grants (the `granted_by` index) reads the rows its filter
+    matches from its keyset on and sorts them, so its work grows with the rows those roles, that window or that actor
+    match; only the sort's top rows are bounded by the page. A grantee's holdings are read on its morph index. The
     migration honours the configured table names and connection.
 
-21. **Usage tracking is opt-in and free when off (N94).** `authorization.usage.enabled` is false by default. While it is
-    off, no listener is registered, no usage table is read, the resolution cache keeps no routes, the manager hands its
-    checks to no tracking pipeline, and the decision path costs what it did before (`SingleCheckBudgetTest`,
+21. **Usage tracking is opt-in and free when off.** `authorization.usage.enabled` is false by default. While it is off,
+    no listener is registered, no usage table is read, the resolution cache keeps no routes, the manager hands its
+    checks to no tracking pipeline, and the decision path costs what an untracked one does (`SingleCheckBudgetTest`,
     `Performance\GrantUsageBudgetTest`); every row's `usage` reads `unknown`.
 
-22. **What counts as use (N100).** Only what a decision rested on counts, by the rules forward resolution applied, and
-    nothing the check did not weigh. An allowed decision a held permission allowed counts every live grant route behind
-    that permission, redundant ones included: the direct grant, and each role grant that carried it with the ancestor
-    role it came through (a `role_permission` route, its `role_grant` route and, for an ancestor, its `role_inherited`
-    route). They are the routes of the grantee whose permission matched (`Usage\WeighedGrants`, noted as
+22. **What counts as use.** Only what a decision rested on counts, by the rules forward resolution applied, and nothing
+    the check did not weigh. An allowed decision a held permission allowed counts every live grant route behind that
+    permission, redundant ones included: the direct grant, and each role grant that carried it with the ancestor role it
+    came through (a `role_permission` route, its `role_grant` route and, for an ancestor, its `role_inherited` route).
+    They are the routes of the grantee whose permission matched (`Usage\WeighedGrants`, noted as
     `SubjectGrants::permissionFor()` answers): the subject's own, or its granting identity's only when the subject's did
     not match. A decision one or more statements made, allow or deny, counts every route attaching the policy each
     belongs to, so a deny-only policy doing its job is used: the subject's attachment when the package's policy resolver
@@ -257,11 +257,11 @@ still left out.
     check its deny statements alone (`Usage\DecisionRoutes`). The everyday checks count: `check()`, `can()`, `cannot()`,
     `any()`, `all()`, `authorize()`, `checkMany()`, `canEach()`, the Gate, Blade and the middleware, and a delegated
     change's own check once its administration stage keeps the verdict. Nothing else does, each for a stated reason: a
-    preview and its admission (another subject's decision, N86), an explanation and `authorization:why` (N89),
-    `permissionsFor()` (introspection, N70), `whereAuthorized()` (decides no record), a review's admission and reads
-    (introspection, N94), and the further checks of an administration stage. A permission from a custom
-    `getPermissions()`, and a policy from a policy store, a resource, `withPolicies()`, a guardrail or a boundary, is no
-    grant the package can trace, and counts nothing.
+    preview and its admission (another subject's decision), an explanation and `authorization:why` (shown, not acted
+    on), `permissionsFor()` (introspection), `whereAuthorized()` (decides no record), a review's admission and reads
+    (introspection), and the further checks of an administration stage. A permission from a custom `getPermissions()`,
+    and a policy from a policy store, a resource, `withPolicies()`, a guardrail or a boundary, is no grant the package
+    can trace, and counts nothing.
 
 23. **Finding the contributing grants on the hot path.** While tracking is on, `GrantResolver::permissions()` and
     `policies()` resolve with the routes behind each permission, by its name, and each policy, by its key
@@ -279,7 +279,7 @@ still left out.
     decisions count none. No step tracking adds ever changes or breaks a check: finding the routes and noting them
     each write a failure to the log channel and the decision is returned as it was made.
 
-24. **Recording (N101).** `Usage\GrantUsageRecorder`, one for each container that resolves it (a queue worker's or a
+24. **Recording.** `Usage\GrantUsageRecorder`, one for each container that resolves it (a queue worker's or a
     command's for as long as it runs, an Octane sandbox's for its request), notes each route at most once a bucket
     (`authorization.usage.interval` seconds, 3600 by default, at least 60, a whole multiple since the epoch in UTC),
     forgetting what it noted as a bucket begins and past ten batches' worth. It never sends from within a check: once
@@ -292,7 +292,7 @@ still left out.
     observations dropped, their routes forgotten, and named by the next job the same way. A batch is compact: each
     stored grant once, and each observation as its route's key, its grant's index and its bucket.
 
-25. **Storage (N102).** `Contracts\GrantUsageStore` (`record()`, `lastObserved()`, `coverage()`), bound to
+25. **Storage.** `Contracts\GrantUsageStore` (`record()`, `lastObserved()`, `coverage()`), bound to
     `Usage\DatabaseGrantUsageStore` and rebindable. `grant_usage` is keyed by the route's key (`Usage\GrantUsageKey`: a
     SHA-256 digest of the source kind, target, grantee, tenant and application as stored, and the role path, the roles
     the route runs through; the same key a review row of the route carries), keeps the stored grant's unique columns,
@@ -305,14 +305,15 @@ still left out.
     latest or opening one when the gap exceeds two intervals; a batch naming a `lostSince` first cuts the coverage back
     to two intervals and a second before it, so the time lost stays uncovered; `authorization:usage-heartbeat` extends
     it with no observations, and records nothing while tracking is off. `authorization:usage-prune` removes the usage of
-    routes whose grant no longer exists and the coverage older than `authorization.usage.retention` days.
+    routes whose grant no longer exists and the coverage that ended more than `authorization.usage.retention` days ago,
+    from the package's own tables whatever store is bound; `--pretend` reports what it would remove.
 
 26. **Regrants.** A grant revoked and made again is a new row created later; an observation through a grant created
     before the current one is ignored (`ObservedUse::isOf()`), and a regrant's observation replaces the old one in the
     store. An expiry or reach rewrite (`GrantTable::writeExpiry()`) keeps `created_at`, and neither the expiry nor the
     reach a grant's `include_subtree` sets is part of the key, so the grant keeps its use.
 
-27. **The unused review and the `usage` field (N94).** `ReviewQuery::unused($scope, $since)` reads the live grants of
+27. **The unused review and the `usage` field.** `ReviewQuery::unused($scope, $since)` reads the live grants of
     each kind to grantees through `StoredRows` a fixed chunk at a time, the room the page leaves or `GrantRows::CHUNK`,
     whichever is more, never fewer for the rows kept, each chunk's routes looked up in one go, keeping the rows with no
     observed use (`ReviewUsage::isUnobserved()`); it pages, streams and exports as every review does, admitted by
@@ -324,7 +325,7 @@ still left out.
     for a row whose source cannot report. A null `last_observed_at` is never proof of non-use. The row keeps `version:
     1`, since the package is unreleased.
 
-28. **Where a subject holds an action (N110).** `ReviewQuery::holdings()->forAction($action)` narrows a review of
+28. **Where a subject holds an action.** `ReviewQuery::holdings()->forAction($action)` narrows a review of
     holdings to the routes whose target gives one action, named literally (an authorization name with no `*`; any other
     review refuses it). `Reviews\Support\ActionRoutes` keeps them from the routes collected, before they are sorted and
     cut to a page, so a page holds its limit of matching rows in the review's one order, reading the permissions'
@@ -350,18 +351,18 @@ still left out.
     last decision is recorded and no event dispatched; `check()` decides the operation. The row keeps `version: 1`,
     since the package is unreleased.
 
-29. **Break-glass activations (N143).** Every break-glass activation not ended or expired at the review's instant is
-    reviewed as a holding of its role in its scope, whether break-glass is enabled or not, since it grants again once
-    it is (N141): holders, holdings, expiries, an actor's grants and the unused review read the role grants together
-    with these activations (`GrantRows::held()`), each a row of its own beside any grant of the same role in the same
-    scope, with its own `source_key`, its activation as `created_at`, its expiry as `expires_at` and its granter as
-    `granted_by`, and its routes through the roles above it and what they carry as a grant's. Its rows carry
-    `break_glass { activation, justification }`, never the note, and their `usage` is always `unknown`, since an
-    activation's use is never tracked. A machine's activation, or one naming half a tenant, is listed as such a grant
-    is; in principal mode an identity's activation is left out, since it never reaches a principal through the
-    identity. Each table is filtered, ordered and limited on its own indexes, a page reading both as the branches of
-    one `union all` and merging them in the review's order (`GrantRows::pageOf()`), so a page reads each table only
-    from where it starts. The row keeps `version: 1`, since the package is unreleased.
+29. **Break-glass activations.** Every break-glass activation not ended or expired at the review's instant is reviewed
+    as a holding of its role in its scope, whether break-glass is enabled or not, since it grants again once it is:
+    holders, holdings, expiries, an actor's grants and the unused review read the role grants together with these
+    activations (`GrantRows::held()`), each a row of its own beside any grant of the same role in the same scope, with
+    its own `source_key`, its activation as `created_at`, its expiry as `expires_at` and its granter as `granted_by`,
+    and its routes through the roles above it and what they carry as a grant's. Its rows carry `break_glass {
+    activation, justification }`, never the note, and their `usage` is always `unknown`, since an activation's use is
+    never tracked. A machine's activation, or one naming half a tenant, is listed as such a grant is; in principal mode
+    an identity's activation is left out, since it never reaches a principal through the identity. Each table is
+    filtered, ordered and limited on its own indexes, a page reading both as the branches of one `union all` and merging
+    them in the review's order (`GrantRows::pageOf()`), so a page reads each table only from where it starts. The row
+    keeps `version: 1`, since the package is unreleased.
 
 ## Success Path
 
@@ -407,7 +408,7 @@ tracking covered the whole window and `unknown` where it did not.
 - A target whose key no definition could have (every definition is keyed by a UUID) is held by no one, on every
   database, without a query, rather than reaching a `uuid` column it cannot be compared with.
 - A grant or attachment row naming half a tenant is listed only in a review of everywhere, as a check applies its
-  grants nowhere (and its restrictions everywhere, N130), never in one of what applies or one rooted within a tenant;
+  grants nowhere (and its restrictions everywhere), never in one of what applies or one rooted within a tenant;
   either half is marked `malformed`, its origin scope as stored.
 - A window whose bounds fall within one second holds no stored expiry, since every expiry is a whole second.
 - A cursor changed in any byte, written in any text but its canonical one, issued for another query, scope, reviewer
@@ -417,7 +418,7 @@ tracking covered the whole window and `unknown` where it did not.
   is keyed by its first role and its length, not by every role it runs through.
 - An export without `authorization:review.export` beside the read right is refused before its header is written; one
   refused at a later chunk, or failing, ends with no footer; a sink that is neither a stream nor a callback is refused
-  with `InvalidArgumentException`, a stream that takes none of a line with `RuntimeException`, and a row holding
+  with `InvalidArgumentException`, a stream that takes none of a line with `ReviewExportException`, and a row holding
   invalid UTF-8 with `JsonException`.
 - A grant created before tracking began, a window a gap of more than two intervals interrupts, a grantee with its own
   `getPermissions()` or `getPolicies()`, and a role's edge or attachment read `unknown`, never `unused`; a regrant reads
@@ -426,6 +427,8 @@ tracking covered the whole window and `unknown` where it did not.
   whose routes then read `unknown` over the time lost, the decision unaffected; a worker's latest observations arrive
   at the store only when its request, command or job ends. A step tracking adds that fails inside a check is written
   to the log and the decision returned unchanged.
+- While the package is not healthy, every entry point refuses with `InvalidAuthorizationConfigException` before the
+  reviewer is admitted or a row read.
 - A window that does not end after it starts, a limit below one, a target that is no definition, and a subject that
   names no key are refused with `InvalidArgumentException` when the query is built. A configured limit that is not a
   whole number of at least 1 is refused at boot with `InvalidAuthorizationConfigException`, and so is one changed
@@ -438,7 +441,8 @@ tracking covered the whole window and `unknown` where it did not.
   stands, and a page as read.
 - `Reviews\Support\ReviewCursor`, `Exceptions\InvalidReviewCursorException` -- the signed cursors and their refusal.
 - `Reviews\Support\Keyset`, `Reviews\Support\GrantRows::after()` -- the keyset a page resumes from.
-- `Reviews\Support\JsonLinesExport` -- the JSON Lines format and its sinks.
+- `Reviews\Support\JsonLinesExport`, `Exceptions\ReviewExportException` -- the JSON Lines format, its sinks and a
+  stream that takes nothing.
 - `Console\ReviewCommand`, `Console\Support\ReviewInvocation`, `Console\Support\TenantOption`,
   `Console\Concerns\RefusesInvocations` -- `authorization:review`.
 - `database/migrations/2026_11_08_000001_add_access_review_indexes.php` -- the review indexes.
@@ -534,7 +538,6 @@ tracking covered the whole window and `unknown` where it did not.
   permission or policy gives the action by, held names matched case-sensitively, deny-only and unreadable policies,
   identity mode, compact reach, a role's policy reaching the overlap, half-named rows, a page of its limit of
   matching rows in bounded queries, and nothing decided or dispatched.
-
 - `Reviews\Support\HolderRoutesTest`, `HoldingRoutesTest`, `StoredRowsTest`, `GrantRowsTest`, `RowCollectorTest`
   (Feature), `ReviewRowTest`, `GrantRowTest` (Unit), `Usage\ReviewUsageTest` (Feature) -- activations beside a grant
   of the same role, live, ended, expired, while break-glass is disabled and a machine's, never the note, an identity's
@@ -545,7 +548,7 @@ tracking covered the whole window and `unknown` where it did not.
 - A change to the row shape or the sort key bumps `ReviewRow::VERSION`, which refuses every cursor issued before it;
   while the package is unreleased, an optional key added to the row (`usage`, `break_glass`, `action_evidence`), or
   the activation's key added to the sort key, keeps `version: 1`.
-- A snapshot export, or a CSV adapter (N97), would be a mode or sink of its own beside the live JSON Lines.
+- A snapshot export, or a CSV adapter, would be a mode or sink of its own beside the live JSON Lines.
 - A new path that decides without acting on the decision (an introspection or a dry run) must keep its pipeline
   untracked, as previews, explanations, listings, scoped queries and reviews are.
 - A change to what makes a grant route unique, or to a review row's route, changes `GrantUsageKey`, which forgets every

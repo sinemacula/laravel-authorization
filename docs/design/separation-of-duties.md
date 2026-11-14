@@ -2,16 +2,15 @@
 
 ## Purpose
 
-Separation of duties (AUTHZ-11.8) keeps one person from holding two roles that must stay apart, such as a clerk who
-raises payments and an approver who signs them off. Roles may be declared mutually exclusive, so that no grantee holds
-both in one scope. This note explains how a pair is stored and owned, how it is declared and removed through the
-administration services, the conflict report that says who holds both roles of a pair (BL-71a), and how every write
-that could let someone hold both, a role grant, a re-parenting or a break-glass activation, is refused with the
-conflicts it would create (BL-71b).
+Separation of duties keeps one person from holding two roles that must stay apart, such as a clerk who raises payments
+and an approver who signs them off. Roles may be declared mutually exclusive, so that no grantee holds both in one
+scope. This note explains how a pair is stored and owned, how it is declared and removed through the administration
+services, the conflict report that says who holds both roles of a pair, and how every write that could let someone hold
+both, a role grant, a re-parenting or a break-glass activation, is refused with the conflicts it would create.
 
 ## Invariants
 
-1. **A pair is data, naming roles by key (N135).** A pair is one row of `role_exclusions`
+1. **A pair is data, naming roles by key.** A pair is one row of `role_exclusions`
    (`authorization.tables.role_exclusions`, honouring `tables.prefix` through `Config\TableNames`, created by its own
    migration on the package's connection with the collision guard). It names its two roles by key, never by name, so a
    rename keeps it and a tenant's roles can be paired. Its roles are stored in a canonical order, the lower key first,
@@ -21,7 +20,7 @@ conflicts it would create (BL-71b).
    `TableConfigValidator::LENGTHS`: every index and key the migration builds is named after it with a short suffix, the
    longest `_excluded_foreign` (17 characters), so the bound is 46.
 
-2. **A pair is owned as a definition is (D20).** A definition takes only the platform's roles and those of its own
+2. **A pair is owned as a definition is.** A definition takes only the platform's roles and those of its own
    tenant and its tenant's ancestors, as a role takes its parent and its permissions (see `Support\RoleParity`). So a
    pair is owned by the owner of its role owned furthest down: the platform when both roles are the platform's; else
    the tenant owning one role when the other is the platform's, that tenant's own, or an ancestor's. Two roles owned by
@@ -36,30 +35,29 @@ conflicts it would create (BL-71b).
    violation, and a pair whose row is neither written nor found is refused with `UnwrittenGrantException` rather than
    reported declared.
 
-4. **Administration (AUTHZ-11.1).** `declare()` and `remove()` take an optional acting context: none is trusted system
-   work (N75), one is delegated and decided through `check()` on the pair's operation resource
-   (`OperationResource::exclusion()`), under `authorization:role-exclusion.declare` or
-   `authorization:role-exclusion.remove`, spelt as the other actions are (N78). The resource is a definition change,
-   owned where the pair is and naming its owning role, with the other role, as stored, among the proposed changes
-   (`resource.change.excluded`, `resource.change.excluded_role`). The administration stage weighs it by the owner rule
-   (`administration.owner`, see `Administration\DefinitionConstraints`), then by `Administration\ExcludedRoles`: both
-   roles junior to the actor, the more senior of the two weighed (`administration.rank`); and, for a removal, which
-   lifts the pair across its owner's whole reach, the administered-scope rule across that reach
-   (`administration.scope`), with `authorization:administration.impersonated` needed across it while impersonating. A
-   declaration only adds a constraint, so it is decided at its node, as a guardrail set is. Neither is marked narrowing,
-   since each changes what may be granted later. Both roles are locked and pinned, under the concurrency protocol,
-   before the change is decided, and the change is decided before anything is read for the report or written. A removal
-   is decided on the owner stored on the pair's row, read under a row lock, its owning role the one that owner owns, so
-   a pair stays removable after a tree move leaves its roles' owners neither within the other; removing a pair that is
-   not declared is decided as declaring it would be.
+4. **Administration.** `declare()` and `remove()` take an optional acting context: none is trusted system work, one is
+   delegated and decided through `check()` on the pair's operation resource (`OperationResource::exclusion()`), under
+   `authorization:role-exclusion.declare` or `authorization:role-exclusion.remove`, spelt as the other actions are. The
+   resource is a definition change, owned where the pair is and naming its owning role, with the other role, as stored,
+   among the proposed changes (`resource.change.excluded`, `resource.change.excluded_role`). The administration stage
+   weighs it by the owner rule (`administration.owner`, see `Administration\DefinitionConstraints`), then by
+   `Administration\ExcludedRoles`: both roles junior to the actor, the more senior of the two weighed
+   (`administration.rank`); and, for a removal, which lifts the pair across its owner's whole reach, the
+   administered-scope rule across that reach (`administration.scope`), with `authorization:administration.impersonated`
+   needed across it while impersonating. A declaration only adds a constraint, so it is decided at its node, as a
+   guardrail set is. Neither is marked narrowing, since each changes what may be granted later. Both roles are locked
+   and pinned, under the concurrency protocol, before the change is decided, and the change is decided before anything
+   is read for the report or written. A removal is decided on the owner stored on the pair's row, read under a row lock,
+   its owning role the one that owner owns, so a pair stays removable after a tree move leaves its roles' owners neither
+   within the other; removing a pair that is not declared is decided as declaring it would be.
 
 5. **One operation, one event.** Each call is one operation, its id on the decision and on the event, and dispatches
    `Role\ExclusionDeclared` or `Role\ExclusionRemoved` once it commits, only when it changed something. Both extend
-   `Role\ExclusionEvent`, implement `AuthorizationMutation` (BL-92) with the operation identifiers
-   `role.exclusion.declared` and `role.exclusion.removed`, and carry the pair's two roles and their names, in its
+   `Role\ExclusionEvent`, implement `AuthorizationMutation` with the operation identifiers `role.exclusion.declared`
+   and `role.exclusion.removed` (`Enums\MutationOperation`), and carry the pair's two roles and their names, in its
    order, and its owner; they are about the pair's first role and name no grantee.
 
-6. **Where two holdings conflict (N136).** Two routes, one to each role, conflict where a check sees both roles held:
+6. **Where two holdings conflict.** Two routes, one to each role, conflict where a check sees both roles held:
    their applications meet (either for every application, or both the same one), and the tenants where each role is
    held meet (the same tenant, one reaching below a tenant the other is in or below, per the bound tenant tree, or
    either platform-wide). Disjoint tenants never conflict, and nor does a grant limited to its own tenant against one in
@@ -67,33 +65,34 @@ conflicts it would create (BL-71b).
    weigh a role's policy attachment by.
 
 7. **What counts as holding a role.** A live grant of the role, or of a role below it while the role hierarchy is
-   enabled, each one route naming the path from the role granted up to the pair's role. A grant holds a role wherever a
-   check sees it held, no more and no less. A check in a tenant counts the platform's grants, the tenant's own and its
-   ancestors' that reach below them (`TenantChain::grants()`), and sees the platform's roles and those of the tenant and
-   its ancestors (`TenantChain::owners()`). So a role a tenant owns is held where the grant and the owner's subtree hold
-   together, by the same `canHoldTogether()`: a grant in the owner or below it holds the role where the grant holds; a
-   grant above the owner that reaches below holds it in the owner's subtree; one limited to its own tenant does not
-   hold it; and a grant at the platform holds it in the owner's subtree. Each role of the chain narrows where it is held
+   enabled, and an unexpired break-glass activation of either (invariant 11), each one route naming the path from the
+   role granted up to the pair's role. A grant holds a role wherever a check sees it held, no more and no less. A check
+   in a tenant counts the platform's grants, the tenant's own and its ancestors' that reach below them
+   (`TenantChain::grants()`), and sees the platform's roles and those of the tenant and its ancestors
+   (`TenantChain::owners()`). So a role a tenant owns is held where the grant and the owner's subtree hold together, by
+   the same `canHoldTogether()`: a grant in the owner or below it holds the role where the grant holds; a grant above
+   the owner that reaches below holds it in the owner's subtree; one limited to its own tenant does not hold it; and a
+   grant at the platform holds it in the owner's subtree. Each role of the chain narrows where it is held
    (`ExclusionRoute::$reach`), and the chain ends at the first role a check holding the roles before it cannot see, or
    one naming half a tenant, as `RoleGraph` ends it: a tenant moved away from a parent role's owner stops holding what
    that role carries, and a parent owned beside the role below it is held nowhere. An expired grant holds nothing, and
-   nor does a grant naming half a tenant, which grants nowhere (N130).
+   nor does a grant naming half a tenant, which grants nowhere.
    A principal's own holdings and its identity's are weighed together, as a check weighs them, when the identity's
    grants reach the principal (both machines or neither, see `SubjectGrants::grantingIdentity()`); the identity
-   directory lists each holder's principals (N81), and a conflict that came through the identity names it. Sibling
+   directory lists each holder's principals, and a conflict that came through the identity names it. Sibling
    principals of one identity are never weighed together. A report is complete only when the directory listed every
    holder's principals completely.
 
 8. **A bounded read.** The report reads through the access reviews' machinery, never a resolver of its own: the roles
    below the pair in one recursive query (`Reviews\Support\RoleChains::descendants()`) and one read of them and of the
-   roles whose parent is among them, repeated only for a role that read finds; the live grants of all of them together,
-   a chunk of roles at a time (`Reviews\Support\GrantRows`, at one instant through `ReviewRun`), all on the write
-   connection. Whether a grant's tenant and the owners of its chain lie within one another, and whether a tenant of one
-   route lies within the tenant of a route reaching below it, are each settled for every pair of tenants together, the
-   subtrees of their ancestors read in one query a chunk of pairs at a time
-   (`Reviews\Support\TenantRelations::settleWithin()`). Nothing is read once for each holder or tenant; the identity
-   directory, the application's seam, is asked once for each holder. `conflictsForAll()` reads the holdings of every
-   role of every pair together.
+   roles whose parent is among them, repeated only for a role that read finds; the live grants and the unexpired
+   break-glass activations of all of them together, a chunk of roles at a time (`Reviews\Support\GrantRows`, at one
+   instant through `ReviewRun`), all on the write connection. Whether a grant's tenant and the owners of its chain lie
+   within one another, and whether a tenant of one route lies within the tenant of a route reaching below it, are each
+   settled for every pair of tenants together, the subtrees of their ancestors read in one query a chunk of pairs at a
+   time (`Reviews\Support\TenantRelations::settleWithin()`). Nothing is read once for each holder or tenant; the
+   identity directory, the application's seam, is asked once for each holder. `conflictsForAll()` reads the holdings of
+   every role of every pair together.
 
 9. **Refused, never repaired.** `declare()` reads the report under the locks it writes under, both roles' rows locked
    for update first in key order, outside the tenant scope, then every role below them (`ExclusionGuard::lockBelow()`),
@@ -109,7 +108,7 @@ conflicts it would create (BL-71b).
     stored, whatever tenant owns it, so a screen shows them only to whom it should. Every operation refuses while the
     package is not healthy (`PackageState`), before it reads or writes.
 
-11. **Every write that can create a holding is checked (N136).** `Exclusions\Support\ExclusionGuard` weighs:
+11. **Every write that can create a holding is checked.** `Exclusions\Support\ExclusionGuard` weighs:
     - a role grant written by `GrantService::grantRole()` or `syncRoles()` (`SyncPlan::write()`), and so by the
       `HasRoles` trait's `assignRole()` and `syncRoles()`, `authorization:grant` and `authorization:migrate-spatie`,
       when it may widen what the grantee holds (`GrantChange::isWidening()`): a new or re-armed grant, a reach widened
@@ -120,14 +119,13 @@ conflicts it would create (BL-71b).
       with a new `parent_id` alike, while the hierarchy is enabled: every holder of the role and of the roles below it
       is weighed as holding the new parent and every role above it. A parent a pair touches is weighed only inside a
       transaction on the package's connection, which `setParent()` opens, so the check's locks hold to the save; a
-      model saved outside one is refused with `LogicException`, and one no pair touches is saved as before;
+      model saved outside one is refused with `LogicException`, and one no pair touches is saved unchecked;
     - a break-glass activation, through `ExclusionGuard::assertActivatable()` (the grantee, the role, and the scope with
       its application), which `BreakGlassService::activate()` calls before it writes, once it has locked the role's row
       shared, in a grant's lock order (invariant 12). An activation not ended or expired is itself a holding, even while
-      break-glass is switched off, since it grants again once it is switched on (N141;
-      `BreakGlassActivations::unexpired()`), read beside the grants by every check and so by every write weighed and every
-      report; one naming a machine counts for nothing, and an identity's never reaches its principals, as a check reads
-      them.
+      break-glass is switched off, since it grants again once it is switched on (`BreakGlassActivations::unexpired()`),
+      read beside the grants by every report and so by every write weighed; one naming a machine counts for nothing,
+      and an identity's never reaches its principals, as a check reads them.
     A role's owner never changes (`OwnerChangedException`), and no write moves a grant to another tenant or
     application, so neither is checked. The refusal is `RoleExclusionConflictException::written()`, carrying the
     report of the first pair the write would create a conflict for, in the pairs' order, keeping only the conflicts
@@ -172,7 +170,7 @@ conflicts it would create (BL-71b).
 
 13. **After the decision, with its hooks first.** A delegated grant or parent is decided before it is weighed, so an
     actor not allowed the change is refused as such, never told of a conflict. The grant hook runs before the package
-    takes any lock (AUTHZ-11.3), so it has been called for a grant later refused; that order is kept. A refused write
+    takes any lock, so it has been called for a grant later refused; that order is kept. A refused write
     rolls back, leaves no row, and dispatches no event, since the events are dispatched once the write commits.
 
 ## Success Path
@@ -232,14 +230,13 @@ conflicts it would create (BL-71b).
 
 - `Services\RoleExclusionServiceTest` (Feature) -- declaring once in either order, removing, refusals, owners, removal
   after a tree move, holdings wherever a check sees them with the tree either way up, the refusal with the report and
-  the locks it reads under, a grant committed by another session
-  during a declaration (MySQL and PostgreSQL), delegated decisions and their locks, the owner and rank rules, events
-  with the operation id, listing, the report of every pair and the bound directory.
+  the locks it reads under, a grant committed by another session during a declaration (MySQL and PostgreSQL), delegated
+  decisions and their locks, the owner and rank rules, events with the operation id, listing, the report of every pair
+  and the bound directory.
 - `Exclusions\Support\ConflictReaderTest` (Feature) -- one tenant, the platform, subtrees and nodes, disjoint tenants,
   applications, parent roles and a parent no longer seen, routes held only below their grant's tenant and a platform
-  grant of a tenant's role, a principal and its identity, siblings and machines under a
-  morph alias, expired and half-tenant grants, a mixed-type closure tree, an incomplete directory and a fixed number
-  of queries and tree reads.
+  grant of a tenant's role, a principal and its identity, siblings and machines under a morph alias, expired and
+  half-tenant grants, a mixed-type closure tree, an incomplete directory and a fixed number of queries and tree reads.
 - `Exclusions\Support\ExclusionHoldingsTest` (Feature) -- the routes, their paths, scopes and expiries, where each
   role is held through a grant above, below or beside its owner or at the platform, the locked read and the queries the
   roles below cost.

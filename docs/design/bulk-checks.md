@@ -1,10 +1,10 @@
 # Bulk Checks
 
-A check over many resources (AUTHZ-10.3) loads what the checks share once and reads the resources' own data in bulk,
-never one query per resource. This note explains `checkMany()`, the one bulk decision (D22), and its adapters
-`canEach()` and `filterAuthorized()`: why every check still takes the one decision path, what is read once and what in
-bulk, the contracts through which a custom resolver or provider reads in bulk, the events and the last decision, and
-the boundary within which a batch sees a write.
+A check over many resources loads what the checks share once and reads the resources' own data in bulk, never one
+query per resource. This note explains `checkMany()`, the one bulk decision, and its adapters `canEach()` and
+`filterAuthorized()`: why every check still takes the one decision path, what is read once and what in bulk, the
+contracts through which a custom resolver or provider reads in bulk, the events and the last decision, and the boundary
+within which a batch sees a write.
 
 ## Invariants
 
@@ -48,8 +48,7 @@ the boundary within which a batch sees a write.
    records' attachment entries are read in one read and their versions in one more, and those resolved are written in
    one write. Reads are partitioned by connection, morph type and scope and keyed by type and key or by the model
    object, never by a bare id. A batch of one takes the single-check lane: it opens no batch, reads nothing ahead and
-   reads its resource's tenant, attachments and attributes on its own, as a single check always has, so `check()`
-   costs what it did before bulk checks.
+   reads its resource's tenant, attachments and attributes on its own, so `check()` costs only its own decision.
 
 6. **Bulk is optional for extensions.** `Contracts\BulkResourceTenantResolver` (`tenantsOf()` and
    `tenantsOfRecords()`, keeping `null` for no tenant apart from `false` for one the resolver cannot tell) and
@@ -146,33 +145,34 @@ before the next. The 100 checks cost the queries one costs.
 
 ## Authoritative Tests
 
-- `ParityPropertyTest` -- generated batches across types, tenants, applications, expiry, roles, boundaries,
-  guardrails, caps, overrides, attachments, bulk and single-item providers, a provider reading through the tenant
-  scope, duplicates, keys and unsaved models, each
-  decision, event, last decision and exception compared with a fresh `check()`, with cold and warm caches (seeded by
-  `AUTHZ_PARITY_SEED`, `AUTHZ_PARITY_RUNS` runs).
+- `Integration\BulkChecks\ParityPropertyTest` -- generated batches across types, tenants, applications, expiry, roles,
+  boundaries, guardrails, caps, overrides, attachments, bulk and single-item providers, a provider reading through the
+  tenant scope, duplicates, keys and unsaved models, each decision, event, last decision and exception compared with a
+  fresh `check()`, with cold and warm caches (seeded by `AUTHZ_PARITY_SEED`, `AUTHZ_PARITY_RUNS` runs).
 - `BulkCheckQueryBudgetTest` -- one resource and a hundred cost the same queries, one each for the tenants, the
   attachments and the attributes, and over a closure-table tree the tree costs the distinct tenants, not the
   resources; `SingleCheckBudgetTest` -- a single check costs what its decision costs.
-- `CheckBatchTest` -- event order and count, the last decision, a failure stopping the batch and restoring the scope,
-  a provider's failure isolated, attributes read in the scope each record is decided in, reading ahead that fails
-  costing no earlier check, a grant revoked by a listener, chunking, the refusal and a single check reading nothing
-  ahead.
-- `AuthorizationManagerTest` -- keys, collections and generators, `insufficient_authentication` and the facade;
-  `HasPermissionsTest` -- the delegates.
+- `Feature\Evaluation\CheckBatchTest` -- event order and count, the last decision, a failure stopping the batch and
+  restoring the scope, a provider's failure isolated, attributes read in the scope each record is decided in, reading
+  ahead that fails costing no earlier check, a grant revoked by a listener, chunking, the refusal and a single check
+  reading nothing ahead.
+- `Feature\AuthorizationManagerTest` -- keys, collections and generators, `insufficient_authentication` and the
+  facade; `HasPermissionsTest` -- the delegates.
 - `PrefetchedResourceTenantsTest`, `ResourceAttributeBatchTest`, `DeclaredResourceTenantTest`,
-  `ResourcePolicyResolverTest`, `ResourceScopeTest`, `ResolutionMemoTest`, `ResolutionCacheTest`, `VersionedStoreTest`
-  and `TenantChainTest` -- the bulk reads, their fallbacks, each scope kept apart and the tree's answers kept.
+  `ResourcePolicyResolverTest`, `ResourceScopeTest`, `ResolutionMemoTest`, `Feature\ResolutionCacheTest`,
+  `VersionedStoreTest` and `TenantChainTest` -- the bulk reads, their fallbacks, each scope kept apart and the tree's
+  answers kept.
 - `BulkConfigValidatorTest` -- the chunk size.
 
 ## Change Triggers
 
 - A second evaluator, or a bulk read that decides anything, breaks invariant 1 and the parity property.
-- An aggregate event, a dispatch policy (BL-72) or a change to the event payload changes invariant 8 and the README.
+- An aggregate event, a change to how `events.decisions` selects a batch's checks, or a change to the event payload
+  changes invariant 8 and the [Checking access](../guides/checking-access.md#bulk-checks) guide.
 - Reading a resource's tenant or attributes once for the whole batch, rather than per chunk, moves the consistency
   boundary of invariant 9 and must be documented.
 - Reading a record's attributes outside the scope its check is decided in breaks invariant 5 for any provider that
   reads through the tenant scope.
 - A single check that opens a batch or reads ahead breaks the single-check lane of invariant 5, and its cost.
-- `permissionsFor()` (AUTHZ-10.4) decides through `CheckBatch` with recording turned off (see
-  `effective-permissions.md`); it must not change how `checkMany()` records.
+- `permissionsFor()` and `heldPermissionsFor()` decide through `CheckBatch` with recording turned off (see
+  `effective-permissions.md`); they must not change how `checkMany()` records.

@@ -2,26 +2,26 @@
 
 ## Purpose
 
-Break-glass is opt-in emergency access (AUTHZ-11.7, N133): a principal with the break-glass right grants itself, or
-another person, a configured emergency role for a configured maximum time, with a justification code from a configured
-list. It arrived in three releases (N138), all of which have shipped:
+Break-glass is opt-in emergency access: a principal with the break-glass right grants itself, or another person, a
+configured emergency role for a configured maximum time, with a justification code from a configured list. It is made
+of:
 
-1. **Storage, configuration and resolution** (BL-70a): the `break_glass` settings, validated at boot; the activations
-   table and its model; and the resolution that reads a live activation as a grant of its role.
-2. **Activation and revocation** (BL-70b): the service that activates, surrenders and revokes, its rights, its limits,
-   the grant hooks and its concurrency, and the switch that stops every activation at once.
-3. **Expiry, reviews and attribution** (BL-70c): the lifecycle events, the listings and access reviews of
-   activations, the attribution of decisions to the activation behind them, and `enabled` accepted at boot.
+1. **Storage, configuration and resolution**: the `break_glass` settings, validated at boot; the activations table and
+   its model; and the resolution that reads a live activation as a grant of its role.
+2. **Activation and revocation**: the service that activates, surrenders and revokes, its rights, its limits, the
+   grant hooks and its concurrency, and the switch that stops every activation at once.
+3. **Expiry, reviews and attribution**: the lifecycle events, the listings and access reviews of activations, and the
+   attribution of decisions to the activations behind them.
 
 This note records the invariants they fix.
 
 ## Invariants
 
 1. **An opt-in switch.** `break_glass.enabled` is a switch, false by default, read from
-   `AUTHORIZATION_BREAK_GLASS_ENABLED` as written, never cast. True is accepted at boot with the block's other checks
-   (invariant 2): at least one justification code, among them. There is no availability gate.
+   `AUTHORIZATION_BREAK_GLASS_ENABLED` and never cast: anything but a boolean is refused. True is accepted at boot
+   with the block's other checks (invariant 2), at least one justification code among them.
 
-2. **The settings fail closed (N116, N117).** The block sets only `enabled`, `max_minutes`, `roles`, `justifications`,
+2. **The settings fail closed.** The block sets only `enabled`, `max_minutes`, `roles`, `justifications`,
    `notes` and `note_max_length`; any other key is refused under its own path, and so is a key a role's entry sets
    beside `max_minutes`. Whole numbers are ints or strings written as whole numbers; switches are booleans; null is
    refused everywhere but a role's `max_minutes`, where it means the global maximum. `max_minutes` is at least 1 (60 by
@@ -71,8 +71,8 @@ This note records the invariants they fix.
    one naming a model read as another subject's separate identity: `SubjectGrants` marks the identity it reads
    (`BreakGlassActivations::markIdentity()`, scoped to the request or job), so none of its activations reaches the
    principal, and the instance counts none for the rest of the request or job; its resolutions are kept under kinds of
-   their own (`identity-…`) so they never mix with those of the same grantee read as a subject. An activation naming
-   half a tenant applies nowhere, as a grant row naming one does not.
+   their own (prefixed `identity-`) so they never mix with those of the same grantee read as a subject. An activation
+   naming half a tenant applies nowhere, as a grant row naming one does not.
 
 8. **A change is seen on the next check.** A save or delete through `Models\BreakGlassActivation` bumps the versions
    a grant to its grantee bumps, the one it named before a move included, at once and again after the caller's
@@ -85,7 +85,7 @@ This note records the invariants they fix.
    route from an activation, so its use never counts as the use of a role grant. The note is hidden from the model's
    array and JSON forms, and is never cached, logged or put on an event.
 
-10. **Off means none counts (N139).** While `enabled` is false no activation counts anywhere, at once, and the rows
+10. **Off means none counts.** While `enabled` is false no activation counts anywhere, at once, and the rows
     stay: `BreakGlassActivations::isCounted()` counts none, `live()` reads none, so the roles relation, delegated
     administration (possession limits, rank, affected holders, authority rows) and `ScopeAnchors` read none either.
     Whether break-glass is on is read through `BreakGlassConfigValidator::read()` once a request or job, when the
@@ -104,17 +104,18 @@ This note records the invariants they fix.
     `activated_at` now and `expires_at` now plus the minutes, in UTC, the acting principal as the granter (none for a
     trusted call), the scope (a platform-wide one always reaching below) and the application. `surrender()` ends an
     activation for its grantee alone, acting as itself and not impersonated (`NOT_GRANTEE` otherwise), and `revoke()`
-    for a holder of the revoke right or a trusted call; either records `ended_at`, `ended_by` and `end_reason`, and
-    either may end an activation while break-glass is disabled. Each returns how many it ended, as a revocation does:
-    one already ended or expired changes nothing and returns 0. A surrender's operation is begun with the grantee's
-    acting context, so it is delegated and names the grantee as its actor, though it decides no right. An activation
+    for a holder of the revoke right or a trusted call; either takes the activation or its key, throws
+    `ModelNotFoundException` for a key that names none, records `ended_at`, `ended_by` and `end_reason`, and may end
+    an activation while break-glass is disabled. Each returns how many it ended, as a revocation does: one already
+    ended or expired changes nothing and returns 0. A surrender's operation is begun with the grantee's acting
+    context, so it is delegated and names the grantee as its actor, though it decides no right. An activation
     dispatches `Identity\BreakGlassActivated` (the role, scope, key, justification code and expiry, never the note), and
     an end that ended one `Identity\BreakGlassSurrendered` or `Identity\BreakGlassRevoked` (with `endedAt`), through
     `OperationScope::dispatch()` inside the operation, so each fires once the write commits and never for a refusal, an
     end that changed nothing or a rollback, whether break-glass is enabled or not. The operation's actor is the granter,
     the grantee who surrendered or the revoker, none for a trusted call.
 
-12. **Holding the right is the gate (N140).** A delegated activation is decided through `check()` (D22) on
+12. **Holding the right is the gate.** A delegated activation is decided through `check()` on
     `OperationResource::breakGlass()`, in the activation's tenant and application, under
     `authorization:break-glass.activate` for the actor itself or `authorization:break-glass.grant` for another, and a
     delegated end under `authorization:break-glass.revoke`. The administration stage weighs them by the scope rule
@@ -124,11 +125,11 @@ This note records the invariants they fix.
 
 13. **Hooks and locks as a grant.** The grant hooks are asked about an activation as about a grant of its role in its
     scope until its expiry (`Hooks\WideningPhase`, a `ProposedGrant` under `authorization:role.grant`), before any
-    lock, and checked again after the locks; a hook's refusal refuses it. A delegated activation or end locks the
-    actor's authority, then the grantee's rows and the role (`DependencyPins`), as a delegated role grant does, and
-    every activation locks the role's row shared before it writes, so a deletion of the role either waits and takes the
-    activation with it or refuses it as `UnknownRoleException`; a revocation of the right or another activation
-    meanwhile has a delegated call tried again.
+    lock, and checked again with locking reads after a delegated call's right is decided and before the role's row is
+    locked; a hook's refusal refuses it. A delegated activation or end locks the actor's authority, then the grantee's
+    rows and the role (`DependencyPins`), as a delegated role grant does, and every activation locks the role's row
+    shared before it writes, so a deletion of the role either waits and takes the activation with it or refuses it as
+    `UnknownRoleException`; a revocation of the right or another activation meanwhile has a delegated call tried again.
 
 14. **The grantee must be able to hold the role.** `BreakGlassService::assertHoldable()` holds the role to what a grant
     of it is held to (its owner's tenant and below, the grantee's guard). Once the role's row is locked shared,
@@ -149,7 +150,7 @@ This note records the invariants they fix.
     overwritten nor reported. One naming half a tenant is recorded and counted with no event. `--pretend` counts
     them, and `PruneResult::$activations` reports how many.
 
-16. **A decision names the activations behind it (N142).** An allow used break-glass when a permission of the
+16. **A decision names the activations behind it.** An allow used break-glass when a permission of the
     principal's that covers the action, or a policy whose statement allowed it, is carried by a role the principal
     holds through a live activation, directly or through the role's ancestry, or when a resource policy's statement
     allowed it through a role selector naming such a role and no selector names the subject itself; one held through
@@ -165,7 +166,7 @@ This note records the invariants they fix.
     whatever `events.decisions` says (`DecisionReport::BREAK_GLASS`), a preview's listing included; a listing that
     dispatches nothing reports none.
 
-17. **Listings count a live activation (N143).** The grant scope query (`Services\GrantScopeQuery`, through
+17. **Listings count a live activation.** The grant scope query (`Services\GrantScopeQuery`, through
     `Support\GrantRoots`) counts a live activation (`BreakGlassActivations::live()`) as a grant of its role in its
     scope, as a check does: `forIdentity()` its principals', `hasGrantIn()` the principal's, never an identity's or a
     machine's, and `granteesReaching()` and `granteesWithin()` list the grantee of every live activation but a
@@ -174,13 +175,13 @@ This note records the invariants they fix.
 18. **The widening counts none.** Whether a grant widens what an identity holds (`Hooks\WideningClassifier`) reads
     role grants alone: an activation is never a grant already held, so a grant beside one widens as without it.
 
-19. **Reviews list every unexpired activation (N143).** The access reviews (`Reviews\Support\GrantRows::held()`, read
-    by `HolderRoutes`, `HoldingRoutes` and `StoredRows`, through `RoleChains` and `RoleCarriers` as a grant is) list
-    every activation not ended or expired at the review's instant, whatever the switch, since it grants again once
-    break-glass is enabled, as for separation of duties (N141): a row of its own beside any grant of the same role,
-    keyed by the activation, ordered after a grant of the same scope, with its expiry and granter as the row's own and
-    `break_glass { activation, justification }`, never the note. A machine's, or one naming half a tenant, is listed
-    as such a grant is; an identity's never reaches a principal's holdings. Its `usage` is `unknown`.
+19. **Reviews list every unexpired activation.** The access reviews (`Reviews\Support\GrantRows::held()`, read by
+    `HolderRoutes`, `HoldingRoutes` and `StoredRows`, through `RoleChains` and `RoleCarriers` as a grant is) list every
+    activation not ended or expired at the review's instant, whatever the switch, since it grants again once
+    break-glass is enabled, as separation of duties counts it: a row of its own beside any grant of the same role, keyed
+    by the activation, ordered after a grant of the same scope, with its expiry and granter as the row's own and
+    `break_glass { activation, justification }`, never the note. A machine's, or one naming half a tenant, is listed as
+    such a grant is; an identity's never reaches a principal's holdings. Its `usage` is `unknown`.
 
 20. **Usage never counts one.** Grant usage tracking starts no route from an activation (`Usage\RouteSources`), so
     its use is never a role grant's, and `Usage\UsagePruner` matches usage against the grant tables alone, so an
@@ -228,8 +229,9 @@ This note records the invariants they fix.
   the roles relation reads, who counts, the switch read once a request, and the identity marks.
 - `Support\SubjectGrants`, `Cache\ResolutionCache`, `Cache\PrincipalCacheKey` -- the identity marked, its entries
   kept apart, and the entries of either state of the switch kept apart.
-- `Services\BreakGlassService`, `Enums\BreakGlassRefusal`, `Exceptions\BreakGlassRefusedException` -- the write path,
-  its refusals, and `assertHoldable()` and the exclusion check under the role's lock.
+- `Services\BreakGlassService`, `Enums\BreakGlassRefusal`, `Exceptions\BreakGlassRefusedException`,
+  `Exclusions\Support\ExclusionGuard::assertActivatable()` -- the write path, its refusals, and `assertHoldable()` and
+  the exclusion check under the role's lock.
 - `Support\PackagePermissions`, `Administration\OperationResource::breakGlass()`,
   `Administration\OperationConstraints` -- the three rights and how a delegated call is weighed.
 - `Query\ScopeAnchors`, `Query\ScopeClasses` -- the activations' tenants among the anchors, compared as bytes.
@@ -254,9 +256,9 @@ This note records the invariants they fix.
   beside a direct grant, an ancestor's permission, a policy statement and a resource policy's role selector, on
   another tenant's resource, a role held both ways, two activations, a denial, the switch off, a machine and an
   identity, the memo, the store and an explanation, and the report through a check, a bulk check, a listing and a
-  preview's listing; `DecisionPipelineTest`, `DecisionReportingTest`, `DecisionEventTest`, `DecisionEvaluatedTest`,
-  `AuthorizationFailedTest`, `GrantResolverTest`, `RolePoliciesTest`, `PrincipalSelectorsTest`,
-  `ResolutionCacheTest` -- each part on its own.
+  preview's listing; `DecisionPipelineTest`, `DecisionReportingTest`, `DecisionEvaluatedTest`,
+  `AuthorizationFailedTest`, `GrantResolverTest`, `RolePoliciesTest`, `ResolutionCacheTest` (Feature),
+  `DecisionEventTest` (Unit) -- each part on its own.
 - `BreakGlassConfigValidatorTest`, `ConfigValidatorTest`, `Diagnostics\Checks\BlockChecksTest` (Feature) -- every
   setting's default, type, bound and unknown key, `enabled` accepted, the role maximums and the codes required once
   enabled.
