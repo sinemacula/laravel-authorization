@@ -1,10 +1,10 @@
 # Break-glass
 
-Break-glass is opt-in emergency access (AUTHZ-11.7): a principal with the break-glass right grants itself, or another
-person, a configured emergency role for a limited time, with a justification code from a configured list, reported
-every time and never needing prior approval. It is off by default. To enable it, list the emergency roles under
-`roles`, list at least one code under `justifications`, set `AUTHORIZATION_BREAK_GLASS_ENABLED=true`, and grant the
-break-glass rights to whoever may use them.
+Break-glass is opt-in emergency access: a principal with the break-glass right grants itself, or another person, a
+configured emergency role for a limited time, with a justification code from a configured list, reported every time
+and never needing prior approval. It is off by default. To enable it, list the emergency roles under `roles`, list at
+least one code under `justifications`, set `AUTHORIZATION_BREAK_GLASS_ENABLED=true`, and grant the break-glass rights
+to whoever may use them.
 
 **The settings.** `config/authorization.php` holds a `break_glass` block, checked at boot like every other:
 
@@ -22,9 +22,10 @@ break-glass rights to whoever may use them.
 ],
 ```
 
-- `enabled` is a switch, false by default, read from `AUTHORIZATION_BREAK_GLASS_ENABLED` as written.
-- `max_minutes` is the longest any activation lasts, a whole number of at least 1. A longer request will be refused,
-  never shortened.
+- `enabled` is true or false, false by default, read from `AUTHORIZATION_BREAK_GLASS_ENABLED`; any other value,
+  `1` or `yes` included, is refused.
+- `max_minutes` is the longest any activation lasts, a whole number of at least 1 (60 by default). A longer request is
+  refused, never shortened.
 - `roles` maps each emergency role, named as a role is named anywhere, to its own `max_minutes`: from 1 up to the
   global maximum, or null or left out for the global maximum. A maximum above the global one is refused. Whether a
   role of that name exists is checked when it is activated, never at boot.
@@ -43,7 +44,8 @@ normal grant of the same role and never merged with it. It holds the role, the g
 the scope (the platform, or a tenant with or without its subtree, and an application or every application), the
 justification code, the note, when it was activated and when it expires (both UTC), and, once it ends, when, by whom and
 why (`surrendered`, `revoked`, or `expired`, which `authorization:prune` records). `Models\BreakGlassActivation` reads
-and writes it. Run the package's migrations when you upgrade: the roles every check reads now include this table.
+and writes it. Every check reads this table through the roles relation, so run the package's migrations when you
+upgrade, before serving checks.
 
 **How it grants.** While an activation has not ended and its expiry is still to come, its role counts for the grantee
 exactly as a grant of the role in the activation's scope does, through the same resolution, cache and tenant chain:
@@ -81,19 +83,21 @@ $breakGlass->revoke($activation, $actor);    // by a holder of the revoke right
   application, across its reach. Holding the right is enough: the rank, self and possession rules of a role grant do
   not apply, while denies, boundaries, guardrails and caps still limit what the role grants. A call with no acting
   context is trusted and skips the right, but none of the limits below.
-- Each limit refuses with `BreakGlassRefusedException`, whose `getReason()` names it: break-glass disabled, a machine
-  or a model read as another subject's identity, a role not listed under `roles`, minutes below 1 or above the
-  role's maximum (never shortened), a justification not listed, a note while `notes` is false or one longer than
-  `note_max_length` characters, and a scope naming half a tenant. An unknown role throws `UnknownRoleException`, an
-  unsaved grantee `InvalidGranteeException`, and a role is held to its owner and guard as a grant of it is.
+- Each limit refuses with `BreakGlassRefusedException`, whose `getReason()` names it as a `BreakGlassRefusal`:
+  break-glass disabled, a machine or a model read as another subject's identity, a role not listed under `roles`,
+  minutes below 1 or above the role's maximum (never shortened), a justification not listed, a note while `notes` is
+  false or one longer than `note_max_length` characters, and a scope naming half a tenant. An unknown role throws
+  `UnknownRoleException`, an unsaved grantee `InvalidGranteeException`, and a role is held to its owner and guard as a
+  grant of it is.
 - An activation that would leave the grantee holding both roles of a pair of mutually exclusive roles where their
   reach overlaps is refused with `RoleExclusionConflictException`, trusted or delegated, and nothing is written (see
   [Separation of duties](separation-of-duties.md#separation-of-duties)).
 - The grant hooks are asked about an activation as about a grant of its role in its scope until its expiry, and a
   hook's refusal refuses it. A delegated call locks what a delegated role grant locks, in the same order.
-- `surrender()` is for the grantee alone, acting as itself; anyone else is refused, as is the grantee while
-  impersonated. `revoke()` needs the revoke right, or a trusted call. Each returns how many it ended: an activation
-  already ended or expired changes nothing and returns 0.
+- `surrender()` is for the grantee alone, acting as itself; anyone else is refused (`NOT_GRANTEE`), as is the grantee
+  while impersonated. `revoke()` needs the revoke right, or a trusted call. Each takes the activation or its key and
+  returns how many it ended: an activation already ended or expired changes nothing and returns 0, and an unknown key
+  throws `ModelNotFoundException`.
 
 **Events.** Each activation dispatches `Identity\BreakGlassActivated`, carrying the role, the scope, the activation's
 key, the justification code and the expiry, never the note. A surrender or revocation that ended one dispatches
@@ -121,4 +125,4 @@ be ended.
 
 See [Break-glass](../design/break-glass.md) for the invariants.
 
-See [Grant scope](../design/grant-scope.md) for the design.
+See [Grant scope](../design/grant-scope.md) for how the listings read activations.

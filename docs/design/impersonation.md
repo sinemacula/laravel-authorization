@@ -19,9 +19,9 @@ effective-permissions API, and the boundary between authorization scoping and re
    resolves no subject). A resolved `Subject` is taken as it is, its identity, tenant, application, guard and session
    kept, as an acting context names its actor (see [Delegated administration](delegated-administration.md)), and when
    it names a tenant or an application, each check through the clone is decided there, grants and ambient scope both,
-   with the request's restored afterwards (N109, see [the subject resolver](subject-resolver-contract.md)). A check
-   never takes its tenant from the caller here otherwise; naming a tenant for a single check is for the administration
-   and preview API.
+   with the request's restored afterwards (see [the subject resolver](subject-resolver-contract.md)); one carrying the
+   platform marker is decided on the platform, on its application. A check never takes its tenant from the caller here
+   otherwise; naming a tenant for a single check is for the administration and preview API.
 
 3. **`for()` does NOT change `$request->user()`.** The scoped manager only affects authorization evaluation -- it
    overrides `currentSubject()` on the clone. The Laravel auth guard, `$request->user()`, session state, and any other
@@ -58,7 +58,8 @@ $permissions = $preview->permissionsFor(null, AuthorizationScope::current());
 `previewFor()` admits the preview as a check about the caller, and again at every use, so a revoked right is seen at
 the next one, and refuses before anything about the target is decided. `permissionsFor()` decides every action of the
 permission catalogue through the full staged evaluation (the subject, resource and tenant, the explicit denies, the
-guardrails, the permission boundaries, the session caps, the allows and the implicit deny; see
+guardrails, the permission boundaries, the session caps, the allows, the administration constraints and the implicit
+deny; see
 [Evaluation order and deny precedence](evaluation-order-and-deny-precedence.md)) and returns the names of those
 allowed, in the catalogue's order -- suitable for rendering permission-picker UIs or capability checklists. The target
 has no session, so an action that needs a step-up is not listed for it, whatever the caller has proved. A preview
@@ -73,10 +74,11 @@ override, throws `InvalidPreviewException`. Trusted code that needs a hypothetic
 
 Chaining `for($user)->withPolicies([$hypothetical])` evaluates against only the supplied policies, bypassing the target
 user's own attached policies, any configured policy store and the policies attached to the resource. A supplied policy
-given a resource (`Policy::withResource('post:42')`) is evaluated as a resource policy, so its allows apply only to the
-subjects its `principals` name. `withPolicies()` replaces the policies only: the guardrails and the subject's permission
-boundaries still cap the decision, their deny statements still count at the deny stage, and the target user's held
-permissions are still asked at the allow stage when no allow statement decides, so an override never lifts a cap.
+given a resource (`$policy->withResource('post:42')`) is evaluated as a resource policy, so its allows apply only to the
+subjects its `principals` name. `withPolicies()` replaces the policies only: the guardrails, the subject's permission
+boundaries and the session caps still cap the decision, the guardrails' and boundaries' deny statements still count at
+the deny stage, and the target user's held permissions are still asked at the allow stage when no allow statement
+decides, so an override never lifts a cap.
 
 ```php
 $result = Authorization::for($targetUser)
@@ -88,11 +90,10 @@ $result = Authorization::for($targetUser)
 
 `for()` clones the manager and pins the supplied subject on the clone. The clone inherits the decision pipeline (the
 evaluator, the policy resolver and the other sources, with any policy override and explicit caps), the last-decision
-store and the event dispatcher by reference -- only the subject override is clone-local. `withPolicies()` and
-`capped()` clone the manager the same way, each with a new pipeline carrying its override or its cap, so the pipeline
-they were called on is never changed.
-`forUser()` scopes the same way, to the subject the resolver translates a user into; Laravel's Gate uses it for the user
-it hands over.
+store and the event dispatcher by reference -- only the subject override, and the scope a `Subject` names, are
+clone-local. `withPolicies()` and `capped()` clone the manager the same way, each with a new pipeline carrying its
+override or its cap, so the pipeline they were called on is never changed. `forUser()` scopes the same way, to the
+subject the resolver translates a user into; Laravel's Gate uses it for the user it hands over.
 
 - **No cross-request leak.** The `Authorization` facade resolves the manager scoped to the current request or job,
   and the scoped clone is a local variable -- it is garbage-collected when the calling scope exits. Long-running
@@ -108,8 +109,8 @@ it hands over.
   was about, so an audit listener can detect that it differs from `$request->user()`. A decision made through
   `previewFor()` also carries the caller as its `previewer`, so "admin X previewed user Y" needs no event of the
   application's own; a decision made through `for()` carries none, since `for()` is a trusted seam, not a preview. By
-  default an allow made through `for()` is reported only for an action in `events.decisions.sensitive_actions`, so a
-  listener that audits every impersonated allow sets `events.decisions.allows` to `all`.
+  default an allow made through `for()` is reported only for an action in `events.decisions.sensitive_actions` or when
+  it used break-glass, so a listener that audits every impersonated allow sets `events.decisions.allows` to `all`.
 - **The permission step uses the target principal's permissions.** When `for($user)` is active, the held-permission
   check is made at the allow stage, after the caps and only when no allow statement decides, through
   `SubjectGrants::permissionFor()` over the target subject's grantees, its principal and its identity -- the target
@@ -120,20 +121,20 @@ it hands over.
 
 - `AuthorizationManager::for()`, in `Concerns\BuildsScopedManagers` -- the scoped-clone factory, which reads the
   subject resolver once when it names a model, and takes a resolved `Subject` as it is.
-- `AuthorizationManager::withPolicies()` and `capped()` -- the policy-override and capped clones, over
-  `Evaluation\DecisionPipeline::withPolicies()` and `capped()`.
-- `AuthorizationManager::forUser()` -- the scoped clone for a user the subject resolver translates.
+- `AuthorizationManager::withPolicies()` and `capped()`, in `Concerns\BuildsScopedManagers` -- the policy-override and
+  capped clones, over `Evaluation\DecisionPipeline::withPolicies()` and `capped()`.
+- `AuthorizationManager::forUser()`, in `Concerns\BuildsScopedManagers` -- the scoped clone for a user the subject
+  resolver translates.
 - `AuthorizationManager::currentSubject()` -- the override-aware resolution method.
-- `AuthorizationManager::permissionsFor()` -- the actions listed for UI rendering, the subject named as `for()` names
-  it.
+- `AuthorizationManager::permissionsFor()`, in `Concerns\ListsPermissions` -- the actions listed for UI rendering, the
+  subject named as `for()` names it.
 - `AuthorizationManager::previewFor()`, in `Concerns\BuildsScopedManagers` -- the checked preview (see
   [Preview](preview.md)).
 
 ## Authoritative Tests
 
 - `AuthorizationManagerTest::testForOverridesResolver` (Unit) -- `for()` decides about the model named instead of the
-  resolver's subject, reading the resolver once, when `for()` is called with a model, to keep the tenant and
-  application.
+  resolver's subject.
 - `BuildsScopedManagersTest::testForAndForUserNameTheSubject` (Feature) -- a resolved `Subject` named through `for()`
   is kept as it is, its identity, tenant, application, guard and session included.
 - `AuthorizationManagerTest::testForReturnsCloneNotSelf` (Unit) -- `for()` returns a distinct instance.
@@ -143,7 +144,8 @@ it hands over.
   direct grant and a role's permission are listed, and a deny policy wins over RBAC.
 - `AuthorizationManagerTest::testAModelIsNamedAsForNamesIt` (Feature, `PermissionsFor`) -- a model is listed as
   `for()` names it.
-- `AuthorizationManagerTest::testAGuestIsAllowedNothing` (Feature, `PermissionsFor`) -- a guest is listed nothing.
+- `AuthorizationManagerTest::testNullIsTheSubjectTheManagersChecksAreAbout` (Feature, `PermissionsFor`) -- null lists
+  the subject the manager's checks are about, and a guest is listed nothing.
 
 ## Change Triggers
 

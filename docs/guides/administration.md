@@ -5,8 +5,8 @@ identity's scope, and the grant scope query trusted integrations ask.
 
 ## Delegated administration
 
-Granting, revoking and editing roles, permissions and policies are themselves actions this package checks (AUTHZ-11.1).
-A management service called with an acting context decides each change it makes as that actor, through `check()`, the
+Granting, revoking and editing roles, permissions and policies are themselves actions this package checks. A
+management service called with an acting context decides each change it makes as that actor, through `check()`, the
 one decision path, and refuses it when the decision does not allow it. Your administration screens call the same
 services with the acting context of the signed-in administrator; seeders, migrations and console commands call them
 without one.
@@ -39,7 +39,7 @@ writes them and a policy naming them validates:
 | `role-exclusion.declare`, `role-exclusion.remove`                                  | A pair of mutually exclusive roles declared or removed               |
 | `break-glass.activate`, `break-glass.grant`, `break-glass.revoke`                  | A break-glass activation for oneself or another, or its end          |
 | `resource-policy.attach`, `resource-policy.detach`                                 | A policy attached to or detached from a record or a resource type    |
-| `role.read`, `permission.read`, `policy.read`                                      | Reading and listing through the services; not decided yet            |
+| `role.read`, `permission.read`, `policy.read`                                      | Reading and listing through the services; declared, never decided    |
 | `permission.grantable`, `policy.grantable`                                         | Delegating a permission, or one version of a policy, not held        |
 | `administration.self`, `administration.impersonated`                               | A change that benefits the actor; a change made while impersonating  |
 | `administration.unbounded`                                                         | Replacing a boundary with a wider one, or removing one               |
@@ -84,7 +84,7 @@ never falls back to a trusted call.
 | `capped($actions)`                                      | Returns the acting context with the call capped by the actions as well                               |
 | `impersonatedBy($impersonator)`                         | Returns the acting context marked as impersonated by the model or reference given                    |
 | `isImpersonating()`                                     | Returns whether someone is impersonating the acting subject                                          |
-| `principal()`, `identity()`                             | Return the references to the acting principal and to its identity, null for none                     |
+| `principal()`, `identity()`                             | Return the references to the acting principal and to its identity, or null for no identity           |
 | `check($operationResource)`                             | Decides the resource's action on it, as the service decides it, and returns the `Decision`           |
 | `decide($action, $resource)`                            | Decides any action as the acting subject, with the call's caps, and returns the `Decision`           |
 | `authorize($operationResource)`                         | Decides as `check()` does and throws when the decision does not allow                                |
@@ -92,29 +92,31 @@ never falls back to a trusted call.
 | `authorizeChanges($operation, $changes, ...$unchanged)` | Decides the changes as `authorizeIn()` does, or the unchanged ones when there are none               |
 | `ActingContext::refusal($decision)`                     | Returns the `AuthorizationException`, with the one `denied` line, the decision refuses with          |
 
-**Trusted calls and delegated calls.** A call with no acting context is trusted system work (N75): nothing is decided,
-every structural rule, system-record protection, transaction and event still applies, and its operation is marked
-trusted with no actor. Treat it as an integration surface for your own code, never as an endpoint for user-controlled
-administration. A call with an acting context is delegated: each change is decided inside the call's transaction, before
-anything is written, and its operation carries the actor. `GuardrailService` always takes an acting context.
+**Trusted calls and delegated calls.** A call with no acting context is trusted system work: nothing is decided, every
+structural rule, system-record protection, transaction and event still applies, and its operation is marked trusted,
+with no actor unless a console command names one for the record. Treat it as an integration surface for your own code,
+never as an endpoint for user-controlled administration. A call with an acting context is delegated: each change is
+decided inside the call's transaction, before anything is written, and its operation carries the actor.
+`GuardrailService` always takes an acting context.
 
 **The operation resource.** Each change is decided on an `OperationResource`, a resource of type
-`authorization:operation` whose id is the operation's id and whose tenant is the scope of what the change changes, never
-the tenant the request is in: the tenant a grant is held in, or a definition's owner for a change to a role, permission
-or policy. A change in a tenant is decided in that tenant's scope, and one in a tenant outside the actor's scope, an
-ancestor of the request's tenant included, is refused as `tenant_scope` unless the actor holds the action through a
-platform-wide grant. A change with no tenant, to a platform-wide grant, a platform role or a platform-owned record, is
-decided at platform scope, where only a platform-wide grant of the action counts, so an actor that holds the action only
-in a tenant is refused it. So who may change a grant row is the scope the actor administers (N79): an actor whose
+`authorization:operation` whose id is the operation's id and whose tenant is the scope of what the change changes,
+never the tenant the request is in: the tenant a grant is held in, or a definition's owner for a change to a role,
+permission or policy. A change in a tenant is decided in that tenant's scope, and one in a tenant outside the actor's
+scope, an ancestor of the request's tenant included, is refused as `tenant_scope` unless the actor holds the action
+through a platform-wide grant. A change with no tenant, to a platform-wide grant, a platform role or a platform-owned
+record, is decided at platform scope, where only a platform-wide grant of the action counts, so an actor that holds the
+action only in a tenant is refused it. So who may change a grant row is the scope the actor administers: an actor whose
 authority for the action reaches the row's tenant, from a parent tenant by authority over its subtree or from the
 platform, changes the row from its own context, and one `revokeAll()` clears a grantee's rows across every tenant the
 actor administers; a parent's node-only authority reaches no child's row, and a tenant's no platform-wide row. A change
 that may widen authority reaches no further than the actor administers, so one whose reach holds a tenant where the
 actor's authority for the action is denied or limited is refused (see *Administered scope* below). A screen that builds
 the same resource through the same named constructor (`OperationResource::grant()`, `revoke()`, `unchanged()`,
-`definition()`, `rewrite()` or `exclusion()`) and checks it with `$actor->check($resource)` gets the decision the
-service makes. Nothing is ever attached to one operation, so a check on it reads only the resource policies attached
-to the type `authorization:operation`. The resource offers what the change names to your policies, under `resource`:
+`definition()`, `rewrite()`, `exclusion()` or `breakGlass()`) and checks it with `$actor->check($resource)` gets the
+decision the service makes. Nothing is ever attached to one operation, so a check on it reads only the resource
+policies attached to the type `authorization:operation`. The resource offers what the change names to your policies,
+under `resource`:
 
 | Key                                                                                          | Type   | What it holds                                                         |
 |----------------------------------------------------------------------------------------------|--------|-----------------------------------------------------------------------|
@@ -130,7 +132,6 @@ to the type `authorization:operation`. The resource offers what the change names
 | `resource.expires_at`                                                                        | time   | When a grant expires; missing for one that never does                 |
 | `resource.digest`                                                                            | string | The digest of the document a `policy.grantable` descriptor names      |
 | `resource.change.name`, `.description`, `.rank`, `.parent`, `.guard`, `.category`, `.digest` | mixed  | A definition's proposed change, a document by its stored digest       |
-| `resource.change.excluded`, `resource.change.excluded_role`                                  | string | The other role a pair of exclusive roles names, by key and name       |
 | `resource.change.owner_type`, `resource.change.owner_id`                                     | string | The grantee an inline policy is created for                           |
 | `resource.impersonated`, `resource.impersonator_type`, `resource.impersonator_id`            | mixed  | Whether the actor is impersonated, and by whom                        |
 
@@ -143,14 +144,14 @@ declares one of these keys must declare it with the same type.
     'conditions' => ['eq' => ['resource.application' => 'admin']]]
 ```
 
-**What this release enforces.** Every change is decided under its action, through every deny, guardrail, boundary and
-session cap, and in its intended tenant. Then an administration stage, after the allow and inside the same decision,
-weighs the operation's constraints, in this order, and can only refuse:
+**What is enforced.** Every change is decided under its action, through every deny, guardrail, boundary and session cap,
+and in its intended tenant. Then an administration stage, after the allow and inside the same decision, weighs the
+operation's constraints, in this order, and can only refuse:
 
 - **Impersonation.** A change made while impersonating is refused as `administration.impersonating` unless the actor is
   also allowed `authorization:administration.impersonated` on the same operation, and, for a change that may widen
   authority, across its whole reach by the administered-scope rule below.
-- **Administered scope** (N79). The actor must administer the whole reach of a change that may widen authority, or the
+- **Administered scope.** The actor must administer the whole reach of a change that may widen authority, or the
   change is refused as `administration.scope`. Its action is decided again in the grant's tenant, standing just below it
   for a grant that reaches the tenants below, so only authority that itself reaches below counts (node-only authority
   cannot issue a subtree grant), or at platform scope for a platform-wide grant, and in the grant's application, so a
@@ -173,17 +174,17 @@ weighs the operation's constraints, in this order, and can only refuse:
   application, or one whose condition would never hold, still refuses the right on a change whose reach is wider than
   its node, and what each right's limits read is read once per decision, however many permissions and policies the
   change hands out.
-- **Rank** (N76). Every change to an identity or a principal, a revocation, a sync, `revokeAll()`, a boundary change and
-  a call that changes nothing included, is refused as `administration.rank` unless the actor is strictly senior to the
+- **Rank.** Every change to an identity or a principal, a revocation, a sync, `revokeAll()`, a boundary change and a
+  call that changes nothing included, is refused as `administration.rank` unless the actor is strictly senior to the
   grantee, and as `administration.rank_uncomparable` when either side's rank, or the reach, cannot be read. The actor is
-  ranked in the grant's own tenant and application, by the roles that reach it (its principal's and its identity's).
-  The grantee is ranked across the whole reach of the change: the most senior rank it holds anywhere the change reaches
+  ranked in the grant's own tenant and application, by the roles that reach it (its principal's and its identity's). The
+  grantee is ranked across the whole reach of the change: the most senior rank it holds anywhere the change reaches
   counts, its roles held platform-wide, in the grant's tenant and its ancestors, in every tenant below for a grant that
-  reaches below, in every tenant for a platform-wide grant, and in any application for a grant to every application.
-  Expired grants never count. A role grant is also weighed against the rank the role would give the grantee, so it
-  never leaves the grantee equal to or senior to the actor. An unranked grantee is the most junior, an unranked actor
-  acts on no one, two unranked sides are equal and refused, and with `authorization.rank.enabled` off rank is no
-  constraint.
+  reaches below, in every tenant for a platform-wide grant, and in any application for a grant to every application, a
+  role held through a live break-glass activation included. Expired grants never count. A role grant is also weighed
+  against the rank the role would give the grantee, so it never leaves the grantee equal to or senior to the actor. An
+  unranked grantee is the most junior, an unranked actor acts on no one, two unranked sides are equal and refused, and
+  with `authorization.rank.enabled` off rank is no constraint.
 - **Self.** A change to the actor itself, its principal or its identity, that may widen authority is refused as
   `administration.self` unless the actor is also allowed `authorization:administration.self` on the same operation, at
   the node it is decided at and across the change's whole reach, as its action is: an actor allowed the right at the
@@ -196,7 +197,7 @@ weighs the operation's constraints, in this order, and can only refuse:
   replacing one with a boundary that can only narrow it and reaches no fewer tenants, and a grant that only shortens or
   narrows one the grantee holds live in the same scope (it lasts no longer and reaches no further, and revoking the
   grant would only narrow).
-- **Possession** (N77). A direct grant of a permission to an identity or a principal, a re-grant, an extension, a wider
+- **Possession.** A direct grant of a permission to an identity or a principal, a re-grant, an extension, a wider
   reach and a sync's additions included, is allowed only when the actor provably holds what it grants, or is explicitly
   allowed to grant it. The same permission route decides every permission a role grant, a policy or a definition change
   hands out:
@@ -265,18 +266,18 @@ weighs the operation's constraints, in this order, and can only refuse:
 
   A policy that allows nothing passes. Otherwise it is refused with the permission route's reason, for a policy that
   could be contained, or as `administration.unprovable`.
-- **The owner rule** (D20). A change to a definition (`role.create`, `.rename`, `.update`, `.delete`, `.parent.set`,
+- **The owner rule.** A change to a definition (`role.create`, `.rename`, `.update`, `.delete`, `.parent.set`,
   and the same for permissions and policies), and a change to what a role carries (a permission added or removed, a
   policy attached or detached), is made only from the tenant that owns the definition or the role: the tenant the
   check is made from must be the owner, and a platform definition needs the platform, so a record seen from a
   descendant, another tenant or the platform is refused as `administration.owner`, whether or not the change narrows.
   `RoleService::create()`, `PermissionService::create()` and `PolicyService::create()` take an optional `tenant:` (a
-  model, an `AuthorizableTenant` or a `Reference`) that owns what they create, the platform when it is left out, so a
-  tenant administrator creates its own tenant's definitions from that tenant's context, and a create is refused as
+  model or an `AuthorizableTenant`) that owns what they create, the platform when it is left out, so a tenant
+  administrator creates its own tenant's definitions from that tenant's context, and a create is refused as
   `administration.owner` from any other; a screen builds the same new record with its owner's `tenant_type` and
   `tenant_id`, such as `OperationResource::definition('authorization:role.create', new Role(['tenant_type' => 'team',
   'tenant_id' => '7']), ['name' => 'editor'])`. A resource policy's attachment is a grant to a resource, never weighed
-  by the rule, and nor is a grant row (N79): who may change one is the administered scope.
+  by the rule, and nor is a grant row: who may change one is the administered scope.
 - **Definitions.** Creating a definition widens no one, so it passes, but a role is created only junior to the actor
   (`administration.rank`). Describing a role, permission or policy, and renaming a policy, pass. Renaming a role, or a
   permission (or changing a permission's name or guard), changes what every existing grant means, so it is a new grant
@@ -327,6 +328,10 @@ weighs the operation's constraints, in this order, and can only refuse:
   the impact check across the attachment's reach, and the policy must pass the policy route. A principal whose rank
   cannot be read is `administration.rank_uncomparable`. Detaching an allow-only policy narrows; detaching a denying one
   is `administration.unprovable`.
+- **Break-glass.** An activation for oneself or another (`break-glass.activate`, `break-glass.grant`) and the end of
+  another's (`break-glass.revoke`) are weighed, after impersonation, by the administered-scope rule alone: holding the
+  right across the reach is the gate, so rank, self and what the role hands out are not weighed, while denies,
+  boundaries, guardrails and caps still apply to what the activated role grants (see [Break-glass](break-glass.md)).
 - **Still refused.** Anything the package cannot prove stays `administration.unprovable`. Guardrail changes keep their
   own authority rule, decided from above the scope, under the concurrency protocol below (see
   [the design note](../design/delegated-administration.md)).
@@ -343,12 +348,12 @@ first refusal, and its reason, never depend on the order the rows were read in.
 
 // A manager may hand out the approved version of the "support" policy, and no rewrite of it.
 ['effect' => 'allow', 'actions' => ['authorization:policy.grantable'], 'resources' => ['authorization:operation:*'],
-    'conditions' => ['eq' => ['resource.policy' => 'support', 'resource.digest' => '9f2c…']]]
+    'conditions' => ['eq' => ['resource.policy' => 'support', 'resource.digest' => $approvedDigest]]]
 ```
 
 `canActOn($target)` on an identity compares rank alone, as the rank rule does, and grants nothing by itself. When
 neither side holds a ranked role, the comparison refuses: both count as the most junior, so their ranks are equal, and
-strict seniority refuses equal rank (N76). An application that leaves rank on but ranks no role should turn rank off
+strict seniority refuses equal rank. An application that leaves rank on but ranks no role should turn rank off
 (`authorization.rank.enabled`), or no delegated change to an identity will pass it.
 
 **Concurrency.** A delegated call never commits on authority that changed under it, and never writes a row its
@@ -402,9 +407,9 @@ not prevented.
 PostgreSQL and MySQL hold the locks until the transaction ends, so a concurrent write of a locked row waits for the
 call. SQLite serialises writers and compiles no row lock, so there the second read alone catches a change. The package
 takes no lock until the service first reads what the call changes, and the call's work starts inside its transaction
-before anything is read or locked, so a scope-widening grant hook (AUTHZ-11.3) run first in that work runs before every
-lock. A trusted call keeps its cost: it takes no extra lock and decides nothing, and with no grant hook configured it
-runs once, with no retry. With one, a trusted grant is tried again in the same way only when a grant it is about to
+before anything is read or locked, so a scope-widening grant hook run first in that work runs before every lock. A
+trusted call keeps its cost: it takes no extra lock and decides nothing, and with no grant hook configured it runs
+once, with no retry. With one, a trusted grant is tried again in the same way only when a grant it is about to
 write now widens an identity's scope with no hook run for it, up to `administration.retries` times, then refused as
 `administration.conflict`; inside your own transaction that conflict is thrown as `TransactionConflictException` (see
 [Grant hooks](#grant-hooks)).
@@ -415,7 +420,7 @@ it that way only from your own code, never as an endpoint for user-controlled ad
 | Surface                                                                                    | Warning                                                                 |
 |--------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
 | A management service called without `actor:`                                               | Trusted: decides nothing; pass the acting context of the administrator  |
-| A raw Eloquent write on the package's models, pivots or tables                             | Always trusted: takes no actor, and dispatches no event                 |
+| A raw Eloquent write on the package's models, pivots or tables                             | Always trusted: no actor; pivot and builder writes dispatch no event    |
 | An identity's `assignRole()`, `givePermission()`, `attachPolicy()`, `createInlinePolicy()` | Trusted without `actor:`; every write helper takes one and passes it on |
 | The Spatie aliases `givePermissionTo()`, `revokePermissionTo()` and `removeRole()`         | Trusted without `actor:`; each takes one and passes it on               |
 | A role's `givePermission()`, `revokePermission()`, `syncPermissions()` and their aliases   | Trusted without `actor:`; each takes one and passes it to `RoleService` |
@@ -426,8 +431,7 @@ The maintenance commands `authorization:sync`, `authorization:prune` and `author
 catalogue, clear expired and orphaned rows and import from Spatie for whoever runs the console; they are not
 administration on anyone's behalf (`authorization:sync` records its `--actor` on what it writes).
 
-With the concurrency protocol, delegated administration is complete: all four parts of
-[the design](../design/delegated-administration.md) are in this release.
+[The design note](../design/delegated-administration.md) gives the whole design of delegated administration.
 
 **Reasons and errors.** A refusal throws `AuthorizationException`, or `InsufficientAuthenticationException` for a
 step-up, carrying the decision (`getDecision()`), its stage and its trace, for audit; the client sees the one `denied`
@@ -436,7 +440,7 @@ it: `administration.impersonating`, `administration.scope`, `administration.rank
 `administration.self`, `administration.owner`, `administration.not_grantable` and `administration.unprovable`; a call
 that conflicted on every try is refused as `administration.conflict`, at the same stage, and every call made while a
 preview is evaluated as `administration.previewing` (see [Preview](preview-and-explanations.md#preview)). The owner rule
-(D20) applies to definitions (roles, permissions and policies), what a role carries (its permissions, policies and
+applies to definitions (roles, permissions and policies), what a role carries (its permissions, policies and
 parent), never to a resource policy's attachment or to grant rows.
 
 **Audit.** Each decision is reported with `DecisionEvaluated` when `events.decisions` selects it (an allow only when
@@ -468,9 +472,9 @@ runs the job inside it, so both are rolled back with the refusal and lose every 
 
 ## Grant hooks
 
-Before a grant that widens an identity's scope is written, the grant service calls a grant hook the application binds
-(AUTHZ-11.3), inside the call's transaction and before the package takes any lock of its own for the call. The hook
-may refuse by throwing. Under the suite, `laravel-iam` binds it to `laravel-sso`'s scope widening, so a grant can never
+Before a grant that widens an identity's scope is written, the grant service calls a grant hook the application binds,
+inside the call's transaction and before the package takes any lock of its own for the call. The hook may refuse by
+throwing. Under the suite, `laravel-iam` binds it to `laravel-sso`'s scope widening, so a grant can never
 quietly take an SSO-linked identity outside the tenant its connection allows.
 
 **What widens.** The grants of a call are classified against what the identity already holds: its own grants and those
@@ -487,6 +491,10 @@ These do not widen: a permission added to a role the identity holds in one tenan
 scope), a grant in a tenant another principal of the identity already holds a grant in, a grant the grantee already
 holds unchanged, and one that only shortens a grant held. A re-arm of an expired grant, an extension of a live one and
 a wider reach are classified like a new grant. A grant to a role widens no identity's scope.
+
+A break-glass activation is asked about as a grant of its role in its scope until its expiry, through the same hook
+phase, so its hook is never skipped either. A live activation is never a grant already held here: a grant beside one
+widens as it would without it.
 
 **When in doubt, the hook is called.** An incomplete directory (`INCOMPLETE_DIRECTORY`) or a tenant tree that cannot be
 read (`UNREADABLE_TREE`) makes a grant widen. A grant whose identity cannot be resolved, because the grantee's model
@@ -548,13 +556,12 @@ deferred provider, or the package's default when nothing else is bound, which ho
 runs twice. An extender a sibling package registered on the contract before the package applies to the bound hook first,
 and the listed hooks run before the hook it returns; an extender registered after the package receives the wrapped hook,
 `ListedGrantHooks`, so one typed to another class fails. A `GrantHook` instance a provider binds after this package
-registers, but before the application boots, is wrapped by the listed hooks as the application boots; before, the grant
-service wrapped it at use instead, and the listed hooks ran first either way. Laravel applies no extender to an instance
-it is handed later, so the grant service wraps the hook it calls as well, unless it already is wrapped: a hook bound
-with `instance()` after the application boots, and a hook bound in any way after an instance the package wrapped as the
-application booted, run after the listed hooks too. When an extender registered after the package decorates the wrapped
-hook and the grant service wraps the decoration again, the listed hooks still run once, first. With no hook listed
-nothing is extended, and the bound hook stands alone.
+registers, but before the application boots, is wrapped by the listed hooks as the application boots. Laravel applies no
+extender to an instance it is handed later, so the grant service wraps the hook it calls as well, unless it already is
+wrapped: a hook bound with `instance()` after the application boots, and a hook bound in any way after an instance the
+package wrapped as the application booted, run after the listed hooks too. When an extender registered after the package
+decorates the wrapped hook and the grant service wraps the decoration again, the listed hooks still run once, first.
+With no hook listed nothing is extended, and the bound hook stands alone.
 
 The wrapped hook builds the listed hooks from its container at its first use and keeps them, so registering the package
 builds none of them, and they share the bound hook's lifetime: built afresh for each queue job and in each Octane
@@ -618,7 +625,7 @@ hook refuses stops the import, with what was written before it kept.
 **What the hook does not cover.**
 
 - **Memberships.** Creating or accepting a membership widens an identity's scope too, but memberships are not this
-  package's (AUTHZ-13.9): the application, or `laravel-iam`, calls the same hook on its own membership path, inside the
+  package's: the application, or `laravel-iam`, calls the same hook on its own membership path, inside the
   membership's transaction:
 
   ```php
@@ -664,11 +671,9 @@ hook refuses stops the import, with what was written before it kept.
   The membership is saved before the hook is called, inside the same transaction, so the hook sees its real key and a
   refusal rolls the save back with everything else.
 
-- **Raw writes.** A raw Eloquent write on the package's models, pivots or tables is a trusted integration surface, as
-  it is for delegated administration, and runs no hook. Only the grant service's calls, and everything built on them
-  (the trait helpers and the console commands), are guaranteed to.
-- **Break-glass.** An activation (AUTHZ-11.7) is asked about as a grant of its role in its scope until its expiry,
-  through the same `Hooks\WideningPhase`, so its hook is never skipped either.
+- **Raw writes.** A raw Eloquent write on the package's models, pivots or tables is a trusted integration surface, as it
+  is for delegated administration, and runs no hook. Only the grant service's and the break-glass service's calls, and
+  everything built on them (the trait helpers and the console commands), are guaranteed to.
 
 ## Grant scope query
 
@@ -806,9 +811,11 @@ subtree query that fails as it runs is thrown as its `QueryException`, once the 
 your transaction stays usable.
 
 **What counts as a grant.** A live role granted, permission granted directly or policy attached, a policy that only
-denies included. Roles are not expanded into their permissions, since a role's root is where it was granted. An
-expired grant counts for nothing, and neither does an inline policy attached to a grantee it does not belong to, which
-no check applies. Permission boundaries and guardrails cap grants; they are not grants and are never read.
+denies included. A live break-glass activation counts as a grant of its role in its scope, as a check reads it: none
+while break-glass is disabled, none of a machine, and an identity's reaches none of its principals. Roles are not
+expanded into their permissions, since a role's root is where it was granted. An expired grant counts for nothing, and
+neither does an inline policy attached to a grantee it does not belong to, which no check applies. Permission boundaries
+and guardrails cap grants; they are not grants and are never read.
 
 **Neither membership nor authorisation.** No answer says whether a principal is a member of a tenant, which is the
 application's to know, nor whether it may act there or use an application. `PRESENT` means a grant applies in the
