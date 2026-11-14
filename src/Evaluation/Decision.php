@@ -40,6 +40,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
  * `explain()` explains it with what it has, marking the rest as not recorded,
  * never evaluating anything again.
  *
+ * An allow names the key of each break-glass activation behind it (N142): one a
+ * role read through an activation gave an allowing permission or policy
+ * through, whether or not another grant gave it too. A denial names none.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -57,6 +61,7 @@ final readonly class Decision
      * @param  \SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness|null  $freshness
      * @param  \SineMacula\Laravel\Authorization\Evaluation\DecisionEvidence|null  $evidence
      * @param  list<string>  $requirementsRead
+     * @param  list<string>  $activations
      */
     private function __construct(
 
@@ -86,6 +91,9 @@ final readonly class Decision
 
         /** The name of each part of every authentication requirement the decision read, allow or deny, met or not, once each, sorted; none when it read none. */
         public array $requirementsRead = [],
+
+        /** The key of each break-glass activation behind the allow, once each, sorted; none for a denial or an allow none gave. */
+        public array $activations = [],
     ) {}
 
     /**
@@ -181,7 +189,18 @@ final readonly class Decision
     {
         $trace = [...$this->trace, $entry];
 
-        return new self($this->effect, $this->reason, $this->stage, $this->statements, $trace, $this->requirements, $this->freshness, $this->evidence, $this->requirementsRead);
+        return new self(
+            $this->effect,
+            $this->reason,
+            $this->stage,
+            $this->statements,
+            $trace,
+            $this->requirements,
+            $this->freshness,
+            $this->evidence,
+            $this->requirementsRead,
+            $this->activations,
+        );
     }
 
     /**
@@ -209,7 +228,7 @@ final readonly class Decision
 
         \sort($read, \SORT_STRING);
 
-        return new self($this->effect, $this->reason, $this->stage, $this->statements, $this->trace, $this->requirements, $stricter, $this->evidence, $read);
+        return new self($this->effect, $this->reason, $this->stage, $this->statements, $this->trace, $this->requirements, $stricter, $this->evidence, $read, $this->activations);
     }
 
     /**
@@ -220,7 +239,49 @@ final readonly class Decision
      */
     public function withEvidence(DecisionEvidence $evidence): self
     {
-        return new self($this->effect, $this->reason, $this->stage, $this->statements, $this->trace, $this->requirements, $this->freshness, $evidence, $this->requirementsRead);
+        return new self(
+            $this->effect,
+            $this->reason,
+            $this->stage,
+            $this->statements,
+            $this->trace,
+            $this->requirements,
+            $this->freshness,
+            $evidence,
+            $this->requirementsRead,
+            $this->activations,
+        );
+    }
+
+    /**
+     * Return the decision with the keys of the break-glass activations behind
+     * it, each once, sorted, or itself when none is given.
+     *
+     * @param  list<string>  $activations
+     * @return self
+     */
+    public function withActivations(array $activations): self
+    {
+        if ($activations === []) {
+            return $this;
+        }
+
+        $keys = \array_unique($activations);
+
+        \sort($keys, \SORT_STRING);
+
+        return new self(
+            $this->effect,
+            $this->reason,
+            $this->stage,
+            $this->statements,
+            $this->trace,
+            $this->requirements,
+            $this->freshness,
+            $this->evidence,
+            $this->requirementsRead,
+            $keys,
+        );
     }
 
     /**

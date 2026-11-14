@@ -59,6 +59,7 @@ final class DecisionEventTest extends TestCase
             DecisionReason::EXPLICIT_DENY,
             $statements,
             true,
+            ['activation-1'],
             ['resource.status'],
         );
 
@@ -73,6 +74,7 @@ final class DecisionEventTest extends TestCase
         self::assertSame(DecisionReason::EXPLICIT_DENY, $event->reason);
         self::assertSame($statements, $event->statements);
         self::assertTrue($event->usedBreakGlass);
+        self::assertSame(['activation-1'], $event->activations);
         self::assertSame(['resource.status'], $event->keys);
     }
 
@@ -106,6 +108,7 @@ final class DecisionEventTest extends TestCase
         self::assertSame(DecisionReason::EXPLICIT_DENY, $event->reason);
         self::assertSame([$statement], $event->statements);
         self::assertFalse($event->usedBreakGlass);
+        self::assertSame([], $event->activations);
         self::assertSame(['resource.status', 'input.reason'], $event->keys);
         self::assertFalse($event->isAllowed());
     }
@@ -174,6 +177,26 @@ final class DecisionEventTest extends TestCase
     }
 
     /**
+     * An event made from an allow that used break-glass says so and names the
+     * activations behind it, and, made without a reason, names break-glass
+     * before every other, a preview's included.
+     *
+     * @return void
+     */
+    public function testAnAllowThatUsedBreakGlassNamesItsActivations(): void
+    {
+        $decision   = Decision::allow(DecisionStage::ALLOW)->withActivations(['activation-2', 'activation-1']);
+        $provenance = new DecisionProvenance(new Reference('user', '1'), null, new Reference('user', '3'));
+        $event      = DecisionEvaluated::of($provenance, 'posts:read', null, $decision);
+        $reported   = DecisionEvaluated::of($provenance, 'posts:read', null, $decision, DecisionReport::PREVIEW);
+
+        self::assertTrue($event->usedBreakGlass);
+        self::assertSame(['activation-1', 'activation-2'], $event->activations);
+        self::assertSame(DecisionReport::BREAK_GLASS, $event->reportedBecause());
+        self::assertSame(DecisionReport::PREVIEW, $reported->reportedBecause());
+    }
+
+    /**
      * Return an event on `posts:edit` with the effect, reason and previewer
      * given, made with the reason and sensitivity given.
      *
@@ -192,9 +215,9 @@ final class DecisionEventTest extends TestCase
         bool $isSensitive = false,
     ): DecisionEvaluated {
         if ($report === null) {
-            return new DecisionEvaluated(null, null, $previewer, 'posts:edit', null, null, null, $effect, $reason, [], false, []);
+            return new DecisionEvaluated(null, null, $previewer, 'posts:edit', null, null, null, $effect, $reason, [], false, [], []);
         }
 
-        return new DecisionEvaluated(null, null, $previewer, 'posts:edit', null, null, null, $effect, $reason, [], false, [], $report, $isSensitive);
+        return new DecisionEvaluated(null, null, $previewer, 'posts:edit', null, null, null, $effect, $reason, [], false, [], [], $report, $isSensitive);
     }
 }

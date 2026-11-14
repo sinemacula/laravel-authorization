@@ -49,4 +49,18 @@ final class ResolutionTest extends TestCase
         self::assertNull((new Resolution(['posts:read']))->routes);
         self::assertSame($routes, (new Resolution(['posts:read'], null, true, $routes))->routes);
     }
+
+    /**
+     * A resolution names no activation unless given them, and keeps those
+     * given.
+     *
+     * @return void
+     */
+    public function testActivationsAreKeptOnlyWhenGiven(): void
+    {
+        $activations = ['policy-1' => ['activation-1']];
+
+        self::assertSame([], (new Resolution(['posts:read']))->activations);
+        self::assertSame($activations, (new Resolution(['posts:read'], null, true, null, $activations))->activations);
+    }
 }

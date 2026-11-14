@@ -8,8 +8,9 @@ use SineMacula\Laravel\Authorization\Usage\RouteMap;
 
 /**
  * What a resolution found: the value, how long it holds, whether it may be
- * stored, and, while grant usage is tracked, the routes of the stored grants
- * behind each permission or policy it found (see `Usage\RouteMap`).
+ * stored, while grant usage is tracked, the routes of the stored grants behind
+ * each permission or policy it found (see `Usage\RouteMap`), and the keys of
+ * the break-glass activations behind each one a role read through one gave.
  *
  * @template-covariant TValue
  *
@@ -25,6 +26,7 @@ final readonly class Resolution
      * @param  int|null  $expiresIn
      * @param  bool  $stable
      * @param  \SineMacula\Laravel\Authorization\Usage\RouteMap|null  $routes
+     * @param  array<string, list<string>>  $activations
      */
     public function __construct(
 
@@ -39,5 +41,8 @@ final readonly class Resolution
 
         /** The routes behind each permission by its name, or each policy by its key, while usage is tracked; null when not tracked, or when the resolution cannot say. */
         public ?RouteMap $routes = null,
+
+        /** The keys of the break-glass activations behind each permission by its name, or each policy by its key; none when no role was read through one. */
+        public array $activations = [],
     ) {}
 }

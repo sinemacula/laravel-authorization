@@ -7,6 +7,7 @@ namespace Tests\Unit\Cache;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCodec;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
@@ -232,5 +233,50 @@ final class ResolutionCodecTest extends TestCase
         $this->expectException(\UnexpectedValueException::class);
 
         ResolutionCodec::routes('routes');
+    }
+
+    /**
+     * Stored activations are read back as lists of keys by grant, a numeric
+     * grant's name as text, and a resolution read as policies keeps its own.
+     *
+     * @return void
+     */
+    public function testReadsActivationsBack(): void
+    {
+        $resolution = new Resolution([Policy::fromArray(['name' => 'p', 'statements' => []])], null, true, null, ['policy-1' => ['activation-1']]);
+
+        self::assertSame(['policy-1' => ['activation-1']], ResolutionCodec::policyResolution($resolution)->activations);
+        self::assertSame(['posts:read' => ['a', 'b'], '7' => ['c']], ResolutionCodec::activations(['posts:read' => ['a', 'b'], 7 => ['c']]));
+        self::assertSame([], ResolutionCodec::activations([]));
+    }
+
+    /**
+     * Return each stored value that is not lists of keys by grant, with why it
+     * is refused.
+     *
+     * @return iterable<string, array{mixed, string}>
+     */
+    public static function corruptActivations(): iterable
+    {
+        yield 'not an array' => ['activations', 'Cached activations are not keyed by grant.'];
+        yield 'a key that is not a list' => [['posts:read' => 'a'], 'Cached activations are not a list of keys.'];
+        yield 'keys keyed by name' => [['posts:read' => ['x' => 'a']], 'Cached activations are not a list of keys.'];
+        yield 'a key that is not a string' => [['posts:read' => [1]], 'Cached name is not a string.'];
+    }
+
+    /**
+     * Stored activations that are not lists of keys by grant are refused.
+     *
+     * @param  mixed  $stored
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('corruptActivations')]
+    public function testRefusesCorruptActivations(mixed $stored, string $message): void
+    {
+        $this->expectException(\UnexpectedValueException::class);
+        $this->expectExceptionMessage($message);
+
+        ResolutionCodec::activations($stored);
     }
 }

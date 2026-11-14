@@ -709,6 +709,55 @@ final class GrantProvenanceResolverTest extends TestCase
     }
 
     /**
+     * An explained check on a cold cache keeps the activations behind each
+     * permission and policy it read, so the check names them, though the cache
+     * keeps nothing else; a grant no activation gave names none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAColdCacheKeepsTheActivationsBehindWhatItRead(): void
+    {
+        $user       = StubIdentity::create(['id' => 'user-1']);
+        $role       = self::emergencyRole('posts:edit');
+        $shared     = self::policy('shared');
+        $own        = self::policy('own');
+        $activation = self::activate($user, $role);
+
+        $role->attachPolicy($shared);
+        $user->attachPolicy($own);
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+
+        GrantProvenanceResolver::permissionFor(new Subject($user, $user), 'posts:edit');
+        GrantProvenanceResolver::policiesOf($user, new EvidenceRecorder);
+
+        $cache = ResolutionCache::instance();
+
+        self::assertNotNull($cache);
+        self::assertEquals(['posts:read' => [], 'posts:edit' => [$activation->id]], $cache->activationsOf('permissions', $user));
+        self::assertEquals([$own->id => [], $shared->id => [$activation->id]], $cache->activationsOf('policies', $user));
+    }
+
+    /**
+     * A permission held directly and through an activation keeps the activation
+     * alone behind it, as a list.
+     *
+     * @return void
+     */
+    public function testAPermissionHeldBothWaysKeepsItsActivationAsAList(): void
+    {
+        $user       = StubIdentity::create(['id' => 'user-1']);
+        $activation = self::activate($user, self::emergencyRole('posts:edit'));
+
+        $user->givePermission(Permission::query()->where('name', 'posts:edit')->firstOrFail());
+
+        GrantProvenanceResolver::permissionFor(new Subject($user, $user), 'posts:edit');
+
+        self::assertSame(['posts:edit' => [$activation->id]], ResolutionCache::instance()?->activationsOf('permissions', $user));
+    }
+
+    /**
      * Create a stored policy allowing an action.
      *
      * @param  string  $name

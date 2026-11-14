@@ -38,6 +38,11 @@ use SineMacula\Laravel\Authorization\Usage\RouteMap;
  * tokens are shared, and the memo, which lasts no longer than the state it was
  * built in, is keyed as ever.
  *
+ * While break-glass is enabled, beside a grantee's permissions, policies and
+ * role keys, each tier keeps the keys of the break-glass activations behind
+ * each one a role read through an activation gave, and nothing when none was
+ * (see `activationsOf()`).
+ *
  * Every entry, in either tier, lives no longer than the nearest expiry of a
  * grant it counts and never longer than the configured maximum. The memo lasts
  * one request or job (the service provider binds the cache with `scoped()`) and
@@ -54,6 +59,12 @@ final readonly class ResolutionCache
     /** @var string The prefix of the memo key the routes behind an entry are kept under. */
     private const string ROUTES = 'routes:';
 
+    /** @var string The prefix of the memo key the break-glass activations behind an entry are kept under. */
+    private const string ACTIVATIONS = 'activations:';
+
+    /** @var list<string> The kinds of entry the break-glass activations behind them are kept beside. */
+    private const array ATTRIBUTED = ['permissions', 'policies', 'role-keys'];
+
     /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionMemo In-memory tier, keyed by full cache key. */
     private ResolutionMemo $memo;
 
@@ -62,6 +73,9 @@ final readonly class ResolutionCache
 
     /** @var string The prefix of every persistent entry's key: the namespace, with the break-glass state it was built in. */
     private string $entries;
+
+    /** @var list<string> The kinds, as kept, the break-glass activations behind an entry are kept beside; none while break-glass is disabled. */
+    private array $attributed;
 
     /**
      * Create a new cache instance.
@@ -92,6 +106,10 @@ final readonly class ResolutionCache
         $this->memo    = new ResolutionMemo(static fn (): string => TenantScope::scopeKey());
         $this->store   = $store === null ? null : new VersionedStore($store, $prefix);
         $this->entries = ($activations->isEnabled ?? false) ? $prefix . ':break-glass' : $prefix;
+
+        $this->attributed = ($activations->isEnabled ?? false)
+            ? \array_map(static fn (string $kind): string => ResolutionCodec::kindOf($kind, $isTrackingUsage), self::ATTRIBUTED)
+            : [];
     }
 
     /**
@@ -347,6 +365,35 @@ final readonly class ResolutionCache
     }
 
     /**
+     * Return the keys of the break-glass activations behind each of the
+     * grantee's permissions, by its name, or each of its policies or role keys,
+     * by its key, as the resolution of the kind last kept or read in the
+     * current scope found them; none while break-glass is disabled, or when no
+     * role it read came through an activation.
+     *
+     * They are kept for as long as the resolution is the last of its key, even
+     * one that lapsed at once, so the check that read it can name them, and a
+     * check that reads afresh replaces them.
+     *
+     * @param  string  $kind
+     * @param  object  $grantee
+     * @return array<string, list<string>>
+     *
+     * @phpstan-impure
+     */
+    public function activationsOf(string $kind, object $grantee): array
+    {
+        if ($this->activations === null || !$this->activations->isEnabled) {
+            return [];
+        }
+
+        $kind = $this->activations->kindOf(ResolutionCodec::kindOf($kind, $this->isTrackingUsage), $grantee);
+
+        /** @var array<string, list<string>> */
+        return $this->memo->get(self::ACTIVATIONS . $kind . ':' . PrincipalCacheKey::for($grantee))[0] ?? [];
+    }
+
+    /**
      * Empty the memo because the tenant the tenant scope applies has changed,
      * or, while a batch is open, set its entries aside for the scope left (see
      * `batch()`).
@@ -583,6 +630,8 @@ final readonly class ResolutionCache
             $this->memo->put(self::ROUTES . $memoKey, [$resolution->routes], $lifetime);
         }
 
+        $this->keepActivations($memoKey, $resolution->activations);
+
         if ($this->store === null || !$resolution->stable || !$held || !$pins->isComplete()) {
             return $resolution->value;
         }
@@ -593,6 +642,7 @@ final readonly class ResolutionCache
             'value'    => $encode === null ? $resolution->value : \array_map($encode, $resolution->value),
             'until'    => Carbon::now()->getTimestamp() + $lifetime,
             ...ResolutionCodec::encodeRoutes($resolution->routes),
+            ...($resolution->activations === [] ? [] : ['activations' => $resolution->activations]),
         ];
 
         if ($writes === null) {
@@ -629,20 +679,23 @@ final readonly class ResolutionCache
         }
 
         try {
-            $value  = $decode($entry['value']);
-            $routes = \array_key_exists('routes', $entry) ? ResolutionCodec::routes($entry['routes']) : null;
+            $value       = $decode($entry['value']);
+            $routes      = \array_key_exists('routes', $entry) ? ResolutionCodec::routes($entry['routes']) : null;
+            $activations = ResolutionCodec::activations($entry['activations'] ?? []);
         } catch (\Throwable $exception) {
             AuthorizationLog::warning("Authorization: discarding corrupt resolution-cache entry '{$key}' — " . $exception->getMessage(), [
                 'cache_key' => $key,
                 'reason'    => $exception->getMessage(),
             ]);
 
-            $value  = null;
-            $routes = null;
+            $value       = null;
+            $routes      = null;
+            $activations = [];
         }
 
         if ($value !== null) {
             $this->memo->put($memoKey, $value, $entry['until'] - Carbon::now()->getTimestamp());
+            $this->keepActivations($memoKey, $activations);
         }
 
         if ($value !== null && $routes !== null) {
@@ -650,5 +703,23 @@ final readonly class ResolutionCache
         }
 
         return $value;
+    }
+
+    /**
+     * Keep the break-glass activations behind the entry beside it in the memo,
+     * for a kind they are asked about while break-glass is enabled, none
+     * included, so a list kept before is replaced.
+     *
+     * @param  string  $memoKey
+     * @param  array<string, list<string>>  $activations
+     * @return void
+     */
+    private function keepActivations(string $memoKey, array $activations): void
+    {
+        if (!\in_array(\strstr($memoKey, ':', true), $this->attributed, true)) {
+            return;
+        }
+
+        $this->memo->put(self::ACTIVATIONS . $memoKey, [$activations], null);
     }
 }

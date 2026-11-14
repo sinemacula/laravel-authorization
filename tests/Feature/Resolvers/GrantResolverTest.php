@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -36,6 +37,8 @@ use Tests\TestCase;
 #[CoversClass(GrantResolver::class)]
 final class GrantResolverTest extends TestCase
 {
+    use ActivatesBreakGlass;
+
     /**
      * Start the clock.
      *
@@ -206,6 +209,74 @@ final class GrantResolverTest extends TestCase
     }
 
     /**
+     * A role read through a break-glass activation names the activation behind
+     * each permission and policy it, or a role above it, gives, a role also
+     * granted included, and nothing behind a grant no activation gave; a
+     * grantee holding none names nothing.
+     *
+     * @return void
+     */
+    public function testAnActivatedRoleNamesItsActivationBehindWhatItGives(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $other  = StubIdentity::create(['id' => 'user-2']);
+        $parent = Role::create(['name' => 'publisher']);
+        $role   = Role::create(['name' => 'responder', 'parent_id' => $parent->id]);
+        $policy = Policy::create(['name' => 'publishers', 'document' => ['version' => 1, 'statements' => []]]);
+        $own    = Policy::create(['name' => 'own', 'document' => ['version' => 1, 'statements' => []]]);
+
+        $parent->givePermission(Permission::create(['name' => 'posts:publish']));
+        $parent->attachPolicy($policy);
+        $role->givePermission(Permission::create(['name' => 'posts:create']));
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        $user->attachPolicy($own);
+        $other->assignRole($role);
+
+        $activation = self::activate($user, $role);
+        $expected   = ['posts:create' => [$activation->id], 'posts:publish' => [$activation->id]];
+
+        $resolved = GrantResolver::permissions($user->permissions(), $user->roles(), self::pins()[0]);
+
+        self::assertEquals($expected, $resolved->activations);
+        self::assertNull($resolved->routes);
+        self::assertTrue($resolved->stable);
+        self::assertSame([$policy->id => [$activation->id]], GrantResolver::policies($user->policies(), self::pins()[0], $user->roles())->activations);
+        self::assertSame([], GrantResolver::permissions($other->permissions(), $other->roles(), self::pins()[0])->activations);
+        self::assertSame([], GrantResolver::policies($other->policies(), self::pins()[0], $other->roles())->activations);
+
+        $user->assignRole($role);
+
+        self::assertEquals($expected, GrantResolver::permissions($user->permissions(), $user->roles(), self::pins()[0])->activations);
+    }
+
+    /**
+     * A resolution holding an activated role whose hierarchy moves while it
+     * runs reads the roles afresh by role, still naming the activation behind
+     * what the role now gives, and says no routes.
+     *
+     * @return void
+     */
+    public function testAMovedHierarchyStillNamesTheActivation(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $parent = Role::create(['name' => 'publisher']);
+        $role   = Role::create(['name' => 'responder']);
+
+        $parent->givePermission(Permission::create(['name' => 'posts:publish']), Carbon::parse('2026-07-01 12:01:00'));
+
+        $activation = self::activate($user, $role);
+        $move       = static fn () => DB::table('roles')->where('id', $role->id)->update(['parent_id' => $parent->id]);
+        $store      = new VersionedStore(new Repository(self::onFirstPin($move)), 'authz');
+        $resolution = GrantResolver::permissions($user->permissions(), $user->roles(), new ResolutionPins($store, true));
+
+        self::assertSame(['posts:publish'], $resolution->value);
+        self::assertSame(60, $resolution->expiresIn);
+        self::assertFalse($resolution->stable);
+        self::assertNull($resolution->routes);
+        self::assertSame(['posts:publish' => [$activation->id]], $resolution->activations);
+    }
+
+    /**
      * A role's grant of a permission that expires sooner than any grant of the
      * identity's bounds the resolution, and one that has expired is left out.
      *
@@ -288,6 +359,61 @@ final class GrantResolverTest extends TestCase
 
         self::assertFalse($resolution->stable);
         self::assertEqualsCanonicalizing([$role->id, $parent->id], $resolution->value);
+    }
+
+    /**
+     * A role read through a break-glass activation names the activation behind
+     * its key and each key above it, also when the hierarchy moves meanwhile; a
+     * role granted alone, and a grantee holding no activated role, name none.
+     *
+     * @return void
+     */
+    public function testAnActivatedRoleNamesItsActivationBehindItsKeys(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $parent  = Role::create(['name' => 'publisher']);
+        $role    = Role::create(['name' => 'responder', 'parent_id' => $parent->id]);
+        $granted = Role::create(['name' => 'editor']);
+        $moved   = Role::create(['name' => 'auditor']);
+        $above   = Role::create(['name' => 'lead']);
+
+        $user->assignRole($granted);
+
+        self::assertSame([], GrantResolver::roleKeys($user->roles(), new ResolutionPins)->activations);
+
+        $activation = self::activate($user, $role);
+        $resolution = GrantResolver::roleKeys($user->roles(), new ResolutionPins);
+
+        self::assertEqualsCanonicalizing([$granted->id, $role->id, $parent->id], $resolution->value);
+        self::assertSame([$role->id => [$activation->id], $parent->id => [$activation->id]], $resolution->activations);
+
+        $other = self::activate($user, $moved);
+        $store = new VersionedStore(new Repository(self::onFirstPin(static fn () => DB::table('roles')->where('id', $moved->id)->update(['parent_id' => $above->id]))), 'authz');
+        $fresh = GrantResolver::roleKeys($user->roles(), new ResolutionPins($store));
+
+        self::assertFalse($fresh->stable);
+        self::assertSame([$other->id], $fresh->activations[$above->id] ?? null);
+        self::assertSame([$other->id], $fresh->activations[$moved->id] ?? null);
+    }
+
+    /**
+     * A resolution tracking grant usage says the routes behind each permission
+     * it finds.
+     *
+     * @return void
+     */
+    public function testARoutedResolutionSaysTheRoutesBehindEachPermission(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $role = Role::create(['name' => 'editor']);
+
+        $role->givePermission(Permission::create(['name' => 'posts:edit']));
+        $user->assignRole($role);
+
+        $routes = GrantResolver::permissions($user->permissions(), $user->roles(), new ResolutionPins(null, true))->routes;
+
+        self::assertNotNull($routes);
+        self::assertSame(['posts:edit'], $routes->names());
     }
 
     /**

@@ -26,8 +26,8 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * that is on reports it, for the first reason, in the order `DecisionReport`
  * declares them, that applies to it and is reported: a preview's denial is
  * reported as a preview while `previews` is on, and as a denial while it is off
- * and `denials` is on. A break-glass allow is to be reported whatever the
- * settings (BL-72b); no decision uses a break-glass grant yet.
+ * and `denials` is on. An allow that used break-glass is reported whatever the
+ * settings, `allows: none` included, as `BREAK_GLASS` (N142).
  *
  * The settings are read once for each batch of checks that reports its
  * decisions (see `CheckBatch`), so each decision costs a few comparisons and
@@ -123,7 +123,7 @@ final readonly class DecisionReporting
      */
     public function evaluated(DecisionProvenance $provenance, string $action, false|ResourceReference|null $reference, Decision $decision): ?DecisionEvaluated
     {
-        $report = $this->reportOf($decision->effect, $decision->reason, $action, $provenance->previewer !== null);
+        $report = $this->reportOf($decision->effect, $decision->reason, $action, $provenance->previewer !== null, $decision->activations !== []);
 
         return $report === null ? null : DecisionEvaluated::of($provenance, $action, ResourceReferences::identifierOf($reference), $decision, $report, $this->isSensitive($action));
     }
@@ -148,17 +148,19 @@ final readonly class DecisionReporting
      * Return why a decision with the effect and reason, on the action, is
      * reported, or null when the settings do not report it: the first reason,
      * in the order `DecisionReport` declares them, that applies to it and that
-     * the settings report.
+     * the settings report. One that used break-glass is always reported.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect  $effect
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null  $reason
      * @param  string  $action
      * @param  bool  $isPreview
+     * @param  bool  $isBreakGlass
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport|null
      */
-    public function reportOf(DecisionEffect $effect, ?DecisionReason $reason, string $action, bool $isPreview): ?DecisionReport
+    public function reportOf(DecisionEffect $effect, ?DecisionReason $reason, string $action, bool $isPreview, bool $isBreakGlass = false): ?DecisionReport
     {
         return match (true) {
+            $isBreakGlass                                                                                => DecisionReport::BREAK_GLASS,
             $isPreview && $this->previews                                                                => DecisionReport::PREVIEW,
             $effect                                      === DecisionEffect::ALLOW                       => $this->allowReport($action),
             $this->insufficientAuthentication && $reason === DecisionReason::INSUFFICIENT_AUTHENTICATION => DecisionReport::INSUFFICIENT_AUTHENTICATION,

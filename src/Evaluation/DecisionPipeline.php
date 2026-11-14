@@ -332,7 +332,10 @@ final class DecisionPipeline
      * held are resolved with where each came from, noted with the recorder, and
      * the context records each condition test (N89). Given what a tracked check
      * weighed, the grantee whose permission matched is noted on it, as the
-     * check asks for the permission (see `Usage\WeighedGrants`).
+     * check asks for the permission (see `Usage\WeighedGrants`). While the
+     * principal's break-glass activations count, the activations behind its
+     * policies and permissions are noted as each resolves, so an allow can name
+     * them (see `BreakGlassAttribution`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -360,9 +363,10 @@ final class DecisionPipeline
         // gathered, before any is read (see `Preview\PreviewAdmission`).
         Previewing::admit($subject);
 
-        $policies   = $this->gatherPolicies($subject, $resource, $evidence);
-        $guardrails = $action === PackagePermissions::GUARDRAIL_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
-        $boundaries = SubjectGrants::boundaries($subject);
+        $attribution = BreakGlassAttribution::of($subject, $action);
+        $policies    = $this->gatherPolicies($subject, $resource, $evidence, $attribution);
+        $guardrails  = $action === PackagePermissions::GUARDRAIL_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
+        $boundaries  = SubjectGrants::boundaries($subject);
 
         // What the caller passes is held under `input` alone, never promoted
         // into another namespace, so it cannot stand in for the request, the
@@ -372,10 +376,12 @@ final class DecisionPipeline
         $checkContext = $this->contexts?->make($context, $subject, $resource, $attributes)
             ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
 
-        $permission = $evidence === null
+        $held = $evidence === null
             ? static fn (): ?string => SubjectGrants::permissionFor($subject, $action, $weighed)
             : static fn (): ?string => $evidence->notePermission(GrantProvenanceResolver::permissionFor($subject, $action));
-        $session = $this->isSessionless
+
+        $permission = $attribution === null ? $held : static fn (): ?string => $attribution->notePermission($held());
+        $session    = $this->isSessionless
             ? SessionCaps::of(null, $this->caps)
             : ($this->sessionCaps ?? new SessionCapResolver)->capsFor($subject, $this->caps);
 
@@ -383,7 +389,7 @@ final class DecisionPipeline
             $checkContext->explain();
         }
 
-        return new CheckSources($policies, $guardrails, $boundaries, $checkContext, $permission, $session);
+        return new CheckSources($policies, $guardrails, $boundaries, $checkContext, $permission, $session, $attribution);
     }
 
     /**
@@ -530,6 +536,10 @@ final class DecisionPipeline
      * guardrails, the subject's boundaries, the session caps and its
      * permissions still count.
      *
+     * An allow names the break-glass activations behind it, read before the
+     * administration stage, which keeps them on an allow it lets through (see
+     * `BreakGlassAttribution`).
+     *
      * An allow of an administration action on an operation resource of that
      * action then passes the operation's constraints, at the administration
      * stage, which can only refuse it (see `OperationConstraints`); a further
@@ -631,7 +641,8 @@ final class DecisionPipeline
      * be read denies it as an invalid policy. Given a recorder, the check is
      * explained (see `sources()`), and given what a tracked check weighed, the
      * grants it weighed are noted on it; a further check the administration
-     * stage makes is never either.
+     * stage makes is never either. An allow names the break-glass activations
+     * behind it.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -657,7 +668,9 @@ final class DecisionPipeline
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }
 
-        return $this->weigh($sources, $action, $resource);
+        $decision = $this->weigh($sources, $action, $resource);
+
+        return $decision->withActivations($sources->attribution?->behind($decision, $sources->policies) ?? []);
     }
 
     /**
@@ -678,11 +691,12 @@ final class DecisionPipeline
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder|null  $evidence
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\BreakGlassAttribution|null  $attribution
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
-    private function gatherPolicies(Subject $subject, ?ResourceReference $resource, ?EvidenceRecorder $evidence): array
+    private function gatherPolicies(Subject $subject, ?ResourceReference $resource, ?EvidenceRecorder $evidence, ?BreakGlassAttribution $attribution): array
     {
         if ($this->policyOverride !== null) {
             return $this->policyOverride;
@@ -691,6 +705,9 @@ final class DecisionPipeline
         $own = $evidence === null
             ? [...$this->policyResolver->policiesFor($subject->subject), ...SubjectGrants::identityPolicies($subject)]
             : $this->explainedPolicies($subject, $evidence);
+
+        // Reading the resource's policies in its tenant empties the memo.
+        $attribution?->notePolicies();
 
         return [...$own, ...$this->resourcePolicies?->policiesFor($resource) ?? []];
     }
