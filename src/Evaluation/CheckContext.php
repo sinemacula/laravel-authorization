@@ -7,7 +7,7 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 /**
  * The context of one check: nested namespaces (`authentication`, `request`,
  * `environment`, `subject`, `resource`, `input` and any an application source
- * adds), each read as a dot path, segment by segment (N24).
+ * adds), each read as a dot path, segment by segment.
  *
  * A namespace is given already built (the caller's `input`) or built by a
  * builder the first time a statement of the check reads it, and at most once
@@ -37,9 +37,9 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  * no resource policy's allow applies.
  *
  * A context an explained check reads through records the evidence the
- * explanation needs (N89): each `${…}` reference it could not resolve, by key,
- * which the statement reading it takes once its test is assessed. Any other
- * context records nothing.
+ * explanation needs: each `${…}` reference it could not resolve, by key, which
+ * the statement reading it takes once its test is assessed. Any other context
+ * records nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

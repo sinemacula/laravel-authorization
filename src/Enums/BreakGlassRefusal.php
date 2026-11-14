@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Enums;
 
 /**
- * Why a break-glass activation, or a surrender, was refused (AUTHZ-11.7), as
+ * Why a break-glass activation, or a surrender, was refused, as
  * `BreakGlassRefusedException::getReason()` reports it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

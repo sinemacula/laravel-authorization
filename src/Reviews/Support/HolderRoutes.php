@@ -12,8 +12,8 @@ use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Who holds a role, a permission or a policy in a review's scope (N93), one row
- * for each route, the grantee of the stored grant being the holder:
+ * Who holds a role, a permission or a policy in a review's scope, one row for
+ * each route, the grantee of the stored grant being the holder:
  *
  * - a direct grant of the target, or for a role, a break-glass activation of it
  *   not ended or expired, a row of its own (see `GrantRows::held()`);

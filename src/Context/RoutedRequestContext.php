@@ -10,8 +10,7 @@ use SineMacula\Laravel\Authorization\Contracts\RequestContext;
 use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 
 /**
- * The default request context: the container's current request, once routed
- * (AUTHZ-8.6).
+ * The default request context: the container's current request, once routed.
  *
  * Supplies the client IP as Laravel resolves it behind the trusted proxies
  * (`ip`), the method (`method`) and the route's name (`route`). A request that

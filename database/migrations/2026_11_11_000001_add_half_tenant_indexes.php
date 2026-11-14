@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Add the indexes the rows naming half a tenant are found through (N130).
+ * Add the indexes the rows naming half a tenant are found through.
  *
  * A row naming half a tenant, a type without a key or a key without a type,
  * which the package never writes, restricts everywhere: a guardrail stored that

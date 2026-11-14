@@ -15,9 +15,9 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the further checks of one decision when the decisions of
- * the request are forgotten while it is made (N112): whether a right is
- * limited, worked out once for each right until then, is worked out again, and
- * once only.
+ * the request are forgotten while it is made: whether a right is limited,
+ * worked out once for each right until then, is worked out again, and once
+ * only.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

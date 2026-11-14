@@ -28,24 +28,23 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * A policy `create()` makes is managed: attached to any number of grantees and
  * roles. One `createInline()` makes belongs to one grantee, is attached to that
- * grantee alone, and is deleted with it (AUTHZ-6.9); its name is unique among
- * that grantee's inline policies. Both validate the document the same way.
+ * grantee alone, and is deleted with it; its name is unique among that
+ * grantee's inline policies. Both validate the document the same way.
  *
  * Each method takes the acting context making the call as `$actor`, the reads
  * as well as the writes: null for trusted system work, such as seeders,
- * migrations and console commands (N75). A write with an acting context is
- * delegated administration (AUTHZ-11.1): it is decided as the actor, through
- * `check()`, on the definition's operation resource, under
- * `authorization:policy.create` (an inline policy included), `.rename`,
- * `.update` (a rewrite or a description) or `.delete`, inside its transaction
- * before anything is written, and refused with the decision's
- * `AuthorizationException` when it is not allowed. A change is made only from
- * the tenant that owns the policy, a platform policy's from the platform
- * (`administration.owner`, D20): `create()` makes one owned by the tenant it is
- * given, else by the platform, so a tenant's administrator creates its tenant's
- * policies from that tenant's context. A delegated change weighs, and writes,
- * the policy as stored, discarding changes to the model in hand that were not
- * saved, and a rewrite is decided on the operation resource
+ * migrations and console commands. A write with an acting context is delegated
+ * administration: it is decided as the actor, through `check()`, on the
+ * definition's operation resource, under `authorization:policy.create` (an
+ * inline policy included), `.rename`, `.update` (a rewrite or a description) or
+ * `.delete`, inside its transaction before anything is written, and refused
+ * with the decision's `AuthorizationException` when it is not allowed. A change
+ * is made only from the tenant that owns the policy, a platform policy's from
+ * the platform (`administration.owner`): `create()` makes one owned by the
+ * tenant it is given, else by the platform, so a tenant's administrator creates
+ * its tenant's policies from that tenant's context. A delegated change weighs,
+ * and writes, the policy as stored, discarding changes to the model in hand
+ * that were not saved, and a rewrite is decided on the operation resource
  * `OperationResource::rewrite()` builds, as a screen builds it. Creating,
  * renaming and describing a policy widen no one, and deleting one does unless
  * it denies. A rewrite that only removes allows or adds denies narrows; one

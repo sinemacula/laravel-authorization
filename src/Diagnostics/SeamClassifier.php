@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\Enums\Origin;
 use SineMacula\Laravel\Authorization\Hooks\ListedGrantHooks;
 
 /**
- * Tell where each seam's binding came from without building it (N113, N118).
+ * Tell where each seam's binding came from without building it.
  *
  * What supplies the contract now (see `CurrentBinding`) is compared by identity
  * with what the package recorded as it bound the contract (see

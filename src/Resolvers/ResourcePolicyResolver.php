@@ -24,7 +24,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
- * Resolves the resource policies a check on a resource reads (AUTHZ-7.3).
+ * Resolves the resource policies a check on a resource reads.
  *
  * A check on a record reads the policies attached to the record and to its
  * type; a check on a type alone, those attached to the type; a check on an

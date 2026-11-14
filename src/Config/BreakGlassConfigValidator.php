@@ -10,8 +10,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
- * Boot-time validator and reader of the `authorization.break_glass` config
- * (AUTHZ-11.7, N133), run by `ConfigValidator`.
+ * Boot-time validator and reader of the `authorization.break_glass` config, run
+ * by `ConfigValidator`.
  *
  * The block must be an array of these settings, each optional:
  *
@@ -34,10 +34,10 @@ use SineMacula\Laravel\Authorization\Models\Role;
  *   at least 1, 500 by default.
  *
  * Whole numbers are ints or strings written as whole numbers, as the
- * environment gives them, and switches real booleans (N117). A setting set to
- * null is refused, but for a role's `max_minutes`. Any other key, in the block
- * or a role's settings, is refused, naming its path (N116). The same checks
- * refuse a setting changed after boot when it is read (see `read()`).
+ * environment gives them, and switches real booleans. A setting set to null is
+ * refused, but for a role's `max_minutes`. Any other key, in the block or a
+ * role's settings, is refused, naming its path. The same checks refuse a
+ * setting changed after boot when it is read (see `read()`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

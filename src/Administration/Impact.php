@@ -11,10 +11,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * The impact check of a change to a shared definition (AUTHZ-11.1, N78): a
- * change that widens what a role, a permission or a policy hands out is a new
- * distribution of authority to everyone who holds it, so every holder whose
- * authority grows must be one the actor administers, as a grant to it would be.
+ * The impact check of a change to a shared definition: a change that widens
+ * what a role, a permission or a policy hands out is a new distribution of
+ * authority to everyone who holds it, so every holder whose authority grows
+ * must be one the actor administers, as a grant to it would be.
  *
  * The holders are read as a set (see `AffectedHolders`), and the change is then
  * weighed against all of them at once, at a fixed cost however many there are:
@@ -27,17 +27,17 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *   rule the scope is weighed by, as well as at its node (see
  *   `OperationConstraints`), or it is refused as
  *   `administration.impersonating`;
- * - **scope** (N79): the actor must administer the whole reach the holders'
- *   grants can have, the definition's owner and every tenant below it in every
+ * - **scope**: the actor must administer the whole reach the holders' grants
+ *   can have, the definition's owner and every tenant below it in every
  *   application, or the platform for a platform definition (see
  *   `AdministeredScope`): the operation's own action decided again there,
  *   standing just below the owner, so only authority that itself reaches below
  *   counts, and nothing that denies or caps the actor anywhere in the reach
  *   could limit it, or it is refused as `administration.scope`;
- * - **rank** (N76): the actor, ranked in the operation's tenant, must be
- *   strictly senior to the most senior rank any holder but itself holds
- *   anywhere in that reach (see `RankComparison::rankAcrossAll()`), and to a
- *   rank the change gives them, or it is refused as `administration.rank`, or
+ * - **rank**: the actor, ranked in the operation's tenant, must be strictly
+ *   senior to the most senior rank any holder but itself holds anywhere in that
+ *   reach (see `RankComparison::rankAcrossAll()`), and to a rank the change
+ *   gives them, or it is refused as `administration.rank`, or
  *   `administration.rank_uncomparable` when a holder's or the actor's rank, or
  *   the reach, cannot be read;
  * - **self**: a change that reaches the actor itself, its principal or its

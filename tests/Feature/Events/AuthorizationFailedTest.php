@@ -28,7 +28,7 @@ use Tests\TestCase;
  * Feature tests for `AuthorizationFailed` as the manager dispatches it when
  * `authorize()` refuses: the same references, names and ids as the decision's
  * `DecisionEvaluated`, never a model, the caller's context or a value the
- * decision read (AUTHZ-15.3, AUTHZ-15.4).
+ * decision read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

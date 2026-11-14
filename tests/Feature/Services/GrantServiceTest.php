@@ -493,7 +493,7 @@ final class GrantServiceTest extends TestCase
     /**
      * A grant can be made for one application, apart from the grant for every
      * application, and each kind's grant, revocation and sync stays in the
-     * application named, every event reporting it (D24).
+     * application named, every event reporting it.
      *
      * @return void
      *

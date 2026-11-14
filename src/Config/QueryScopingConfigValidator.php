@@ -5,15 +5,15 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Config;
 
 /**
- * Boot-time validator for the `authorization.query_scoping` config
- * (AUTHZ-10.1), run by `ConfigValidator`.
+ * Boot-time validator for the `authorization.query_scoping` config, run by
+ * `ConfigValidator`.
  *
  * The block must be an array, and each limit it sets (`max_anchors`,
  * `max_scopes`, `max_attachments`) a whole number of at least 1, an int or a
- * string written as a whole number, as the environment gives one (N117). A
- * limit it does not set takes its default, and one set to null is refused; any
- * other key is refused, naming its path (N116), so a misspelt limit fails at
- * boot rather than leaving its default in place.
+ * string written as a whole number, as the environment gives one. A limit it
+ * does not set takes its default, and one set to null is refused; any other key
+ * is refused, naming its path, so a misspelt limit fails at boot rather than
+ * leaving its default in place.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

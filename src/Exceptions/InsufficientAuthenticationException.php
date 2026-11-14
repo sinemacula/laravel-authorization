@@ -12,9 +12,8 @@ use SineMacula\Laravel\Authorization\Support\Messages;
 
 /**
  * Thrown when `authorize()`, or one of the package's route middleware, decides
- * a check as `insufficient_authentication` (AUTHZ-7.8, AUTHZ-9.6, N36): an
- * allow would apply once the subject's session meets an authentication
- * requirement.
+ * a check as `insufficient_authentication`: an allow would apply once the
+ * subject's session meets an authentication requirement.
  *
  * Extends Laravel's own authorization exception, so an application that does
  * not map it to a step-up response still renders it as a `403`. It carries the

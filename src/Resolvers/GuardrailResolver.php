@@ -16,22 +16,22 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
- * Resolves the guardrails that apply to a check (AUTHZ-7.6).
+ * Resolves the guardrails that apply to a check.
  *
  * The guardrails of a check are the platform's and those of the check's tenant
  * and every one of its ancestors in the tenant tree, as a tenant's guardrails
- * reach its subtree (AUTHZ-5.3). The check's tenant is the resource's when the
- * resource has one, also when a platform-wide grant admitted a resource of a
- * tenant outside the scope and the check is decided at platform scope (see
- * `ResourceScope`), so a tenant's guardrails always cap a check on its
- * resources; else it is the tenant the check is decided in. With no tenant,
- * only the platform's apply (AUTHZ-5.7). A guardrail naming half a tenant, a
- * type without a key or a key without a type, which the package never writes,
- * applies everywhere, as the platform's do, since what restricts fails closed
- * (see `Support\TenantColumns`). Every one that applies is intersected at the
- * guardrail stage. The authorization manager never asks for the guardrails of a
- * check of `authorization:guardrail.manage`, which is exempt from them, so no
- * guardrail ever keeps an actor from changing the guardrails.
+ * reach its subtree. The check's tenant is the resource's when the resource has
+ * one, also when a platform-wide grant admitted a resource of a tenant outside
+ * the scope and the check is decided at platform scope (see `ResourceScope`),
+ * so a tenant's guardrails always cap a check on its resources; else it is the
+ * tenant the check is decided in. With no tenant, only the platform's apply. A
+ * guardrail naming half a tenant, a type without a key or a key without a type,
+ * which the package never writes, applies everywhere, as the platform's do,
+ * since what restricts fails closed (see `Support\TenantColumns`). Every one
+ * that applies is intersected at the guardrail stage. The authorization manager
+ * never asks for the guardrails of a check of `authorization:guardrail.manage`,
+ * which is exempt from them, so no guardrail ever keeps an actor from changing
+ * the guardrails.
  *
  * The guardrails and their documents are read in one query, on the write
  * connection, those naming half a tenant through two more united with it, each

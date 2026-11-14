@@ -8,9 +8,9 @@ use Carbon\CarbonImmutable;
 use SineMacula\Laravel\Authorization\Usage\UsageBatch;
 
 /**
- * Where grant usage is kept (N102): each grant route's last observed use, and
- * the periods tracking was on, so a review can tell a grant nobody used from
- * one whose use was never watched.
+ * Where grant usage is kept: each grant route's last observed use, and the
+ * periods tracking was on, so a review can tell a grant nobody used from one
+ * whose use was never watched.
  *
  * The package binds a store on its own tables (see
  * `Usage\DatabaseGrantUsageStore`); an application may bind its own, to send

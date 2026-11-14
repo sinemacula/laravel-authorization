@@ -7,8 +7,8 @@ namespace SineMacula\Laravel\Authorization\Support;
 use Illuminate\Contracts\Translation\Translator;
 
 /**
- * Words the messages the package puts in front of a client (AUTHZ-9.7, N61,
- * N62), from the lines of its `authorization` language file.
+ * Words the messages the package puts in front of a client, from the lines of
+ * its `authorization` language file.
  *
  * Every denial carries the one generic `denied` line, whatever its reason: the
  * reason code travels beside it, on the exception or the policy response, for

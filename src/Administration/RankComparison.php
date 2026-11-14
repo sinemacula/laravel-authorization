@@ -21,10 +21,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
 /**
- * The one comparison of rank delegated administration makes (AUTHZ-3.5, N76):
- * whether an actor's rank lets it act on a target. It grants nothing by itself:
- * it is one constraint among the others, never an allow, so passing it says
- * only that rank does not stand in the way.
+ * The one comparison of rank delegated administration makes: whether an actor's
+ * rank lets it act on a target. It grants nothing by itself: it is one
+ * constraint among the others, never an allow, so passing it says only that
+ * rank does not stand in the way.
  *
  * Both sides are resolved through the same path, scope-aware: the roles each
  * holds in the scope, the current tenant and application unless one is given, a

@@ -29,11 +29,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * `hasRole`, `getRoleNames`) to migrate without rewriting call sites.
  *
  * Each write helper takes an optional `actor:`, an acting context it hands to
- * the service, so the change is delegated and decided as that actor
- * (AUTHZ-11.1). Without one it is trusted system work: nothing is decided, so a
- * helper called without an actor is an integration surface for the
- * application's own code, never an endpoint for user-controlled administration.
- * `removeRole()` takes no actor, so it is always trusted.
+ * the service, so the change is delegated and decided as that actor. Without
+ * one it is trusted system work: nothing is decided, so a helper called without
+ * an actor is an integration surface for the application's own code, never an
+ * endpoint for user-controlled administration. `removeRole()` takes no actor,
+ * so it is always trusted.
  *
  * The role checks and `canActOn()` refuse while the package is not healthy (see
  * `PackageState`), before the resolution cache or the loaded roles are read.
@@ -251,16 +251,16 @@ trait HasRoles // @phpstan-ignore trait.unused
 
     /**
      * Determine whether rank lets this identity act on the given target, as
-     * `RankComparison` compares them (N76): strictly senior, an unranked target
-     * the most junior, an unranked actor acting on no one, and either side
-     * whose roles cannot be read not comparable. Both are resolved the same
-     * way, in the current tenant and application, an expired grant never
-     * counting. With `authorization.rank.enabled` false, rank is no constraint,
-     * so it returns true.
+     * `RankComparison` compares them: strictly senior, an unranked target the
+     * most junior, an unranked actor acting on no one, and either side whose
+     * roles cannot be read not comparable. Both are resolved the same way, in
+     * the current tenant and application, an expired grant never counting. With
+     * `authorization.rank.enabled` false, rank is no constraint, so it returns
+     * true.
      *
      * It returns the comparison alone and grants nothing: rank is never an
-     * allow (AUTHZ-3.5), and delegated administration weighs it beside every
-     * other check, never in place of one.
+     * allow, and delegated administration weighs it beside every other check,
+     * never in place of one.
      *
      * @param  object  $target
      * @return bool

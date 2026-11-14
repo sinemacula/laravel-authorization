@@ -10,10 +10,9 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 /**
  * The role, permission or policy a delegated change hands out, as stored, so
  * the change is weighed on the row it writes against, never on the model in
- * hand (AUTHZ-11.1): a model with unsaved changes, or one read before another
- * write changed its row, would otherwise be judged on a rank, a name or a
- * document the row does not hold, while the grant is written against the row's
- * key.
+ * hand: a model with unsaved changes, or one read before another write changed
+ * its row, would otherwise be judged on a rank, a name or a document the row
+ * does not hold, while the grant is written against the row's key.
  *
  * The row is read by its key, on the write connection, outside every global
  * scope, inside the change's transaction, so it is the row as last committed

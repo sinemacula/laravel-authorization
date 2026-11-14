@@ -2,7 +2,7 @@
 
 /**
  * Create the `role_exclusions` table: the pairs of roles declared mutually
- * exclusive (AUTHZ-11.8, N135).
+ * exclusive.
  *
  * Each row names two roles by key, so a pair holds whatever the roles are
  * called and whichever tenant owns them, in a canonical order, the lower key

@@ -13,7 +13,7 @@ use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
- * Boot-time validator for the `authorization.attributes` config (N30), run by
+ * Boot-time validator for the `authorization.attributes` config, run by
  * `ConfigValidator`.
  *
  * `attributes.resources` and `attributes.subjects` must each map a morph type
@@ -25,8 +25,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * `tenant`), no key another provider declares with another type, and no key
  * under another key the same provider declares.
  *
- * The block sets no key but `resources` and `subjects` (N116); each is empty
- * when left out, and refused when set to null.
+ * The block sets no key but `resources` and `subjects`; each is empty when left
+ * out, and refused when set to null.
  *
  * The check of each entry's shape (`providers()`, `provider()`) builds nothing
  * and can run alone, as the configuration report runs it; the check of what the

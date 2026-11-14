@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 /**
- * Dispatched when a grantee's permission boundary is removed in a scope
- * (AUTHZ-7.4), by the boundary service or once the grantee is deleted.
+ * Dispatched when a grantee's permission boundary is removed in a scope, by the
+ * boundary service or once the grantee is deleted.
  *
  * It carries what every change to a boundary does (see `BoundaryEvent`): the
  * operation, the grantee, the policy that was the boundary, its name and the

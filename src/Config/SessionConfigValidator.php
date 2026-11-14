@@ -13,8 +13,8 @@ use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 
 /**
- * Boot-time validator for the `authorization.session` config (AUTHZ-7.5,
- * AUTHZ-13.3), run by `ConfigValidator`.
+ * Boot-time validator for the `authorization.session` config, run by
+ * `ConfigValidator`.
  *
  * `session.source` must name a class implementing `SessionPolicySource`; null
  * is refused rather than read as "no cap", so a missing source fails at boot
@@ -29,8 +29,8 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  * it, so the declared permissions are read at boot, and only when the map names
  * a scope.
  *
- * The block sets no key but `source` and `scopes` (N116); `scopes` is empty
- * when left out, and refused when set to null.
+ * The block sets no key but `source` and `scopes`; `scopes` is empty when left
+ * out, and refused when set to null.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

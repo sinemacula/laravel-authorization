@@ -7,16 +7,16 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 use SineMacula\Laravel\Authorization\Subject;
 
 /**
- * Session policy source contract (AUTHZ-13.3).
+ * Session policy source contract.
  *
  * Answers the scopes the credential of a check's subject carries, which cap
- * every check about it (AUTHZ-7.5): an action passes the session stage only
- * when a pattern the scopes map to covers it, through
- * `authorization.session.scopes`, where a scope not mapped names an action or
- * an action pattern itself. A cap grants nothing.
+ * every check about it: an action passes the session stage only when a pattern
+ * the scopes map to covers it, through `authorization.session.scopes`, where a
+ * scope not mapped names an action or an action pattern itself. A cap grants
+ * nothing.
  *
  * Null means the credential carries no cap, and differs from an empty list,
- * which allows nothing. A source answers in this order (N126):
+ * which allows nothing. A source answers in this order:
  *
  * - The subject says what its credential carries, in its own `scopes`, which a
  *   subject resolver fills from the credential it read: the source answers from

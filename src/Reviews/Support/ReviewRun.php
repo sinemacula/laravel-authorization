@@ -23,24 +23,24 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * for the whole run, and the instant it is made at, against which every expiry
  * is read, frozen so the run reads one instant throughout.
  *
- * The structural rules are those a check reads (D22), never a second evaluator:
- * a grant counts while it is live (see `LiveGrants`), and applies in a tenant
- * as `TenantChain::grants()` reads it; a role or permission counts in a tenant
+ * The structural rules are those a check reads, never a second evaluator: a
+ * grant counts while it is live (see `LiveGrants`), and applies in a tenant as
+ * `TenantChain::grants()` reads it; a role or permission counts in a tenant
  * only when the tenant sees it (`TenantChain::owners()`), as the definition
  * models' tenant scope reads them; and a grant is rooted within a tenant as
  * `GrantRoots::within()` reads it, the tree's subtree query nested whole, never
  * loaded.
  *
  * A row that names half a tenant, a tenant type without a key or a key without
- * a type, which the package never writes (N99), is neither the platform's nor
- * any tenant's (see `TenantChain::whereNullTenant()`): a check applies what
- * grants of it nowhere and what restricts of it everywhere (N130, see
+ * a type, which the package never writes, is neither the platform's nor any
+ * tenant's (see `TenantChain::whereNullTenant()`): a check applies what grants
+ * of it nowhere and what restricts of it everywhere (see
  * `Support\TenantColumns`), so it is never a placed grant and no review of what
  * applies lists it. A review of everywhere, which needs platform-wide
  * admission, lists it all the same; a review rooted within a tenant never does,
  * since it cannot be shown to lie within the tenant and a scoped review never
- * discloses another tenant's holders (N96). Either is marked `malformed`, its
- * origin scope as stored (see `GrantRow` and `Enums\GrantState`).
+ * discloses another tenant's holders. Either is marked `malformed`, its origin
+ * scope as stored (see `GrantRow` and `Enums\GrantState`).
  *
  * A role's policy attachment reaches a holder of the role only where both the
  * role's grant and the attachment hold, as `RolePolicies` reads them in a

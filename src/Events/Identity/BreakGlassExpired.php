@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Dispatched when `authorization:prune` records the expiry of a break-glass
- * activation that expired without ending (AUTHZ-11.7).
+ * activation that expired without ending.
  *
  * The activation stopped counting at its expiry, with no sweep needed; this
  * reports the expiry recorded on its row, which is kept. The operation names no

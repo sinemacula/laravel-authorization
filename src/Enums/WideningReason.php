@@ -5,13 +5,13 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Enums;
 
 /**
- * Why a proposed grant widens an identity's scope, as the grant hook is told it
- * (AUTHZ-11.3).
+ * Why a proposed grant widens an identity's scope, as the grant hook is told
+ * it.
  *
  * The first four are proven widenings. The next two are doubts: the package
  * could not prove the grant stays within what the identity already held, and
  * calls the hook rather than skip it. The last is for an application calling
- * the hook on its own membership path (AUTHZ-13.9).
+ * the hook on its own membership path.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

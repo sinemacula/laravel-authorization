@@ -11,9 +11,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * The resource a review's admission is decided on (AUTHZ-11.6, N96): the
- * question the review asks, what it is about, by references alone, and the
- * scope it reads.
+ * The resource a review's admission is decided on: the question the review
+ * asks, what it is about, by references alone, and the scope it reads.
  *
  * Its reference is a record of type `authorization:review` whose id is the
  * question (`holders`, `holdings`, `expiring` or `granted_by`), so a

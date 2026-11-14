@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 /**
  * The statements a decision assesses, gathered from its policies, its
  * guardrails and its permission boundaries in the fixed order every decision
- * keeps (AUTHZ-7.9).
+ * keeps.
  *
  * The policies are ordered by name, then stored key, then the resource a
  * resource policy is attached to, then document, and each statement by its

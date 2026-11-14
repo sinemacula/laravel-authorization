@@ -13,8 +13,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 
 /**
- * Decides a check on a tenant-owned resource in the right scope (AUTHZ-4.4,
- * AUTHZ-5.5, N9).
+ * Decides a check on a tenant-owned resource in the right scope (N9).
  *
  * A resource of the decision's tenant, or of a tenant below it, is decided in
  * the resource's own tenant, so grants there and those above it that reach the

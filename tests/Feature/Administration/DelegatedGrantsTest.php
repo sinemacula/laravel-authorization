@@ -38,10 +38,9 @@ use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
- * Feature tests for delegated direct grants (BL-65 part 2, AUTHZ-11.1,
- * AUTHZ-3.5): rank, self, the administered scope, possession and explicit
- * grantability, expiry and atomic batches, each decided by a screen exactly as
- * the grant service decides it.
+ * Feature tests for delegated direct grants: rank, self, the administered
+ * scope, possession and explicit grantability, expiry and atomic batches, each
+ * decided by a screen exactly as the grant service decides it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,8 +75,8 @@ final class DelegatedGrantsTest extends TestCase
     }
 
     /**
-     * The rank table (N76): the actor's rank, the grantee's, and whether rank
-     * lets the actor act on it, null when it does.
+     * The rank table: the actor's rank, the grantee's, and whether rank lets
+     * the actor act on it, null when it does.
      *
      * @return iterable<string, array{int|null, int|null, \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null}>
      */
@@ -234,7 +233,7 @@ final class DelegatedGrantsTest extends TestCase
      * A platform-wide grant needs platform authority, which the grant's own
      * decision at platform scope asks for, and an actor holding it makes the
      * grant from a tenant as from the platform: its authority reaches the
-     * platform's row (N79).
+     * platform's row.
      *
      * @return void
      *
@@ -258,12 +257,12 @@ final class DelegatedGrantsTest extends TestCase
     }
 
     /**
-     * Who may change a grant row is the administered scope (N79): an actor
-     * whose authority for the action reaches the row's tenant, from a parent
-     * over its subtree, changes it from its own context, and one call clears a
-     * grantee's rows across the tenants it administers; a parent's node-only
-     * authority reaches no child, and a tenant's no platform-wide row, nor a
-     * tenant outside its own.
+     * Who may change a grant row is the administered scope: an actor whose
+     * authority for the action reaches the row's tenant, from a parent over its
+     * subtree, changes it from its own context, and one call clears a grantee's
+     * rows across the tenants it administers; a parent's node-only authority
+     * reaches no child, and a tenant's no platform-wide row, nor a tenant
+     * outside its own.
      *
      * @return void
      *

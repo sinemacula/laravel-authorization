@@ -9,9 +9,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * One grant route behind a permission or a policy a resolution found, as grant
- * usage tracking records it (N100): its key (see `GrantUsageKey`), the same key
- * an access review row of the same route carries, and the stored grant it
- * starts from (see `StoredGrant`).
+ * usage tracking records it: its key (see `GrantUsageKey`), the same key an
+ * access review row of the same route carries, and the stored grant it starts
+ * from (see `StoredGrant`).
  *
  * A resolution keeps the routes behind what it finds beside it in the
  * resolution cache, each once (see `RouteMap`), so a check finds those behind

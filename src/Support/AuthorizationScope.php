@@ -12,9 +12,9 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 
 /**
- * Where `permissionsFor()` lists a subject's actions (AUTHZ-10.4, N71): the
- * active tenant, or none for the platform, the application, or none, and the
- * resource the actions are taken on, or none.
+ * Where `permissionsFor()` lists a subject's actions: the active tenant, or
+ * none for the platform, the application, or none, and the resource the actions
+ * are taken on, or none.
  *
  * A scope is named explicitly: `current()` captures the request's tenant and
  * application as the resolvers report them, `platform()` names no tenant and
@@ -32,8 +32,8 @@ use SineMacula\Laravel\Authorization\Subject;
  * meanwhile and is back with it, unless a write dropped it, and a scope that is
  * already in place, such as `current()`, is not applied again, so listing in it
  * costs what checking in it costs, but is held in place all the same, so the
- * decisions of the request being forgotten while it runs (N112) never move it
- * into the tenant the request resolves afresh.
+ * decisions of the request being forgotten while it runs never move it into the
+ * tenant the request resolves afresh.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -9,13 +9,13 @@ use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 
 /**
  * The SQL an authorized scope writes on one database, each fragment proved to
- * hold exactly when PHP, reading the row, would find the same (N65): the kind
- * of a column, whether the connection is UTF-8, whether a column compares byte
- * for byte and an integer key holds only what PHP reads, the guard on a
- * record's key, its byte length, whether PHP can read a tenant column, the
- * byte-exact comparison of a column with a value, with the plain comparison an
- * index can serve that keeps every row the exact one does, whether a key's text
- * starts with a value, the bytes of the text PHP reads from any expression, the
+ * hold exactly when PHP, reading the row, would find the same: the kind of a
+ * column, whether the connection is UTF-8, whether a column compares byte for
+ * byte and an integer key holds only what PHP reads, the guard on a record's
+ * key, its byte length, whether PHP can read a tenant column, the byte-exact
+ * comparison of a column with a value, with the plain comparison an index can
+ * serve that keeps every row the exact one does, whether a key's text starts
+ * with a value, the bytes of the text PHP reads from any expression, the
  * comparison of an attached record's key with a row's key under the attachment
  * column's own collation, and the literal the database reads as it reads a
  * value bound as a parameter.

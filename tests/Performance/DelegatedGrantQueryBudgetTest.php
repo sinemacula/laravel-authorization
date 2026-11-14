@@ -19,12 +19,11 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Query budget of a delegated direct grant (BL-65 part 2): what the possession
- * route reads to prove the actor holds what it grants is read a table at a
- * time, the grant's reach in the query, and every policy found in one more
- * query, so a delegated grant, or a sync's additions, runs the same number of
- * queries however many resource policies and guardrails other tenants and other
- * records have.
+ * Query budget of a delegated direct grant: what the possession route reads to
+ * prove the actor holds what it grants is read a table at a time, the grant's
+ * reach in the query, and every policy found in one more query, so a delegated
+ * grant, or a sync's additions, runs the same number of queries however many
+ * resource policies and guardrails other tenants and other records have.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

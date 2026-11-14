@@ -8,9 +8,9 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 
 /**
  * The permissions the package itself declares: the administration actions its
- * own management services check (AUTHZ-11.1), which the permission catalogue
- * always holds, whatever the application configures, so `authorization:sync`
- * writes them, they can be granted, and a policy naming them validates.
+ * own management services check, which the permission catalogue always holds,
+ * whatever the application configures, so `authorization:sync` writes them,
+ * they can be granted, and a policy naming them validates.
  *
  * Each is spelt `authorization:NOUN.VERB`, is guard-agnostic and is filed under
  * the `authorization` category. They are the package's, not the application's:
@@ -41,7 +41,7 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
  * `break-glass.grant` and `break-glass.revoke` are the rights to activate an
  * emergency role for oneself, to activate one for another, and to end another's
  * activation (see `Services\BreakGlassService`): holding the right is enough,
- * so the stage weighs no rank, self or possession rule for them (N140).
+ * so the stage weighs no rank, self or possession rule for them.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -111,7 +111,7 @@ final readonly class PackagePermissions implements PermissionProvider
     /** @var string The right to remove a grantee's permission boundary. */
     public const string BOUNDARY_REMOVE = 'authorization:boundary.remove';
 
-    /** @var string The right to set and remove guardrails, held from above the scope they cap (AUTHZ-7.6). */
+    /** @var string The right to set and remove guardrails, held from above the scope they cap. */
     public const string GUARDRAIL_MANAGE = 'authorization:guardrail.manage';
 
     /** @var string The right to attach a policy to a resource record or a whole resource type. */
@@ -144,22 +144,22 @@ final readonly class PackagePermissions implements PermissionProvider
     /** @var string The further right a delegated boundary change needs when it may lift or widen what a boundary caps. */
     public const string ADMINISTRATION_UNBOUNDED = 'authorization:administration.unbounded';
 
-    /** @var string The right to preview what a subject may do, as that subject, in a tenant and application (AUTHZ-11.4). */
+    /** @var string The right to preview what a subject may do, as that subject, in a tenant and application. */
     public const string SUBJECT_PREVIEW = 'authorization:subject.preview';
 
-    /** @var string The right to run an access review in a scope, decided on its review resource (AUTHZ-11.6). */
+    /** @var string The right to run an access review in a scope, decided on its review resource. */
     public const string REVIEW_READ = 'authorization:review.read';
 
     /** @var string The right to export an access review, which also needs the right to run it. */
     public const string REVIEW_EXPORT = 'authorization:review.export';
 
-    /** @var string The right to declare two roles mutually exclusive (AUTHZ-11.8). */
+    /** @var string The right to declare two roles mutually exclusive. */
     public const string ROLE_EXCLUSION_DECLARE = 'authorization:role-exclusion.declare';
 
     /** @var string The right to remove a declared pair of mutually exclusive roles. */
     public const string ROLE_EXCLUSION_REMOVE = 'authorization:role-exclusion.remove';
 
-    /** @var string The right to activate an emergency role for oneself (AUTHZ-11.7). */
+    /** @var string The right to activate an emergency role for oneself. */
     public const string BREAK_GLASS_ACTIVATE = 'authorization:break-glass.activate';
 
     /** @var string The right to activate an emergency role for another person. */

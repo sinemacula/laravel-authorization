@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 
 /**
- * The package's grant usage store (N102), on its own tables on the package's
+ * The package's grant usage store, on its own tables on the package's
  * connection: `authorization.tables.grant_usage`, one row for each grant route
  * with its last observed bucket and the creation of the grant it was observed
  * through, and `authorization.tables.usage_coverage`, the periods tracking was

@@ -5,9 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown when a role with children would be deleted (D18). Deleting it would
- * take from everyone holding a child what the role passed down, so the children
- * are moved to another parent or deleted first.
+ * Thrown when a role with children would be deleted. Deleting it would take
+ * from everyone holding a child what the role passed down, so the children are
+ * moved to another parent or deleted first.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

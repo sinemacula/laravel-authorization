@@ -22,15 +22,14 @@ use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 
 /**
  * The roots of a set of grantees' live grants, in every tenant and every
- * application, read in one query over the grant tables (AUTHZ-14.2,
- * AUTHZ-13.8).
+ * application, read in one query over the grant tables.
  *
  * A grant is a live row of a role granted, a permission granted directly or a
- * policy attached, a policy that only denies included (N82); roles are not
- * expanded into their permissions, since a role's root is where it was granted.
- * A row that has expired, as `LiveGrants` reads it, is no grant, and neither is
- * an attachment of an inline policy to a grantee it does not belong to, which
- * no check applies (see `InlinePolicies`). Boundaries and guardrails are
+ * policy attached, a policy that only denies included; roles are not expanded
+ * into their permissions, since a role's root is where it was granted. A row
+ * that has expired, as `LiveGrants` reads it, is no grant, and neither is an
+ * attachment of an inline policy to a grantee it does not belong to, which no
+ * check applies (see `InlinePolicies`). Boundaries and guardrails are
  * constraints on grants, not grants, and are never read. A grant's root is the
  * tenant its row names, or the platform for a row naming none.
  *
@@ -41,9 +40,9 @@ use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
  *
  * The grantees are matched by their exact morph type and key, so two grantees
  * sharing a key under different types are never confused. Every read is on the
- * write connection (AUTHZ-12.4), and is one query, whatever the number of
- * grantees, grants or tenants, and however deep the tree: the tenant's subtree
- * is nested whole as the tree's query, never loaded.
+ * write connection, and is one query, whatever the number of grantees, grants
+ * or tenants, and however deep the tree: the tenant's subtree is nested whole
+ * as the tree's query, never loaded.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

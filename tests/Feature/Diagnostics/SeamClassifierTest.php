@@ -44,11 +44,10 @@ use Tests\TestCase;
 
 /**
  * Feature tests for telling where each seam's binding came from without
- * building it (N113, N118): the package's default, the configured class, a
- * binding made before the package registered or after it, of each kind, a
- * sibling's declared adapter, standing or overridden, a declared factory, an
- * unknown factory, a deferred provider not loaded yet, the extenders and an
- * alias.
+ * building it: the package's default, the configured class, a binding made
+ * before the package registered or after it, of each kind, a sibling's declared
+ * adapter, standing or overridden, a declared factory, an unknown factory, a
+ * deferred provider not loaded yet, the extenders and an alias.
  *
  * Every seam bound here explodes when it is built or called, and each test
  * checks that none was, and that whether each seam was resolved is the same

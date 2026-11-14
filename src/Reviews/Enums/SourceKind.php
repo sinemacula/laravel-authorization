@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Reviews\Enums;
 
 /**
- * The kind of source a row of an access review comes from (N93): a stored grant
- * held directly, a route through a role, or a stored role edge or role
- * attachment.
+ * The kind of source a row of an access review comes from: a stored grant held
+ * directly, a route through a role, or a stored role edge or role attachment.
  *
  * The cases are declared in the order a review lists its rows, kind by kind
  * (see `Reviews\Support\ReviewOrder`).

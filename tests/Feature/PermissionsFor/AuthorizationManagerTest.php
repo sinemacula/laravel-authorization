@@ -48,10 +48,10 @@ use Tests\Fixtures\QueryScoping\InvariantRequirementChecker;
 use Tests\TestCase;
 
 /**
- * Feature tests for `permissionsFor()` (AUTHZ-10.4): the actions of the
- * permission catalogue a subject may take in a scope, exactly those `check()`
- * would allow there, listed in the catalogue's order, through the one decision
- * path and recording nothing.
+ * Feature tests for `permissionsFor()`: the actions of the permission catalogue
+ * a subject may take in a scope, exactly those `check()` would allow there,
+ * listed in the catalogue's order, through the one decision path and recording
+ * nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

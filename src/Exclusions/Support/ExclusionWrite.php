@@ -12,10 +12,10 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * A write weighed against the pairs of mutually exclusive roles (AUTHZ-11.8,
- * N136): the role grants it wrote or would write, or the parent it would give a
- * role, so the conflict report reads the holdings as they are after it and
- * keeps only the conflicts it creates, those a route of its own takes part in.
+ * A write weighed against the pairs of mutually exclusive roles: the role
+ * grants it wrote or would write, or the parent it would give a role, so the
+ * conflict report reads the holdings as they are after it and keeps only the
+ * conflicts it creates, those a route of its own takes part in.
  *
  * A grant already written is read as stored; a break-glass activation proposed
  * is read beside the stored grants and activations; a parent proposed replaces

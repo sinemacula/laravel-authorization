@@ -11,9 +11,8 @@ use SineMacula\Laravel\Authorization\Exceptions\BoundaryException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
- * The rule a policy in use as a permission boundary keeps (AUTHZ-7.4): it is
- * never deleted from under a grantee it bounds, which would lift the cap
- * without a word.
+ * The rule a policy in use as a permission boundary keeps: it is never deleted
+ * from under a grantee it bounds, which would lift the cap without a word.
  *
  * The policy observer refuses the deletion of such a policy with
  * `BoundaryException`, naming every grantee it bounds, until each boundary is

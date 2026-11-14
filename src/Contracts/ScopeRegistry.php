@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Contracts;
 
 /**
- * Scope registry contract (AUTHZ-13.5).
+ * Scope registry contract.
  *
  * Answers which scopes a credential may carry, so the scopes issued to a
  * credential name real permissions. The package ships a registry backed by the

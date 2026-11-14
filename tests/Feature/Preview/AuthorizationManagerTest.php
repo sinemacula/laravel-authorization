@@ -37,10 +37,10 @@ use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
 /**
- * Feature tests for the authorization manager's forms on a preview
- * (AUTHZ-11.4): each decides about the target exactly as the same form through
- * `for()` decides under the same scope and state, through the one decision path
- * (D22), and differs only in its admission and in what it records and reports.
+ * Feature tests for the authorization manager's forms on a preview: each
+ * decides about the target exactly as the same form through `for()` decides
+ * under the same scope and state, through the one decision path, and differs
+ * only in its admission and in what it records and reports.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

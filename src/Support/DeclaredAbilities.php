@@ -5,10 +5,10 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Support;
 
 /**
- * The abilities the package answers through Laravel's Gate (AUTHZ-9.1): the
- * exact name of every permission the permission catalogue holds, whatever its
- * guard. That is the package's own permissions (see `PackagePermissions`) and
- * every permission the configured enums and providers declare.
+ * The abilities the package answers through Laravel's Gate: the exact name of
+ * every permission the permission catalogue holds, whatever its guard. That is
+ * the package's own permissions (see `PackagePermissions`) and every permission
+ * the configured enums and providers declare.
  *
  * An ability is held only when it is one of those names exactly: a name is
  * never read as a pattern, so `posts:*` is held only when a permission of that

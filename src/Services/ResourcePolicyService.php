@@ -35,8 +35,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
- * Attaches policies to resources and resource types, and detaches them
- * (AUTHZ-7.3).
+ * Attaches policies to resources and resource types, and detaches them.
  *
  * A resource policy is a managed policy attached to one record of a type, or to
  * the whole type. A check on a record reads the policies attached to it and to
@@ -61,9 +60,9 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  * is only ever reported, and `PolicyAttached` dispatched, once its row is
  * there.
  *
- * An attachment holds in a scope as a grant does (AUTHZ-5.1): a policy one
- * tenant owns is attached in that tenant, or a tenant below it that the call
- * names as `$tenant`, and naming any other is refused with
+ * An attachment holds in a scope as a grant does: a policy one tenant owns is
+ * attached in that tenant, or a tenant below it that the call names as
+ * `$tenant`, and naming any other is refused with
  * `GrantScopeMismatchException`; one the platform owns is attached in the
  * tenant named, else platform-wide. It reaches the tenants below its tenant
  * unless `$includeSubtree` is false, and holds in the application named, else
@@ -71,21 +70,21 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  *
  * Every call runs in one transaction on the package's connection, is one
  * operation for the acting context the call names, or trusted system work with
- * none (N75), and dispatches `PolicyAttached` or `PolicyDetached` once it
- * commits, only when it changed something, invalidating the resolution cache
- * for the resource's type.
+ * none, and dispatches `PolicyAttached` or `PolicyDetached` once it commits,
+ * only when it changed something, invalidating the resolution cache for the
+ * resource's type.
  *
- * A call with an acting context is delegated administration (AUTHZ-11.1): an
- * attachment is decided under `authorization:resource-policy.attach`, and each
- * detachment, of the policy named or of every policy attached to the record,
- * under `authorization:resource-policy.detach`, as the actor, through
- * `check()`, on the change's operation resource (whose grantee is the resource,
- * `*` for its whole type), inside the transaction before anything is written;
- * the first refused throws the decision's `AuthorizationException`, leaving
- * nothing written. An attachment's allows grant without any permission held, to
- * every principal they name, on one record or the whole type, so each
- * principal, the holders of a role a selector names included, must be one the
- * actor administers across the attachment's reach, junior to it and not itself
+ * A call with an acting context is delegated administration: an attachment is
+ * decided under `authorization:resource-policy.attach`, and each detachment, of
+ * the policy named or of every policy attached to the record, under
+ * `authorization:resource-policy.detach`, as the actor, through `check()`, on
+ * the change's operation resource (whose grantee is the resource, `*` for its
+ * whole type), inside the transaction before anything is written; the first
+ * refused throws the decision's `AuthorizationException`, leaving nothing
+ * written. An attachment's allows grant without any permission held, to every
+ * principal they name, on one record or the whole type, so each principal, the
+ * holders of a role a selector names included, must be one the actor
+ * administers across the attachment's reach, junior to it and not itself
  * without `authorization:administration.self` (see `Impact`), and the actor
  * must be able to hand out what the policy allows (see `PolicyRoute`);
  * detaching a policy with no deny statement only narrows, and is allowed on its

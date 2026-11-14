@@ -12,8 +12,8 @@ use SineMacula\Laravel\Authorization\Reviews\Support\TenantRelations;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * The conflict report of pairs of mutually exclusive roles (AUTHZ-11.8, N135,
- * N136): who holds both roles of each pair where their reach overlaps.
+ * The conflict report of pairs of mutually exclusive roles: who holds both
+ * roles of each pair where their reach overlaps.
  *
  * Two routes, one to each role, overlap where a check sees both roles held (see
  * `ExclusionRoute::$reach`): their applications meet, either for every
@@ -25,8 +25,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * A holder's own routes are weighed against each other, and so are a
  * principal's together with its identity's, as a check weighs them: the
- * identity directory lists each holder's principals (N81), and a principal that
- * holds one role itself and the other through its identity, when the identity's
+ * identity directory lists each holder's principals, and a principal that holds
+ * one role itself and the other through its identity, when the identity's
  * grants reach it (both machines or neither, see
  * `SubjectGrants::grantingIdentity()`), conflicts, the identity named. A
  * sibling principal of the same identity never counts, and an identity that

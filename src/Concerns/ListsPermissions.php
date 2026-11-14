@@ -17,10 +17,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 
 /**
  * The listings of the authorization manager: `permissionsFor()`, the actions a
- * subject may take in a scope (AUTHZ-10.4), and `heldPermissionsFor()`, the
- * same actions each with the authentication requirements its decision read
- * (N128, N129). Both list through the one path, so they list the same actions,
- * in the same order, and refuse, throw and record alike.
+ * subject may take in a scope, and `heldPermissionsFor()`, the same actions
+ * each with the authentication requirements its decision read. Both list
+ * through the one path, so they list the same actions, in the same order, and
+ * refuse, throw and record alike.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,12 +30,12 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 trait ListsPermissions
 {
     /**
-     * Return the actions the subject may take in the scope (AUTHZ-10.4, N69),
-     * for a UI to show or hide its controls: every action the permission
-     * catalogue declares (the package's own permissions, the cases of the
-     * configured enums and the definitions of the configured providers), each
-     * name once, in the catalogue's order, whose `check()` on the scope's
-     * resource, with the context, would allow, in the scope, about the subject.
+     * Return the actions the subject may take in the scope, for a UI to show or
+     * hide its controls: every action the permission catalogue declares (the
+     * package's own permissions, the cases of the configured enums and the
+     * definitions of the configured providers), each name once, in the
+     * catalogue's order, whose `check()` on the scope's resource, with the
+     * context, would allow, in the scope, about the subject.
      *
      * A resolved `Subject` is taken as it is, its identity, guard and session
      * kept; any other object is named as `for()` names it; and null is the
@@ -61,11 +61,11 @@ trait ListsPermissions
      * one resource can differ from a listing for none, and the action is still
      * to be authorized when it is taken.
      *
-     * Listing is introspection, not a check (N70): it records no last decision
-     * and dispatches no `DecisionEvaluated` and no `AuthorizationFailed`, not
-     * even for an action listed through break-glass (N142). A catalogue that
-     * cannot be read, such as one declaring a name twice with different
-     * metadata, throws `InvalidPermissionCatalogueException`.
+     * Listing is introspection, not a check: it records no last decision and
+     * dispatches no `DecisionEvaluated` and no `AuthorizationFailed`, not even
+     * for an action listed through break-glass. A catalogue that cannot be
+     * read, such as one declaring a name twice with different metadata, throws
+     * `InvalidPermissionCatalogueException`.
      *
      * On a preview from `previewFor()`, the subject is the preview's target,
      * named by null alone: naming any subject, or a scope of another tenant or
@@ -74,7 +74,7 @@ trait ListsPermissions
      * `DecisionEvaluated` as `authorization.events.decisions` selects, every
      * one while `previews` is on and one that used break-glass whatever the
      * settings, naming both parties, while the last decision is left as the
-     * admission recorded it (N86).
+     * admission recorded it.
      *
      * @param  object|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
@@ -97,9 +97,8 @@ trait ListsPermissions
     /**
      * Return the actions the subject may take in the scope, as
      * `permissionsFor()` lists them, each with the authentication requirements
-     * its decision read (N128, N129): a `HeldPermission` for every action
-     * `permissionsFor()` would list, given the same arguments, in the same
-     * order, and none other.
+     * its decision read: a `HeldPermission` for every action `permissionsFor()`
+     * would list, given the same arguments, in the same order, and none other.
      *
      * Each entry names every part of every authentication requirement its
      * decision read, on an allow or a deny, or in a further check the decision
@@ -116,8 +115,7 @@ trait ListsPermissions
      * refuses and throws what `permissionsFor()` would, and it records no last
      * decision and dispatches no `DecisionEvaluated` and no
      * `AuthorizationFailed`, a preview's listing dispatching
-     * `DecisionEvaluated` alone, as `authorization.events.decisions` selects
-     * (N86).
+     * `DecisionEvaluated` alone, as `authorization.events.decisions` selects.
      *
      * @param  object|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope

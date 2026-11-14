@@ -5,9 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * An authentication requirement a policy statement states (AUTHZ-8.3, N33): the
- * parts the subject's session must have proved, each with an optional maximum
- * age in seconds.
+ * An authentication requirement a policy statement states: the parts the
+ * subject's session must have proved, each with an optional maximum age in
+ * seconds.
  *
  * A statement states one with the `authentication_requirement` operator on the
  * reserved key `authentication`, its operand a map of parts, each `{}` or

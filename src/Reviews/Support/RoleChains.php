@@ -15,9 +15,8 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * The role hierarchy as an access review reads it, in a fixed number of queries
  * however many roles there are and however deep the hierarchy runs: a role's
  * holder holds what the role and every role above it carry, when the hierarchy
- * is enabled (AUTHZ-3.4), so the holders of a role are found through the grants
- * of every role below it, and what a role's holder holds through every role
- * above it.
+ * is enabled, so the holders of a role are found through the grants of every
+ * role below it, and what a role's holder holds through every role above it.
  *
  * A chain runs from a role up through its parents, as `RoleGraph` walks it for
  * a check: it ends at a role that is missing, or that the reviewed tenant does

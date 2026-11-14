@@ -11,9 +11,9 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * What every change to a grantee's permission boundary carries (AUTHZ-7.4): the
- * operation, the grantee, the policy, its name and the scope, as `BoundarySet`
- * and `BoundaryRemoved` report them.
+ * What every change to a grantee's permission boundary carries: the operation,
+ * the grantee, the policy, its name and the scope, as `BoundarySet` and
+ * `BoundaryRemoved` report them.
  *
  * A snapshot of plain values (references, the name and the scope), never a
  * model. It is dispatched once the write commits, on the package's connection,

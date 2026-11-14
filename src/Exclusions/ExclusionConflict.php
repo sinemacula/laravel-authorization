@@ -8,8 +8,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * A holder that holds both roles of a pair of mutually exclusive roles where
- * their reach overlaps (AUTHZ-11.8, N136): one route to each role, which hold
- * in some tenant, or at the platform, in some application, together.
+ * their reach overlaps: one route to each role, which hold in some tenant, or
+ * at the platform, in some application, together.
  *
  * The holder is the grantee of both routes, or, where the conflict came through
  * its identity, a principal holding one role itself and the other through its

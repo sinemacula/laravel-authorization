@@ -17,10 +17,9 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * What one `authorization:review` invocation asks (AUTHZ-11.6, N97): the
- * review, its reference, its scope, its window or actor, whether it lists
- * direct grants alone, and where its JSON Lines go, read from its arguments and
- * options.
+ * What one `authorization:review` invocation asks: the review, its reference,
+ * its scope, its window or actor, whether it lists direct grants alone, and
+ * where its JSON Lines go, read from its arguments and options.
  *
  * Each is read strictly, and anything it cannot read is refused with
  * `InvalidArgumentException`, whose message names the argument or option and

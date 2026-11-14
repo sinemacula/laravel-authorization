@@ -24,12 +24,12 @@ use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\TestCase;
 
 /**
- * Query budget of the access reviews (AUTHZ-11.6): a review reads the roles it
- * involves in a fixed number of queries and the grants of all its holders
- * together, a page at a time, so its queries never grow with its holders, the
- * holders of a role through a deep hierarchy costing what one holder does; nor
- * with the tenants its grants are held in, nor with grants that reach no
- * attachment of the policy reviewed.
+ * Query budget of the access reviews: a review reads the roles it involves in a
+ * fixed number of queries and the grants of all its holders together, a page at
+ * a time, so its queries never grow with its holders, the holders of a role
+ * through a deep hierarchy costing what one holder does; nor with the tenants
+ * its grants are held in, nor with grants that reach no attachment of the
+ * policy reviewed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
- * Boot-time validator for the `authorization.context` config (N25, N26), run by
+ * Boot-time validator for the `authorization.context` config, run by
  * `ConfigValidator`.
  *
  * `context.keys` must map each namespace to its keys, each a dot path within
@@ -30,10 +30,10 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * listed once, and no source may claim one, so a clash is refused at boot
  * rather than on the first check. The assurance keys it declares must each be a
  * name with no `.`, or a name followed by one trailing `*`, or boot fails
- * closed (N104).
+ * closed.
  *
- * The block sets no key but `keys` and `sources` (N116); each is an empty list
- * when left out, and refused when set to null.
+ * The block sets no key but `keys` and `sources`; each is an empty list when
+ * left out, and refused when set to null.
  *
  * The checks of the values' shape (`keys()`, `sources()`) build nothing and can
  * run alone, as the configuration report runs them; the check of the namespaces
@@ -42,7 +42,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  *
  * It runs at boot, after every service provider has registered, so the
  * authentication context read is the one bound last, whichever provider bound
- * it (N104).
+ * it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

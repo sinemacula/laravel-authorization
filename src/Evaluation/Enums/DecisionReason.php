@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
 
 /**
- * Why a check was denied (AUTHZ-7.10); an allowed check carries none.
+ * Why a check was denied; an allowed check carries none.
  *
  * Each code is 1 to 64 characters of lower-case letters, digits, `_`, `.`, `:`
  * and `-`, starting with a letter or digit, and any code added later keeps to

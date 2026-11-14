@@ -8,18 +8,18 @@ use SineMacula\Laravel\Authorization\Administration\AffectedHolders;
 use SineMacula\Laravel\Authorization\Administration\ConflictRetries;
 
 /**
- * Boot-time validator for the `authorization.administration` config
- * (AUTHZ-11.1), run by `ConfigValidator`.
+ * Boot-time validator for the `authorization.administration` config, run by
+ * `ConfigValidator`.
  *
  * The block must be an array, and each limit it may set a whole number:
  * `max_impact`, the most holders a delegated change to a shared definition is
  * weighed against (see `Administration\Impact`), of at least 1, and `retries`,
  * how many times a delegated call that conflicts is tried again (see
  * `Administration\ConflictRetries`), of at least 0, each an int or a string
- * written as a whole number, as the environment gives one (N117). A limit it
- * does not set takes its default, and one set to null is refused; any other key
- * is refused, naming its path (N116), so a misspelt limit fails at boot rather
- * than leaving its default in place.
+ * written as a whole number, as the environment gives one. A limit it does not
+ * set takes its default, and one set to null is refused; any other key is
+ * refused, naming its path, so a misspelt limit fails at boot rather than
+ * leaving its default in place.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

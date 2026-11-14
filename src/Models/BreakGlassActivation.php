@@ -13,9 +13,9 @@ use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Observers\BreakGlassActivationObserver;
 
 /**
- * Eloquent model for a break-glass activation (AUTHZ-11.7, N133): one
- * activation of an emergency role for one principal, for a limited time, its
- * own record beside any normal grant of the same role.
+ * Eloquent model for a break-glass activation: one activation of an emergency
+ * role for one principal, for a limited time, its own record beside any normal
+ * grant of the same role.
  *
  * `Services\BreakGlassService` creates and ends activations, and break-glass is
  * off unless the application enables it. A live activation, one not ended whose

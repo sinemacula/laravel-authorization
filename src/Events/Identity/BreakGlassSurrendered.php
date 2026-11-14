@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 /**
  * Dispatched when a grantee surrenders its break-glass activation before it
- * expires (AUTHZ-11.7). The operation's actor is the grantee.
+ * expires. The operation's actor is the grantee.
  *
  * It carries what every ended activation does (see `BreakGlassEnded`).
  *

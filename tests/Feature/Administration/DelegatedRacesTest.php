@@ -39,17 +39,17 @@ use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
- * Races between a delegated decision and the write it allows (AUTHZ-11.1, the
- * concurrency protocol): a concurrent revocation of the actor's authority, a
- * role that grows, a policy rewritten, a resource policy naming a granted role
- * attached and a tenant moved, each landing after the decision and before the
- * write, and a rank or a document changed between the service's read of a
- * record and its lock, have the operation tried again and decided on what was
- * committed, so it is refused; a change that alters nothing the operation
- * relies on is tried again and made; and one that lands on every try is refused
- * as `administration.conflict`, recorded and reported as the actor's refusal.
- * Each race is simulated inside the operation's try, as the reads that follow
- * it would see a concurrent commit, so the version check runs on SQLite as on
+ * Races between a delegated decision and the write it allows (the concurrency
+ * protocol): a concurrent revocation of the actor's authority, a role that
+ * grows, a policy rewritten, a resource policy naming a granted role attached
+ * and a tenant moved, each landing after the decision and before the write, and
+ * a rank or a document changed between the service's read of a record and its
+ * lock, have the operation tried again and decided on what was committed, so it
+ * is refused; a change that alters nothing the operation relies on is tried
+ * again and made; and one that lands on every try is refused as
+ * `administration.conflict`, recorded and reported as the actor's refusal. Each
+ * race is simulated inside the operation's try, as the reads that follow it
+ * would see a concurrent commit, so the version check runs on SQLite as on
  * PostgreSQL and MySQL.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

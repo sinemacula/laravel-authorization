@@ -11,8 +11,8 @@ use SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * One row of an access review (N93): one route by which a subject holds a
- * target, or one stored row a review of expiries or of an actor lists.
+ * One row of an access review: one route by which a subject holds a target, or
+ * one stored row a review of expiries or of an actor lists.
  *
  * A row names references alone, each a morph type and a string key, never a
  * name, an email, a description, a document or a value. Its shape is versioned
@@ -40,8 +40,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   expiry; `route_expires_at`: the earliest expiry of every row the route
  *   rests on, when this route ends, though another route may keep the target
  *   held;
- * - `granted_by`: the last actor to grant or change the starting row (N95),
- *   null for a trusted write or a role edge;
+ * - `granted_by`: the last actor to grant or change the starting row, null for
+ *   a trusted write or a role edge;
  * - `grant_state`: whether the starting row still counts at the review's
  *   instant, `live` or `expired`, or `malformed` when a row the route rests on
  *   names half a tenant (see `Enums\GrantState`); `subject_state`: what the

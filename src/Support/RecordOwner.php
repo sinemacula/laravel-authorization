@@ -11,8 +11,7 @@ use SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException;
 /**
  * The rules every role, permission and policy row keeps about the tenant that
  * owns it: both tenant columns or neither, and an owner fixed once the row is
- * created (D16), since every grant of the row holds in the scope its owner
- * fixes.
+ * created, since every grant of the row holds in the scope its owner fixes.
  *
  * Shared by the role, permission and policy observers.
  *

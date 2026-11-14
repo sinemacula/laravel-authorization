@@ -40,26 +40,26 @@ use SineMacula\Laravel\Authorization\Support\RoleReach;
  * or permission named by a string is looked up under the grantee's guard (its
  * `getAuthorizationGuard()`, when it declares one), else the package default.
  *
- * Every grant holds in a scope (AUTHZ-5.1): a role, permission or policy one
- * tenant owns is granted in that tenant, or a tenant below it that a call
- * names, and naming any other is refused with `GrantScopeMismatchException`;
- * one the platform owns is granted in the tenant a call names as `$tenant`,
- * else platform-wide. A name is looked up among the rows visible in the tenant
- * named, else in the current tenant. A revocation follows the same rule, and a
- * sync replaces the grants in one scope: the tenant named, else the tenant that
- * owns every target, else the platform. A grant holds in the application the
- * call names as `$application`, else in every application (AUTHZ-5.6, D24); a
- * revocation and a sync stay in it the same way.
+ * Every grant holds in a scope: a role, permission or policy one tenant owns is
+ * granted in that tenant, or a tenant below it that a call names, and naming
+ * any other is refused with `GrantScopeMismatchException`; one the platform
+ * owns is granted in the tenant a call names as `$tenant`, else platform-wide.
+ * A name is looked up among the rows visible in the tenant named, else in the
+ * current tenant. A revocation follows the same rule, and a sync replaces the
+ * grants in one scope: the tenant named, else the tenant that owns every
+ * target, else the platform. A grant holds in the application the call names as
+ * `$application`, else in every application; a revocation and a sync stay in it
+ * the same way.
  *
- * A grant in a tenant also holds in the tenants below it in the tenant tree
- * (AUTHZ-5.3), unless the call passes `$includeSubtree` false to limit it to
- * that tenant; a platform-wide grant counts everywhere whatever it is given.
- * Granting what the grantee holds, with the same expiry and another reach,
- * changes the reach and is reported as `REACH_CHANGED` with the granted event
- * (D21); a sync writes its reach only to what it grants or re-arms, except to a
- * role listed with a reach of its own (`Support\RoleReach`): a sync compares
- * such a role and its reach, and changes the reach of one held live with the
- * other in place, in one write keeping its expiry, reported the same way.
+ * A grant in a tenant also holds in the tenants below it in the tenant tree,
+ * unless the call passes `$includeSubtree` false to limit it to that tenant; a
+ * platform-wide grant counts everywhere whatever it is given. Granting what the
+ * grantee holds, with the same expiry and another reach, changes the reach and
+ * is reported as `REACH_CHANGED` with the granted event; a sync writes its
+ * reach only to what it grants or re-arms, except to a role listed with a reach
+ * of its own (`Support\RoleReach`): a sync compares such a role and its reach,
+ * and changes the reach of one held live with the other in place, in one write
+ * keeping its expiry, reported the same way.
  *
  * Grants are idempotent: granting what the grantee holds, with the same expiry,
  * changes nothing and is reported as unchanged, and a concurrent duplicate
@@ -75,13 +75,13 @@ use SineMacula\Laravel\Authorization\Support\RoleReach;
  * granted event as well as the expiry-changed one.
  *
  * Each method takes the acting context making the call as `$actor`: null for
- * trusted system work, such as seeders, migrations and console commands (N75).
- * A call with an acting context is delegated administration (AUTHZ-11.1): each
- * change it makes is decided as the actor, through `check()`, on the change's
- * operation resource, inside the call's transaction before anything is written,
- * and the first refused throws the decision's `AuthorizationException`, leaving
- * nothing written and dispatching no change event. The actor's authority and
- * then the grantee's rows are locked before the call reads them (see
+ * trusted system work, such as seeders, migrations and console commands. A call
+ * with an acting context is delegated administration: each change it makes is
+ * decided as the actor, through `check()`, on the change's operation resource,
+ * inside the call's transaction before anything is written, and the first
+ * refused throws the decision's `AuthorizationException`, leaving nothing
+ * written and dispatching no change event. The actor's authority and then the
+ * grantee's rows are locked before the call reads them (see
  * `Administration\DependencyPins`), so what is decided is what is written:
  * `revokeAll()` revokes exactly the rows it decided, never one granted
  * meanwhile, and a sync never writes back a row it decided as held that is gone
@@ -140,19 +140,19 @@ use SineMacula\Laravel\Authorization\Support\RoleReach;
  * Before a grant, a sync's additions, re-arms and changed reaches, an extension
  * or a wider reach that widens an identity's scope is written, trusted or
  * delegated, the bound grant hook is called with every widening grant of the
- * call, before the package takes any lock for it (AUTHZ-11.3, see
- * `Hooks\WideningPhase`): it may refuse by throwing, which rolls the call back,
- * and the call is tried again when a grant it writes widens with no hook run
- * for it, as read again under the lock once every decision is made, or, inside
- * a transaction the application opened, thrown as
- * `TransactionConflictException`. A widening grant made inside another
- * management call's work is refused with `NestedGrantException`, and one whose
- * identity cannot be resolved with `UnresolvableRecipientException`.
+ * call, before the package takes any lock for it (see `Hooks\WideningPhase`):
+ * it may refuse by throwing, which rolls the call back, and the call is tried
+ * again when a grant it writes widens with no hook run for it, as read again
+ * under the lock once every decision is made, or, inside a transaction the
+ * application opened, thrown as `TransactionConflictException`. A widening
+ * grant made inside another management call's work is refused with
+ * `NestedGrantException`, and one whose identity cannot be resolved with
+ * `UnresolvableRecipientException`.
  *
  * Once a role is granted, re-armed, widened below its tenant or given a later
  * expiry, a sync's included, and before any event is dispatched, the call is
  * weighed against the pairs of mutually exclusive roles touching its roles,
- * read before it writes, trusted or delegated alike (AUTHZ-11.8, see
+ * read before it writes, trusted or delegated alike (see
  * `Exclusions\Support\ExclusionGuard`): a write that would leave someone
  * holding both roles of a declared pair where their reach overlaps throws
  * `RoleExclusionConflictException`, carrying the report of the conflicts it
@@ -162,10 +162,10 @@ use SineMacula\Laravel\Authorization\Support\RoleReach;
  *
  * A grantee is an identity or a role: a policy attached to a role applies to
  * whoever holds the role, within both grants' scopes, and to whoever holds a
- * role below it (AUTHZ-7.2). An inline policy is attached only to the grantee
- * it belongs to; attaching or syncing it to any other throws
- * `InlinePolicyAttachmentException` before anything is written (AUTHZ-6.9). A
- * policy whose statements name `principals` is refused for any grantee with
+ * role below it. An inline policy is attached only to the grantee it belongs
+ * to; attaching or syncing it to any other throws
+ * `InlinePolicyAttachmentException` before anything is written. A policy whose
+ * statements name `principals` is refused for any grantee with
  * `ResourcePolicyException` (see `PolicyPrincipals`).
  *
  * Every operation refuses while the package is not healthy (see
@@ -533,8 +533,8 @@ final class GrantService
             };
 
             // A grant that widens the identity's scope runs its hooks first,
-            // before the package takes any lock for the call (AUTHZ-11.3),
-            // handed the operation as begun, with its client.
+            // before the package takes any lock for the call, handed the
+            // operation as begun, with its client.
             $hooks = WideningPhase::before($begun, $grantee, static function () use ($kind, $resolve, $expiresAt): array {
                 [$model, $scope] = $resolve();
 
@@ -658,8 +658,8 @@ final class GrantService
 
             // Every addition, and every change of reach, that widens the
             // identity's scope runs its hooks first, all of them before any
-            // lock and any write (AUTHZ-11.3), handed the operation as begun,
-            // with its client.
+            // lock and any write, handed the operation as begun, with its
+            // client.
             $hooks = WideningPhase::before($begun, $grantee, static fn (): array => WideningPhase::additions($plan(), $expiresAt));
 
             // The grantee's rows are locked before they are read, so a row the

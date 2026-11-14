@@ -11,13 +11,13 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * Boot-time validator for the `authorization.tables` config, run by
  * `ConfigValidator`.
  *
- * The block must be an array setting no key but the package's fourteen tables
- * (N116). Each name it sets must be a plain SQL identifier: a letter or an
- * underscore, then letters, digits and underscores. A name qualified by a
- * schema (`schema.table`) is refused, as the migrations build the names of
- * their indexes and keys from the table's name, and a dot there would break
- * them. A name the block leaves out is the table's default, as the config file
- * has it (see `TableNames::defaultName()`); a name set to null is refused. The
+ * The block must be an array setting no key but the package's fourteen tables.
+ * Each name it sets must be a plain SQL identifier: a letter or an underscore,
+ * then letters, digits and underscores. A name qualified by a schema
+ * (`schema.table`) is refused, as the migrations build the names of their
+ * indexes and keys from the table's name, and a dot there would break them. A
+ * name the block leaves out is the table's default, as the config file has it
+ * (see `TableNames::defaultName()`); a name set to null is refused. The
  * fourteen names, those left out included, must be distinct, compared whatever
  * their case, since some databases fold it.
  *

@@ -10,8 +10,8 @@ use SineMacula\Laravel\Authorization\Config\GrantHookConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 
 /**
- * The ordered composite of grant hooks (AUTHZ-11.3), and, holding none, the
- * package's default binding of the grant hook contract.
+ * The ordered composite of grant hooks, and, holding none, the package's
+ * default binding of the grant hook contract.
  *
  * It calls its hooks in order: the first that throws stops the rest, and its
  * exception refuses the call. `fromConfig()` builds it from the hooks
@@ -19,9 +19,9 @@ use SineMacula\Laravel\Authorization\Contracts\GrantHook;
  * validated at boot, and there is no way to add a hook at run time: an
  * application lists its hooks in the config, or binds its own hook on the
  * contract. The listed hooks run before whatever the contract resolves to, this
- * default included, through `ListedGrantHooks` (N108). With none listed the
- * default does nothing, and the grant service then classifies nothing, since
- * there is no hook to call.
+ * default included, through `ListedGrantHooks`. With none listed the default
+ * does nothing, and the grant service then classifies nothing, since there is
+ * no hook to call.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

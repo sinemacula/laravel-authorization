@@ -32,15 +32,15 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
- * Sets and removes guardrails, on tenants and on the platform (AUTHZ-7.6).
+ * Sets and removes guardrails, on tenants and on the platform.
  *
  * A guardrail is a managed policy that caps what any subject may do in its
  * scope: a check passes the guardrail stage only when every guardrail that
  * applies allows it, as the policy's allow statements would, conditions
  * included, and its deny statements deny at the deny stage. A guardrail grants
  * nothing: what passes it is still decided by the allows. A guardrail on a
- * tenant holds in the tenant and its subtree, through the tenant tree
- * (AUTHZ-5.3), and the platform's everywhere; with none, nothing is capped.
+ * tenant holds in the tenant and its subtree, through the tenant tree, and the
+ * platform's everywhere; with none, nothing is capped.
  *
  * Every call names the tenant, or null for the platform, and the acting context
  * making the change, which is never optional: there is no trusted guardrail

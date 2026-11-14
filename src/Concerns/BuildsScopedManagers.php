@@ -14,10 +14,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 /**
  * The scoped clones of the authorization manager: `for()` and `forUser()`,
  * which name the subject its checks are about, `for()` deciding in the tenant
- * and application a `Subject` names (N109), or on the platform for a `Subject`
- * it is given carrying the platform marker (N120), `forActor()`, which names an
- * acting subject decided in the scope in place, `previewFor()`, which previews
- * another subject as the caller, and `withPolicies()`, `capped()` and
+ * and application a `Subject` names, or on the platform for a `Subject` it is
+ * given carrying the platform marker, `forActor()`, which names an acting
+ * subject decided in the scope in place, `previewFor()`, which previews another
+ * subject as the caller, and `withPolicies()`, `capped()` and
  * `withoutSessionCaps()`, which change how they are decided. Each returns a
  * clone, so the manager it is called on is unchanged.
  *
@@ -56,27 +56,27 @@ trait BuildsScopedManagers
      * A resolved `Subject` is taken as it is, its identity, guard and session
      * kept, as an acting context names its actor (see
      * `Administration\ActingContext`). When it names a tenant or an
-     * application, every check of the manager is decided there (N109): its
-     * tenant, or the platform for none, and its application, or none, are put
-     * in place of the request's, both as the ambient grant scope and as the
-     * subject's, for each check, batch, explanation and compile of a query
-     * scoped through it, and the request's are restored afterwards, even when
-     * the check throws (see `AuthorizationScope::within()`), held there for the
-     * whole check or batch, even when it is the request's and the decisions of
-     * the request are forgotten meanwhile (see `forgetDecisionsFor()`). That is
-     * the decision `AuthorizationScope::within()` around `for()` of the subject
-     * in that scope makes, so wrapping the call still gives the same result. A
-     * `Subject` carrying the platform marker (N120) is decided on the platform
-     * the same way, with no tenant, on its application, or on none, whatever
-     * tenant the request or an explicit `AuthorizationScope::within()` has put
-     * in place. A `Subject` naming none of them is decided in the scope in
-     * place. Any other model is named in the request's tenant, application,
-     * guard and platform marker, and is decided in the scope in place, whatever
-     * marker it carries: on the platform for a request whose subject is on the
-     * platform and names no tenant, while no other scope is in place, and in
-     * the tenant an explicit `AuthorizationScope::within()` puts in place; with
-     * no subject resolved, it has none. The subject's tenant is read when a
-     * check is decided, not here, so a tenant that cannot be read throws
+     * application, every check of the manager is decided there: its tenant, or
+     * the platform for none, and its application, or none, are put in place of
+     * the request's, both as the ambient grant scope and as the subject's, for
+     * each check, batch, explanation and compile of a query scoped through it,
+     * and the request's are restored afterwards, even when the check throws
+     * (see `AuthorizationScope::within()`), held there for the whole check or
+     * batch, even when it is the request's and the decisions of the request are
+     * forgotten meanwhile (see `forgetDecisionsFor()`). That is the decision
+     * `AuthorizationScope::within()` around `for()` of the subject in that
+     * scope makes, so wrapping the call still gives the same result. A
+     * `Subject` carrying the platform marker is decided on the platform the
+     * same way, with no tenant, on its application, or on none, whatever tenant
+     * the request or an explicit `AuthorizationScope::within()` has put in
+     * place. A `Subject` naming none of them is decided in the scope in place.
+     * Any other model is named in the request's tenant, application, guard and
+     * platform marker, and is decided in the scope in place, whatever marker it
+     * carries: on the platform for a request whose subject is on the platform
+     * and names no tenant, while no other scope is in place, and in the tenant
+     * an explicit `AuthorizationScope::within()` puts in place; with no subject
+     * resolved, it has none. The subject's tenant is read when a check is
+     * decided, not here, so a tenant that cannot be read throws
      * `InvalidTenantException` from the check, before anything is decided, as
      * it did before the subject's scope was put in place.
      *
@@ -104,11 +104,10 @@ trait BuildsScopedManagers
     /**
      * Return a scoped manager deciding about the acting subject in the tenant
      * and application in place, whatever the subject names, its tenant, its
-     * application and its platform marker (N120) included, as `for()` of a
-     * model and `forUser()` do, and unlike `for()` of a `Subject`: what
-     * delegated administration and access reviews decide an actor's rights
-     * through, in the reach they put in place (see
-     * `Administration\ActingContext`).
+     * application and its platform marker included, as `for()` of a model and
+     * `forUser()` do, and unlike `for()` of a `Subject`: what delegated
+     * administration and access reviews decide an actor's rights through, in
+     * the reach they put in place (see `Administration\ActingContext`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @return self
@@ -130,13 +129,13 @@ trait BuildsScopedManagers
      * Return a scoped manager deciding about the subject the resolver
      * translates the supplied user into: the user Laravel's Gate hands over,
      * for example, decided in the scope in place, as `for()` decides a model,
-     * whatever the subject names, its platform marker (N120) included: a
-     * request whose subject is on the platform and names no tenant is decided
-     * on the platform while no other scope is in place, and in the tenant an
-     * explicit `AuthorizationScope::within()` puts in place, as the Gate,
-     * `@can`, `can:` and application access, which decide through it, are. A
-     * guest (no user) is no subject, so every check of the scoped manager
-     * denies as `subject_unresolved`, whoever the current request is about.
+     * whatever the subject names, its platform marker included: a request whose
+     * subject is on the platform and names no tenant is decided on the platform
+     * while no other scope is in place, and in the tenant an explicit
+     * `AuthorizationScope::within()` puts in place, as the Gate, `@can`, `can:`
+     * and application access, which decide through it, are. A guest (no user)
+     * is no subject, so every check of the scoped manager denies as
+     * `subject_unresolved`, whoever the current request is about.
      *
      * @param  object|null  $user
      * @return self
@@ -180,20 +179,20 @@ trait BuildsScopedManagers
     }
 
     /**
-     * Return a scoped manager previewing the supplied subject as the caller
-     * (AUTHZ-11.4): its checks are about the subject, in the scope, while the
-     * caller, the subject this manager decides about, stays who is asking.
+     * Return a scoped manager previewing the supplied subject as the caller:
+     * its checks are about the subject, in the scope, while the caller, the
+     * subject this manager decides about, stays who is asking.
      *
      * The subject is previewed with no session: a resolved `Subject` keeps its
      * principal and identity, and a model is named as `for()` names it, so no
      * authentication requirement made of it is met, whatever the caller has
      * proved. A null scope is the request's tenant and application, captured
      * now, or the platform, on the subject's application, for a `Subject` given
-     * carrying the platform marker (N120); a model is previewed in the
-     * request's tenant and application, whatever marker it carries. The caller
-     * must be allowed `authorization:subject.preview` on the preview resource
-     * naming the subject and the scope (see `Preview\PreviewResource`), decided
-     * as an ordinary check about the caller, with its own session, denies,
+     * carrying the platform marker; a model is previewed in the request's
+     * tenant and application, whatever marker it carries. The caller must be
+     * allowed `authorization:subject.preview` on the preview resource naming
+     * the subject and the scope (see `Preview\PreviewResource`), decided as an
+     * ordinary check about the caller, with its own session, denies,
      * boundaries, guardrails and caps: now, in the scope, and again at every
      * use of the preview, each check, batch, listing and compile of a query
      * scoped through it, in the scope and in every other scope one of its
@@ -237,9 +236,9 @@ trait BuildsScopedManagers
 
     /**
      * Return a scoped manager whose checks are capped by the supplied actions,
-     * each an action or an action pattern, as a delegated or restricted call is
-     * (AUTHZ-7.5): an action none of them covers is denied at the session stage
-     * as `session_policy`, and an empty list allows nothing.
+     * each an action or an action pattern, as a delegated or restricted call
+     * is: an action none of them covers is denied at the session stage as
+     * `session_policy`, and an empty list allows nothing.
      *
      * A cap grants nothing, so an action it covers is still decided by every
      * other stage. Capping a capped manager intersects the caps, and the
@@ -262,7 +261,7 @@ trait BuildsScopedManagers
 
     /**
      * Return a scoped manager whose checks are decided as for a principal that
-     * holds no session yet (N105), as application admission decides (see
+     * holds no session yet, as application admission decides (see
      * `Services\ApplicationAccess`): no credential's scopes cap a check, and a
      * machine is not refused for lacking them, while the explicit caps of
      * `capped()` still apply. The check is otherwise the full decision, through

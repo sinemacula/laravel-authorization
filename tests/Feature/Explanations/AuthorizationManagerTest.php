@@ -47,11 +47,11 @@ use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
- * Feature tests for the manager's `explain()` (AUTHZ-11.5, N88, N89): the one
- * check `check()` makes, decided in explain mode, with the same verdict,
- * recorded and reported as any check is, and explained with where each grant
- * that allowed it came from, every condition test with its outcome, the keys
- * found missing, the stages it never reached and what it asked, never a value.
+ * Feature tests for the manager's `explain()`: the one check `check()` makes,
+ * decided in explain mode, with the same verdict, recorded and reported as any
+ * check is, and explained with where each grant that allowed it came from,
+ * every condition test with its outcome, the keys found missing, the stages it
+ * never reached and what it asked, never a value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

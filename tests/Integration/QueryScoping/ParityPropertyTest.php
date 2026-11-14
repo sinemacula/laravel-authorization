@@ -29,12 +29,11 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\TestCase;
 
 /**
- * The query scoping parity property (AUTHZ-10.1, N64): for random scenarios
- * within this release's subset, the rows `whereAuthorized()`, or the
- * model-level scope, keeps are exactly the rows of the query's candidate set
- * that `check()` allows on a freshly loaded model, a check that throws counting
- * as a denial; and a construct outside the subset that a check would weigh is
- * refused.
+ * The query scoping parity property: for random scenarios within this release's
+ * subset, the rows `whereAuthorized()`, or the model-level scope, keeps are
+ * exactly the rows of the query's candidate set that `check()` allows on a
+ * freshly loaded model, a check that throws counting as a denial; and a
+ * construct outside the subset that a check would weigh is refused.
  *
  * The scenarios are drawn from `AUTHZ_PARITY_SEED`, a random seed when it is
  * not set, and there are `AUTHZ_PARITY_RUNS` of them, 150 by default; a failure

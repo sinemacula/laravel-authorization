@@ -18,11 +18,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * operator, an operand of the wrong type or a malformed `${…}` reference. It is
  * not part of the public API.
  *
- * An allow statement may name its `principals` (AUTHZ-7.3): the subjects a
- * resource policy's allow applies to, each by reference or a role by its key. A
- * deny statement takes none.
+ * An allow statement may name its `principals`: the subjects a resource
+ * policy's allow applies to, each by reference or a role by its key. A deny
+ * statement takes none.
  *
- * The `authentication_requirement` operator (N33) tests the reserved key
+ * The `authentication_requirement` operator tests the reserved key
  * `authentication` alone, has no `_if_exists` form, and takes a requirement as
  * its operand (see `AuthenticationRequirement`), which its key test carries
  * built.

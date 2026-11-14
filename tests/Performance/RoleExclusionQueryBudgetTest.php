@@ -20,13 +20,13 @@ use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\TestCase;
 
 /**
- * Query budget of the conflict report of mutually exclusive roles (AUTHZ-11.8,
- * N135): the roles below the pair are read in a fixed number of queries, the
- * grants of all of them together, and the tree is asked about every pair of
- * tenants the holders' grants weigh together, a chunk at a time, so the count
- * is the same for two holders as for forty, wherever they are granted and
- * whatever the depth of the hierarchy, and the report of every pair costs no
- * more queries for one pair than for several.
+ * Query budget of the conflict report of mutually exclusive roles: the roles
+ * below the pair are read in a fixed number of queries, the grants of all of
+ * them together, and the tree is asked about every pair of tenants the holders'
+ * grants weigh together, a chunk at a time, so the count is the same for two
+ * holders as for forty, wherever they are granted and whatever the depth of the
+ * hierarchy, and the report of every pair costs no more queries for one pair
+ * than for several.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

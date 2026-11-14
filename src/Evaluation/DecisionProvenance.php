@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Who a decision was about, who previewed it, and where it was made, as
- * references (AUTHZ-15.3, AUTHZ-15.5).
+ * references.
  *
  * The subject is the principal the decision was about and the identity the
  * person or machine behind it, each null when the decision had no subject, as a

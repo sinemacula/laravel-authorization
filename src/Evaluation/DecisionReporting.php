@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 
 /**
  * Which decisions `DecisionEvaluated` reports, as
- * `authorization.events.decisions` sets it (BL-72), and why each is reported.
+ * `authorization.events.decisions` sets it, and why each is reported.
  *
  * Each setting reports a kind of decision on its own: `previews` every decision
  * made through a preview, `insufficient_authentication` every denial whose only
@@ -27,7 +27,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * declares them, that applies to it and is reported: a preview's denial is
  * reported as a preview while `previews` is on, and as a denial while it is off
  * and `denials` is on. An allow that used break-glass is reported whatever the
- * settings, `allows: none` included, as `BREAK_GLASS` (N142).
+ * settings, `allows: none` included, as `BREAK_GLASS`.
  *
  * The settings are read once for each batch of checks that reports its
  * decisions (see `CheckBatch`), so each decision costs a few comparisons and

@@ -18,9 +18,9 @@ use SineMacula\Laravel\Authorization\Subject;
 
 /**
  * Compiles the statements one class of rows is decided from, before they are
- * weighed (AUTHZ-10.2, N65): for each statement a check would weigh, the
- * condition a row meets when the statement matches it, which an allow needs,
- * and when it applies to it, which a deny needs.
+ * weighed: for each statement a check would weigh, the condition a row meets
+ * when the statement matches it, which an allow needs, and when it applies to
+ * it, which a deny needs.
  *
  * A statement is weighed when it names the action, and, for an allow (a
  * guardrail's or a boundary's included), it applies to the subject, as the

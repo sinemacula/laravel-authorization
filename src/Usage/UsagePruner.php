@@ -12,11 +12,11 @@ use SineMacula\Laravel\Authorization\Database\KeyAsText;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 
 /**
- * Prunes the package's grant usage tables (N102): the row of every route whose
- * stored grant no longer exists, matched on the columns that make the grant
- * unique (its table, the key it grants, its grantee, and its tenant and
- * application as stored, a null matching a null), and every coverage period
- * that ended before the retention.
+ * Prunes the package's grant usage tables: the row of every route whose stored
+ * grant no longer exists, matched on the columns that make the grant unique
+ * (its table, the key it grants, its grantee, and its tenant and application as
+ * stored, a null matching a null), and every coverage period that ended before
+ * the retention.
  *
  * A grant revoked and made again is a new row, so the row of its route is kept
  * while the grant exists, and its old use is ignored by its creation (see

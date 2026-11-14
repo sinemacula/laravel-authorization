@@ -27,11 +27,10 @@ use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
- * Feature tests for the session caps a subject's own scopes make (N121): a
- * source reading the scopes the subject resolver filled caps every check about
- * the subject, null and an empty list kept apart, and no two subjects that
- * differ only in their scopes or their platform marker share a cap or a
- * decision.
+ * Feature tests for the session caps a subject's own scopes make: a source
+ * reading the scopes the subject resolver filled caps every check about the
+ * subject, null and an empty list kept apart, and no two subjects that differ
+ * only in their scopes or their platform marker share a cap or a decision.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

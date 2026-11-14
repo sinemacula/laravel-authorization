@@ -7,14 +7,14 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\ConditionOutcome;
 
 /**
- * One condition test of a statement, as an explanation records it (AUTHZ-11.5):
- * the context key it tests, its operator, whether the `_if_exists` suffix lets
- * a missing key pass, what it found, whether the key was missing, and the
- * `${…}` references of its operand that could not be resolved, by key.
+ * One condition test of a statement, as an explanation records it: the context
+ * key it tests, its operator, whether the `_if_exists` suffix lets a missing
+ * key pass, what it found, whether the key was missing, and the `${…}`
+ * references of its operand that could not be resolved, by key.
  *
  * Only an explained check records its tests, each on its own, so two tests of
  * one key stay apart. Never a value: no operand, no value read and no
- * interpolated string reaches it (AUTHZ-8.8).
+ * interpolated string reaches it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

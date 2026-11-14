@@ -19,12 +19,12 @@ use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\TestCase;
 
 /**
- * Paging budget of access reviews over a large tenant (AUTHZ-11.6, N98): five
- * thousand holders granted roles of a deep hierarchy across fifty tenants, each
- * nested below the one before, are read a page at a time by keyset, each page
- * costing the same queries whatever its number and seeking to where it starts,
- * as the database measures the rows it reads, and streamed a chunk at a time
- * with the memory held bounded by the chunk, not by the tenant.
+ * Paging budget of access reviews over a large tenant: five thousand holders
+ * granted roles of a deep hierarchy across fifty tenants, each nested below the
+ * one before, are read a page at a time by keyset, each page costing the same
+ * queries whatever its number and seeking to where it starts, as the database
+ * measures the rows it reads, and streamed a chunk at a time with the memory
+ * held bounded by the chunk, not by the tenant.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

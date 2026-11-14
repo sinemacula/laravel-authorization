@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Contracts;
 
 /**
- * Environment context contract (AUTHZ-8.6).
+ * Environment context contract.
  *
  * Supplies the `environment` namespace of the context. It is trusted: its
  * values never come from what the caller passes, and only rebinding this

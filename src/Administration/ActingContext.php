@@ -20,29 +20,29 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * Who is making a delegated administration call (AUTHZ-11.1): the resolved
- * acting subject (its principal, the identity behind it, its guard, its session
- * and, for a machine, the scopes of its credential, which cap every check as
- * they cap the request's), any caps the call adds, and who is impersonating it,
- * when someone is.
+ * Who is making a delegated administration call: the resolved acting subject
+ * (its principal, the identity behind it, its guard, its session and, for a
+ * machine, the scopes of its credential, which cap every check as they cap the
+ * request's), any caps the call adds, and who is impersonating it, when someone
+ * is.
  *
  * A management service given an acting context decides each change it makes
  * through `check()`, as this subject, on the change's operation resource, and
  * refuses with the decision when it is not allowed. A service given none runs
- * as trusted system work (N75). An acting context is built from a resolved
- * subject only, never from a bare reference: `current()` takes the request's
- * subject as `check()` resolves it, its session kept, so a step-up met in the
- * session counts; `for()` names another, as `Authorization::for()` names one,
- * with no session, so an authentication requirement is never met for it, unless
- * it is handed a resolved `Subject`, which is kept as it is. A subject that
- * cannot be resolved, or whose principal is not a saved model, refuses with
+ * as trusted system work. An acting context is built from a resolved subject
+ * only, never from a bare reference: `current()` takes the request's subject as
+ * `check()` resolves it, its session kept, so a step-up met in the session
+ * counts; `for()` names another, as `Authorization::for()` names one, with no
+ * session, so an authentication requirement is never met for it, unless it is
+ * handed a resolved `Subject`, which is kept as it is. A subject that cannot be
+ * resolved, or whose principal is not a saved model, refuses with
  * `AuthorizationException`, as `subject_unresolved`, and never falls back to a
  * trusted call.
  *
- * A preview confers no authority (AUTHZ-11.4, N87): an acting context built
- * while a preview is evaluated, by a callback or a listener it runs, or built
- * from a preview's target, the subject a preview manager's `currentSubject()`
- * returns, is refused as `administration.previewing`, with no override (see
+ * A preview confers no authority: an acting context built while a preview is
+ * evaluated, by a callback or a listener it runs, or built from a preview's
+ * target, the subject a preview manager's `currentSubject()` returns, is
+ * refused as `administration.previewing`, with no override (see
  * `Preview\Previewing`).
  *
  * The package never impersonates, so the application says when the acting

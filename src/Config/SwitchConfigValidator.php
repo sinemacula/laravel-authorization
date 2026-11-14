@@ -13,11 +13,10 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * `hierarchy` and `rank`, each a block holding one `enabled` setting.
  *
  * A block must be an array setting no key but `enabled`, which must be true or
- * false (N117): anything else, `null`, `0`, `1`, `'0'`, `'false'` or `'off'`
- * among it, is refused rather than read as either, since each switch decides
- * what a check grants. The environment gives a real boolean for `true`,
- * `false`, `(true)` and `(false)`. A block that is left out, or leaves out
- * `enabled`, is on.
+ * false: anything else, `null`, `0`, `1`, `'0'`, `'false'` or `'off'` among it,
+ * is refused rather than read as either, since each switch decides what a check
+ * grants. The environment gives a real boolean for `true`, `false`, `(true)`
+ * and `(false)`. A block that is left out, or leaves out `enabled`, is on.
  *
  * `isEnabled()` is the one way the package reads the switches at run time, so a
  * value changed after boot is refused there too, never read for its truthiness.

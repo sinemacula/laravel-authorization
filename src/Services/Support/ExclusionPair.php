@@ -12,15 +12,15 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
- * Two roles named as a pair of mutually exclusive roles (AUTHZ-11.8, N135), in
- * the pair's canonical order, the role with the lower key first, so the pair
- * (A, B) is the pair (B, A).
+ * Two roles named as a pair of mutually exclusive roles, in the pair's
+ * canonical order, the role with the lower key first, so the pair (A, B) is the
+ * pair (B, A).
  *
  * A role is never paired with itself (`InvalidRoleExclusionException`), and a
  * role naming half a tenant, which belongs to no one, is never paired
  * (`InvalidTenantColumnsException`).
  *
- * A pair is a definition, owned as the package's other definitions are (D20): a
+ * A pair is a definition, owned as the package's other definitions are: a
  * definition takes only the platform's roles and those of its own tenant and
  * its tenant's ancestors, as a role takes its parent and its permissions (see
  * `RoleParity`). So a pair is owned by the owner of its role owned furthest

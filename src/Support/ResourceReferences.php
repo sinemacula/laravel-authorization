@@ -10,9 +10,9 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 
 /**
- * Turns the value a check is about into the reference of its resource
- * (AUTHZ-4.2), the one place every surface does it: `check()` and its adapters,
- * the Gate and the `authorize` route middleware.
+ * Turns the value a check is about into the reference of its resource, the one
+ * place every surface does it: `check()` and its adapters, the Gate and the
+ * `authorize` route middleware.
  *
  * A model class is read through reflection without running its constructor, so
  * its own `getMorphClass()` names the type exactly as its models do, and no

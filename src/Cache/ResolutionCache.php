@@ -386,7 +386,7 @@ final readonly class ResolutionCache
      * replaced or forgotten.
      *
      * Given `$isForgettingDecisions`, the tenant was forgotten with everything
-     * else the request or job remembers towards its decisions (N112, see
+     * else the request or job remembers towards its decisions (see
      * `Evaluation\DecisionMemory`): every entry is dropped, in every scope, and
      * so are those set aside for a scope left or for a callback run in another
      * (see `batch()`), which are never put back, and the tenant tree's answers,

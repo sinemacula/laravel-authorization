@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Contracts;
 
 /**
- * Bulk resource attribute provider contract (AUTHZ-8.4, AUTHZ-10.3).
+ * Bulk resource attribute provider contract.
  *
  * An optional addition to `ResourceAttributeProvider` for a provider that can
  * read the attributes of many records at once. In a bulk check (`checkMany()`,

@@ -14,9 +14,9 @@ use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
 
 /**
- * Builds what the service provider binds for the context of a check (N25, N26):
- * the trusted sources' defaults, the context key catalogue and the check
- * context factory.
+ * Builds what the service provider binds for the context of a check: the
+ * trusted sources' defaults, the context key catalogue and the check context
+ * factory.
  *
  * The key catalogue is built from `authorization.context.keys` and the factory
  * from the bound trusted sources and the sources
@@ -46,9 +46,9 @@ final class ContextBindings
      * never lets a condition test.
      *
      * The authentication context is resolved, and its namespaces and assurance
-     * keys read, at the catalogue's first use that needs them rather than here
-     * (N104): a sibling package may resolve the catalogue while providers
-     * register, before the provider binding its context has registered.
+     * keys read, at the catalogue's first use that needs them rather than here:
+     * a sibling package may resolve the catalogue while providers register,
+     * before the provider binding its context has registered.
      *
      * @param  \Illuminate\Contracts\Foundation\Application  $app
      * @return \SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue

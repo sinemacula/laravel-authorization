@@ -49,28 +49,26 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
  * Authorization manager — the facade-facing entry point.
  *
  * Coordinates subject resolution, the decision and its recording into a single
- * API (AUTHZ-9.5): `can`, `cannot`, `authorize`, `check`, `any`, `all` and
- * `explain`, over many resources at once (AUTHZ-10.3), `checkMany`, `canEach`
- * and `filterAuthorized`, on the current subject or on a scoped clone from
- * `for()`, `forUser()`, `withPolicies()` or `capped()`, or on a preview from
- * `previewFor()` (AUTHZ-11.4), which decides about another subject as the
- * caller, and the actions a subject may take in a scope, `permissionsFor`
- * (AUTHZ-10.4), and the same with the requirements each read,
- * `heldPermissionsFor` (see `ListsPermissions`), decided through the same path
- * but recording nothing. `check()` is the one decision entry point (D22) and
+ * API: `can`, `cannot`, `authorize`, `check`, `any`, `all` and `explain`, over
+ * many resources at once, `checkMany`, `canEach` and `filterAuthorized`, on the
+ * current subject or on a scoped clone from `for()`, `forUser()`,
+ * `withPolicies()` or `capped()`, or on a preview from `previewFor()`, which
+ * decides about another subject as the caller, and the actions a subject may
+ * take in a scope, `permissionsFor`, and the same with the requirements each
+ * read, `heldPermissionsFor` (see `ListsPermissions`), decided through the same
+ * path but recording nothing. `check()` is the one decision entry point and
  * `checkMany()` the one bulk entry point, `check()` deciding as `checkMany()`
  * decides a batch of one, so a check is decided the same way however it is
  * asked: every other form adapts one of them, and they alone record each
  * decision and report it (see `CheckBatch`). The decision itself is made by the
  * manager's `DecisionPipeline`, which admits the check (the subject, resource
  * and tenant stages) and gathers every source, the session caps included; the
- * policy evaluator runs the rest of the stages in AUTHZ-7.1's order, the
- * denies, the caps, the allows and the implicit deny, each recorded in the
- * decision's trace for audit consumers. A manager from `for()` of a `Subject`
- * naming a tenant or an application decides every check, batch, explanation and
- * query scope there (N109), with the request's scope restored afterwards;
- * `permissionsFor()` and `heldPermissionsFor()` list in the scope they are
- * given.
+ * policy evaluator runs the rest of the stages in order, the denies, the caps,
+ * the allows and the implicit deny, each recorded in the decision's trace for
+ * audit consumers. A manager from `for()` of a `Subject` naming a tenant or an
+ * application decides every check, batch, explanation and query scope there,
+ * with the request's scope restored afterwards; `permissionsFor()` and
+ * `heldPermissionsFor()` list in the scope they are given.
  *
  * `scopedTo()` is called from the `BuildsScopedManagers` trait alone, which an
  * analysis of this file by itself does not see (hence php:S1144), and so is the
@@ -80,7 +78,7 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
  * `PackageState`), before the subject is resolved or a decision read, the state
  * handed to the manager as it is built and kept by each scoped clone; what the
  * `ForgetsDecisions` trait forgets, `forgetLastDecision()` and
- * `forgetDecisionsFor()` (N112), is no decision, and never refuses.
+ * `forgetDecisionsFor()`, is no decision, and never refuses.
  *
  * @SuppressWarnings("php:S1144")
  *
@@ -356,8 +354,8 @@ final class AuthorizationManager
 
     /**
      * Decide the action for the current subject, the one core decision every
-     * other form adapts (D22): `can()` and `cannot()` read whether it is
-     * allowed, `any()` and `all()` read it for each action they decide, and
+     * other form adapts: `can()` and `cannot()` read whether it is allowed,
+     * `any()` and `all()` read it for each action they decide, and
      * `authorize()` throws when it is not. It decides as `checkMany()` decides
      * a batch of one, through the same `CheckBatch`, so a check is decided the
      * same way on its own or in a batch, but reads nothing ahead and holds
@@ -404,8 +402,8 @@ final class AuthorizationManager
 
     /**
      * Decide each of the checks for the current subject, the one core bulk
-     * decision (D22, AUTHZ-10.3), and return the decisions keyed as the checks
-     * are, in their order, one for every check, a check repeated included.
+     * decision, and return the decisions keyed as the checks are, in their
+     * order, one for every check, a check repeated included.
      *
      * Each check is decided exactly as `check()` decides it, through the same
      * stages, so its decision is the one `check()` would make, but what the
@@ -506,7 +504,7 @@ final class AuthorizationManager
     /**
      * Return the scope that keeps the rows of the model's queries the current
      * subject may take the action on, with the caller's context, as `check()`
-     * decides them (AUTHZ-10.1): `whereAuthorized()` puts it on a builder.
+     * decides them: `whereAuthorized()` puts it on a builder.
      *
      * It is compiled now, so a query the scope cannot compile exactly is
      * refused here with `QueryScopeRefusedException`, and compiled again from
@@ -556,7 +554,7 @@ final class AuthorizationManager
      * session of the request that recorded it, as the subject resolver gives
      * it, whichever subject the decision was about (one named with `for()`
      * included), and until the earliest instant a met requirement it read stops
-     * being met (N37).
+     * being met.
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
      */
@@ -584,18 +582,17 @@ final class AuthorizationManager
 
     /**
      * Decide the supplied action in explain mode and return the decision's
-     * explanation (AUTHZ-11.5, N89): the verdict, the statements, or the cap or
-     * permission, that decided it, every condition test of every stage it
-     * reached with what it found, the keys found missing, the stages it never
-     * reached, where each grant that allowed it came from, and what the check
-     * asked (see `Explanation`). The check is the one `check()` makes, through
-     * the same path and the same stages, so its verdict is the same, and it is
-     * recorded as the last decision and reported as any check is; explain mode
-     * only records the evidence besides. On a preview, the preview is admitted
-     * as for `check()`, and the right to preview discloses the target's
-     * explanation (N85), which names statements, conditions, caps and
-     * requirements, never a value or a session; a refused preview explains
-     * nothing.
+     * explanation: the verdict, the statements, or the cap or permission, that
+     * decided it, every condition test of every stage it reached with what it
+     * found, the keys found missing, the stages it never reached, where each
+     * grant that allowed it came from, and what the check asked (see
+     * `Explanation`). The check is the one `check()` makes, through the same
+     * path and the same stages, so its verdict is the same, and it is recorded
+     * as the last decision and reported as any check is; explain mode only
+     * records the evidence besides. On a preview, the preview is admitted as
+     * for `check()`, and the right to preview discloses the target's
+     * explanation, which names statements, conditions, caps and requirements,
+     * never a value or a session; a refused preview explains nothing.
      *
      * @param  string  $action
      * @param  mixed  $resource
@@ -614,7 +611,7 @@ final class AuthorizationManager
 
     /**
      * Report a change to the application's tenant tree at the tenant: it moved
-     * under another parent, or was deleted (AUTHZ-12.8).
+     * under another parent, or was deleted.
      *
      * Every resolution built in the tenant or below it is dropped, in every
      * worker, and the current tenant's ancestors are read afresh, so a moved
@@ -685,9 +682,9 @@ final class AuthorizationManager
      * decides through explains its check.
      *
      * While grant usage is tracked, an everyday check's batch decides through a
-     * pipeline that notes the grant routes each decision used (N100); a
-     * preview's, an explanation's and a listing's never do (N70, N86, N89),
-     * since none of them is a decision the application acts on.
+     * pipeline that notes the grant routes each decision used; a preview's, an
+     * explanation's and a listing's never do, since none of them is a decision
+     * the application acts on.
      *
      * @param  bool  $isDispatching
      * @param  bool  $isStoring

@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 /**
- * Dispatched when a break-glass activation is revoked before it expires
- * (AUTHZ-11.7). The operation's actor is the revoker, or no one for a trusted
- * call.
+ * Dispatched when a break-glass activation is revoked before it expires. The
+ * operation's actor is the revoker, or no one for a trusted call.
  *
  * It carries what every ended activation does (see `BreakGlassEnded`).
  *

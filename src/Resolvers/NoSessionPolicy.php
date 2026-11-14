@@ -8,8 +8,8 @@ use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Subject;
 
 /**
- * The default session policy source (AUTHZ-13.3). It knows no credential, so it
- * answers from what the subject says its credential carries (N126): null for
+ * The default session policy source. It knows no credential, so it answers from
+ * what the subject says its credential carries: null for
  * `CredentialScopes::uncapped()` and the scopes for `CredentialScopes::of()`,
  * and null, no cap, when the subject says nothing, whatever session or guard it
  * names. Failing closed for a credential it cannot establish is the duty of a

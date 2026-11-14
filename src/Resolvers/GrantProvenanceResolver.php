@@ -27,11 +27,11 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 use SineMacula\Laravel\Authorization\Support\TenantColumns;
 
 /**
- * Resolves, for an explained check (N89), what a grantee's grants come to
- * together with where each came from: the permissions it holds and the policies
- * attached to it, each with the grant row that gave it, the roles it came
- * through, the role held and then each ancestor up to the role that carries it,
- * and the tenant and application the grant was made in.
+ * Resolves, for an explained check, what a grantee's grants come to together
+ * with where each came from: the permissions it holds and the policies attached
+ * to it, each with the grant row that gave it, the roles it came through, the
+ * role held and then each ancestor up to the role that carries it, and the
+ * tenant and application the grant was made in.
  *
  * The check decides from what an everyday check decides from: the grantee's
  * resolution in the resolution cache when the cache holds it. Where each grant

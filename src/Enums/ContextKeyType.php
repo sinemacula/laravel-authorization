@@ -8,7 +8,7 @@ use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
 
 /**
  * The type of a declared context key, which decides the operators a condition
- * may test it with (N25).
+ * may test it with.
  *
  * The `_if_exists` form of an operator suits the types its operator suits, and
  * `null` suits every type. A value of the wrong type found at evaluation is

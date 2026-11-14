@@ -13,10 +13,10 @@ use SineMacula\Laravel\Authorization\Evaluation\ExplanationText;
 use Symfony\Component\Console\Formatter\OutputFormatter;
 
 /**
- * The configuration report as `authorization:check` prints it as text (N113):
- * one line per issue first, then a section each for the settings, the tables,
- * the seams, the grant hooks, the connection and the integrations, each line
- * `[subject] state`, and a last line with the outcome.
+ * The configuration report as `authorization:check` prints it as text: one line
+ * per issue first, then a section each for the settings, the tables, the seams,
+ * the grant hooks, the connection and the integrations, each line `[subject]
+ * state`, and a last line with the outcome.
  *
  * The text holds what the report holds, and nothing else: names, classes,
  * drivers, paths and what the package wrote, never a value the report does not

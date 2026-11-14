@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 
 /**
  * The hooks `authorization.grant_hooks` lists, run before the hook bound on the
- * grant hook contract (N108).
+ * grant hook contract.
  *
  * When the configuration lists hooks, the package extends the contract with
  * `around()`, so whatever Laravel builds for the contract is wrapped in this

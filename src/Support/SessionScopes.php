@@ -8,7 +8,7 @@ use SineMacula\Laravel\Authorization\Config\SessionConfigValidator;
 
 /**
  * The scope map (`authorization.session.scopes`): what each scope a credential
- * may carry names, as action patterns (AUTHZ-7.5).
+ * may carry names, as action patterns.
  *
  * A scope mapped to a list of patterns names those patterns; a scope listed on
  * its own, by a numeric key, names itself, as does every scope the map does not

@@ -25,12 +25,12 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature tests for the `authorization:review` Artisan command (AUTHZ-11.6,
- * N97): an access review exported as JSON Lines on the trusted path, to the
- * standard output alone or to a file that exists only with `--force`, for every
- * query and scope option, a subject's holdings narrowed to an action among
- * them, exiting 0 when written, 2 for an invalid invocation and 1 when the
- * review fails, its errors on the standard error.
+ * Feature tests for the `authorization:review` Artisan command: an access
+ * review exported as JSON Lines on the trusted path, to the standard output
+ * alone or to a file that exists only with `--force`, for every query and scope
+ * option, a subject's holdings narrowed to an action among them, exiting 0 when
+ * written, 2 for an invalid invocation and 1 when the review fails, its errors
+ * on the standard error.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

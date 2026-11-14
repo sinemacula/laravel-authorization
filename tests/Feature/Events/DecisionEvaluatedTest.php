@@ -33,8 +33,7 @@ use Tests\TestCase;
  * subject and its identity, the tenant and application the decision was made
  * in, the action, the resource, the effect and reason, the deciding statements
  * and the keys the decision depended on, as references, names and ids, never a
- * model, the caller's context or a value the decision read (AUTHZ-15.3,
- * AUTHZ-15.4).
+ * model, the caller's context or a value the decision read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

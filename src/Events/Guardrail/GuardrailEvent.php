@@ -12,9 +12,9 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * What every change to a guardrail carries (AUTHZ-7.6): the operation, with the
- * actor that made the change, the policy, its name and the scope, as
- * `GuardrailSet` and `GuardrailRemoved` report them.
+ * What every change to a guardrail carries: the operation, with the actor that
+ * made the change, the policy, its name and the scope, as `GuardrailSet` and
+ * `GuardrailRemoved` report them.
  *
  * A snapshot of plain values (references, the name and the scope), never a
  * model. It is dispatched once the write commits, on the package's connection,

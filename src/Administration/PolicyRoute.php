@@ -14,10 +14,10 @@ use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 
 /**
- * Whether handing out a policy hands out only what the actor may hand out
- * (N77): a policy attached to a principal, an identity or a role, each policy a
- * granted role or a new parent carries, a policy rewritten for its holders, and
- * a policy attached to a resource, each across the change's whole reach and
+ * Whether handing out a policy hands out only what the actor may hand out: a
+ * policy attached to a principal, an identity or a role, each policy a granted
+ * role or a new parent carries, a policy rewritten for its holders, and a
+ * policy attached to a resource, each across the change's whole reach and
  * lifetime, by one of two routes.
  *
  * 1. **Containment.** Every allow statement handed out names its actions alone,

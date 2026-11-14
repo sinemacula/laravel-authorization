@@ -386,8 +386,8 @@ final class GateRegistrarTest extends TestCase
 
     /**
      * The context supplied alongside an unidentifiable argument is never
-     * carried on the recorded refusal's event, as it is not for any other check
-     * (AUTHZ-15.4).
+     * carried on the recorded refusal's event, as it is not for any other
+     * check.
      *
      * @return void
      */

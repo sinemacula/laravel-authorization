@@ -15,11 +15,10 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * Report the configuration the application runs with (AUTHZ-17.2, N113): every
- * setting, the name each table takes, every seam and where its binding came
- * from, the grant hooks in the order they run, the connection, and how the
- * package is wired into the application, with every issue the configuration's
- * checks find.
+ * Report the configuration the application runs with: every setting, the name
+ * each table takes, every seam and where its binding came from, the grant hooks
+ * in the order they run, the connection, and how the package is wired into the
+ * application, with every issue the configuration's checks find.
  *
  * The report is built by `Diagnostics\Inspector` without building any seam,
  * connecting to anything or running a query, so it is safe before migrations

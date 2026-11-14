@@ -37,12 +37,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * read.
  *
  * Each write helper takes an optional `actor:`, an acting context it hands to
- * the service, so the change is delegated and decided as that actor
- * (AUTHZ-11.1). Without one it is trusted system work: nothing is decided, so a
- * helper called without an actor is an integration surface for the
- * application's own code, never an endpoint for user-controlled administration.
- * `givePermissionTo()` and `revokePermissionTo()` take no actor, so they are
- * always trusted.
+ * the service, so the change is delegated and decided as that actor. Without
+ * one it is trusted system work: nothing is decided, so a helper called without
+ * an actor is an integration surface for the application's own code, never an
+ * endpoint for user-controlled administration. `givePermissionTo()` and
+ * `revokePermissionTo()` take no actor, so they are always trusted.
  *
  * The permission checks refuse while the package is not healthy (see
  * `PackageState`), before the resolution cache is read.

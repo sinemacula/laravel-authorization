@@ -39,14 +39,14 @@ use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
- * Feature tests for the break-glass activations an allow names (N142): an
- * allowing permission, policy statement or resource policy role selector
- * carried by a role read through a live activation, directly or through its
- * ancestry, names the activation's key, on the decision and on its event, which
- * is reported whatever the settings, also on another tenant's resource; a
- * normal grant, a denial, a machine, an identity and break-glass switched off
- * name none; and the cache, warm or cold, a bulk check, a listing and a
- * preview's listing agree.
+ * Feature tests for the break-glass activations an allow names: an allowing
+ * permission, policy statement or resource policy role selector carried by a
+ * role read through a live activation, directly or through its ancestry, names
+ * the activation's key, on the decision and on its event, which is reported
+ * whatever the settings, also on another tenant's resource; a normal grant, a
+ * denial, a machine, an identity and break-glass switched off name none; and
+ * the cache, warm or cold, a bulk check, a listing and a preview's listing
+ * agree.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

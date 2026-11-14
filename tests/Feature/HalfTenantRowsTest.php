@@ -36,18 +36,18 @@ use Tests\TestCase;
 
 /**
  * Feature tests for rows naming half a tenant, a key without a type or a type
- * without a key, which the package never writes (N130): such a row is neither
- * the platform's nor any tenant's, and fails closed both ways. One that grants
- * (a role, permission or policy grant, a role's policy attachment, the
- * ownership of a role or a permission) applies nowhere; one that restricts (a
- * boundary, a guardrail, a deny attached to a grantee, to a role or to a
- * resource) applies everywhere: at the platform, in an organisation, in an
- * account below it in a closure-table tree and in another organisation, through
- * a check, a bulk check, `permissionsFor()` and `whereAuthorized()` alike, and
- * again once the resolution cache holds the answers. An attachment that both
- * allows and denies, stored that way or of a policy naming half a tenant,
- * denies everywhere and allows nowhere. A row naming a whole tenant, and a
- * platform row, hold as they always have.
+ * without a key, which the package never writes: such a row is neither the
+ * platform's nor any tenant's, and fails closed both ways. One that grants (a
+ * role, permission or policy grant, a role's policy attachment, the ownership
+ * of a role or a permission) applies nowhere; one that restricts (a boundary, a
+ * guardrail, a deny attached to a grantee, to a role or to a resource) applies
+ * everywhere: at the platform, in an organisation, in an account below it in a
+ * closure-table tree and in another organisation, through a check, a bulk
+ * check, `permissionsFor()` and `whereAuthorized()` alike, and again once the
+ * resolution cache holds the answers. An attachment that both allows and
+ * denies, stored that way or of a policy naming half a tenant, denies
+ * everywhere and allows nowhere. A row naming a whole tenant, and a platform
+ * row, hold as they always have.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

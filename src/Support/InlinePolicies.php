@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Exceptions\SystemInlinePolicyException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
- * The rules an inline policy keeps about the grantee it belongs to (AUTHZ-6.9).
+ * The rules an inline policy keeps about the grantee it belongs to.
  *
  * An inline policy names its grantee in `owner_type` and `owner_id`, both or
  * neither, and the grantee is fixed once the policy is created. It is never a

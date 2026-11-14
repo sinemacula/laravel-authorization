@@ -16,9 +16,9 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * One access review (AUTHZ-11.6, N93), an immutable value the review service
- * runs (see `AccessReview`): the question, the scope it reads, what it is
- * about, and the most rows it returns.
+ * One access review, an immutable value the review service runs (see
+ * `AccessReview`): the question, the scope it reads, what it is about, and the
+ * most rows it returns.
  *
  * - `holders()`: who holds a role, a permission or a policy, by any route, or
  *   by a direct grant alone. A permission means that definition, never a policy
@@ -37,19 +37,19 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   dropped, so a bound with a fraction is compared as the next whole second,
  *   which selects exactly the stored expiries within the window;
  * - `grantedBy()`: the stored grants whose `granted_by` pair is exactly the
- *   actor's, the last actor to grant or change each (N95);
+ *   actor's, the last actor to grant or change each;
  * - `unused()`: the live stored grants (roles and permissions granted, policies
- *   attached to grantees) with no observed use since the instant (N94): each
- *   row's `usage` says `unused` when grant usage tracking covered the whole
- *   window, from the later of the instant and the grant's creation to the
- *   review's instant, and `unknown` when it did not, or the grant's source
- *   cannot report its use. A grant observed in use within the window is left
- *   out. Usage is recorded only while tracking is on (see
- *   `Usage\UsageTracking`), so with it off every grant reads `unknown`.
+ *   attached to grantees) with no observed use since the instant: each row's
+ *   `usage` says `unused` when grant usage tracking covered the whole window,
+ *   from the later of the instant and the grant's creation to the review's
+ *   instant, and `unknown` when it did not, or the grant's source cannot report
+ *   its use. A grant observed in use within the window is left out. Usage is
+ *   recorded only while tracking is on (see `Usage\UsageTracking`), so with it
+ *   off every grant reads `unknown`.
  *
  * Every input is a plain value, a model or a resolved subject: nothing is read
- * from a request (D22). Every review is bounded: it returns at most its limit
- * of rows, `authorization.reviews.limit` (1000 by default, a whole number of at
+ * from a request. Every review is bounded: it returns at most its limit of
+ * rows, `authorization.reviews.limit` (1000 by default, a whole number of at
  * least 1, validated at boot) unless `withLimit()` sets another, and says
  * whether more were left out.
  *

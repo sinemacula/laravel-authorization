@@ -23,17 +23,16 @@ use SineMacula\Laravel\Authorization\Usage\WeighedGrants;
  *
  * An identity's grants hold in every principal of that identity, a principal's
  * only in that principal, and nothing reaches a principal through another
- * principal of the same identity. A machine is never treated as a person
- * (AUTHZ-2.4): the identity's roles, permissions and the allow statements of
- * its policies reach the subject only when both are machines (see
- * `AuthorizableMachine`) or neither is, so a person's grants never reach a
- * machine principal and a machine's never reach a person. What only narrows a
- * check still holds across the two: the deny statements of the identity's
- * policies, its own and those its roles attach, deny the subject, the
- * permission boundaries of both cap every check about the subject, and a
- * subject or identity that reports itself inactive is denied everything,
- * whatever either holds. An identity policy that cannot be read therefore
- * denies the check whatever the identity's kind.
+ * principal of the same identity. A machine is never treated as a person: the
+ * identity's roles, permissions and the allow statements of its policies reach
+ * the subject only when both are machines (see `AuthorizableMachine`) or
+ * neither is, so a person's grants never reach a machine principal and a
+ * machine's never reach a person. What only narrows a check still holds across
+ * the two: the deny statements of the identity's policies, its own and those
+ * its roles attach, deny the subject, the permission boundaries of both cap
+ * every check about the subject, and a subject or identity that reports itself
+ * inactive is denied everything, whatever either holds. An identity policy that
+ * cannot be read therefore denies the check whatever the identity's kind.
  *
  * A break-glass activation reaches only the principal it names: an identity
  * read here is marked as one (see `BreakGlassActivations::markIdentity()`), so

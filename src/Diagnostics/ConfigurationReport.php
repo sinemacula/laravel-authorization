@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\Settings\SettingRow;
 
 /**
  * The configuration the application runs with, as `authorization:check` reports
- * it (N113), built without building any seam (see `Inspector`).
+ * it, built without building any seam (see `Inspector`).
  *
  * Its shape is versioned (`VERSION`, see `toArray()`):
  *

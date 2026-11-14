@@ -14,8 +14,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
  * Owner and guard parity between a role and what it takes: its permissions, its
- * parent, and the grantees it, or a permission, is granted to (AUTHZ-3.10,
- * AUTHZ-5.2).
+ * parent, and the grantees it, or a permission, is granted to.
  *
  * A role takes only the platform's permissions and parents and its own
  * tenant's, so a platform role takes only the platform's. A role, permission or

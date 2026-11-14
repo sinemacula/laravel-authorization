@@ -13,9 +13,8 @@ use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 
 /**
- * Reads break-glass activations (AUTHZ-11.7, N133) as the role grants they
- * stand for, so an activation reaches a check through the path a role grant
- * takes.
+ * Reads break-glass activations as the role grants they stand for, so an
+ * activation reaches a check through the path a role grant takes.
  *
  * A grantee's `roles()` relation reads its role grants and its live activations
  * as one set of grant rows (see `roleGrants()`): an activation gives the grant
@@ -36,10 +35,10 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
  * tenant applies nowhere, as a grant row naming one does not (see
  * `TenantChain::grants()`). The note an activation carries is never read here.
  *
- * While `break_glass.enabled` is false no activation counts anywhere (N139):
- * not through the roles relation, nor where delegated administration or the
- * query scopes read the table, and the rows stay for audit. Whether it is on is
- * read once a request or job, when the container builds the record (see
+ * While `break_glass.enabled` is false no activation counts anywhere: not
+ * through the roles relation, nor where delegated administration or the query
+ * scopes read the table, and the rows stay for audit. Whether it is on is read
+ * once a request or job, when the container builds the record (see
  * `isEnabled()`), never once a check, so the resolution cache, built with it,
  * keeps the entries of either state apart.
  *
@@ -249,8 +248,8 @@ final class BreakGlassActivations
     /**
      * Return the keys of the activations behind what the roles held carry, by
      * each permission's name or policy's key: for each role read through an
-     * activation, what every role of its chain carries (N142). A role held
-     * through a role grant as well still names its activation.
+     * activation, what every role of its chain carries. A role held through a
+     * role grant as well still names its activation.
      *
      * @param  iterable<\SineMacula\Laravel\Authorization\Models\Role>  $held
      * @param  array<string, list<string>>  $chains

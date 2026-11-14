@@ -13,8 +13,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
- * Answers whether a principal may use an application (AUTHZ-5.6, AUTHZ-13.4,
- * D23), for `laravel-authentication`'s application access contract.
+ * Answers whether a principal may use an application, for
+ * `laravel-authentication`'s application access contract.
  *
  * An application named in `authorization.application_access` requires the
  * permission it maps to: the full decision is asked whether the principal holds
@@ -26,12 +26,12 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * it, is refused with `InvalidAuthorizationConfigException`, never read as
  * naming no permission, so a malformed entry never opens the application.
  *
- * Admission is decided without session caps, for people and machines alike
- * (N105): a principal being admitted holds no session yet, so the request's
- * credential scopes, which belong to whoever made the request, never cap it,
- * and a machine is not refused for lacking scopes it has yet to be given. The
- * denies, guardrails and boundaries still decide, through the one decision path
- * (D22). Once the session exists, its caps apply to every check.
+ * Admission is decided without session caps, for people and machines alike: a
+ * principal being admitted holds no session yet, so the request's credential
+ * scopes, which belong to whoever made the request, never cap it, and a machine
+ * is not refused for lacking scopes it has yet to be given. The denies,
+ * guardrails and boundaries still decide, through the one decision path. Once
+ * the session exists, its caps apply to every check.
  *
  * It only builds the check and asks the decision; it decides nothing itself.
  *

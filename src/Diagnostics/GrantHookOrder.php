@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\Settings\SettingCatalogue;
 use SineMacula\Laravel\Authorization\Diagnostics\Settings\ValueRenderer;
 
 /**
- * The order the grant hooks run in, without building any (N108): the hooks the
+ * The order the grant hooks run in, without building any: the hooks the
  * configuration lists in `authorization.grant_hooks` first, in the order
  * listed, then the hook bound to the contract. The chain stops at the first
  * hook that refuses.

@@ -50,9 +50,9 @@ use Tests\TestCase;
 /**
  * Feature tests for the seam bindings: the package's default of a contract,
  * scoped under its package-owned key and giving way to a binding made before
- * the package registers or after (N103); the class the configuration names,
- * bound over an earlier binding and a deferred provider's (N106); and the grant
- * hooks the configuration lists, extended around the bound hook (N108).
+ * the package registers or after; the class the configuration names, bound over
+ * an earlier binding and a deferred provider's; and the grant hooks the
+ * configuration lists, extended around the bound hook.
  *
  * Each test binds the grant hook contract in an application of its own, which
  * knows only the configuration it is given.

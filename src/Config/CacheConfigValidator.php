@@ -16,14 +16,14 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  *
  * - `store`: the cache store resolutions persist in across requests, a store
  *   the cache manager resolves, or null, the default, for none;
- * - `ttl`: the longest an entry lives, a whole number of seconds of at least 1
- *   (N117), 300 by default; null is refused, as there is no "forever": an entry
- *   that missed an invalidation would otherwise never heal;
+ * - `ttl`: the longest an entry lives, a whole number of seconds of at least 1,
+ *   300 by default; null is refused, as there is no "forever": an entry that
+ *   missed an invalidation would otherwise never heal;
  * - `prefix`: the prefix of every key the cache writes, a non-empty string,
  *   `authorization` by default.
  *
- * Any other key is refused (N116). The resolution cache reads the lifetime and
- * the prefix through the same checks when it is built, so a value changed after
+ * Any other key is refused. The resolution cache reads the lifetime and the
+ * prefix through the same checks when it is built, so a value changed after
  * boot is refused there too.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

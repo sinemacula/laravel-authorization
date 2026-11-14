@@ -9,8 +9,8 @@ use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 
 /**
- * Which application an access review reads grants for (AUTHZ-5.6), said
- * explicitly rather than by a null that could mean either of two things:
+ * Which application an access review reads grants for, said explicitly rather
+ * than by a null that could mean either of two things:
  *
  * - `none()`: a check with no application, where only the grants made for every
  *   application hold;

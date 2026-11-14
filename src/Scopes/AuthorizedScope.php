@@ -16,8 +16,7 @@ use SineMacula\Laravel\Authorization\Query\Refusal;
 
 /**
  * A model-level scope that keeps every query of the model to the rows the
- * current subject may take the action on (AUTHZ-10.1), added in the model's
- * `booted()`:
+ * current subject may take the action on, added in the model's `booted()`:
  *
  *     protected static function booted(): void
  *     {

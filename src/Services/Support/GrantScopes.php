@@ -13,10 +13,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
- * Where the grant service writes a grant (AUTHZ-5.1, AUTHZ-5.2, D15): in the
- * tenant a call names, else the tenant that owns the target, else
- * platform-wide; a target one tenant owns is granted only in that tenant or a
- * tenant below it.
+ * Where the grant service writes a grant: in the tenant a call names, else the
+ * tenant that owns the target, else platform-wide; a target one tenant owns is
+ * granted only in that tenant or a tenant below it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

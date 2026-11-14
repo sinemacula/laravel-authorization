@@ -23,8 +23,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
- * Tells which of the grants a call proposes widen an identity's scope
- * (AUTHZ-11.3).
+ * Tells which of the grants a call proposes widen an identity's scope.
  *
  * A grant changes nothing, and is never classified, when the grantee already
  * holds it live in the same scope with the same reach or more, until the same
@@ -40,10 +39,10 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * ancestor and reaching below it, or a platform-wide one), which covers a grant
  * in a new tenant, in a sibling of one held and at an ancestor of one held; and
  * when it reaches below its tenant where none of those grants reached below
- * before. The identity's principals are those the identity directory lists
- * (N81), and the grants are read by the grant scope query's reader, in every
- * application, on the write connection. A break-glass activation is never a
- * grant already held here, so a grant beside one is classified as without it.
+ * before. The identity's principals are those the identity directory lists, and
+ * the grants are read by the grant scope query's reader, in every application,
+ * on the write connection. A break-glass activation is never a grant already
+ * held here, so a grant beside one is classified as without it.
  *
  * When in doubt, the grant widens: an incomplete list of principals, or a tree
  * that cannot be read, is a reason of its own. An identity that cannot be

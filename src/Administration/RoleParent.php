@@ -12,9 +12,8 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
  * Whether a delegated change of a role's parent hands out only what the actor
- * may hand out, to holders it administers (AUTHZ-3.3, AUTHZ-11.1), as the
- * administration stage weighs it for a role the actor's context owns (see
- * `DefinitionConstraints`).
+ * may hand out, to holders it administers, as the administration stage weighs
+ * it for a role the actor's context owns (see `DefinitionConstraints`).
  *
  * Every holder of the role, and of every role below it, gets the parent's whole
  * authority, its ancestors' included (see `RoleAuthority`), and loses the old

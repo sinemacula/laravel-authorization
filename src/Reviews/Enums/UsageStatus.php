@@ -5,8 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Reviews\Enums;
 
 /**
- * What an access review knows of a grant route's use (N94, see
- * `Reviews\RowUsage`).
+ * What an access review knows of a grant route's use (see `Reviews\RowUsage`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -91,7 +91,7 @@ final readonly class GrantTable extends ExpiringGrants
      *
      * Granting what is held with the same expiry and reach changes nothing. A
      * different expiry is written with the reach; the same expiry with a
-     * different reach changes the reach alone (D21).
+     * different reach changes the reach alone.
      *
      * @param  string  $id
      * @param  \DateTimeInterface|null  $expiresAt
@@ -372,7 +372,7 @@ final readonly class GrantTable extends ExpiringGrants
     /**
      * Return the change, or, when it left a held row as it was but the row
      * holds with the other reach than the writer's, write the writer's reach to
-     * it, keeping its expiry, and report the reach changed (D21).
+     * it, keeping its expiry, and report the reach changed.
      *
      * @param  string  $id
      * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantChange  $change

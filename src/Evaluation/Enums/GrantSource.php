@@ -6,10 +6,10 @@ namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
 
 /**
  * How a grant that allowed a check reached its subject, as an explanation
- * records it (AUTHZ-11.5): a permission granted to the grantee, or through one
- * of its roles; a policy attached to the grantee, or to one of its roles; a
- * permission or policy of a role held through a break-glass activation; a
- * policy attached to the resource; or a source that cannot say.
+ * records it: a permission granted to the grantee, or through one of its roles;
+ * a policy attached to the grantee, or to one of its roles; a permission or
+ * policy of a role held through a break-glass activation; a policy attached to
+ * the resource; or a source that cannot say.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

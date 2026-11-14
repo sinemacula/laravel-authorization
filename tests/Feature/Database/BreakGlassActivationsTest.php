@@ -39,17 +39,17 @@ use Tests\Fixtures\QueryScoping\TenantScopedPost;
 use Tests\TestCase;
 
 /**
- * Feature tests for break-glass activations read as role grants (AUTHZ-11.7,
- * N133): a live activation grants its role, the role's permissions and its
- * policies, in its scope alone (the platform, a tenant and its subtree, a
- * tenant alone, an application), through a check, a bulk check,
- * `permissionsFor()` and `whereAuthorized()` alike, cold and warm; an expired
- * or ended one, one naming half a tenant, a machine's and an identity's grant
- * nothing; a normal grant of the same role is untouched; denies, boundaries and
- * guardrails still apply; the cache entry lapses at the activation's expiry and
- * a change made through the model is seen on the next check; switching
- * break-glass off stops every activation at once; and an explanation names the
- * route as break-glass with the activation's key, never its note.
+ * Feature tests for break-glass activations read as role grants: a live
+ * activation grants its role, the role's permissions and its policies, in its
+ * scope alone (the platform, a tenant and its subtree, a tenant alone, an
+ * application), through a check, a bulk check, `permissionsFor()` and
+ * `whereAuthorized()` alike, cold and warm; an expired or ended one, one naming
+ * half a tenant, a machine's and an identity's grant nothing; a normal grant of
+ * the same role is untouched; denies, boundaries and guardrails still apply;
+ * the cache entry lapses at the activation's expiry and a change made through
+ * the model is seen on the next check; switching break-glass off stops every
+ * activation at once; and an explanation names the route as break-glass with
+ * the activation's key, never its note.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

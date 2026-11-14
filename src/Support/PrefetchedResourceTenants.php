@@ -10,8 +10,7 @@ use SineMacula\Laravel\Authorization\Contracts\BulkResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 
 /**
- * The tenants of a bulk check's resources, read at once (AUTHZ-4.4,
- * AUTHZ-10.3).
+ * The tenants of a bulk check's resources, read at once.
  *
  * Made for the resources of one chunk of a bulk check, it asks the bound
  * resolver, when it answers in bulk (`BulkResourceTenantResolver`), for the

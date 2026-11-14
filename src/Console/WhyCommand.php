@@ -16,24 +16,23 @@ use SineMacula\Laravel\Authorization\Subject;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * Explain why a saved subject may or may not take an action (AUTHZ-11.5, N91).
+ * Explain why a saved subject may or may not take an action.
  *
  * The subject, a `{morphType}:{key}` reference, is resolved by the bound
  * console subject resolver (see `Contracts\ConsoleSubjectResolver`) to its
  * principal and identity, never from whoever is signed in to the console. The
  * action is explained on the resource given, or on none, through
- * `Authorization::for()` and `explain()`, the one decision path (D22), in
- * explain mode (N89), with the scope the options name in place both as the
- * ambient grant scope and as the subject's (N71): the platform unless
- * `--tenant` names a tenant, never the tenant in place, and no application
- * unless `--application` names one. `--context` is a JSON object read as the
- * `input` namespace alone (N90). A `{morphType}:{key}` resource names that
- * record and `{morphType}:*` its type alone, passed to the check as it takes
- * them, so the record's tenant, resource policies and attribute provider apply
- * as in any check; any other resource, or any with `--opaque`, is an opaque
- * identifier (N92). The decision is recorded and reported as any explained
- * check is, and the scope in place before is restored afterwards, even when the
- * check throws.
+ * `Authorization::for()` and `explain()`, the one decision path, in explain
+ * mode, with the scope the options name in place both as the ambient grant
+ * scope and as the subject's: the platform unless `--tenant` names a tenant,
+ * never the tenant in place, and no application unless `--application` names
+ * one. `--context` is a JSON object read as the `input` namespace alone. A
+ * `{morphType}:{key}` resource names that record and `{morphType}:*` its type
+ * alone, passed to the check as it takes them, so the record's tenant, resource
+ * policies and attribute provider apply as in any check; any other resource, or
+ * any with `--opaque`, is an opaque identifier. The decision is recorded and
+ * reported as any explained check is, and the scope in place before is restored
+ * afterwards, even when the check throws.
  *
  * The explanation is of the named subject under the given scope and console
  * context, without their browser session, so no authentication requirement is

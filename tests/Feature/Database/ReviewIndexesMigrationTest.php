@@ -13,11 +13,11 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the migration adding the indexes access reviews read
- * through (AUTHZ-11.6, N95): an index on the `granted_by` pair of each grant
- * table and one on the permission of each role permission edge, on the tables
- * configured under their custom names, created and dropped cleanly, and run
- * again harmlessly, on every database; a database that indexes the edge's
- * permission for its foreign key already, as MySQL does, keeps that index.
+ * through: an index on the `granted_by` pair of each grant table and one on the
+ * permission of each role permission edge, on the tables configured under their
+ * custom names, created and dropped cleanly, and run again harmlessly, on every
+ * database; a database that indexes the edge's permission for its foreign key
+ * already, as MySQL does, keeps that index.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

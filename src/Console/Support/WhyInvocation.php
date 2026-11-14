@@ -12,9 +12,9 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * What one `authorization:why` invocation asks (AUTHZ-11.5, N90, N91): the
- * action, the resource, the scope, the caller-supplied input and the format,
- * read from its arguments and options, and the one check that explains it.
+ * What one `authorization:why` invocation asks: the action, the resource, the
+ * scope, the caller-supplied input and the format, read from its arguments and
+ * options, and the one check that explains it.
  *
  * Each option is read strictly, and anything it cannot read is refused with
  * `InvalidArgumentException`, whose message names the option and never a value
@@ -32,7 +32,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  *   key starting with one, are refused.
  * - `--format` is `text`, the default, or `json`.
  *
- * The resource is passed to the check as `check()` takes it (N92):
+ * The resource is passed to the check as `check()` takes it:
  * `{morphType}:{key}` as the `(type, id)` pair of that record, so its tenant,
  * its resource policies and its attribute provider apply as they do to any
  * check on the pair; `{morphType}:*` as the type alone, a model class when the
@@ -105,13 +105,12 @@ final readonly class WhyInvocation
     /**
      * Explain the check about the subject, in the scope, on the trusted path:
      * with the scope's tenant and application in place, both as the ambient
-     * grant scope and as the subject's (N71), and restored afterwards, even
-     * when the check throws. The subject keeps its principal, identity, guard
-     * and platform marker, and has no session and says nothing of its
-     * credential's scopes, whatever the resolver gave it, since it is no
-     * request's credential. A subject on the platform stays there when no
-     * tenant is given, and is placed in the tenant given otherwise, as any
-     * subject is.
+     * grant scope and as the subject's, and restored afterwards, even when the
+     * check throws. The subject keeps its principal, identity, guard and
+     * platform marker, and has no session and says nothing of its credential's
+     * scopes, whatever the resolver gave it, since it is no request's
+     * credential. A subject on the platform stays there when no tenant is
+     * given, and is placed in the tenant given otherwise, as any subject is.
      *
      * @param  \SineMacula\Laravel\Authorization\AuthorizationManager  $authorization
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject

@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Contracts;
 
 /**
- * Request context contract (AUTHZ-8.6).
+ * Request context contract.
  *
  * Supplies the `request` namespace of the context. It is trusted: its values
  * come from the request the application received, never from what the caller

@@ -5,14 +5,14 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown when a preview (`Authorization::previewFor()`, AUTHZ-11.4) is asked to
- * do what it does not do in this version (N87): to change its target, through
- * `for()`, `forUser()`, `previewFor()` or `permissionsFor()` naming a subject,
- * or the scope it was admitted in, through a listing in another tenant or
- * application; to decide through policies other than the stored ones, with
- * `withPolicies()`, before or after it is built; to decide without session
- * caps, with `withoutSessionCaps()`, before or after it is built; or to preview
- * a subject that names no record, which no event could name.
+ * Thrown when a preview (`Authorization::previewFor()`) is asked to do what it
+ * does not do in this version: to change its target, through `for()`,
+ * `forUser()`, `previewFor()` or `permissionsFor()` naming a subject, or the
+ * scope it was admitted in, through a listing in another tenant or application;
+ * to decide through policies other than the stored ones, with `withPolicies()`,
+ * before or after it is built; to decide without session caps, with
+ * `withoutSessionCaps()`, before or after it is built; or to preview a subject
+ * that names no record, which no event could name.
  *
  * Changing either party or the scope would need an admission of its own, a
  * hypothetical policy would answer what the target could never do, and lifting

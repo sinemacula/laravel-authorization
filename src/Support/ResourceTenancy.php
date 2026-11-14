@@ -7,16 +7,16 @@ namespace SineMacula\Laravel\Authorization\Support;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Where a queryable model's records keep their tenant (AUTHZ-4.4, AUTHZ-10.1):
- * nowhere, for a tenantless model; in a type column and an id column; or in an
- * id column alone, every record's tenant being of one type.
+ * Where a queryable model's records keep their tenant: nowhere, for a
+ * tenantless model; in a type column and an id column; or in an id column
+ * alone, every record's tenant being of one type.
  *
  * A record's tenant is read from its raw attributes, with no accessor and no
  * cast, as the database holds them: a record whose type or id is null has no
  * tenant, as `Reference::tenantOf()` reads an owner, and one whose declared
  * column is missing, as a partly selected model's may be, or holds anything but
  * a string or an integer, cannot be read, so a check on it throws rather than
- * deciding it as a record of no tenant (N10).
+ * deciding it as a record of no tenant.
  *
  * A fixed type given as a model class is that model's morph class, read without
  * running its constructor (hence php:S3011).

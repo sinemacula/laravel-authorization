@@ -16,9 +16,9 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the migration creating the table of pairs of mutually
- * exclusive roles (AUTHZ-11.8, N135), on the tables configured under custom
- * names, on every database: its columns and indexes, one row a pair, the pairs
- * of a role deleted with it, the collision guard, and a clean drop.
+ * exclusive roles, on the tables configured under custom names, on every
+ * database: its columns and indexes, one row a pair, the pairs of a role
+ * deleted with it, the collision guard, and a clean drop.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

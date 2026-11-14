@@ -29,9 +29,9 @@ use SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Unit tests for the explanation value object (AUTHZ-11.5, N88): what decided a
- * decision, the stages it reached and never reached, and its stable schema,
- * projected from the decision alone and never carrying a value.
+ * Unit tests for the explanation value object: what decided a decision, the
+ * stages it reached and never reached, and its stable schema, projected from
+ * the decision alone and never carrying a value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

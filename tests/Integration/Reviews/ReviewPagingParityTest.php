@@ -20,13 +20,13 @@ use Tests\Concerns\ReviewsAccess;
 use Tests\TestCase;
 
 /**
- * Parity of the ways an access review is read (AUTHZ-11.6, N98): on the same
- * data, the whole review, its pages read to the end at every page size, its
- * stream at every chunk size and its export give the same rows in the same
- * order, with no duplicate and none left out, for every query and scope, over
- * alternative routes through a hierarchy, nullable scopes, rows naming half a
- * tenant and references differing only in case, a trailing space, accents or
- * symbols, on every database.
+ * Parity of the ways an access review is read: on the same data, the whole
+ * review, its pages read to the end at every page size, its stream at every
+ * chunk size and its export give the same rows in the same order, with no
+ * duplicate and none left out, for every query and scope, over alternative
+ * routes through a hierarchy, nullable scopes, rows naming half a tenant and
+ * references differing only in case, a trailing space, accents or symbols, on
+ * every database.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

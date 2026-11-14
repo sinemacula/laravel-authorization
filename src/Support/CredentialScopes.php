@@ -6,10 +6,10 @@ namespace SineMacula\Laravel\Authorization\Support;
 
 /**
  * What a subject's credential says about its scopes, as a subject resolver read
- * it (N126): either the credential carries no cap (`uncapped()`), or it carries
- * the scopes given (`of()`), each a string that is not empty, where an empty
- * list carries none granted and allows nothing. A `Subject` that carries none
- * of these says nothing about its credential's scopes, which is not the same as
+ * it: either the credential carries no cap (`uncapped()`), or it carries the
+ * scopes given (`of()`), each a string that is not empty, where an empty list
+ * carries none granted and allows nothing. A `Subject` that carries none of
+ * these says nothing about its credential's scopes, which is not the same as
  * carrying no cap: the session policy source then establishes them itself.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

@@ -10,8 +10,8 @@ use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 
 /**
- * The JSON Lines an access review is exported as (N97): one JSON object a line,
- * each ended by a line feed, in UTF-8, version 1.
+ * The JSON Lines an access review is exported as: one JSON object a line, each
+ * ended by a line feed, in UTF-8, version 1.
  *
  * - The first line is the header: `record` `header`, the row schema `version`,
  *   the `query` kind, the `scope` (its selection, its tenant or null, and its

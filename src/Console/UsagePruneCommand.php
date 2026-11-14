@@ -9,8 +9,8 @@ use SineMacula\Laravel\Authorization\Usage\UsagePruner;
 use SineMacula\Laravel\Authorization\Usage\UsageTracking;
 
 /**
- * Prunes the package's grant usage tables (N102): the usage of every route
- * whose stored grant no longer exists, and the coverage that ended more than
+ * Prunes the package's grant usage tables: the usage of every route whose
+ * stored grant no longer exists, and the coverage that ended more than
  * `authorization.usage.retention` days ago.
  *
  * Schedulable, and shaped like `authorization:prune`: `--pretend` reports what

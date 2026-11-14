@@ -5,12 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Usage;
 
 /**
- * Which of a subject's grants one tracked check weighed (N100), so only the
- * routes its decision rested on are noted, by the rules forward resolution
- * applied (see `DecisionRoutes`): the grantee whose permission matched the
- * action, the subject's own or, only when the subject's did not, its granting
- * identity's, and whether the subject's and its identity's attached policies
- * were read at all.
+ * Which of a subject's grants one tracked check weighed, so only the routes its
+ * decision rested on are noted, by the rules forward resolution applied (see
+ * `DecisionRoutes`): the grantee whose permission matched the action, the
+ * subject's own or, only when the subject's did not, its granting identity's,
+ * and whether the subject's and its identity's attached policies were read at
+ * all.
  *
  * One is made for each tracked check, and its permission is noted as the check
  * asks for it, so finding the routes reads nothing the check did not.

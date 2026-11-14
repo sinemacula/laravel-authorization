@@ -568,7 +568,7 @@ return [
     | Session policies
     |---------------------------------------------------------------------------
     |
-    | A check may be capped (AUTHZ-7.5): by the scopes of the subject's
+    | A check may be capped: by the scopes of the subject's
     | credential, and by the actions the caller passes to
     | `Authorization::capped([...])` for a delegated or restricted call. Every
     | cap present must cover the action, or it is denied as `session_policy`.

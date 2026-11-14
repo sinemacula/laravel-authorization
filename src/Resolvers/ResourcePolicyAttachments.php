@@ -17,9 +17,9 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
  * The queries `ResourcePolicyResolver` reads resource policy attachments with:
  * those that hold in the tenant and application a check is decided in, and,
  * through queries united with them, those whose denies count in every scope
- * (N130, see `Support\TenantColumns`): an attachment naming half a tenant, and
- * any attachment of a policy naming half a tenant. Each added query is a range
- * of an index, the attachments' or the policies' tenant index for a key with no
+ * (see `Support\TenantColumns`): an attachment naming half a tenant, and any
+ * attachment of a policy naming half a tenant. Each added query is a range of
+ * an index, the attachments' or the policies' tenant index for a key with no
  * type, their `tenant_id` index for a type with no key, so the scope's own
  * query keeps its plan and, with no such row, the added work is empty index
  * ranges.

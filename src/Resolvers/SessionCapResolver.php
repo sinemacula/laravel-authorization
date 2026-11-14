@@ -11,9 +11,9 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
 
 /**
- * Makes the session caps of a check (AUTHZ-7.5): the scopes the session policy
- * source reports for the subject's credential, mapped to action patterns
- * through the scope map, and the explicit caps the caller passed to
+ * Makes the session caps of a check: the scopes the session policy source
+ * reports for the subject's credential, mapped to action patterns through the
+ * scope map, and the explicit caps the caller passed to
  * `Authorization::capped()`.
  *
  * A subject that is a machine (see `AuthorizableMachine`) must have its

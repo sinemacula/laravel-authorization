@@ -17,11 +17,11 @@ use SineMacula\Laravel\Authorization\Support\ResourceTenancy;
 
 /**
  * What an authorized scope knows of the model it scopes, checked before
- * anything is compiled (AUTHZ-10.1, N68): its morph type, its table and
- * connection, the dialect it is written in, its key and its tenant columns,
- * wrapped and qualified, and their kinds, and whether its key can be compared
- * with a value exactly: an integer key holds only integers PHP reads as they
- * are, and a string key's collation compares bytes.
+ * anything is compiled: its morph type, its table and connection, the dialect
+ * it is written in, its key and its tenant columns, wrapped and qualified, and
+ * their kinds, and whether its key can be compared with a value exactly: an
+ * integer key holds only integers PHP reads as they are, and a string key's
+ * collation compares bytes.
  *
  * A model is refused, at once, when the scope cannot prove that what the
  * database compares is what `check()` reads from a loaded record: it does not

@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * An action a subject may take in a scope, as `heldPermissionsFor()` lists it
- * (N128, N129), with every authentication requirement its decision read.
+ * An action a subject may take in a scope, as `heldPermissionsFor()` lists it,
+ * with every authentication requirement its decision read.
  *
  * The requirements are named as a policy document and the requirement checker
  * name their parts (`multifactor`, `phishing_resistant` and so on), each once,

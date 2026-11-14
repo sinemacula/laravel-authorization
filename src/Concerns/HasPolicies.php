@@ -27,18 +27,18 @@ use SineMacula\Laravel\Authorization\Support\RolePolicies;
  * Manages the polymorphic pivot between a grantee, an identity or a role, and
  * one or more policy rows. The `getPolicies()` helper hydrates each attached
  * row into an evaluation-ready value object; an identity that holds roles also
- * gets the policies attached to those roles and to the roles above them
- * (AUTHZ-7.2).
+ * gets the policies attached to those roles and to the roles above them.
+ *
  *
  * A grantee may own inline policies (`createInlinePolicy()`), attached to it
  * alone. They are deleted once the model is deleted; a model that soft-deletes
- * keeps them until it is force-deleted (AUTHZ-6.9).
+ * keeps them until it is force-deleted.
  *
  * Each write helper takes an optional `actor:`, an acting context it hands to
- * the service, so the change is delegated and decided as that actor
- * (AUTHZ-11.1). Without one it is trusted system work: nothing is decided, so a
- * helper called without an actor is an integration surface for the
- * application's own code, never an endpoint for user-controlled administration.
+ * the service, so the change is delegated and decided as that actor. Without
+ * one it is trusted system work: nothing is decided, so a helper called without
+ * an actor is an integration surface for the application's own code, never an
+ * endpoint for user-controlled administration.
  *
  * Reading the policies refuses while the package is not healthy (see
  * `PackageState`), before the resolution cache is read.

@@ -13,12 +13,12 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 
 /**
- * Validator and reader of the `authorization.events` config (BL-72), run by
+ * Validator and reader of the `authorization.events` config, run by
  * `ConfigValidator`: which decisions `DecisionEvaluated` reports.
  *
  * The block sets no key but `decisions`, and `decisions` none but its five
- * settings (N116). `denials`, `insufficient_authentication` and `previews` are
- * switches, true or false (N117); `allows` is `all`, `sensitive` or `none`; and
+ * settings. `denials`, `insufficient_authentication` and `previews` are
+ * switches, true or false; `allows` is `all`, `sensitive` or `none`; and
  * `sensitive_actions` is a list of action names, each a catalogue action named
  * exactly, letters, digits and `_ - : .` with no wildcard. A setting left out
  * takes its default (every switch on, `sensitive`, no action), and one set to

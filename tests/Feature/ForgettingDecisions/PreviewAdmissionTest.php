@@ -18,8 +18,8 @@ use Tests\TestCase;
 
 /**
  * Feature tests for a preview's use when the decisions of the request are
- * forgotten while it runs (N112): its scope, admitted once in the use until
- * then, is admitted again at its next decision there, and once only.
+ * forgotten while it runs: its scope, admitted once in the use until then, is
+ * admitted again at its next decision there, and once only.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

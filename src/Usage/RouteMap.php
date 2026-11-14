@@ -6,10 +6,10 @@ namespace SineMacula\Laravel\Authorization\Usage;
 
 /**
  * The grant routes behind what one resolution found, while grant usage is
- * tracked (N100), kept once each and referenced: the distinct stored grants,
- * the distinct routes, each its key and the index of the grant it starts from,
- * and, for each permission by its name or each policy by its key, the indexes
- * of the routes that give it.
+ * tracked, kept once each and referenced: the distinct stored grants, the
+ * distinct routes, each its key and the index of the grant it starts from, and,
+ * for each permission by its name or each policy by its key, the indexes of the
+ * routes that give it.
  *
  * A role's grant, and the ancestor it reaches, gives every permission or policy
  * the role carries, so its route is kept once and referenced by each, and an

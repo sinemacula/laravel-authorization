@@ -17,11 +17,11 @@ use Tests\TestCase;
 
 /**
  * Feature tests for checking the configuration as the boot does, collecting
- * every issue instead of throwing the first (N113): several refused settings at
- * once, in a stable order; each unknown key on its own beside a refused
- * sibling; checks skipped for a refused block; an unforeseen failure recorded
- * by its class alone; and the checks that build what the configuration names
- * left to the boot.
+ * every issue instead of throwing the first: several refused settings at once,
+ * in a stable order; each unknown key on its own beside a refused sibling;
+ * checks skipped for a refused block; an unforeseen failure recorded by its
+ * class alone; and the checks that build what the configuration names left to
+ * the boot.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

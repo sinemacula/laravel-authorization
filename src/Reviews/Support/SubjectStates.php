@@ -26,7 +26,7 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  * inactive when it is deleted softly, or is an identity that reports itself
  * inactive; active when it is read and is neither; unknown when its type names
  * no model or its record is gone. A review lists an inactive subject's stored
- * grants all the same (N93).
+ * grants all the same.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

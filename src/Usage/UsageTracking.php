@@ -8,10 +8,9 @@ use SineMacula\Laravel\Authorization\Config\ConfigValue;
 use SineMacula\Laravel\Authorization\Config\UsageConfigValidator;
 
 /**
- * The settings of grant usage tracking (N94, N101), read from
- * `authorization.usage` and checked as the config is checked at boot (see
- * `Config\UsageConfigValidator`), so a setting changed after boot is refused
- * rather than replaced by another.
+ * The settings of grant usage tracking, read from `authorization.usage` and
+ * checked as the config is checked at boot (see `Config\UsageConfigValidator`),
+ * so a setting changed after boot is refused rather than replaced by another.
  *
  * Tracking is off unless `enabled` is true. Observations are bucketed by
  * `interval` seconds, 3600 by default: a bucket starts at a whole multiple of

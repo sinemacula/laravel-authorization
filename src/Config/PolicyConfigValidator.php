@@ -11,9 +11,9 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
  * `ConfigValidator`.
  *
  * The block must be an array setting no key but `limits`, itself an array
- * setting no key but the limits a policy document is held to (N116). Each limit
- * it sets must be a whole number of at least 1 (N117); one it leaves out takes
- * its default, and one set to null is refused.
+ * setting no key but the limits a policy document is held to. Each limit it
+ * sets must be a whole number of at least 1; one it leaves out takes its
+ * default, and one set to null is refused.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

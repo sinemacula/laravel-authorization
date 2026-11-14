@@ -8,13 +8,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\GrantSource;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Where a grant that allowed a check came from, as an explanation records it
- * (AUTHZ-11.5): the permission or policy that applied, how it reached the
- * subject, the grantee it was granted to, the principal or its identity, the
- * roles it came through, the role held first and then each ancestor up to the
- * role that carries it, the tenant and application of the grant, where the
- * grant was made, and, for a role held through a break-glass activation, the
- * activation's key, never its note.
+ * Where a grant that allowed a check came from, as an explanation records it:
+ * the permission or policy that applied, how it reached the subject, the
+ * grantee it was granted to, the principal or its identity, the roles it came
+ * through, the role held first and then each ancestor up to the role that
+ * carries it, the tenant and application of the grant, where the grant was
+ * made, and, for a role held through a break-glass activation, the activation's
+ * key, never its note.
  *
  * It is read when the explained check resolves its grants, from the rows that
  * resolution reads, and never afterwards. A source that cannot say how a grant

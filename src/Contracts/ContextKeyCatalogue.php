@@ -8,7 +8,7 @@ use SineMacula\Laravel\Authorization\Context\ContextKey;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 
 /**
- * Context key catalogue contract (N25, AUTHZ-8.1).
+ * Context key catalogue contract.
  *
  * The context keys a policy may read: each a full dot path, its namespace
  * first, with a type that decides the operators a condition may test it with,

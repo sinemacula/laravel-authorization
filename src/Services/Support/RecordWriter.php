@@ -106,8 +106,8 @@ final class RecordWriter
     /**
      * Return the new model owned by the tenant given, its tenant columns set to
      * the tenant's morph type and key, so its creation is decided in that
-     * tenant, and by the owner rule against it (D20); with none, the model as
-     * it is, owned by the platform.
+     * tenant, and by the owner rule against it; with none, the model as it is,
+     * owned by the platform.
      *
      * @template TModel of \Illuminate\Database\Eloquent\Model
      *

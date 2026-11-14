@@ -14,21 +14,20 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * The constraints of an operation on a shared definition (AUTHZ-11.1, D20, N78,
- * N79), weighed by the administration stage (see `OperationConstraints`): a
- * change to a role, a permission or a policy itself, a change to what a role
- * carries (its permissions and policies), and a policy's attachment to a
- * resource.
+ * The constraints of an operation on a shared definition, weighed by the
+ * administration stage (see `OperationConstraints`): a change to a role, a
+ * permission or a policy itself, a change to what a role carries (its
+ * permissions and policies), and a policy's attachment to a resource.
  *
- * 1. **Owner** (D20): a change to a definition, to a role's permissions or
- *    policies, or to a role's parent is made from the tenant that owns the
- *    definition, or the role, and a platform definition's from the platform:
- *    the tenant the check is made from (see `FurtherChecks`) must be the owner,
- *    or it is refused as `administration.owner`, whether or not it narrows (see
+ * 1. **Owner**: a change to a definition, to a role's permissions or policies,
+ *    or to a role's parent is made from the tenant that owns the definition, or
+ *    the role, and a platform definition's from the platform: the tenant the
+ *    check is made from (see `FurtherChecks`) must be the owner, or it is
+ *    refused as `administration.owner`, whether or not it narrows (see
  *    `OwnerConstraint`). A definition being created is owned by the tenant its
  *    record names, and a pair of mutually exclusive roles by the tenant that
  *    owns its owning role. A resource policy's attachment is a grant to a
- *    resource, which the rule never weighs (N79).
+ *    resource, which the rule never weighs.
  * 2. A change that can only narrow is then allowed: removing a permission from
  *    a role, detaching an allow-only policy, one that changes nothing.
  * 3. Every other change is weighed by what it changes, each case below.

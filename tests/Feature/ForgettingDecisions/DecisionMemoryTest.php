@@ -29,9 +29,9 @@ use Tests\TestCase;
 
 /**
  * Feature tests for `DecisionMemory`, what the request or job remembers towards
- * its decisions and the one call that has it forgotten (N112): the last
- * decision, the resolution memo and the tenant the request resolved, with a
- * generation that moves on each time, for the request or job alone.
+ * its decisions and the one call that has it forgotten: the last decision, the
+ * resolution memo and the tenant the request resolved, with a generation that
+ * moves on each time, for the request or job alone.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

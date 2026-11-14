@@ -37,9 +37,9 @@ use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\TestCase;
 
 /**
- * Feature tests for the widening classification (AUTHZ-11.3): which grants a
- * call proposes widen an identity's scope, over an identity owning two
- * principals and a closure-table tree of two organisations.
+ * Feature tests for the widening classification: which grants a call proposes
+ * widen an identity's scope, over an identity owning two principals and a
+ * closure-table tree of two organisations.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

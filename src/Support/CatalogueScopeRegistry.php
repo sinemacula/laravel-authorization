@@ -8,12 +8,12 @@ use SineMacula\Laravel\Authorization\Contracts\ScopeRegistry;
 use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 
 /**
- * A scope registry backed by the permission catalogue and the scope map
- * (AUTHZ-13.5): a credential may carry every scope the map names, whose
- * patterns the application's boot already checked against the catalogue, and
- * every other scope that names a permission the package or the application
- * declares, or a pattern covering at least one, as an unmapped scope names an
- * action or an action pattern itself.
+ * A scope registry backed by the permission catalogue and the scope map: a
+ * credential may carry every scope the map names, whose patterns the
+ * application's boot already checked against the catalogue, and every other
+ * scope that names a permission the package or the application declares, or a
+ * pattern covering at least one, as an unmapped scope names an action or an
+ * action pattern itself.
  *
  * The package binds no scope registry. An application binds this one where its
  * credentials' scopes are issued, and the container builds it:

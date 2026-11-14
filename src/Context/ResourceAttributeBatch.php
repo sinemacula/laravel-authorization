@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceScope;
 
 /**
  * The resource attributes of a bulk check's records, read in bulk as its checks
- * first need them (AUTHZ-8.4, AUTHZ-10.3).
+ * first need them.
  *
  * Made for the records of a bulk check, each reference an item of its own under
  * a token, tracked a chunk at a time as each chunk starts, it reads nothing up

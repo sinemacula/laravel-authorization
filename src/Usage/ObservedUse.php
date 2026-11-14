@@ -7,10 +7,9 @@ namespace SineMacula\Laravel\Authorization\Usage;
 use Carbon\CarbonImmutable;
 
 /**
- * What a usage store keeps of one grant route (N101, N102): the start of the
- * last bucket the route was observed in, and the creation of the grant it was
- * observed through, which tells a regrant's use from the use of the grant it
- * replaced.
+ * What a usage store keeps of one grant route: the start of the last bucket the
+ * route was observed in, and the creation of the grant it was observed through,
+ * which tells a regrant's use from the use of the grant it replaced.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -9,10 +9,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Collects, while one explained check is decided, where each grant it may be
- * allowed by came from (N89): the provenance of every policy gathered for it,
- * as the grant resolution read it, and of the permission held, when the allow
- * stage asks for it. Once the check is decided, it gives the evidence of the
- * grants that allowed it (see `evidenceFor()`), and nothing is read again.
+ * allowed by came from: the provenance of every policy gathered for it, as the
+ * grant resolution read it, and of the permission held, when the allow stage
+ * asks for it. Once the check is decided, it gives the evidence of the grants
+ * that allowed it (see `evidenceFor()`), and nothing is read again.
  *
  * A policy whose source cannot say how it reached the subject, a custom policy
  * resolver or a policy store, is recorded as `unavailable`; a policy attached

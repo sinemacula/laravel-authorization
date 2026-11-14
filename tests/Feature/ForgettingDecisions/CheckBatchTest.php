@@ -35,7 +35,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for a batch of checks still running when the decisions of the
- * request are forgotten (N112): it reads ahead again from its next chunk, the
+ * request are forgotten: it reads ahead again from its next chunk, the
  * attributes of a reference it shares across chunks and where its checks are
  * made included, once for each time they are forgotten, and the request's
  * subject when it is about it, while a subject it was given by name, and the

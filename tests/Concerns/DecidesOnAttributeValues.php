@@ -22,7 +22,7 @@ use Tests\Fixtures\QueryScoping\ScopedPost;
 /**
  * Makes decisions whose conditions read a resource attribute, a subject
  * attribute and a value the caller passes, each a value no decision event may
- * carry (AUTHZ-15.4), and asserts an event carries none of them.
+ * carry, and asserts an event carries none of them.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

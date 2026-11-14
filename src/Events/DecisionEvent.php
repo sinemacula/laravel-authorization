@@ -14,12 +14,12 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReport;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * What every decision event carries (AUTHZ-15.3, AUTHZ-15.4), as
- * `DecisionEvaluated` and `AuthorizationFailed` report it: the subject and its
- * identity, the previewer of a preview, the action, the resource, the tenant
- * and application the decision was made in, its effect and reason code, the
- * statements that decided it, whether it used a break-glass grant and the
- * activations behind it, and the context keys it depended on.
+ * What every decision event carries, as `DecisionEvaluated` and
+ * `AuthorizationFailed` report it: the subject and its identity, the previewer
+ * of a preview, the action, the resource, the tenant and application the
+ * decision was made in, its effect and reason code, the statements that decided
+ * it, whether it used a break-glass grant and the activations behind it, and
+ * the context keys it depended on.
  *
  * A snapshot of references, names and ids, never a model, the caller's context,
  * a session, or a condition or attribute value: the keys are names alone. The
@@ -29,9 +29,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * subject (see `DecisionProvenance`). The previewer is null for a decision that
  * is not a preview. An allow used break-glass when a grant that allowed it came
  * through a live activation, whether or not another grant gave it too, and
- * names the key of each such activation, never its note (N142); a denial never
- * did. The decision itself, with its trace, is not carried: a listener that
- * needs it reads `Authorization::lastDecision()`.
+ * names the key of each such activation, never its note; a denial never did.
+ * The decision itself, with its trace, is not carried: a listener that needs it
+ * reads `Authorization::lastDecision()`.
  *
  * Why the decision was reported, `reportedBecause()`, and whether its action is
  * one of `events.decisions.sensitive_actions`, `isSensitiveAction()`, are set

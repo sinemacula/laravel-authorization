@@ -22,8 +22,8 @@ use SineMacula\Laravel\Authorization\Administration\ActingContext;
  * the impersonator, and each change it made was decided through `check()` on an
  * operation resource whose id is this operation's, so a decision and the events
  * of the write it allowed share the id. A call made without one is trusted
- * system work (N75): it has no actor, unless a console command names one by
- * reference for the record alone, and nothing was decided for it.
+ * system work: it has no actor, unless a console command names one by reference
+ * for the record alone, and nothing was decided for it.
  *
  * Each management service call is one operation, as is a write made through a
  * model outside the services, which is trusted and names no actor.

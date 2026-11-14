@@ -27,12 +27,12 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * human-readable reason.
  *
  * The config must be an array, and it and every block whose keys the package
- * defines may set only those keys (N116), so a misspelt key is refused, naming
- * its full path, rather than leaving its default in place. A key left out takes
- * its default; a key set to null is refused, except where null means off or
- * none: `connection`, `policy_store`, `cache.store`, `usage.connection`,
+ * defines may set only those keys, so a misspelt key is refused, naming its
+ * full path, rather than leaving its default in place. A key left out takes its
+ * default; a key set to null is refused, except where null means off or none:
+ * `connection`, `policy_store`, `cache.store`, `usage.connection`,
  * `usage.queue`, a break-glass role's `max_minutes` and `log_channel`. Whole
- * numbers and switches are read as the environment writes them (N117): see
+ * numbers and switches are read as the environment writes them: see
  * `IntegerSetting` and `SwitchConfigValidator`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Guardrail;
 
 /**
- * Dispatched when a guardrail is removed from a tenant or from the platform
- * (AUTHZ-7.6), by the guardrail service.
+ * Dispatched when a guardrail is removed from a tenant or from the platform, by
+ * the guardrail service.
  *
  * It carries what every change to a guardrail does (see `GuardrailEvent`): the
  * operation, with the actor that removed it, the policy that was the guardrail,

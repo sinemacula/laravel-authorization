@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 /**
  * Thrown when a grant may widen an identity's scope but the identity behind its
  * grantee cannot be resolved, so the grant hook cannot be told whose scope
- * widens (AUTHZ-11.3).
+ * widens.
  *
  * The grantee's model cannot be read, or the bound subject resolver's
  * `forUser()` throws, names no identity, or names the grantee as neither the

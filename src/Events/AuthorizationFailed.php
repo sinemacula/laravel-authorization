@@ -20,8 +20,8 @@ namespace SineMacula\Laravel\Authorization\Events;
  * does, and like `DecisionEvaluated` it is dispatched when the decision is
  * made, not after a commit, and carries what `DecisionEvent` carries:
  * references, names and ids, never the principal model, the caller's context or
- * a condition or attribute value (AUTHZ-15.4). The exception thrown carries the
- * full decision.
+ * a condition or attribute value. The exception thrown carries the full
+ * decision.
  *
  * Part of the SemVer-stable event API; breaking changes require a major version
  * bump.

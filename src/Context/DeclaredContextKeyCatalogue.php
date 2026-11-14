@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
  * the condition key syntax, of at most `PolicyValidator::KEY_LENGTH`
  * characters.
  *
- * The keys of `subject` and `resource` (N29) are the package's built-ins (`id`,
+ * The keys of `subject` and `resource` are the package's built-ins (`id`,
  * `type`, `tenant.type` and `tenant.id`) and those the attribute providers
  * declare, given at construction; neither namespace takes a key declared or
  * registered any other way, and no provider may declare a built-in, a key under
@@ -29,8 +29,8 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
  *
  * An assurance key (see `AssuranceKeys`) of `authentication` or of a namespace
  * the authentication context contributes, under the fixed names or those the
- * context declares, is always untestable, whatever its declaration says (N37,
- * N104), so declaring it testable again changes nothing.
+ * context declares, is always untestable, whatever its declaration says, so
+ * declaring it testable again changes nothing.
  *
  * The authentication context's namespaces and assurance keys are read at the
  * catalogue's first use that needs them (a key found, permitted or listed),
@@ -43,14 +43,14 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
  * assurance key, which is untestable either way. Before the first read, which
  * keys are assurance keys is not known yet, so such a declaration is held and
  * judged at the first read, which throws the refusal the declaration itself
- * would have thrown, naming the key and how it was first declared (N104): a
- * provider may declare keys while providers still register, before the one
- * binding the authentication context has, and reading the context then, even to
- * read it again later, would resolve it while providers register. A refusal at
- * the first read is not kept, so every later read throws it too and the
- * catalogue fails closed. Once the keys are read, such a declaration is judged
- * at once. A key declared again with another type is refused at once, stated as
- * declared, without reading the context.
+ * would have thrown, naming the key and how it was first declared: a provider
+ * may declare keys while providers still register, before the one binding the
+ * authentication context has, and reading the context then, even to read it
+ * again later, would resolve it while providers register. A refusal at the
+ * first read is not kept, so every later read throws it too and the catalogue
+ * fails closed. Once the keys are read, such a declaration is judged at once. A
+ * key declared again with another type is refused at once, stated as declared,
+ * without reading the context.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

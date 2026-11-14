@@ -15,8 +15,8 @@ use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 /**
  * The queries an access review reads stored rows through: the rows of a grant
  * table or of the role permission edges, selected under the column names
- * `GrantRow` reads, on the package's write connection, as every grant read is
- * (AUTHZ-12.4), and ordered in the review's order (see `ReviewOrder`).
+ * `GrantRow` reads, on the package's write connection, as every grant read is,
+ * and ordered in the review's order (see `ReviewOrder`).
  *
  * A query of holders or of stored rows is read a page at a time, each page
  * resuming after a position in the review's order by keyset (see `after()` and

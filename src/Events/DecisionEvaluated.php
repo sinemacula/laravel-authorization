@@ -9,12 +9,11 @@ namespace SineMacula\Laravel\Authorization\Events;
  * `check()`, `can()`, `authorize()`, every path.
  *
  * Carries what `DecisionEvent` carries: references, names and ids, never the
- * principal model, the caller's context or a condition or attribute value
- * (AUTHZ-15.4). Listeners that want a denial-only view filter on
- * `!$event->isAllowed()`; the separate `AuthorizationFailed` event covers the
- * narrower hard-denial signal that fires only when `authorize()` is about to
- * throw. A listener that needs the full decision, with its trace, reads
- * `Authorization::lastDecision()`.
+ * principal model, the caller's context or a condition or attribute value.
+ * Listeners that want a denial-only view filter on `!$event->isAllowed()`; the
+ * separate `AuthorizationFailed` event covers the narrower hard-denial signal
+ * that fires only when `authorize()` is about to throw. A listener that needs
+ * the full decision, with its trace, reads `Authorization::lastDecision()`.
  *
  * It implements `AuthorizationEvent`, as every event the package dispatches
  * does. Unlike the change events, it is dispatched when the decision is made,

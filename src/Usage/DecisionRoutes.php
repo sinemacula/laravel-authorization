@@ -13,11 +13,11 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
 /**
- * The grant routes a decision rested on (N100), found from what the resolution
- * cache keeps beside the grants it weighed (see `ResolutionCache::routesOf()`),
- * in the scope the decision was made in, by the rules forward resolution
- * applied, so a check finds them with no query and nothing is recorded that the
- * decision did not weigh.
+ * The grant routes a decision rested on, found from what the resolution cache
+ * keeps beside the grants it weighed (see `ResolutionCache::routesOf()`), in
+ * the scope the decision was made in, by the rules forward resolution applied,
+ * so a check finds them with no query and nothing is recorded that the decision
+ * did not weigh.
  *
  * - An allowed decision a permission held allowed rested on every live route
  *   behind that permission, redundant ones included, of the grantee whose

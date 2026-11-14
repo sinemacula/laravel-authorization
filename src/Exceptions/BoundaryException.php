@@ -8,7 +8,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Thrown when a permission boundary would be set, or its policy deleted,
- * against the rules boundaries keep (AUTHZ-7.4).
+ * against the rules boundaries keep.
  *
  * A boundary is a managed policy set on a principal or an identity: an inline
  * policy, which belongs to one grantee and is deleted with it, is refused, and

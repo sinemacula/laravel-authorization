@@ -40,10 +40,10 @@ use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\TestCase;
 
 /**
- * Feature tests for the admission of an access review (N96): the right is
- * decided as the reviewer, through ordinary `check()`, on the review resource
- * in the reviewed scope; a review across a reach is refused when anything could
- * limit the right anywhere in it; a refusal discloses nothing.
+ * Feature tests for the admission of an access review: the right is decided as
+ * the reviewer, through ordinary `check()`, on the review resource in the
+ * reviewed scope; a review across a reach is refused when anything could limit
+ * the right anywhere in it; a refusal discloses nothing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

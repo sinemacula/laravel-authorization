@@ -20,8 +20,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * The pairs of mutually exclusive roles, read and written by the role exclusion
- * service inside its transaction (AUTHZ-11.8, N135), on the package's
- * connection, in the table `authorization.tables.role_exclusions` names.
+ * service inside its transaction, on the package's connection, in the table
+ * `authorization.tables.role_exclusions` names.
  *
  * A pair is one row, its roles in the pair's canonical order, the lower key
  * first (see `ExclusionPair`). Declaring one inserts its row with

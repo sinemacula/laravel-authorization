@@ -22,12 +22,12 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Separation of duties enforced on every write that can create a holding
- * (AUTHZ-11.8, N136): a role grant, a widened or re-armed one, a parent given
- * to a role and a break-glass activation are refused with
- * `RoleExclusionConflictException`, carrying the conflicts the write would
- * create, when they would leave someone holding both roles of a declared pair
- * where their reach overlaps; trusted or delegated alike, with no override.
+ * Separation of duties enforced on every write that can create a holding: a
+ * role grant, a widened or re-armed one, a parent given to a role and a
+ * break-glass activation are refused with `RoleExclusionConflictException`,
+ * carrying the conflicts the write would create, when they would leave someone
+ * holding both roles of a declared pair where their reach overlaps; trusted or
+ * delegated alike, with no override.
  *
  * Before the write, the pairs touching its roles are found by walking up from
  * them, a read of each level of the hierarchy (see

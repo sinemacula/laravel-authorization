@@ -13,8 +13,8 @@ use Carbon\CarbonImmutable;
  * rows cover only the stored grants.
  *
  * `AccessReview` reads every review, page, stream and export through the one
- * read that returns this (D22), then shapes it as a `ReviewResult`, a
- * `ReviewPage` with a signed cursor, a stream of rows or JSON Lines.
+ * read that returns this, then shapes it as a `ReviewResult`, a `ReviewPage`
+ * with a signed cursor, a stream of rows or JSON Lines.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

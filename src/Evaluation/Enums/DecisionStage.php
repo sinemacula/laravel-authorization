@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
 
 /**
- * The stages of a decision, in the order they run (AUTHZ-7.1); the first that
- * decides ends it.
+ * The stages of a decision, in the order they run; the first that decides ends
+ * it.
  *
  * The subject, resource and tenant stages admit the check; then every explicit
  * deny is assessed, from every source; then the caps, guardrails, boundaries

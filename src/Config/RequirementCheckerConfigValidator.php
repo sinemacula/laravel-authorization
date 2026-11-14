@@ -8,8 +8,8 @@ use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 
 /**
- * Boot-time validator for the `authorization.requirement_checker` config (N34),
- * run by `ConfigValidator`.
+ * Boot-time validator for the `authorization.requirement_checker` config, run
+ * by `ConfigValidator`.
  *
  * The value must name a class implementing `AuthenticationRequirementChecker`.
  * Null is refused rather than read as "no checker", so a missing checker fails

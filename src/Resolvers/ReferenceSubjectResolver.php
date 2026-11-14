@@ -20,8 +20,8 @@ use SineMacula\Laravel\Authorization\Subject;
  * The morph type is resolved through the Eloquent morph map, or taken as a
  * class name, and must name an Eloquent model, whose row with the key is
  * loaded. The model is then handed to the bound subject resolver's `forUser()`,
- * the package's one translation of a model into the subject decisions are about
- * (N55): under the shipped resolver, the model is its own principal and
+ * the package's one translation of a model into the subject decisions are
+ * about: under the shipped resolver, the model is its own principal and
  * identity; under an application's resolver with principals, a person is mapped
  * to the principal it acts as, with itself as the identity. The subject
  * returned must be about the model named, as its principal or its identity, or

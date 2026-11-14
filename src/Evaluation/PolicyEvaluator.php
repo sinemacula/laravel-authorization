@@ -10,19 +10,19 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 
 /**
- * Decides a check from its statements, stage by stage (AUTHZ-7.1): the denies,
- * the caps (guardrails, permission boundaries and session caps), then the
- * allows, then the implicit deny. No allow is reached before every deny and
- * every cap has run, so a deny, or a cap that does not allow the check, beats
- * every allow source: a policy's allow, a resource policy's, a permission held
- * and an insufficient authentication alike.
+ * Decides a check from its statements, stage by stage: the denies, the caps
+ * (guardrails, permission boundaries and session caps), then the allows, then
+ * the implicit deny. No allow is reached before every deny and every cap has
+ * run, so a deny, or a cap that does not allow the check, beats every allow
+ * source: a policy's allow, a resource policy's, a permission held and an
+ * insufficient authentication alike.
  *
  * 1. *Deny*: every deny statement of every policy, every guardrail and every
  *    boundary is assessed, each in a fixed order (the policies by name, each
  *    statement by its position; see `StatementEntries`) and recorded in the
  *    trace, so the decision, its trace and the statements that decided it are
- *    the same whatever order the policies were read in (AUTHZ-7.9). An explicit
- *    deny wins over any allow, and nothing after it is assessed (N4).
+ *    the same whatever order the policies were read in. An explicit deny wins
+ *    over any allow, and nothing after it is assessed (N4).
  * 2. *Guardrail*: each guardrail on the check's tenant, its ancestors and the
  *    platform must allow the check, as its allow statements would as an
  *    ordinary policy's, conditions included. The guardrails are intersected:
@@ -55,10 +55,9 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *    that allowed.
  * 6. *Implicit*: nothing allowed. The denial is `insufficient_authentication`
  *    when an allow statement names the action and the resource and only its
- *    authentication requirement is unmet (N35), with each such requirement and
- *    its unmet parts as alternatives; `condition_failed` when an allow
- *    statement names them but its conditions do not hold; and `no_match`
- *    otherwise.
+ *    authentication requirement is unmet, with each such requirement and its
+ *    unmet parts as alternatives; `condition_failed` when an allow statement
+ *    names them but its conditions do not hold; and `no_match` otherwise.
  *
  * Every stage the decision reaches is recorded in its trace: each statement it
  * assessed, the permission step (naming the held permission that allowed, when
@@ -77,17 +76,17 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  * requirement keeps the cap from allowing, so a cap that refuses is never
  * answered with a step-up.
  *
- * A policy attached to a resource (AUTHZ-7.3) is decided with the others: its
- * denies apply to everyone at the deny stage, and its allows only to a subject
- * their `principals` name, at the allow stage, with no permission held. An
- * allow that does not apply to the subject, a guardrail's or a boundary's
- * included, is recorded as a principal mismatch and bears on nothing, an unmet
+ * A policy attached to a resource is decided with the others: its denies apply
+ * to everyone at the deny stage, and its allows only to a subject their
+ * `principals` name, at the allow stage, with no permission held. An allow that
+ * does not apply to the subject, a guardrail's or a boundary's included, is
+ * recorded as a principal mismatch and bears on nothing, an unmet
  * authentication requirement included.
  *
  * A decision that read a requirement carries how long it may be reused: in the
  * session it was made in, until the earliest instant a met requirement it read
- * stops being met (N37), and the name of every part of every requirement it
- * read, on an allow or a deny, met or not.
+ * stops being met, and the name of every part of every requirement it read, on
+ * an allow or a deny, met or not.
  *
  * Each step of a statement it assessed names the `${…}` references the
  * statement names; through the context of an explained check, it also carries

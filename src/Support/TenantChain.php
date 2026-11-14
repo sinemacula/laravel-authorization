@@ -12,23 +12,22 @@ use SineMacula\Laravel\Authorization\Database\ComposedExpression;
 
 /**
  * A tenant and its ancestors, nearest first, as the bound tenant tree answers
- * them: the tenants whose records a tenant sees and whose grants reach it
- * (AUTHZ-5.3).
+ * them: the tenants whose records a tenant sees and whose grants reach it.
  *
  * An empty chain is the platform: no tenant, so only platform-wide records and
- * grants count (AUTHZ-5.7). A row is the platform's only when both its tenant
- * columns are null (see `whereNullTenant()`): a row naming half a tenant, a
- * type without a key or a key without a type, which the package never writes,
- * is neither the platform's nor any tenant's, so no chain reads it, and as a
- * grant or an owner it applies nowhere; what restricts of it applies everywhere
- * instead, read through `TenantColumns` (N130).
+ * grants count. A row is the platform's only when both its tenant columns are
+ * null (see `whereNullTenant()`): a row naming half a tenant, a type without a
+ * key or a key without a type, which the package never writes, is neither the
+ * platform's nor any tenant's, so no chain reads it, and as a grant or an owner
+ * it applies nowhere; what restricts of it applies everywhere instead, read
+ * through `TenantColumns`.
  *
  * A chain may stand just below its tenant: a grant made in the tenant then
  * counts only when it reaches the tenants below it, as an ancestor's does, so
  * what holds there is what holds in every one of the tenant's children from
- * above them. A guardrail on a tenant is changed from there (AUTHZ-7.6): from
- * the scope of the tenant's parent, by a grant that reaches the tenant, never
- * one made in the tenant itself.
+ * above them. A guardrail on a tenant is changed from there: from the scope of
+ * the tenant's parent, by a grant that reaches the tenant, never one made in
+ * the tenant itself.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -8,7 +8,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
  * A role listed in a sync with a reach of its own: whether its grant in the
- * sync's tenant also holds in the tenants below it (AUTHZ-5.3).
+ * sync's tenant also holds in the tenants below it.
  *
  * `GrantService::syncRoles()` and the `HasRoles` trait's `syncRoles()` take one
  * beside a role model or name, as `RoleReach::of($role, includeSubtree: true)`,

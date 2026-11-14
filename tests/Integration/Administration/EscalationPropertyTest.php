@@ -29,10 +29,10 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * The escalation property of delegated administration (AUTHZ-11.1): over random
- * scenarios, every delegated operation that commits leaves no subject with
- * authority beyond what the actor could hand out, and every operation refused
- * leaves nothing changed and dispatches no change event.
+ * The escalation property of delegated administration: over random scenarios,
+ * every delegated operation that commits leaves no subject with authority
+ * beyond what the actor could hand out, and every operation refused leaves
+ * nothing changed and dispatches no change event.
  *
  * `permissionsFor()` before and after each operation is the oracle, at the
  * platform and in every tenant of the scenario, with no resource and on a post,

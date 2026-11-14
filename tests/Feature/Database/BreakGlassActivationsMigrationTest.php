@@ -16,13 +16,13 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\TestCase;
 
 /**
- * Feature tests for the migration creating the break-glass activations table
- * (AUTHZ-11.7, N133), on every database: under a name set explicitly, beside
- * the roles table it references, with every column, index and key, each name it
- * builds within the limit, its reference columns byte-exact on MySQL; it
- * refuses to overwrite a table of the same name, and is dropped cleanly again.
- * The prefixed name is proven in `TablePrefixMigrationTest`, and the bound of
- * the name in `TableConfigValidatorTest`.
+ * Feature tests for the migration creating the break-glass activations table,
+ * on every database: under a name set explicitly, beside the roles table it
+ * references, with every column, index and key, each name it builds within the
+ * limit, its reference columns byte-exact on MySQL; it refuses to overwrite a
+ * table of the same name, and is dropped cleanly again. The prefixed name is
+ * proven in `TablePrefixMigrationTest`, and the bound of the name in
+ * `TableConfigValidatorTest`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -35,9 +35,9 @@ use Tests\TestCase;
 
 /**
  * Feature tests for a manager from `for()` of a `Subject` naming a tenant or an
- * application (N109): every check through it is decided there, its grants and
- * the ambient scope both, as `AuthorizationScope::within()` around `for()` of
- * the subject in that scope decides it, with the request's scope restored
+ * application: every check through it is decided there, its grants and the
+ * ambient scope both, as `AuthorizationScope::within()` around `for()` of the
+ * subject in that scope decides it, with the request's scope restored
  * afterwards, even when the check throws.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

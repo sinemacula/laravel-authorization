@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Guardrail;
 
 /**
- * Dispatched when a policy is set as a guardrail on a tenant or on the platform
- * (AUTHZ-7.6), by the guardrail service.
+ * Dispatched when a policy is set as a guardrail on a tenant or on the
+ * platform, by the guardrail service.
  *
  * It carries what every change to a guardrail does (see `GuardrailEvent`): the
  * operation, with the actor that set it, the policy, its name and the scope.

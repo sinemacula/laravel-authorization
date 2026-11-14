@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Contracts;
 
 /**
- * Subject attribute provider contract (N30, AUTHZ-8.5).
+ * Subject attribute provider contract.
  *
  * Supplies the attributes of the subjects of one morph type (a department, a
  * clearance and the like), which conditions and `${…}` references read under

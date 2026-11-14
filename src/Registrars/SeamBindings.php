@@ -27,14 +27,14 @@ use SineMacula\Laravel\Authorization\Support\ClassName;
  * `singleton()`, `scoped()` or `bind()`) keeps its binding across the reset
  * between jobs, while the package's default is still rebuilt for each one.
  *
- * A contract is bound to its key only when nothing is bound to it yet (N103): a
+ * A contract is bound to its key only when nothing is bound to it yet: a
  * binding a sibling package or the application made before the package
  * registers stands, and one made afterwards replaces the default. A class the
  * configuration names in place of the package's default is the application's
  * explicit choice, so the contract is bound to it over whatever was bound
- * before (N106), a deferred provider's binding included, and a binding made
- * afterwards still replaces it. The grant hook is the one exception: the hooks
- * the configuration lists run before whatever it resolves to (N108).
+ * before, a deferred provider's binding included, and a binding made afterwards
+ * still replaces it. The grant hook is the one exception: the hooks the
+ * configuration lists run before whatever it resolves to.
  *
  * The closure each contract is bound to is the service provider's: it is built
  * by the closure the provider hands the registrar, which the provider declares.
@@ -116,8 +116,8 @@ final readonly class SeamBindings
      *
      * A class other than the package's default is the application's explicit
      * choice, so it replaces a binding a sibling package made before the
-     * package registers (N106); the package's default gives way to one. The
-     * concrete bound is the class, or what the builder given makes of it.
+     * package registers; the package's default gives way to one. The concrete
+     * bound is the class, or what the builder given makes of it.
      *
      * @param  class-string  $contract
      * @param  string  $key
@@ -174,11 +174,10 @@ final readonly class SeamBindings
      * built once per request or job, under the package-owned key that keeps the
      * default reachable whatever the contract resolves to.
      *
-     * The contract is bound to the key only when nothing is bound to it yet
-     * (N103). When the concrete is a class the application configured (N106),
-     * the contract is bound to the key over whatever was bound before, a
-     * deferred provider's binding included, and a binding made afterwards still
-     * replaces it.
+     * The contract is bound to the key only when nothing is bound to it yet.
+     * When the concrete is a class the application configured, the contract is
+     * bound to the key over whatever was bound before, a deferred provider's
+     * binding included, and a binding made afterwards still replaces it.
      *
      * Binding the configured class follows Laravel's rules for any binding: an
      * extender registered on the contract is applied to it, so one typed to a
@@ -200,8 +199,8 @@ final readonly class SeamBindings
 
     /**
      * Bind a contract an application may bind itself to the closure, built once
-     * for as long as the application runs, when nothing is bound to it yet
-     * (N103), recording the binding as the defaults are.
+     * for as long as the application runs, when nothing is bound to it yet,
+     * recording the binding as the defaults are.
      *
      * @param  class-string  $contract
      * @param  \Closure(\Illuminate\Contracts\Foundation\Application): object  $concrete
@@ -218,7 +217,7 @@ final readonly class SeamBindings
     /**
      * Bind the composite holding no hook as the grant hook's default, and, when
      * the configuration lists hooks, extend the contract so they run before
-     * whatever it resolves to (N108).
+     * whatever it resolves to.
      *
      * Laravel applies the extender each time it builds the contract, so the
      * hook is wrapped however it was bound: before the package registers or
@@ -627,8 +626,8 @@ final readonly class SeamBindings
 
     /**
      * Bind the contract to the default's key over whatever a sibling package
-     * bound to it before the package registered (N106), a deferred provider's
-     * binding included.
+     * bound to it before the package registered, a deferred provider's binding
+     * included.
      *
      * A deferred provider that provides the contract would bind it at the
      * contract's first resolution, after the package, so it is loaded first and

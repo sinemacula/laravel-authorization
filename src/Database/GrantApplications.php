@@ -8,7 +8,7 @@ use Illuminate\Contracts\Database\Query\Builder;
 
 /**
  * Limits a grant query to the grants that hold in an application: those made
- * for every application, and those made for it (AUTHZ-5.6).
+ * for every application, and those made for it.
  *
  * Without an application only the grants made for every application count, as
  * without a tenant only platform-wide grants do.

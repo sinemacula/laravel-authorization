@@ -36,10 +36,10 @@ use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
- * Feature tests for `PreviewContext`, who previews whom and where (AUTHZ-11.4):
- * the caller stays who is asking, the target is evaluated with no session in
- * the preview's scope, and every use is admitted again, before anything about
- * the target is decided.
+ * Feature tests for `PreviewContext`, who previews whom and where: the caller
+ * stays who is asking, the target is evaluated with no session in the preview's
+ * scope, and every use is admitted again, before anything about the target is
+ * decided.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

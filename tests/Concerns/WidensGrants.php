@@ -17,10 +17,10 @@ use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 
 /**
- * Sets up the tests of grant hooks (AUTHZ-11.3): an identity owning principals
- * (second stub identities), as the bound subject resolver and identity
- * directory see them, a recording hook bound on the contract, and a tree of two
- * organisations, the first with two accounts and a team below the first.
+ * Sets up the tests of grant hooks: an identity owning principals (second stub
+ * identities), as the bound subject resolver and identity directory see them, a
+ * recording hook bound on the contract, and a tree of two organisations, the
+ * first with two accounts and a team below the first.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

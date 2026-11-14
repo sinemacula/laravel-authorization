@@ -150,7 +150,7 @@ final class PolicyEvaluatorTest extends TestCase
 
     /**
      * A deny that decides ends the decision at the deny stage: the allow
-     * statements are not assessed, so only the deny is traced (AUTHZ-7.1).
+     * statements are not assessed, so only the deny is traced.
      *
      * @return void
      */
@@ -279,8 +279,7 @@ final class PolicyEvaluatorTest extends TestCase
 
     /**
      * Every order the policies can be passed in gives an identical decision:
-     * the same effect, reason, stage, deciding statements and trace
-     * (AUTHZ-7.9).
+     * the same effect, reason, stage, deciding statements and trace.
      *
      * @return void
      */
@@ -1558,9 +1557,9 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
-     * Every stage a decision reaches is traced, in AUTHZ-7.1's order: the
-     * denies, then each cap stage, which caps nothing when nothing applies,
-     * then the allows and the permission step.
+     * Every stage a decision reaches is traced, in order: the denies, then each
+     * cap stage, which caps nothing when nothing applies, then the allows and
+     * the permission step.
      *
      * @return void
      */

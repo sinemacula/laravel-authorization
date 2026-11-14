@@ -11,9 +11,9 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * One grant a call proposes to write, as a grant hook sees it (AUTHZ-11.3): the
- * action it falls under, what it grants, where it holds, until when, and why it
- * widens the identity's scope.
+ * One grant a call proposes to write, as a grant hook sees it: the action it
+ * falls under, what it grants, where it holds, until when, and why it widens
+ * the identity's scope.
  *
  * It is an immutable value: it names the role, permission or policy granted by
  * reference, never as a model, and its expiry is an immutable instant in UTC,

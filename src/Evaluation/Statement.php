@@ -22,12 +22,12 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * statement in traces; it never changes how the statement is evaluated.
  *
  * An allow statement in a policy attached to a resource names the subjects it
- * applies to in `principals` (AUTHZ-7.3): each a subject reference (`<morph
- * type>:<id>`) or a role by its key (`role:<role id>`). The evaluator applies
- * such an allow only to a subject a selector names, applies an allow in a
- * resource policy that names none to nobody, and an allow that names principals
- * in a policy attached any other way to nobody either. A deny statement takes
- * no `principals`.
+ * applies to in `principals`: each a subject reference (`<morph type>:<id>`) or
+ * a role by its key (`role:<role id>`). The evaluator applies such an allow
+ * only to a subject a selector names, applies an allow in a resource policy
+ * that names none to nobody, and an allow that names principals in a policy
+ * attached any other way to nobody either. A deny statement takes no
+ * `principals`.
  *
  * Conditions map each operator to the context keys it tests and their operands,
  * for example `['eq' => ['input.tenant' => 'org-1']]`, and every test of every
@@ -44,8 +44,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * operator but `null` tests the null.
  *
  * The `authentication_requirement` operator states an authentication
- * requirement on the reserved key `authentication` (N33): one test, judged by
- * the bound requirement checker for the check's subject and session, never read
+ * requirement on the reserved key `authentication`: one test, judged by the
+ * bound requirement checker for the check's subject and session, never read
  * from the context. It holds when met, does not hold when unmet, and is
  * undecidable when the checker fails. An allow statement whose requirement
  * alone does not hold says so in its assessment, with the requirement and its
