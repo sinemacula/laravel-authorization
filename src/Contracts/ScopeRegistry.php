@@ -11,8 +11,7 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  * credential name real permissions. The package ships a registry backed by the
  * permission catalogue and the scope map (`CatalogueScopeRegistry`) but binds
  * none: an application, or `sinemacula/laravel-iam` for
- * `laravel-authentication`'s scope registry (AUTH-4.5), binds it where scopes
- * are issued.
+ * `laravel-authentication`'s scope registry, binds it where scopes are issued.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

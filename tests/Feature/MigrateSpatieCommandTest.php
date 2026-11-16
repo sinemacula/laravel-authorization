@@ -136,8 +136,8 @@ final class MigrateSpatieCommandTest extends TestCase
     }
 
     /**
-     * Spatie's grants carry no scope, so each is imported platform-wide, for
-     * every application, stamped with the time of the import.
+     * A Spatie grant with no team id is imported platform-wide, for every
+     * application, stamped with the time of the import.
      *
      * @return void
      */
@@ -900,6 +900,160 @@ final class MigrateSpatieCommandTest extends TestCase
     }
 
     /**
+     * Return each Spatie table that may hold team ids.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function teamTables(): iterable
+    {
+        yield 'roles' => ['roles'];
+        yield 'role grants' => ['model_has_roles'];
+        yield 'permission grants' => ['model_has_permissions'];
+    }
+
+    /**
+     * A team id in any of Spatie's team tables stops the import before anything
+     * is written, a dry run too, when no tenant type is given.
+     *
+     * @param  string  $table
+     * @return void
+     */
+    #[DataProvider('teamTables')]
+    public function testRefusesTeamIdsWithoutATenantType(string $table): void
+    {
+        $this->addTeamColumn();
+
+        DB::table($table)->update(['team_id' => 5]);
+
+        foreach ([['--dry-run' => true], []] as $options) {
+            self::assertSame(1, Artisan::call('authorization:migrate-spatie', $options));
+
+            $output = Artisan::output();
+
+            self::assertStringContainsString("Spatie table '{$table}' holds team ids in 'team_id'. Pass --team-tenant-type to import them into tenants.", $output);
+            self::assertStringNotContainsString('Migration summary', $output);
+        }
+
+        self::assertSame(\array_fill_keys(\array_keys(self::targetRows()), []), self::targetRows());
+    }
+
+    /**
+     * A team column that holds no team id imports every row platform-wide.
+     *
+     * @return void
+     */
+    public function testATeamColumnWithNoTeamIdsImportsPlatformWide(): void
+    {
+        $this->addTeamColumn();
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie'));
+        self::assertSame(2, DB::table('auth_roles')->whereNull('tenant_type')->whereNull('tenant_id')->count());
+
+        foreach (['auth_authorizable_roles', 'auth_authorizable_permissions'] as $table) {
+            self::assertSame(1, DB::table($table)->whereNull('tenant_type')->whereNull('tenant_id')->count(), $table);
+        }
+    }
+
+    /**
+     * With a tenant type, a team's role is owned by the team's tenant and a
+     * grant with a team id is made in that tenant; a role with no team id is
+     * the platform's, granted in each team that holds it. A dry run and a
+     * re-run write nothing.
+     *
+     * @return void
+     */
+    public function testImportsTeamRowsIntoTheTeamsTenant(): void
+    {
+        $this->addTeamColumn();
+        $this->seedTeams('team_id');
+
+        $options = ['--team-tenant-type' => 'team'];
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie', [...$options, '--dry-run' => true]));
+        self::assertSame(0, DB::table('auth_roles')->count());
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie', $options));
+
+        self::assertSame(['admin||', 'editor|team|5', 'editor|team|6'], self::teamRoles());
+        self::assertSame(['42|admin|team|5', '42|admin|team|6', '43|editor|team|5', '44|editor|team|6'], self::teamGrants('auth_authorizable_roles', 'auth_roles', 'role_id'));
+        self::assertSame(['42|posts:edit|team|6'], self::teamGrants('auth_authorizable_permissions', 'auth_permissions', 'permission_id'));
+
+        $before = self::targetRows();
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie', $options));
+
+        $output = Artisan::output();
+
+        self::assertSame($before, self::targetRows());
+        self::assertMatchesRegularExpression('/\|\s+roles\s+\|\s+0\s+\|\s+3\s+\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s+authorizable_roles\s+\|\s+0\s+\|\s+4\s+\|/', $output);
+    }
+
+    /**
+     * `--team-column` names the team column the import reads, in place of
+     * `team_id`.
+     *
+     * @return void
+     */
+    public function testReadsTheTeamColumnTheOptionNames(): void
+    {
+        $this->addTeamColumn('organisation_id');
+        $this->seedTeams('organisation_id');
+
+        self::assertSame(1, Artisan::call('authorization:migrate-spatie', ['--team-column' => 'organisation_id']));
+        self::assertStringContainsString('Spatie table \'roles\' holds team ids in \'organisation_id\'.', Artisan::output());
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie', ['--team-column' => 'organisation_id', '--team-tenant-type' => 'organisation']));
+        self::assertSame(['admin||', 'editor|organisation|5', 'editor|organisation|6'], self::teamRoles());
+        self::assertSame(['42|posts:edit|organisation|6'], self::teamGrants('auth_authorizable_permissions', 'auth_permissions', 'permission_id'));
+    }
+
+    /**
+     * A team role is reused only for the tenant type it was imported under.
+     *
+     * @return void
+     */
+    public function testReusesTeamRolesOnlyForTheirTenantType(): void
+    {
+        $this->addTeamColumn();
+        $this->seedTeams('team_id');
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie', ['--team-tenant-type' => 'team']));
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie', ['--team-tenant-type' => 'organisation']));
+        self::assertMatchesRegularExpression('/\|\s+roles\s+\|\s+2\s+\|\s+1\s+\|/', Artisan::output());
+        self::assertSame(['admin||', 'editor|organisation|5', 'editor|organisation|6', 'editor|team|5', 'editor|team|6'], self::teamRoles());
+    }
+
+    /**
+     * A tenant type with a team column no Spatie table has stops the import
+     * before anything is written, a dry run too.
+     *
+     * @return void
+     */
+    public function testRefusesATenantTypeWhenNoTableHasTheTeamColumn(): void
+    {
+        foreach ([['--dry-run' => true], []] as $options) {
+            self::assertSame(1, Artisan::call('authorization:migrate-spatie', [...$options, '--team-tenant-type' => 'team']));
+            self::assertStringContainsString('No Spatie table has the team column \'team_id\'. Pass --team-column to name it.', Artisan::output());
+        }
+
+        self::assertSame(\array_fill_keys(\array_keys(self::targetRows()), []), self::targetRows());
+    }
+
+    /**
+     * A blank tenant type counts as none, so team ids stop the import.
+     *
+     * @return void
+     */
+    public function testABlankTenantTypeRefusesTeamIds(): void
+    {
+        $this->addTeamColumn();
+        $this->seedTeams('team_id');
+
+        self::assertSame(1, Artisan::call('authorization:migrate-spatie', ['--team-tenant-type' => '']));
+        self::assertStringContainsString('Spatie table \'roles\' holds team ids in \'team_id\'.', Artisan::output());
+        self::assertSame(\array_fill_keys(\array_keys(self::targetRows()), []), self::targetRows());
+    }
+
+    /**
      * Command fails when Spatie source tables do not exist.
      *
      * @return void
@@ -1093,6 +1247,69 @@ final class MigrateSpatieCommandTest extends TestCase
             'model_type'    => 'App\Models\User',
             'model_id'      => 42,
         ]);
+    }
+
+    /**
+     * Add a nullable team column to Spatie's roles and grant tables.
+     *
+     * @param  string  $column
+     * @return void
+     */
+    private function addTeamColumn(string $column = 'team_id'): void
+    {
+        foreach (['roles', 'model_has_roles', 'model_has_permissions'] as $table) {
+            Schema::table($table, static function (Blueprint $blueprint) use ($column): void {
+                $blueprint->unsignedBigInteger($column)->nullable();
+            });
+        }
+    }
+
+    /**
+     * Make Spatie's `editor` role team 5's, add a second `editor` for team 6
+     * and grant roles and a permission in both teams.
+     *
+     * @param  string  $column
+     * @return void
+     */
+    private function seedTeams(string $column): void
+    {
+        DB::table('roles')->where('id', 2)->update([$column => 5]);
+        DB::table('roles')->insert(['id' => 3, 'name' => 'editor', 'guard_name' => 'web', $column => 6, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('model_has_roles')->update([$column => 5]);
+        DB::table('model_has_roles')->insert([
+            ['role_id' => 1, 'model_type' => 'App\Models\User', 'model_id' => 42, $column => 6],
+            ['role_id' => 2, 'model_type' => 'App\Models\User', 'model_id' => 43, $column => 5],
+            ['role_id' => 3, 'model_type' => 'App\Models\User', 'model_id' => 44, $column => 6],
+        ]);
+        DB::table('model_has_permissions')->update([$column => 6]);
+    }
+
+    /**
+     * Return each imported role as its name and owner, in a stable order.
+     *
+     * @return list<string>
+     */
+    private static function teamRoles(): array
+    {
+        return \array_values(DB::table('auth_roles')->get()->map(static fn (object $row): string => "{$row->name}|{$row->tenant_type}|{$row->tenant_id}")->sort()->all());
+    }
+
+    /**
+     * Return each grant in the table as its grantee, the name it grants and its
+     * tenant, in a stable order.
+     *
+     * @param  string  $grants
+     * @param  string  $targets
+     * @param  string  $column
+     * @return list<string>
+     */
+    private static function teamGrants(string $grants, string $targets, string $column): array
+    {
+        $rows = DB::table($grants)
+            ->join($targets, "{$targets}.id", '=', "{$grants}.{$column}")
+            ->get(["{$grants}.authorizable_id", "{$targets}.name", "{$grants}.tenant_type", "{$grants}.tenant_id"]);
+
+        return \array_values($rows->map(static fn (object $row): string => "{$row->authorizable_id}|{$row->name}|{$row->tenant_type}|{$row->tenant_id}")->sort()->all());
     }
 
     /**
