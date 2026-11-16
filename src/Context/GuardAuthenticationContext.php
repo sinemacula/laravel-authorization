@@ -35,6 +35,13 @@ final readonly class GuardAuthenticationContext implements AuthenticationContext
     /** @var string The namespace the context supplies. */
     public const string NAMESPACE = 'authentication';
 
+    /** @var array<string, string> The keys the context supplies, by dot path, with their types, declared to the key catalogue while it is the bound context. */
+    public const array KEYS = [
+        'authentication.guard'     => 'string',
+        'authentication.user_id'   => 'string',
+        'authentication.user_type' => 'string',
+    ];
+
     /**
      * Create a new guard authentication context.
      *

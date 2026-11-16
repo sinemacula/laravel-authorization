@@ -11,10 +11,18 @@ use Illuminate\Contracts\Auth\Guard;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\Authorization\Context\ContextBindings;
+use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
+use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\SiblingAuthenticationContext;
 use Tests\TestCase;
 
 /**
@@ -207,6 +215,109 @@ final class GuardAuthenticationContextTest extends TestCase
     public function testItIsMarkedScopeInvariant(): void
     {
         self::assertContains(ScopeInvariant::class, \class_implements(GuardAuthenticationContext::class));
+    }
+
+    /**
+     * The keys it declares are the ones it supplies, each a string.
+     *
+     * @return void
+     */
+    public function testDeclaresTheKeysItSupplies(): void
+    {
+        $this->actingAs(AuthenticatableIdentity::create(['id' => self::USER_ID]));
+
+        $supplied = \array_map(static fn (string $key): string => "authentication.{$key}", \array_keys($this->context()->values()['authentication'] ?? []));
+
+        self::assertSame(['authentication.guard' => 'string', 'authentication.user_id' => 'string', 'authentication.user_type' => 'string'], GuardAuthenticationContext::KEYS);
+        self::assertSame(\array_keys(GuardAuthenticationContext::KEYS), $supplied);
+    }
+
+    /**
+     * While it is the bound context, a policy on its keys is saved and decided
+     * on the guard and its user.
+     *
+     * @return void
+     */
+    public function testAPolicyOnItsKeysIsSavedAndDecided(): void
+    {
+        $this->bindDeclaredCatalogue();
+
+        $user = AuthenticatableIdentity::create(['id' => self::USER_ID]);
+
+        $user->attachPolicy(Policy::create(['name' => 'guarded', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => [
+                'authentication.guard'     => 'web',
+                'authentication.user_id'   => self::USER_ID,
+                'authentication.user_type' => AuthenticatableIdentity::class,
+            ]]],
+        ]]]));
+
+        self::assertFalse(Authorization::for($user)->can('posts:create'));
+
+        $this->actingAs($user);
+
+        self::assertTrue(Authorization::for($user)->can('posts:create'));
+    }
+
+    /**
+     * Provide the keys the context declares.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function declaredKeys(): iterable
+    {
+        foreach (\array_keys(GuardAuthenticationContext::KEYS) as $path) {
+            yield $path => [$path];
+        }
+    }
+
+    /**
+     * With another authentication context bound, a policy on the keys that
+     * context's owner declares is saved and decided, and one naming a key of
+     * this context is refused when it is saved, as undeclared.
+     *
+     * @param  string  $path
+     * @return void
+     */
+    #[DataProvider('declaredKeys')]
+    public function testAnotherContextLeavesItsKeysUndeclared(string $path): void
+    {
+        $this->app?->instance(AuthenticationContext::class, new SiblingAuthenticationContext);
+        $this->bindDeclaredCatalogue()->register('authentication', SiblingAuthenticationContext::KEYS);
+
+        $user = AuthenticatableIdentity::create(['id' => self::USER_ID]);
+
+        $user->attachPolicy(Policy::create(['name' => 'sibling', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['authentication.identity_id' => 'identity-1']]],
+        ]]]));
+
+        self::assertTrue(Authorization::for($user)->can('posts:create'));
+
+        $this->expectException(InvalidPolicyDocumentException::class);
+        $this->expectExceptionMessage("condition key '{$path}' is not a declared context key");
+
+        Policy::create(['name' => 'refused', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => [$path => 'web']]],
+        ]]]);
+    }
+
+    /**
+     * Bind the declared context key catalogue in place of the test suite's
+     * permissive one.
+     *
+     * @return \SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue
+     */
+    private function bindDeclaredCatalogue(): DeclaredContextKeyCatalogue
+    {
+        $app = $this->app;
+
+        self::assertNotNull($app);
+
+        $catalogue = ContextBindings::catalogue($app);
+
+        $app->instance(ContextKeyCatalogue::class, $catalogue);
+
+        return $catalogue;
     }
 
     /**

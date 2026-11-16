@@ -16,14 +16,15 @@ use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
  * catalogue does not declare is refused on write, and so is a condition on an
  * untestable key or with an operator that does not suit the key's type.
  *
- * The shipped default declares the package's own keys (`authentication.guard`,
- * `authentication.user_id`, `authentication.user_type`, `request.ip`,
+ * The shipped default declares the package's own keys (`request.ip`,
  * `request.method`, `request.route`, `environment.time`, and the built-in
  * `subject` and `resource` keys `id`, `type`, `tenant.type` and `tenant.id`),
- * those of `authorization.context.keys` and those the attribute providers of
- * `authorization.attributes` declare; an application or sibling package
- * registers its own namespace and keys from a service provider. Keys of the
- * `input` namespace, which holds the values the caller passes, are declared
+ * the default authentication context's (`authentication.guard`,
+ * `authentication.user_id` and `authentication.user_type`) while it is the one
+ * bound, those of `authorization.context.keys` and those the attribute
+ * providers of `authorization.attributes` declare; an application or sibling
+ * package registers its own namespace and keys from a service provider. Keys of
+ * the `input` namespace, which holds the values the caller passes, are declared
  * like any other.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

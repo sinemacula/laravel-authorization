@@ -9,19 +9,22 @@ A policy's conditions and `${...}` references read the check's context: nested n
 one. A namespace is built only when a statement under evaluation reads it, through a condition key or a reference, and
 at most once a check, so a check whose policies read nothing of the request never looks at it.
 
-| Namespace        | Keys                            | Comes from                                                  |
-|------------------|---------------------------------|-------------------------------------------------------------|
-| `authentication` | `guard`, `user_id`, `user_type` | The bound `AuthenticationContext`                           |
-| `request`        | `ip`, `method`, `route`         | The bound `RequestContext`, only in a routed request        |
-| `environment`    | `time`                          | The bound `EnvironmentContext`                              |
-| `subject`        | `id`, `type`, `tenant.*`, more  | The check's subject and its attribute provider              |
-| `resource`       | `id`, `type`, `tenant.*`, more  | The check's resource and its attribute provider             |
-| `input`          | The keys you declare            | What the caller passes                                      |
-| Any other        | The keys its owner declares     | A `ContextSource` listed in `authorization.context.sources` |
+| Namespace        | Keys                                                  | Comes from                                                  |
+|------------------|-------------------------------------------------------|-------------------------------------------------------------|
+| `authentication` | The default context's `guard`, `user_id`, `user_type` | The bound `AuthenticationContext`                           |
+| `request`        | `ip`, `method`, `route`                               | The bound `RequestContext`, only in a routed request        |
+| `environment`    | `time`                                                | The bound `EnvironmentContext`                              |
+| `subject`        | `id`, `type`, `tenant.*`, more                        | The check's subject and its attribute provider              |
+| `resource`       | `id`, `type`, `tenant.*`, more                        | The check's resource and its attribute provider             |
+| `input`          | The keys you declare                                  | What the caller passes                                      |
+| Any other        | The keys its owner declares                           | A `ContextSource` listed in `authorization.context.sources` |
 
 The shipped defaults supply what Laravel knows. `authentication` holds the default guard's name and, when someone is
 signed in on it, the user's key as a string and morph type (the morph alias, or the class name); with nobody signed in
-only `guard` is present. `request` holds Laravel's `ip()`, resolved through your trusted proxies, the method and the
+only `guard` is present. These three keys come from the default context and are declared only while it is the one
+bound: another `AuthenticationContext` supplies keys under names of its own, which its owner declares, and a policy
+naming `authentication.guard`, `authentication.user_id` or `authentication.user_type` is then refused when it is saved,
+as any undeclared key is. `request` holds Laravel's `ip()`, resolved through your trusted proxies, the method and the
 route's name (missing for an unnamed route), and only once the request has been routed: in a queued job or a console
 command the namespace is absent, so every `request` key is missing. `environment.time` is `now()` in UTC as
 `Y-m-d\TH:i:s\Z`, fixed the first time the check reads `environment`, then kept for the rest of the check, so
@@ -41,8 +44,9 @@ Authorization::can('posts:delete', $post, ['request' => ['ip' => '10.0.0.1']]); 
 ```
 
 Every key a policy reads must be declared in the context key catalogue, with a type, or the policy is refused when it
-is saved. The package declares its own keys, those in the table above, and your attribute providers declare theirs;
-declare the rest, `input`'s included, in `config/authorization.php`, each path within its namespace:
+is saved. The package declares its own keys, those in the table above (the `authentication` ones while the default
+context is bound), and your attribute providers declare theirs; declare the rest, `input`'s included, in
+`config/authorization.php`, each path within its namespace:
 
 ```php
 'context' => [
