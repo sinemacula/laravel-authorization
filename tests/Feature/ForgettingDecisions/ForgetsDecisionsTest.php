@@ -276,30 +276,32 @@ final class ForgetsDecisionsTest extends TestCase
     }
 
     /**
-     * Return what the call names as changed: a session, an identity, both or
-     * neither.
+     * Return what the call names as changed: a session, an identity, both,
+     * neither, or another session and identity.
      *
-     * @return iterable<string, array{string|null, bool}>
+     * @return iterable<string, array{string|null, string|null}>
      */
     public static function provideWhatChanged(): iterable
     {
-        yield 'neither' => [null, false];
-        yield 'a session' => [self::SESSION, false];
-        yield 'an identity' => [null, true];
-        yield 'both' => [self::SESSION, true];
+        yield 'neither' => [null, null];
+        yield 'a session' => [self::SESSION, null];
+        yield 'an identity' => [null, 'user-1'];
+        yield 'both' => [self::SESSION, 'user-1'];
+        yield 'another session and identity' => ['session-2', 'other'];
     }
 
     /**
-     * Whatever names what changed, a session, an identity, both or neither,
-     * everything is forgotten: the last decision, the memo and the tenant the
-     * request resolved, and the generation moves on.
+     * Whatever names what changed, a session, an identity, both, neither, or
+     * another session and identity, everything is forgotten: the last decision,
+     * the memo and the tenant the request resolved, and the generation moves
+     * on.
      *
      * @param  string|null  $session
-     * @param  bool  $isNamingIdentity
+     * @param  string|null  $identityId
      * @return void
      */
     #[DataProvider('provideWhatChanged')]
-    public function testEverythingIsForgottenWhateverTheArgumentsName(?string $session, bool $isNamingIdentity): void
+    public function testEverythingIsForgottenWhateverTheArgumentsName(?string $session, ?string $identityId): void
     {
         $user = StubIdentity::create(['id' => 'user-1']);
 
@@ -312,7 +314,7 @@ final class ForgetsDecisionsTest extends TestCase
 
         self::revokeDirectly('user-1');
 
-        Authorization::forgetDecisionsFor($session, $isNamingIdentity ? $user : null);
+        Authorization::forgetDecisionsFor($session, $identityId === null ? null : StubIdentity::query()->firstOrCreate(['id' => $identityId]));
 
         self::assertNull(Authorization::lastDecision());
         self::assertSame($generation + 1, DecisionMemory::current()->generation());

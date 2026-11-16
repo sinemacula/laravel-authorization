@@ -448,11 +448,10 @@ still to come, and `lastDecision()` after them, follow the change. A preview adm
 decision. The session caps are read from the session policy source at every check, so there is nothing of them to
 forget.
 
-The session and the identity name what changed, for the reader of your code: in this version everything is forgotten,
-for every session and every identity, whatever they are, null included. A decision already returned and an event
-already dispatched are observations of what was decided then, and are never retracted. Forgetting is not a decision, so
-a manager never refuses it, even while the package refuses its configuration. `forgetLastDecision()` clears the last
-decision alone, as a long-running worker does between requests.
+The session and the identity are accepted but never read: forgetting is always total, for every session and every
+identity. A decision already returned and an event already dispatched are observations of what was decided then, and are
+never retracted. Forgetting is not a decision, so a manager never refuses it, even while the package refuses its
+configuration. `forgetLastDecision()` clears the last decision alone, as a long-running worker does between requests.
 
 ### Under the suite
 
