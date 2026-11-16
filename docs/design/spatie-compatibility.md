@@ -203,10 +203,11 @@ The package deliberately does **not** ship the following Spatie surface:
   guard resolution.
 - **Teams / tenancy columns**: Spatie's optional `team_id` scoping column is not shipped. Roles, permissions and
   policies are owned by the platform or by one tenant through their own `tenant_type` / `tenant_id` columns, and each
-  grant carries a scope of its own; `authorization:migrate-spatie` imports Spatie's rows and grants platform-wide,
-  through the management services, so each is validated and reported as any other write is. Spatie's string ids are
-  kept, but its timestamps are not: each imported role and permission is created through its service, so its
-  `created_at` and `updated_at` are the time of the import rather than Spatie's.
+  grant carries a scope of its own; `authorization:migrate-spatie` maps Spatie's team ids to tenants (see
+  [Importing Spatie's data](#importing-spaties-data)) and imports every row through the management services, so each
+  is validated and reported as any other write is. Spatie's string ids are kept, but its timestamps are not: each
+  imported role and permission is created through its service, so its `created_at` and `updated_at` are the time of
+  the import rather than Spatie's.
 - **`guard_name`**: the guard column is `guard`. `authorization:migrate-spatie` maps Spatie's `guard_name` onto it,
   so code that reads `$role->guard_name` reads `$role->guard` instead.
 - **Wildcard permission classes**: Spatie's `WildcardPermission` helper is not needed; wildcard matching is the
@@ -219,10 +220,18 @@ The package deliberately does **not** ship the following Spatie surface:
 (`--connection`, `--roles-table`, `--permissions-table`, `--role-has-permissions-table`, `--model-has-roles-table`,
 `--model-has-permissions-table`), the default connection and Spatie's names when left out. It refuses before reading
 anything when one of them is a table it writes on the same connection, as the default configuration's `roles` and
-`permissions` are. It reuses the platform role or permission of the same name and guard, so a re-run carries on after
+`permissions` are. It reuses the role or permission of the same name, guard and owner, so a re-run carries on after
 a run that stopped part-way, reporting those rows as already present. A grant already held with no expiry is left as it
 is; one given an expiry since, or expired, is granted again without one. Two Spatie roles, or two permissions, that
 map to the same one stop the import before anything is written.
+
+With teams enabled, Spatie keeps a team id on `roles`, `model_has_roles` and `model_has_permissions`, in the column
+`--team-column` names (`team_id`, Spatie's `team_foreign_key` default). `--team-tenant-type` names the tenant type a
+team id maps to: a team's role is created as a role that tenant owns, and a grant with a team id is made in that tenant
+with the default reach, so a platform role held in two teams becomes two tenant grants. A row with no team id stays the
+platform's. Without `--team-tenant-type`, a team id in any of those tables stops the import before anything is written,
+on a dry run too, rather than flatten team grants into platform-wide ones. With it, the import stops the same way when
+none of those tables has the team column, so a mistyped `--team-column` cannot import team rows platform-wide.
 
 ## Not included
 

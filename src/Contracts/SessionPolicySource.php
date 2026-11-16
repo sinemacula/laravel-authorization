@@ -44,7 +44,7 @@ use SineMacula\Laravel\Authorization\Subject;
  * The shipped default (`NoSessionPolicy`) knows no credential: it answers from
  * the subject's own `scopes`, and null when the subject says nothing. Under the
  * suite, `sinemacula/laravel-iam` binds one reading the scopes of the caller's
- * credential from `laravel-authentication` (AUTH-4.5).
+ * credential from `laravel-authentication`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
