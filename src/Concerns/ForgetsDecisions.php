@@ -55,13 +55,11 @@ trait ForgetsDecisions
      * keeps its subject, and decides afresh about it, one from `for()` of a
      * `Subject` in the subject's own scope, even when that is the request's.
      *
-     * The session and the identity name what changed, for the caller's clarity
-     * and for a later version that forgets selectively: in this one, whatever
-     * they are, null included, everything is forgotten, for every session and
-     * every identity. A decision already returned and an event already
-     * dispatched are observations of what was decided then, and are never
-     * retracted. It is not a decision, so it never refuses, even while the
-     * package does (see `PackageState`).
+     * The session and the identity are accepted but never read: forgetting is
+     * always total, for every session and every identity. A decision already
+     * returned and an event already dispatched are observations of what was
+     * decided then, and are never retracted. It is not a decision, so it never
+     * refuses, even while the package does (see `PackageState`).
      *
      * @param  string|null  $session
      * @param  object|null  $identity
