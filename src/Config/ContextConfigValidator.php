@@ -77,7 +77,7 @@ final class ContextConfigValidator
         $block          = ConfigBlock::of('authorization.context', $config, self::SETTINGS);
         $authentication = $container->bound(AuthenticationContext::class) ? $container->make(AuthenticationContext::class) : null;
 
-        self::keys(ConfigBlock::entry($block, 'keys', []), $authentication instanceof GuardAuthenticationContext);
+        self::keys(ConfigBlock::entry($block, 'keys', []), $authentication === null ? null : $authentication::class);
         self::namespaces(self::sources(ConfigBlock::entry($block, 'sources', [])), $container, $authentication);
     }
 
@@ -124,17 +124,18 @@ final class ContextConfigValidator
     /**
      * Validate that `context.keys` maps namespaces to their keys' types, and
      * that the context key catalogue accepts every key, alongside the default
-     * authentication context's keys while that context is bound. Nothing is
-     * built but the catalogue. Another context's namespaces and assurance keys
-     * are checked by `namespaces()`.
+     * authentication context's keys while the bound context's class is
+     * `GuardAuthenticationContext`, a null class being none bound or one not
+     * known. Nothing is built but the catalogue. Another context's namespaces
+     * and assurance keys are checked by `namespaces()`.
      *
      * @param  mixed  $value
-     * @param  bool  $isDefaultContextBound
+     * @param  string|null  $contextClass
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    public static function keys(mixed $value, bool $isDefaultContextBound = false): void
+    public static function keys(mixed $value, ?string $contextClass = null): void
     {
         $keys = self::keyMap($value);
 
@@ -142,7 +143,7 @@ final class ContextConfigValidator
             $catalogue = new DeclaredContextKeyCatalogue;
 
             // Declared first, so a clash names the default context's key.
-            foreach ($isDefaultContextBound ? GuardAuthenticationContext::KEYS : [] as $path => $type) {
+            foreach ($contextClass !== null && \is_a($contextClass, GuardAuthenticationContext::class, true) ? GuardAuthenticationContext::KEYS : [] as $path => $type) {
                 $catalogue->declare($path, ContextKeyType::from($type));
             }
 

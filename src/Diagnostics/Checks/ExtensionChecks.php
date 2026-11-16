@@ -74,8 +74,10 @@ final readonly class ExtensionChecks
 
     /**
      * Check each namespace of `context.keys`, then that the catalogue accepts
-     * them beside the default authentication context's keys while the package
-     * default is bound, and each class of `context.sources`.
+     * them beside the default authentication context's keys while the bound
+     * context's class, read without building it, is that context's, and each
+     * class of `context.sources`. A context whose class is not known is checked
+     * at boot.
      *
      * @return void
      */
@@ -87,13 +89,14 @@ final readonly class ExtensionChecks
             return;
         }
 
-        $path      = self::CONTEXT . '.keys';
-        $keys      = ConfigBlock::entry($block, 'keys', []);
-        $isDefault = SeamClassifier::of($this->container)->isPackageDefault(AuthenticationContext::class);
+        $path    = self::CONTEXT . '.keys';
+        $keys    = ConfigBlock::entry($block, 'keys', []);
+        $classes = SeamClassifier::of($this->container)->classify(AuthenticationContext::class)->classes;
+        $class   = \count($classes) === 1 ? $classes[0] : null;
 
         if ($this->collector->verifyEntries($path, $keys, ContextConfigValidator::keyEntry(...))) {
-            $this->collector->verify($path, static function () use ($keys, $isDefault): void {
-                ContextConfigValidator::keys($keys, $isDefault);
+            $this->collector->verify($path, static function () use ($keys, $class): void {
+                ContextConfigValidator::keys($keys, $class);
             });
         }
 

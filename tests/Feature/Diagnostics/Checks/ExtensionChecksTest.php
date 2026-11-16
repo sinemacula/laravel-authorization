@@ -7,6 +7,7 @@ namespace Tests\Feature\Diagnostics\Checks;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Config\AttributeConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ContextConfigValidator;
+use SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Diagnostics\Checks\ExtensionChecks;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings;
@@ -78,21 +79,28 @@ final class ExtensionChecksTest extends TestCase
 
     /**
      * A context key clashing with the default authentication context's keys is
-     * refused beside any other issue while the package default is bound, and
-     * accepted while another context is bound.
+     * refused beside any other issue while the bound class is that context's,
+     * accepted while another context is bound, and left to the boot while a
+     * factory is bound, which is never built.
      *
      * @return void
      */
     public function testRefusesAKeyClashingWithTheDefaultContextsKeys(): void
     {
         $settings = ['context' => ['keys' => ['authentication' => ['guard' => 'list']]], 'session' => ['source' => 3]];
+        $clash    = ['authorization.context.keys', 'invalid_value'];
 
-        self::assertSame([
-            ['authorization.context.keys', 'invalid_value'],
-            ['authorization.session.source', 'invalid_type'],
-        ], self::pathsAndCodes($this->check($settings)));
+        self::assertSame([$clash, ['authorization.session.source', 'invalid_type']], self::pathsAndCodes($this->check($settings)));
+
+        $this->container()->bind(AuthenticationContext::class, GuardAuthenticationContext::class);
+
+        self::assertContains($clash, self::pathsAndCodes($this->check($settings)));
 
         $this->container()->instance(AuthenticationContext::class, new SiblingAuthenticationContext);
+
+        self::assertNotContains($clash, self::pathsAndCodes($this->check($settings)));
+
+        $this->container()->bind(AuthenticationContext::class, static fn (): AuthenticationContext => throw new \LogicException('The factory was built.'));
 
         self::assertSame([['authorization.session.source', 'invalid_type']], self::pathsAndCodes($this->check($settings)));
     }

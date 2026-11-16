@@ -271,6 +271,29 @@ final class ContextBindingsTest extends TestCase
     }
 
     /**
+     * The catalogue decides by the context bound, however it is bound: a class
+     * binding or a factory building the default context declares its keys.
+     *
+     * @return void
+     */
+    public function testTheCatalogueDecidesTheDefaultContextByTheContextBound(): void
+    {
+        $app = $this->application();
+
+        $app->bind(AuthenticationContext::class, GuardAuthenticationContext::class);
+
+        self::assertTrue(ContextBindings::catalogue($app)->permits('authentication.guard', 'eq'));
+
+        $app->bind(AuthenticationContext::class, static fn (Application $app): AuthenticationContext => $app->make(GuardAuthenticationContext::class));
+
+        self::assertTrue(ContextBindings::catalogue($app)->permits('authentication.guard', 'eq'));
+
+        $app->bind(AuthenticationContext::class, static fn (): AuthenticationContext => new SiblingAuthenticationContext);
+
+        self::assertNull(ContextBindings::catalogue($app)->find('authentication.guard'));
+    }
+
+    /**
      * Without an authentication context bound, only `authentication` holds
      * assurance keys, under the fixed names.
      *

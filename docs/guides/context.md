@@ -9,15 +9,15 @@ A policy's conditions and `${...}` references read the check's context: nested n
 one. A namespace is built only when a statement under evaluation reads it, through a condition key or a reference, and
 at most once a check, so a check whose policies read nothing of the request never looks at it.
 
-| Namespace        | Keys                            | Comes from                                                  |
-|------------------|---------------------------------|-------------------------------------------------------------|
-| `authentication` | `guard`, `user_id`, `user_type` | The bound `AuthenticationContext`                           |
-| `request`        | `ip`, `method`, `route`         | The bound `RequestContext`, only in a routed request        |
-| `environment`    | `time`                          | The bound `EnvironmentContext`                              |
-| `subject`        | `id`, `type`, `tenant.*`, more  | The check's subject and its attribute provider              |
-| `resource`       | `id`, `type`, `tenant.*`, more  | The check's resource and its attribute provider             |
-| `input`          | The keys you declare            | What the caller passes                                      |
-| Any other        | The keys its owner declares     | A `ContextSource` listed in `authorization.context.sources` |
+| Namespace        | Keys                                                  | Comes from                                                  |
+|------------------|-------------------------------------------------------|-------------------------------------------------------------|
+| `authentication` | The default context's `guard`, `user_id`, `user_type` | The bound `AuthenticationContext`                           |
+| `request`        | `ip`, `method`, `route`                               | The bound `RequestContext`, only in a routed request        |
+| `environment`    | `time`                                                | The bound `EnvironmentContext`                              |
+| `subject`        | `id`, `type`, `tenant.*`, more                        | The check's subject and its attribute provider              |
+| `resource`       | `id`, `type`, `tenant.*`, more                        | The check's resource and its attribute provider             |
+| `input`          | The keys you declare                                  | What the caller passes                                      |
+| Any other        | The keys its owner declares                           | A `ContextSource` listed in `authorization.context.sources` |
 
 The shipped defaults supply what Laravel knows. `authentication` holds the default guard's name and, when someone is
 signed in on it, the user's key as a string and morph type (the morph alias, or the class name); with nobody signed in

@@ -4,9 +4,11 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Contracts\Foundation\Application;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Config\ContextConfigValidator;
+use SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
@@ -330,7 +332,34 @@ final class ContextConfigValidatorTest extends TestCase
         ContextConfigValidator::validate($config, $this->container());
         ContextConfigValidator::keys($config['keys']);
 
-        self::assertSame('invalid_value', self::refusedSetting(static fn () => ContextConfigValidator::keys($config['keys'], true))[1]);
+        self::assertSame('invalid_value', self::refusedSetting(static fn () => ContextConfigValidator::keys($config['keys'], GuardAuthenticationContext::class))[1]);
+
+        ContextConfigValidator::keys($config['keys'], SiblingAuthenticationContext::class);
+    }
+
+    /**
+     * Boot decides by the context bound, however it is bound: a class binding
+     * or a factory building the default context refuses a clashing key, and a
+     * factory building another context does not.
+     *
+     * @return void
+     */
+    public function testDecidesTheDefaultContextByTheContextBound(): void
+    {
+        $app    = $this->container();
+        $config = ['keys' => ['authentication' => ['guard' => 'list']]];
+
+        $app->bind(AuthenticationContext::class, GuardAuthenticationContext::class);
+
+        self::assertSame('invalid_value', self::refusedSetting(static fn () => ContextConfigValidator::validate($config, $app))[1]);
+
+        $app->bind(AuthenticationContext::class, static fn (Application $app): AuthenticationContext => $app->make(GuardAuthenticationContext::class));
+
+        self::assertSame('invalid_value', self::refusedSetting(static fn () => ContextConfigValidator::validate($config, $app))[1]);
+
+        $app->bind(AuthenticationContext::class, static fn (): AuthenticationContext => new SiblingAuthenticationContext);
+
+        ContextConfigValidator::validate($config, $app);
     }
 
     /**

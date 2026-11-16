@@ -354,15 +354,16 @@ return [
     |---------------------------------------------------------------------------
     |
     | The context a policy's conditions and `${…}` references read is nested
-    | namespaces, each key a dot path: `authentication` (`guard`, `user_id`,
-    | `user_type`), `request` (`ip`, `method`, `route`, present only in a
-    | routed request), `environment` (`time`, UTC), `subject` and `resource`
-    | (see attributes below), `input` (what the caller passes to `check()`,
-    | `can()`, a Gate and the like, held there alone, so `['post' =>
-    | ['status' => 'draft']]` is `input.post.status`) and any namespace a
-    | source below adds. Replace a trusted namespace by binding its
-    | contract (`AuthenticationContext`, `RequestContext`,
-    | `EnvironmentContext`).
+    | namespaces, each key a dot path: `authentication` (the default
+    | context's `guard`, `user_id`, `user_type`), `request` (`ip`, `method`,
+    | `route`, present only in a routed request), `environment` (`time`,
+    | UTC), `subject` and `resource` (see attributes below), `input` (what
+    | the caller passes to `check()`, `can()`, a Gate and the like, held
+    | there alone, so `['post' => ['status' => 'draft']]` is
+    | `input.post.status`) and any namespace a source below adds. Replace a
+    | trusted namespace by binding its contract (`AuthenticationContext`,
+    | `RequestContext`, `EnvironmentContext`); another
+    | `AuthenticationContext` supplies keys of its own.
     |
     | `keys` declares the keys a policy may read beyond the package's own, by
     | namespace, each a dot path mapped to its type: `string`, `number`,
