@@ -15,9 +15,11 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
 
@@ -40,12 +42,19 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * anything, when a source table is one of them. The `--dry-run` flag reports
  * counts without writing.
  *
- * A platform role or permission of the same name and guard is reused, and a
- * grant already held with no expiry is left as it is, so a re-run carries on
- * where an earlier run stopped and reports those rows as already present. A
- * grant given an expiry since, or expired, is granted again without one. Two
- * Spatie rows that map to the same role or permission stop the import before
- * anything is written.
+ * Spatie's team ids, in the column `--team-column` names, map to tenants of the
+ * type `--team-tenant-type` gives: a team's role is owned by its tenant and a
+ * grant with a team id is made in that tenant. Without the type, the command
+ * refuses before writing anything when a team id is present; a row with no team
+ * id is the platform's. With it, the command refuses when no table has the team
+ * column.
+ *
+ * A role or permission of the same name, guard and owner is reused, and a grant
+ * already held with no expiry is left as it is, so a re-run carries on where an
+ * earlier run stopped and reports those rows as already present. A grant given
+ * an expiry since, or expired, is granted again without one. Two Spatie rows
+ * that map to the same role or permission stop the import before anything is
+ * written.
  *
  * The import runs in two steps. The roles, the permissions and the roles'
  * permissions are written first, in one transaction, which commits before any
@@ -89,6 +98,8 @@ final class MigrateSpatieCommand extends Command
                                     {--role-has-permissions-table=role_has_permissions : Spatie's role permissions table}
                                     {--model-has-roles-table=model_has_roles : Spatie's role grants table}
                                     {--model-has-permissions-table=model_has_permissions : Spatie's permission grants table}
+                                    {--team-column=team_id : The team id column on Spatie's roles and grant tables}
+                                    {--team-tenant-type= : The tenant type Spatie's team ids map to (team rows are refused when left out)}
         EOD;
 
     /** @var string The console command description. */
@@ -122,7 +133,7 @@ final class MigrateSpatieCommand extends Command
      */
     public function handle(): int
     {
-        if (!$this->isSourceApartFromTarget() || !$this->verifySourceSchema() || !$this->verifyTargetSchema()) {
+        if (!$this->isSourceApartFromTarget() || !$this->verifySourceSchema() || !$this->verifyTargetSchema() || !$this->isEveryTeamMapped()) {
             return self::FAILURE;
         }
 
@@ -149,8 +160,8 @@ final class MigrateSpatieCommand extends Command
         // Each grant is a call of its own, made once the catalogue has
         // committed, so its grant hooks run before any lock the package takes
         // for it.
-        $counts['authorizable_roles']       = $this->migrateGrants('model-has-roles-table', 'role_id', $roleIdMap, $dryRun, $this->grants->grantRole(...));
-        $counts['authorizable_permissions'] = $this->migrateGrants('model-has-permissions-table', 'permission_id', $permissionIdMap, $dryRun, $this->grants->grantPermission(...));
+        $counts['authorizable_roles']       = $this->migrateGrants('model-has-roles-table', 'role_id', $roleIdMap, $dryRun);
+        $counts['authorizable_permissions'] = $this->migrateGrants('model-has-permissions-table', 'permission_id', $permissionIdMap, $dryRun);
 
         $this->renderMigrationSummary($counts, $dryRun);
 
@@ -263,6 +274,64 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
+     * Determine whether every team id in Spatie's roles and grant tables maps
+     * to a tenant, reporting the first table that holds one when no tenant type
+     * is given, or that no table has the team column when one is.
+     *
+     * @return bool
+     */
+    private function isEveryTeamMapped(): bool
+    {
+        /** @var string $column */
+        $column = $this->option('team-column');
+        $type   = $this->option('team-tenant-type');
+        $schema = $this->source()->getSchemaBuilder();
+        $tables = \array_filter(
+            \array_map($this->sourceTable(...), ['roles-table', 'model-has-roles-table', 'model-has-permissions-table']),
+            static fn (string $table): bool => $schema->hasColumn($table, $column),
+        );
+
+        if (\is_string($type) && $type !== '') {
+            if ($tables === []) {
+                $this->error("No Spatie table has the team column '{$column}'. Pass --team-column to name it.");
+            }
+
+            return $tables !== [];
+        }
+
+        foreach ($tables as $table) {
+            if ($this->source()->table($table)->whereNotNull($column)->exists()) {
+                $this->error("Spatie table '{$table}' holds team ids in '{$column}'. Pass --team-tenant-type to import them into tenants.");
+
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Return the tenant a Spatie row's team id maps to, or null for a row with
+     * no team id, which is the platform's.
+     *
+     * @param  array<string, mixed>  $row
+     * @return \SineMacula\Laravel\Authorization\Support\Reference|null
+     */
+    private function teamTenant(array $row): ?Reference
+    {
+        /** @var string $column */
+        $column = $this->option('team-column');
+
+        /** @var int|string|null $team */
+        $team = $row[$column] ?? null;
+
+        /** @var string $type */
+        $type = $this->option('team-tenant-type');
+
+        return $team === null ? null : new Reference($type, (string) $team);
+    }
+
+    /**
      * Return the connection the package's tables live on, which the import
      * writes to and runs its transaction on.
      *
@@ -301,28 +370,35 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Return the platform's row of the configured model with the name and
-     * guard, which a re-run reuses, or null when there is none.
+     * Return the row of the configured model with the name and guard that the
+     * owner holds, the platform when null, which a re-run reuses, or null when
+     * there is none.
      *
      * @param  'permission'|'role'  $model
      * @param  string  $name
      * @param  string|null  $guard
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $owner
      * @return \Illuminate\Database\Eloquent\Model|null
      */
-    private static function platformRow(string $model, string $name, ?string $guard): ?Model
+    private static function ownedRow(string $model, string $name, ?string $guard, ?Reference $owner): ?Model
     {
         /** @var class-string<\Illuminate\Database\Eloquent\Model> $class */
         $class = ModelClasses::get($model);
+        $query = $class::query()->withoutGlobalScope(TenantScope::class)->where('name', $name)->where('guard', $guard);
 
-        return TenantChain::whereNullTenant($class::query()->where('name', $name)->where('guard', $guard), 'tenant_type', 'tenant_id')->first();
+        if ($owner === null) {
+            return TenantChain::whereNullTenant($query, 'tenant_type', 'tenant_id')->first();
+        }
+
+        return $query->where('tenant_type', $owner->type)->where('tenant_id', $owner->id)->first();
     }
 
     /**
      * Migrate roles from Spatie's `roles` table through the role service, so
      * each is validated and reported as any role created here is, reusing the
-     * platform's role of the same name and guard. A Spatie string id is kept;
-     * an auto-increment one is replaced by a UUID. A dry run builds each new
-     * role without saving it.
+     * role of the same name, guard and owner. A role with a team id is owned by
+     * the team's tenant. A Spatie string id is kept; an auto-increment one is
+     * replaced by a UUID. A dry run builds each new role without saving it.
      *
      * @param  bool  $dryRun
      * @param  array<string, array<'present'|'rows', int>>  $counts
@@ -346,13 +422,14 @@ final class MigrateSpatieCommand extends Command
             }
 
             $guard = $roleRow['guard_name'] ?? null;
+            $owner = $this->teamTenant($roleRow);
 
             /** @var \SineMacula\Laravel\Authorization\Models\Role|null $existing */
-            $existing = self::platformRow('role', $roleRow['name'], $guard);
+            $existing = self::ownedRow('role', $roleRow['name'], $guard, $owner);
 
             $idMap[$roleRow['id']] = $existing ?? ($dryRun
-                ? new Role(['name' => $roleRow['name'], 'guard' => $guard])
-                : $this->roles->create($roleRow['name'], $guard, id: self::keptId($roleRow['id'])));
+                ? RecordWriter::ownedBy(new Role(['name' => $roleRow['name'], 'guard' => $guard]), $owner)
+                : $this->roles->create($roleRow['name'], $guard, id: self::keptId($roleRow['id']), tenant: $owner));
 
             self::claim($claimed, 'role', $idMap[$roleRow['id']], $roleRow['id']);
 
@@ -389,7 +466,7 @@ final class MigrateSpatieCommand extends Command
             $guard = $permissionRow['guard_name'] ?? null;
 
             /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $existing */
-            $existing = self::platformRow('permission', $permissionRow['name'], $guard);
+            $existing = self::ownedRow('permission', $permissionRow['name'], $guard, null);
 
             $idMap[$permissionRow['id']] = $existing ?? ($dryRun
                 ? new Permission(['name' => $permissionRow['name'], 'guard' => $guard])
@@ -404,8 +481,9 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Record the role or permission a Spatie row maps to, refusing a second
-     * Spatie row that maps to the same one, which would merge the two.
+     * Record the role or permission a Spatie row maps to, by name, guard and
+     * owner, refusing a second Spatie row that maps to the same one, which
+     * would merge the two.
      *
      * @param  array<string, int|string>  $claimed
      * @param  'permission'|'role'  $kind
@@ -417,7 +495,7 @@ final class MigrateSpatieCommand extends Command
      */
     private static function claim(array &$claimed, string $kind, Permission|Role $row, int|string $spatieId): void
     {
-        $key = \json_encode([$row->name, $row->guard], \JSON_THROW_ON_ERROR);
+        $key = \json_encode([$row->name, $row->guard, $row->tenant_type, $row->tenant_id], \JSON_THROW_ON_ERROR);
 
         if (isset($claimed[$key])) {
             throw new \UnexpectedValueException("Spatie {$kind}s {$claimed[$key]} and {$spatieId} both map to {$kind} '{$row->name}' with guard '{$row->guard}'.");
@@ -518,26 +596,25 @@ final class MigrateSpatieCommand extends Command
      * Migrate one of Spatie's grant tables (`model_has_roles`,
      * `model_has_permissions`), named by the option given, through the grant
      * service and return the number of grants migrated and of those already
-     * held. A grant whose role or permission was skipped is skipped with it.
-     * Spatie's grants carry no scope, so each is imported platform-wide, for
-     * every application. The grantee is named by Spatie's `model_type` and
-     * `model_id`, so its class need not be loadable.
-     *
-     * @template TModel of \Illuminate\Database\Eloquent\Model
+     * held. A grant whose role or permission was skipped is skipped with it. A
+     * grant with a team id is made in the team's tenant, one without
+     * platform-wide, each for every application. The grantee is named by
+     * Spatie's `model_type` and `model_id`, so its class need not be loadable.
      *
      * @param  string  $option
      * @param  string  $column
-     * @param  array<int|string, TModel>  $idMap
+     * @param  array<int|string, \SineMacula\Laravel\Authorization\Models\Permission|\SineMacula\Laravel\Authorization\Models\Role>  $idMap
      * @param  bool  $dryRun
-     * @param  \Closure(\SineMacula\Laravel\Authorization\Support\Reference, TModel): \SineMacula\Laravel\Authorization\Enums\GrantOutcome  $grant
      * @return array{rows: int, present: int}
+     *
+     * @throws \Throwable
      */
-    private function migrateGrants(string $option, string $column, array $idMap, bool $dryRun, \Closure $grant): array
+    private function migrateGrants(string $option, string $column, array $idMap, bool $dryRun): array
     {
         $migrated = ['rows' => 0, 'present' => 0];
 
         foreach ($this->source()->table($this->sourceTable($option))->get() as $row) {
-            /** @var array<string, int|string> $spatieGrant */
+            /** @var array<string, int|string|null> $spatieGrant */
             $spatieGrant = (array) $row;
             $target      = $idMap[$spatieGrant[$column]] ?? null;
 
@@ -545,7 +622,14 @@ final class MigrateSpatieCommand extends Command
                 continue;
             }
 
-            $outcome = $dryRun ? null : $grant(new Reference((string) $spatieGrant['model_type'], (string) $spatieGrant['model_id']), $target);
+            $grantee = new Reference((string) $spatieGrant['model_type'], (string) $spatieGrant['model_id']);
+            $tenant  = $this->teamTenant($spatieGrant);
+
+            $outcome = match (true) {
+                $dryRun                 => null,
+                $target instanceof Role => $this->grants->grantRole($grantee, $target, tenant: $tenant),
+                default                 => $this->grants->grantPermission($grantee, $target, tenant: $tenant),
+            };
 
             $migrated[$outcome === GrantOutcome::UNCHANGED ? 'present' : 'rows']++;
         }

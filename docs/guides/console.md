@@ -74,11 +74,15 @@ without writing. Spatie's tables are read on the connection `--connection` names
 the names `--roles-table`, `--permissions-table`, `--role-has-permissions-table`, `--model-has-roles-table` and
 `--model-has-permissions-table` give, Spatie's own by default. The command refuses before reading anything when one of
 them is a table it writes on the same connection, which the default configuration hits, as both name `roles` and
-`permissions`. A re-run carries on where an earlier run stopped: a platform role or permission of the same name and
-guard is reused, and a grant already held with no expiry is left as it is, both counted as already present. A grant
-given an expiry since, or expired, is granted again without one. Two Spatie roles, or two permissions, that map to the
-same one stop the import before anything is written, on a dry run as well. A dry run looks the roles and permissions
-up but counts every grant as a row. The aliases kept for a port are listed in
+`permissions`. A re-run carries on where an earlier run stopped: a role or permission of the same name, guard and owner
+is reused, and a grant already held with no expiry is left as it is, both counted as already present. A grant given an
+expiry since, or expired, is granted again without one. Two Spatie roles, or two permissions, that map to the same one
+stop the import before anything is written, on a dry run as well. A dry run looks the roles and permissions up but
+counts every grant as a row. Spatie's team ids, in the column `--team-column` names (`team_id` by default), map to
+tenants of the type `--team-tenant-type` gives: a role with a team id is owned by that team's tenant, and a grant with
+one is made in it. Without `--team-tenant-type`, the command refuses before writing anything, on a dry run as well, when
+the roles or grant tables hold a team id; rows with none are imported platform-wide. With it, the command refuses when
+none of those tables has the team column. The aliases kept for a port are listed in
 [Spatie compatibility](../design/spatie-compatibility.md).
 
 ## Checking the configuration
