@@ -213,6 +213,17 @@ The package deliberately does **not** ship the following Spatie surface:
   default behaviour of `hasPermission()` (fnmatch semantics, see
   [Wildcard and Condition Semantics](wildcard-and-condition-semantics.md#wildcard-matching)).
 
+## Importing Spatie's data
+
+`authorization:migrate-spatie` reads Spatie's five tables on the connection and under the names its options give
+(`--connection`, `--roles-table`, `--permissions-table`, `--role-has-permissions-table`, `--model-has-roles-table`,
+`--model-has-permissions-table`), the default connection and Spatie's names when left out. It refuses before reading
+anything when one of them is a table it writes on the same connection, as the default configuration's `roles` and
+`permissions` are. It reuses the platform role or permission of the same name and guard, so a re-run carries on after
+a run that stopped part-way, reporting those rows as already present. A grant already held with no expiry is left as it
+is; one given an expiry since, or expired, is granted again without one. Two Spatie roles, or two permissions, that
+map to the same one stop the import before anything is written.
+
 ## Not included
 
 Anything not listed above is **not** part of the Spatie compat surface. A Spatie idiom that does not port cleanly is
