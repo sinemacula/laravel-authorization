@@ -469,8 +469,8 @@ final readonly class ResolutionCache
      * built in it or below it records, because the tree changed there: it moved
      * under another parent, or was deleted. Throws when the store fails, so the
      * caller can retry rather than leave stale entries. Like a grant, the
-     * version is bumped again once the caller's transaction commits, a failure
-     * then written to the log channel.
+     * version is bumped again once the caller's transaction commits or rolls
+     * back, a failure then written to the log channel.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @return void
@@ -481,14 +481,16 @@ final readonly class ResolutionCache
 
         $this->invalidate($keys);
 
-        // Bump again once the caller's open transaction commits, on whichever
-        // connection the tree lives, so an entry a concurrent check stored from
-        // the tree before the commit never holds; with none open, straight
-        // away.
+        // Bump again once the caller's open transaction commits or rolls back,
+        // on whichever connection the tree lives, so an entry a check stored
+        // while it was open, from the tree before the commit or from a change
+        // that rolls back, never holds; with none open, straight away.
         /** @var \Illuminate\Database\DatabaseTransactionsManager $transactions */
         $transactions = Container::getInstance()->make('db.transactions');
 
         $transactions->addCallback(fn () => $this->invalidateQuietly($keys));
+
+        $this->invalidateOnRollback($keys);
     }
 
     /**
@@ -530,6 +532,24 @@ final readonly class ResolutionCache
     {
         $this->memo->flush();
         $this->store?->bumpQuietly($keys);
+    }
+
+    /**
+     * Bump the version keys quietly once a transaction open now rolls back.
+     *
+     * @param  list<string>  $keys
+     * @return void
+     */
+    public function invalidateOnRollback(array $keys): void
+    {
+        /** @var \Illuminate\Database\DatabaseTransactionsManager $transactions */
+        $transactions = Container::getInstance()->make('db.transactions');
+
+        // Every level, since Laravel before 13.21 never runs the rollback
+        // callbacks of a savepoint that has already committed.
+        foreach ($transactions->callbackApplicableTransactions() as $transaction) {
+            $transaction->addCallbackForRollback(fn () => $this->invalidateQuietly($keys));
+        }
     }
 
     /**

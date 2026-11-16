@@ -76,8 +76,8 @@ This note records the invariants they fix.
 
 8. **A change is seen on the next check.** A save or delete through `Models\BreakGlassActivation` bumps the versions
    a grant to its grantee bumps, the one it named before a move included, at once and again after the caller's
-   transaction commits (`Observers\BreakGlassActivationObserver`). A row written to the table by other means bumps
-   nothing, as a grant row written so does not.
+   transaction commits or rolls back (`Observers\BreakGlassActivationObserver`). A row written to the table by other
+   means bumps nothing, as a grant row written so does not.
 
 9. **Provenance without the note.** Each role read through an activation carries the activation's key on its pivot
    (`break_glass_id`, null for a role grant). An explanation names such a route as `break_glass_permission` or

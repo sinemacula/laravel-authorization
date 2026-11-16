@@ -23,7 +23,8 @@ use Tests\TestCase;
  * Feature tests for the observer bumping a break-glass activation's grantee
  * whenever the activation is saved or deleted through the model: the grantee it
  * names, and the one it named before a move, at once and again once the
- * caller's transaction commits, and nothing at all without a resolution cache.
+ * caller's transaction commits or rolls back, and nothing at all without a
+ * resolution cache.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -130,6 +131,33 @@ final class BreakGlassActivationObserverTest extends TestCase
 
         self::assertNotNull($tokens[0]);
         self::assertNotSame($tokens[0], $tokens[1]);
+    }
+
+    /**
+     * An activation whose transaction rolls back is denied again, in the
+     * request and the next, though a check inside the transaction stored its
+     * allow.
+     *
+     * @return void
+     */
+    public function testARolledBackActivationIsDeniedAgain(): void
+    {
+        $ann   = StubIdentity::create(['id' => 'ann']);
+        $role  = self::emergencyRole();
+        $check = static fn (): bool => StubIdentity::query()->findOrFail('ann')->hasPermission('posts:create');
+
+        $this->request();
+
+        DB::beginTransaction();
+        self::activate($ann, $role);
+        $inside = $check();
+        DB::rollBack();
+
+        $now = $check();
+
+        $this->request();
+
+        self::assertSame([true, false, false], [$inside, $now, $check()]);
     }
 
     /**
