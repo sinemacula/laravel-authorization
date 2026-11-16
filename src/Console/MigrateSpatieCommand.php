@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -19,6 +20,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
@@ -42,12 +44,14 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * anything, when a source table is one of them. The `--dry-run` flag reports
  * counts without writing.
  *
- * Spatie's team ids, in the column `--team-column` names, map to tenants of the
- * type `--team-tenant-type` gives: a team's role is owned by its tenant and a
- * grant with a team id is made in that tenant. Without the type, the command
- * refuses before writing anything when a team id is present; a row with no team
- * id is the platform's. With it, the command refuses when no table has the team
- * column.
+ * Spatie's team ids, in the column `--team-column` names (Spatie's
+ * `team_foreign_key`, else `team_id`), map to tenants of the type
+ * `--team-tenant-type` gives: a team's role is owned by its tenant and a grant
+ * with a team id is made in that tenant alone, not the tenants below it. A
+ * grant with no team id is made platform-wide, or in the role's tenant when the
+ * role is a team's. Without the type, the command refuses before writing
+ * anything when a team id is present. With it, the command refuses when no
+ * table has the team column.
  *
  * A role or permission of the same name, guard and owner is reused, and a grant
  * already held with no expiry is left as it is, so a re-run carries on where an
@@ -85,6 +89,9 @@ final class MigrateSpatieCommand extends Command
         'model-has-permissions-table',
     ];
 
+    /** @var string Spatie's default team id column. */
+    private const string DEFAULT_TEAM_COLUMN = 'team_id';
+
     /** @var list<string> The keys of the package tables the import writes. */
     private const array TARGET_TABLES = ['roles', 'permissions', 'role_permissions', 'authorizable_roles', 'authorizable_permissions'];
 
@@ -98,12 +105,15 @@ final class MigrateSpatieCommand extends Command
                                     {--role-has-permissions-table=role_has_permissions : Spatie's role permissions table}
                                     {--model-has-roles-table=model_has_roles : Spatie's role grants table}
                                     {--model-has-permissions-table=model_has_permissions : Spatie's permission grants table}
-                                    {--team-column=team_id : The team id column on Spatie's roles and grant tables}
+                                    {--team-column= : The team id column on Spatie's roles and grant tables (permission.column_names.team_foreign_key, else team_id, when left out)}
                                     {--team-tenant-type= : The tenant type Spatie's team ids map to (team rows are refused when left out)}
         EOD;
 
     /** @var string The console command description. */
     protected $description = 'Migrate data from Spatie laravel-permission tables into this package';
+
+    /** @var string The team id column on Spatie's tables, settled when the command runs. */
+    private string $teamColumn = self::DEFAULT_TEAM_COLUMN;
 
     /**
      * Create a new command instance.
@@ -133,6 +143,9 @@ final class MigrateSpatieCommand extends Command
      */
     public function handle(): int
     {
+        $column           = $this->option('team-column') ?? config('permission.column_names.team_foreign_key');
+        $this->teamColumn = \is_string($column) && $column !== '' ? $column : self::DEFAULT_TEAM_COLUMN;
+
         if (!$this->isSourceApartFromTarget() || !$this->verifySourceSchema() || !$this->verifyTargetSchema() || !$this->isEveryTeamMapped()) {
             return self::FAILURE;
         }
@@ -282,8 +295,7 @@ final class MigrateSpatieCommand extends Command
      */
     private function isEveryTeamMapped(): bool
     {
-        /** @var string $column */
-        $column = $this->option('team-column');
+        $column = $this->teamColumn;
         $type   = $this->option('team-tenant-type');
         $schema = $this->source()->getSchemaBuilder();
         $tables = \array_filter(
@@ -312,18 +324,15 @@ final class MigrateSpatieCommand extends Command
 
     /**
      * Return the tenant a Spatie row's team id maps to, or null for a row with
-     * no team id, which is the platform's.
+     * no team id.
      *
      * @param  array<string, mixed>  $row
      * @return \SineMacula\Laravel\Authorization\Support\Reference|null
      */
     private function teamTenant(array $row): ?Reference
     {
-        /** @var string $column */
-        $column = $this->option('team-column');
-
         /** @var int|string|null $team */
-        $team = $row[$column] ?? null;
+        $team = $row[$this->teamColumn] ?? null;
 
         /** @var string $type */
         $type = $this->option('team-tenant-type');
@@ -597,9 +606,12 @@ final class MigrateSpatieCommand extends Command
      * `model_has_permissions`), named by the option given, through the grant
      * service and return the number of grants migrated and of those already
      * held. A grant whose role or permission was skipped is skipped with it. A
-     * grant with a team id is made in the team's tenant, one without
-     * platform-wide, each for every application. The grantee is named by
-     * Spatie's `model_type` and `model_id`, so its class need not be loadable.
+     * grant with a team id is made in the team's tenant alone, not the tenants
+     * below it; one without is made platform-wide, or in the role's tenant
+     * alone when the role is a team's, each for every application. A dry run
+     * refuses a team's role granted outside its tenant, as the grant service
+     * does. The grantee is named by Spatie's `model_type` and `model_id`, so
+     * its class need not be loadable.
      *
      * @param  string  $option
      * @param  string  $column
@@ -625,10 +637,14 @@ final class MigrateSpatieCommand extends Command
             $grantee = new Reference((string) $spatieGrant['model_type'], (string) $spatieGrant['model_id']);
             $tenant  = $this->teamTenant($spatieGrant);
 
+            if ($dryRun && $target instanceof Role) {
+                GrantScopes::of(GrantTarget::ROLE, $target, $tenant);
+            }
+
             $outcome = match (true) {
                 $dryRun                 => null,
-                $target instanceof Role => $this->grants->grantRole($grantee, $target, tenant: $tenant),
-                default                 => $this->grants->grantPermission($grantee, $target, tenant: $tenant),
+                $target instanceof Role => $this->grants->grantRole($grantee, $target, tenant: $tenant, includeSubtree: false),
+                default                 => $this->grants->grantPermission($grantee, $target, tenant: $tenant, includeSubtree: false),
             };
 
             $migrated[$outcome === GrantOutcome::UNCHANGED ? 'present' : 'rows']++;
