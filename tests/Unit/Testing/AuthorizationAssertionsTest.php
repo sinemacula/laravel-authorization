@@ -18,6 +18,7 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -119,6 +120,50 @@ final class AuthorizationAssertionsTest extends TestCase
         );
 
         $this->assertCannot($user, 'docs:delete');
+    }
+
+    /**
+     * `assertCannot` passes when the denial is for the given reason.
+     *
+     * @return void
+     */
+    public function testAssertCannotPassesWhenDeniedForTheReason(): void
+    {
+        $user = StubIdentity::create(['id' => '7b2e4d6f-8a1c-4e3b-9d5f-1a3c5e7b9d2f']);
+
+        $this->assertCannot($user, 'docs:delete', reason: DecisionReason::NO_MATCH);
+    }
+
+    /**
+     * `assertCannot` fails when the denial is for another reason, naming both.
+     *
+     * @return void
+     */
+    public function testAssertCannotFailsWhenDeniedForAnotherReason(): void
+    {
+        $user = StubIdentity::create(['id' => '3d5f7b9e-1c2a-4b6d-8f0e-2a4c6e8b0d1f']);
+
+        $this->expectException(AssertionFailedError::class);
+        $this->expectExceptionMessage(
+            "Failed asserting that the principal is denied 'posts:edit' on resource 'post:42' for 'explicit_deny'.\nDecision:\n"
+            . 'DENY (no_match: no statement or permission names it) at the implicit stage.',
+        );
+
+        $this->assertCannot($user, 'posts:edit', 'post:42', reason: DecisionReason::EXPLICIT_DENY);
+    }
+
+    /**
+     * `assertCannot` can be called from outside the test case, as by a helper.
+     *
+     * @return void
+     */
+    public function testAssertCannotIsCallableFromOutsideTheTestCase(): void
+    {
+        $user = StubIdentity::create(['id' => '5c7e9a1b-3d5f-4a7c-9e1b-3d5f7a9c1e3b']);
+
+        $outside = \Closure::bind(static fn (AuthorizationAssertionsTest $test) => $test->assertCannot($user, 'docs:delete', reason: DecisionReason::NO_MATCH), null, null);
+
+        $outside($this);
     }
 
     /**

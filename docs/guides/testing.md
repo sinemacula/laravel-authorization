@@ -25,6 +25,25 @@ $this->app->instance(AuthenticationRequirementChecker::class, new class implemen
 $this->actingAsSubject(new Subject($user, $user, session: 'session-1'));
 ```
 
+`assertCannot()` takes an optional last argument, the reason the denial must be for:
+
+```php
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+
+$this->assertCannot($user, 'posts:delete', $post, reason: DecisionReason::EXPLICIT_DENY);
+```
+
+There is no fake evaluator: tests decide through the real manager with these assertions and `actingAsSubject()`, and
+assert the decision and change [events](events.md) with `Event::fake([...])`, naming the events, since a bare
+`Event::fake()` also stops the package's model hooks:
+
+```php
+use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+
+Event::fake([DecisionEvaluated::class]);
+```
+
 `SineMacula\Laravel\Authorization\Testing\Concerns\TenantTreeContract` checks a tenant tree of your own against the
 contract the package reads it by, and `SineMacula\Laravel\Authorization\Testing\FakeTenantTree` is an in-memory tree to
 bind in tests of your own (see [Managing roles, permissions and
