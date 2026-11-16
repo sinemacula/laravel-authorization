@@ -19,14 +19,18 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Permission\Created as PermissionCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Exceptions\GrantRefusedException;
+use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Testing\FakeTenantTree;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Concerns\WidensGrants;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
@@ -976,6 +980,7 @@ final class MigrateSpatieCommandTest extends TestCase
         self::assertSame(['admin||', 'editor|team|5', 'editor|team|6'], self::teamRoles());
         self::assertSame(['42|admin|team|5', '42|admin|team|6', '43|editor|team|5', '44|editor|team|6'], self::teamGrants('auth_authorizable_roles', 'auth_roles', 'role_id'));
         self::assertSame(['42|posts:edit|team|6'], self::teamGrants('auth_authorizable_permissions', 'auth_permissions', 'permission_id'));
+        self::assertSame(['admin|||posts:create', 'admin|||posts:delete', 'editor|team|5|posts:edit', 'editor|team|6|posts:edit'], self::teamRolePermissions());
 
         $before = self::targetRows();
 
@@ -985,12 +990,97 @@ final class MigrateSpatieCommandTest extends TestCase
 
         self::assertSame($before, self::targetRows());
         self::assertMatchesRegularExpression('/\|\s+roles\s+\|\s+0\s+\|\s+3\s+\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s+role_permissions\s+\|\s+0\s+\|\s+4\s+\|/', $output);
         self::assertMatchesRegularExpression('/\|\s+authorizable_roles\s+\|\s+0\s+\|\s+4\s+\|/', $output);
     }
 
     /**
+     * A team grant holds in the team's tenant alone, not the tenants below it,
+     * as does a grant of a team's role with no team id, made in the role's
+     * tenant.
+     *
+     * @return void
+     */
+    public function testTeamGrantsHoldInTheTeamAlone(): void
+    {
+        $this->app?->instance(TenantTree::class, FakeTenantTree::of([
+            [new Reference('team', '5'), null],
+            [new Reference('team', '6'), null],
+            [new Reference('team', '7'), new Reference('team', '5')],
+            [new Reference('team', '8'), new Reference('team', '6')],
+        ]));
+        $this->addTeamColumn();
+        $this->seedTeams('team_id');
+
+        DB::table('model_has_roles')->insert(['role_id' => 2, 'model_type' => 'App\Models\User', 'model_id' => 45, 'team_id' => null]);
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie', ['--team-tenant-type' => 'team']));
+
+        /** @var \SineMacula\Laravel\Authorization\Services\GrantScopeQuery $scopes */
+        $scopes = app(GrantScopeQuery::class);
+
+        $users = \array_map(static fn (string $id): Reference => new Reference('App\Models\User', $id), ['42', '43', '45']);
+
+        self::assertEquals($users, $scopes->granteesReaching(new Reference('team', '5')));
+        self::assertSame([], $scopes->granteesReaching(new Reference('team', '7')));
+        self::assertSame([], $scopes->granteesReaching(new Reference('team', '8')));
+    }
+
+    /**
+     * A team's role granted in another team is refused as the grant service
+     * refuses it, on a dry run too.
+     *
+     * @return void
+     */
+    public function testRefusesATeamsRoleGrantedInAnotherTeam(): void
+    {
+        $this->useAnAuthorizationConnection();
+        $this->addTeamColumn();
+        $this->seedTeams('team_id');
+
+        DB::table('model_has_roles')->insert(['role_id' => 2, 'model_type' => 'App\Models\User', 'model_id' => 45, 'team_id' => 6]);
+
+        foreach ([['--dry-run' => true], []] as $options) {
+            $failure = null;
+
+            try {
+                Artisan::call('authorization:migrate-spatie', [...$options, '--team-tenant-type' => 'team']);
+            } catch (\Throwable $exception) {
+                $failure = $exception;
+            }
+
+            self::assertInstanceOf(GrantScopeMismatchException::class, $failure);
+            self::assertStringContainsString('The role \'editor\' belongs to tenant \'team:5\'', $failure->getMessage());
+            self::assertStringEndsWith('not in tenant \'team:6\'.', $failure->getMessage());
+            self::assertSame([], self::authorizationConnection()->table('auth_authorizable_roles')->where('authorizable_id', '45')->get()->all());
+        }
+    }
+
+    /**
+     * Without `--team-column`, the import reads Spatie's configured team
+     * foreign key, else `team_id` when that is blank.
+     *
+     * @return void
+     */
+    public function testDefaultsTheTeamColumnToSpatiesTeamForeignKey(): void
+    {
+        $this->addTeamColumn('organisation_id');
+        $this->seedTeams('organisation_id');
+
+        config()->set('permission.column_names.team_foreign_key', 'organisation_id');
+
+        self::assertSame(1, Artisan::call('authorization:migrate-spatie'));
+        self::assertStringContainsString('Spatie table \'roles\' holds team ids in \'organisation_id\'.', Artisan::output());
+
+        config()->set('permission.column_names.team_foreign_key', '');
+
+        self::assertSame(1, Artisan::call('authorization:migrate-spatie', ['--team-tenant-type' => 'organisation']));
+        self::assertStringContainsString('No Spatie table has the team column \'team_id\'.', Artisan::output());
+    }
+
+    /**
      * `--team-column` names the team column the import reads, in place of
-     * `team_id`.
+     * Spatie's configured team foreign key.
      *
      * @return void
      */
@@ -998,6 +1088,8 @@ final class MigrateSpatieCommandTest extends TestCase
     {
         $this->addTeamColumn('organisation_id');
         $this->seedTeams('organisation_id');
+
+        config()->set('permission.column_names.team_foreign_key', 'team_id');
 
         self::assertSame(1, Artisan::call('authorization:migrate-spatie', ['--team-column' => 'organisation_id']));
         self::assertStringContainsString('Spatie table \'roles\' holds team ids in \'organisation_id\'.', Artisan::output());
@@ -1265,8 +1357,8 @@ final class MigrateSpatieCommandTest extends TestCase
     }
 
     /**
-     * Make Spatie's `editor` role team 5's, add a second `editor` for team 6
-     * and grant roles and a permission in both teams.
+     * Make Spatie's `editor` role team 5's, add a second `editor` for team 6,
+     * give each `posts:edit` and grant roles and a permission in both teams.
      *
      * @param  string  $column
      * @return void
@@ -1275,6 +1367,7 @@ final class MigrateSpatieCommandTest extends TestCase
     {
         DB::table('roles')->where('id', 2)->update([$column => 5]);
         DB::table('roles')->insert(['id' => 3, 'name' => 'editor', 'guard_name' => 'web', $column => 6, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('role_has_permissions')->insert([['permission_id' => 2, 'role_id' => 2], ['permission_id' => 2, 'role_id' => 3]]);
         DB::table('model_has_roles')->update([$column => 5]);
         DB::table('model_has_roles')->insert([
             ['role_id' => 1, 'model_type' => 'App\Models\User', 'model_id' => 42, $column => 6],
@@ -1292,6 +1385,22 @@ final class MigrateSpatieCommandTest extends TestCase
     private static function teamRoles(): array
     {
         return \array_values(DB::table('auth_roles')->get()->map(static fn (object $row): string => "{$row->name}|{$row->tenant_type}|{$row->tenant_id}")->sort()->all());
+    }
+
+    /**
+     * Return each imported role permission as the role's name and owner and the
+     * permission's name, in a stable order.
+     *
+     * @return list<string>
+     */
+    private static function teamRolePermissions(): array
+    {
+        $rows = DB::table('auth_role_permissions')
+            ->join('auth_roles', 'auth_roles.id', '=', 'auth_role_permissions.role_id')
+            ->join('auth_permissions', 'auth_permissions.id', '=', 'auth_role_permissions.permission_id')
+            ->get(['auth_roles.name as role', 'auth_roles.tenant_type', 'auth_roles.tenant_id', 'auth_permissions.name as permission']);
+
+        return \array_values($rows->map(static fn (object $row): string => "{$row->role}|{$row->tenant_type}|{$row->tenant_id}|{$row->permission}")->sort()->all());
     }
 
     /**

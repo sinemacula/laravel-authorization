@@ -226,12 +226,16 @@ is; one given an expiry since, or expired, is granted again without one. Two Spa
 map to the same one stop the import before anything is written.
 
 With teams enabled, Spatie keeps a team id on `roles`, `model_has_roles` and `model_has_permissions`, in the column
-`--team-column` names (`team_id`, Spatie's `team_foreign_key` default). `--team-tenant-type` names the tenant type a
-team id maps to: a team's role is created as a role that tenant owns, and a grant with a team id is made in that tenant
-with the default reach, so a platform role held in two teams becomes two tenant grants. A row with no team id stays the
-platform's. Without `--team-tenant-type`, a team id in any of those tables stops the import before anything is written,
-on a dry run too, rather than flatten team grants into platform-wide ones. With it, the import stops the same way when
-none of those tables has the team column, so a mistyped `--team-column` cannot import team rows platform-wide.
+`--team-column` names, else Spatie's `permission.column_names.team_foreign_key`, else `team_id`. `--team-tenant-type`
+names the tenant type a team id maps to: a team's role is created as a role that tenant owns, and a grant with a team id
+is made in that tenant alone, not the tenants below it, as Spatie scopes it to that team, so a platform role held in two
+teams becomes two tenant grants. A role with no team id is the platform's, and a grant with none is made platform-wide,
+except a grant of a team's role: the grant service makes a grant that names no tenant in the tenant that owns its role,
+so that grant is made in the role's tenant, again alone. A grant of a team's role under another team's id is refused
+with `GrantScopeMismatchException`, as the grant service refuses a role outside its tenant, and a dry run refuses it the
+same way. Without `--team-tenant-type`, a team id in any of those tables stops the import before anything is written, on
+a dry run too, rather than flatten team grants into platform-wide ones. With it, the import stops the same way when none
+of those tables has the team column, so a mistyped `--team-column` cannot import team rows platform-wide.
 
 ## Not included
 
