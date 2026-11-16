@@ -153,6 +153,16 @@ final class AuthorizationAssertionsTest extends TestCase
     }
 
     /**
+     * `assertCannot` is public, so a helper outside the test case can call it.
+     *
+     * @return void
+     */
+    public function testAssertCannotIsPublic(): void
+    {
+        self::assertTrue((new \ReflectionMethod(self::class, 'assertCannot'))->isPublic());
+    }
+
+    /**
      * `assertHasRole` passes when the role is assigned.
      *
      * @return void
