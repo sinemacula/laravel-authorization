@@ -886,15 +886,18 @@ final class PolicyValidatorTest extends TestCase
     }
 
     /**
-     * Declare the context keys, bind the declared context key catalogue in
-     * place of the test suite's permissive one, and return the validator.
+     * Declare the context keys, bind the declared context key catalogue, with
+     * the bound authentication context's keys, in place of the test suite's
+     * permissive one, and return the validator.
      *
      * @param  array<string, array<string, string>>  $keys
      * @return \SineMacula\Laravel\Authorization\Evaluation\PolicyValidator
      */
     private function declaringKeys(array $keys): PolicyValidator
     {
-        $this->app?->instance(ContextKeyCatalogue::class, new DeclaredContextKeyCatalogue($keys));
+        $authentication = fn (): ?AuthenticationContext => $this->app?->make(AuthenticationContext::class);
+
+        $this->app?->instance(ContextKeyCatalogue::class, new DeclaredContextKeyCatalogue($keys, [], $authentication));
 
         return self::validator();
     }

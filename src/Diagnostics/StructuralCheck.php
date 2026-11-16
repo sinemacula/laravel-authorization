@@ -69,7 +69,7 @@ final readonly class StructuralCheck
 
         (new RootChecks($collector, $this->container, $config))->run();
         (new BlockChecks($collector, $this->container, $config))->run();
-        (new ExtensionChecks($collector, $config))->run();
+        (new ExtensionChecks($collector, $this->container, $config))->run();
 
         return $collector->findings();
     }

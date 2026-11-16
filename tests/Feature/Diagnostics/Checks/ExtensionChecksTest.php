@@ -7,6 +7,7 @@ namespace Tests\Feature\Diagnostics\Checks;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Config\AttributeConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ContextConfigValidator;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Diagnostics\Checks\ExtensionChecks;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigFindings;
 use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
@@ -14,6 +15,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\IssueCollector;
 use Tests\Feature\Stubs\FailingContextSource;
 use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
+use Tests\Feature\Stubs\SiblingAuthenticationContext;
 use Tests\TestCase;
 
 /**
@@ -75,6 +77,27 @@ final class ExtensionChecksTest extends TestCase
     }
 
     /**
+     * A context key clashing with the default authentication context's keys is
+     * refused beside any other issue while the package default is bound, and
+     * accepted while another context is bound.
+     *
+     * @return void
+     */
+    public function testRefusesAKeyClashingWithTheDefaultContextsKeys(): void
+    {
+        $settings = ['context' => ['keys' => ['authentication' => ['guard' => 'list']]], 'session' => ['source' => 3]];
+
+        self::assertSame([
+            ['authorization.context.keys', 'invalid_value'],
+            ['authorization.session.source', 'invalid_type'],
+        ], self::pathsAndCodes($this->check($settings)));
+
+        $this->container()->instance(AuthenticationContext::class, new SiblingAuthenticationContext);
+
+        self::assertSame([['authorization.session.source', 'invalid_type']], self::pathsAndCodes($this->check($settings)));
+    }
+
+    /**
      * A refused block skips each setting it holds.
      *
      * @return void
@@ -106,7 +129,7 @@ final class ExtensionChecksTest extends TestCase
     {
         $collector = new IssueCollector;
 
-        (new ExtensionChecks($collector, [...$this->authorizationConfig(), ...$settings]))->run();
+        (new ExtensionChecks($collector, $this->container(), [...$this->authorizationConfig(), ...$settings]))->run();
 
         return $collector->findings();
     }

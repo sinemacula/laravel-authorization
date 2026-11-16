@@ -4,12 +4,15 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Diagnostics\Checks;
 
+use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Config\AttributeConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ConfigBlock;
 use SineMacula\Laravel\Authorization\Config\ContextConfigValidator;
 use SineMacula\Laravel\Authorization\Config\SessionConfigValidator;
 use SineMacula\Laravel\Authorization\Context\AttributeProviders;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Diagnostics\IssueCollector;
+use SineMacula\Laravel\Authorization\Diagnostics\SeamClassifier;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 
 /**
@@ -42,12 +45,16 @@ final readonly class ExtensionChecks
      * Create a new set of checks.
      *
      * @param  \SineMacula\Laravel\Authorization\Diagnostics\IssueCollector  $collector
+     * @param  \Illuminate\Contracts\Container\Container  $container
      * @param  array<array-key, mixed>  $config
      */
     public function __construct(
 
         /** What records each issue. */
         private IssueCollector $collector,
+
+        /** The container the authentication context's binding is read from. */
+        private Container $container,
 
         /** The configuration checked. */
         private array $config,
@@ -67,7 +74,8 @@ final readonly class ExtensionChecks
 
     /**
      * Check each namespace of `context.keys`, then that the catalogue accepts
-     * them, and each class of `context.sources`.
+     * them beside the default authentication context's keys while the package
+     * default is bound, and each class of `context.sources`.
      *
      * @return void
      */
@@ -79,12 +87,13 @@ final readonly class ExtensionChecks
             return;
         }
 
-        $path = self::CONTEXT . '.keys';
-        $keys = ConfigBlock::entry($block, 'keys', []);
+        $path      = self::CONTEXT . '.keys';
+        $keys      = ConfigBlock::entry($block, 'keys', []);
+        $isDefault = SeamClassifier::of($this->container)->isPackageDefault(AuthenticationContext::class);
 
         if ($this->collector->verifyEntries($path, $keys, ContextConfigValidator::keyEntry(...))) {
-            $this->collector->verify($path, static function () use ($keys): void {
-                ContextConfigValidator::keys($keys);
+            $this->collector->verify($path, static function () use ($keys, $isDefault): void {
+                ContextConfigValidator::keys($keys, $isDefault);
             });
         }
 
