@@ -7,8 +7,8 @@ namespace SineMacula\Laravel\Authorization\Support;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
- * A role listed in a sync with a reach of its own: whether its grant in the
- * sync's tenant also holds in the tenants below it.
+ * A role listed in a sync or a batch grant with a reach of its own: whether its
+ * grant in the call's tenant also holds in the tenants below it.
  *
  * `GrantService::syncRoles()` and the `HasRoles` trait's `syncRoles()` take one
  * beside a role model or name, as `RoleReach::of($role, includeSubtree: true)`,
@@ -21,6 +21,9 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * whatever its entry says. A role listed with both reaches is therefore refused
  * with `InvalidArgumentException` in a tenant, but goes ahead in a
  * platform-wide sync, where both entries name the same reach.
+ * `GrantService::grantRoles()` takes one the same way, in place of its
+ * `$includeSubtree`, and refuses a role whose entries name both reaches, a
+ * plain entry counting with `$includeSubtree`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,7 +41,7 @@ final readonly class RoleReach
         /** The role, as a model or a name. */
         public Role|string $role,
 
-        /** Whether the role's grant also holds in the tenants below the sync's tenant. */
+        /** Whether the role's grant also holds in the tenants below the call's tenant. */
         public bool $includeSubtree,
     ) {}
 
@@ -55,7 +58,7 @@ final readonly class RoleReach
     }
 
     /**
-     * Split a sync's entries into its targets, each role model or name in the
+     * Split a call's entries into its targets, each role model or name in the
      * order listed, and the reach each entry listed with one names, keyed by
      * the target's position.
      *

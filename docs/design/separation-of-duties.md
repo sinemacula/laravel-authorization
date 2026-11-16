@@ -109,12 +109,12 @@ both, a role grant, a re-parenting or a break-glass activation, is refused with 
     package is not healthy (`PackageState`), before it reads or writes.
 
 11. **Every write that can create a holding is checked.** `Exclusions\Support\ExclusionGuard` weighs:
-    - a role grant written by `GrantService::grantRole()` or `syncRoles()` (`SyncPlan::write()`), and so by the
-      `HasRoles` trait's `assignRole()` and `syncRoles()`, `authorization:grant` and `authorization:migrate-spatie`,
-      when it may widen what the grantee holds (`GrantChange::isWidening()`): a new or re-armed grant, a reach widened
-      below its tenant, or an expiry made later or lifted. A grant left as it was, a shorter expiry kept within its
-      reach, a narrower reach and a revocation only remove holdings and are never weighed, so a stored conflict can
-      always be narrowed away;
+    - a role grant written by `GrantService::grantRole()`, `grantRoles()` or `syncRoles()` (`SyncPlan::write()`), and
+      so by the `HasRoles` trait's `assignRole()` and `syncRoles()`, `authorization:grant` and
+      `authorization:migrate-spatie`, when it may widen what the grantee holds (`GrantChange::isWidening()`): a new or
+      re-armed grant, a reach widened below its tenant, or an expiry made later or lifted. A batch is weighed once every
+      entry is written. A grant left as it was, a shorter expiry kept within its reach, a narrower reach and a
+      revocation only remove holdings and are never weighed, so a stored conflict can always be narrowed away;
     - a parent given to a saved role, from `RoleObserver::saving()`, so `RoleService::setParent()` and a model saved
       with a new `parent_id` alike, while the hierarchy is enabled: every holder of the role and of the roles below it
       is weighed as holding the new parent and every role above it. A parent a pair touches is weighed only inside a

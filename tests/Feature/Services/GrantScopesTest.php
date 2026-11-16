@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Feature\Stubs\StubTenant;
@@ -46,6 +47,59 @@ final class GrantScopesTest extends TestCase
         self::assertEquals(new Reference($tenant->getMorphClass(), 'tenant-a'), GrantScopes::named($tenant));
         self::assertSame($reference, GrantScopes::named($reference));
         self::assertNull(GrantScopes::named(null));
+    }
+
+    /**
+     * A call names its tenant as a reference, with its reach and application,
+     * the reach kept as given even with no tenant.
+     *
+     * @return void
+     */
+    public function testACallNamesItsScope(): void
+    {
+        $tenant = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'A']);
+
+        self::assertEquals(new GrantScope(new Reference($tenant->getMorphClass(), 'tenant-a'), 'admin', false), GrantScopes::ofCall($tenant, false, 'admin'));
+        self::assertEquals(new GrantScope(null, null, false), GrantScopes::ofCall(null, false, null));
+        self::assertEquals(new GrantScope, GrantScopes::ofCall(null, true, null));
+    }
+
+    /**
+     * A grant in a tenant is written with the reach given, and a platform-wide
+     * grant always reaches below.
+     *
+     * @return void
+     */
+    public function testAPlatformGrantIsWrittenReachingBelow(): void
+    {
+        $tenant = new Reference('stub_tenant', 'tenant-a');
+
+        self::assertEquals(new GrantScope($tenant, 'admin', false), GrantScopes::written($tenant, false, 'admin'));
+        self::assertEquals(new GrantScope($tenant), GrantScopes::written($tenant, true, null));
+        self::assertEquals(new GrantScope(null, 'admin'), GrantScopes::written(null, false, 'admin'));
+    }
+
+    /**
+     * Each key takes the scope it is listed with, once however often it is
+     * listed with the same reach, and a key listed with both reaches is
+     * refused, naming the kind and the key.
+     *
+     * @return void
+     */
+    public function testAKeyListedWithBothReachesIsRefused(): void
+    {
+        $narrow = new GrantScope(new Reference('stub_tenant', 'tenant-a'), null, false);
+        $wide   = new GrantScope(new Reference('stub_tenant', 'tenant-a'));
+
+        self::assertSame(['a' => $narrow, 'b' => $wide], GrantScopes::byKey(GrantTarget::ROLE, [['a', $narrow], ['b', $wide], ['a', $narrow]]));
+        self::assertSame([], GrantScopes::byKey(GrantTarget::ROLE, []));
+
+        foreach ([[['a', $wide], ['a', $narrow]], [['a', $narrow], ['b', $wide], ['a', $wide]]] as $listed) {
+            $refusal = self::refusalOf(static fn (): array => GrantScopes::byKey(GrantTarget::PERMISSION, $listed));
+
+            self::assertInstanceOf(\InvalidArgumentException::class, $refusal);
+            self::assertSame('The permission [a] is listed with both reaches.', $refusal->getMessage());
+        }
     }
 
     /**

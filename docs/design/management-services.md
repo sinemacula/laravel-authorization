@@ -65,7 +65,11 @@ themselves are described in [Events](events.md).
    everywhere, so there both entries name the same reach and the sync goes ahead. A sync given no expiry, as every
    identity trait sync is, re-arms a lapsed temporary grant as a permanent one. A role's grants of permissions behave
    the same way through `RoleService::grantPermission()` and `syncPermissions()`, which take the expiry before the
-   actor.
+   actor. A batch grant (`GrantService::grantRoles()`) grants each role as `grantRole()` does, in one transaction and
+   one operation, revoking nothing. It compares a role listed twice by the key it resolves to: the same reach is granted
+   once, and both reaches in a tenant are refused with `InvalidArgumentException` before anything is written
+   (`GrantScopes::byKey()`). A plain entry counts with the call's `$includeSubtree`, so a role listed plain and with a
+   reach of its own that differs is refused, where a sync writes it with the entry's own reach.
 
 5. **One scope per grant.** A grant holds in one tenant or platform-wide. The tenant that owns the target fixes it, or a
    tenant below it that the call names, and naming any other is refused with `GrantScopeMismatchException`; a platform
@@ -284,6 +288,7 @@ working: each forwards to the matching service method, with the `actor` it is gi
   writes.
 - `Services\BreakGlassService`: the break-glass activations and their end.
 - `Services\Support\GrantTable`: the scoped row writes, insert-or-ignore and the locked read-back.
+- `Services\Support\GrantScopes`: the scope a grant is written in and the refusal of a role listed with both reaches.
 - `Services\Support\RecordWriter`: the record saves and deletes, each in one transaction.
 - `Enums\GrantTarget`: each kind's configured model, grant table and events.
 - `Support\InlinePolicies` and `Observers\AuthorizablePolicyPivotObserver`: the grantee an inline policy belongs to, the
@@ -300,8 +305,8 @@ working: each forwards to the matching service method, with the `actor` it is gi
 
 ## Authoritative Tests
 
-- `GrantServiceTest`, `GrantTableTest`, `GrantTargetTest`: idempotency, re-arming, scope, events, the transaction and
-  the connection.
+- `GrantServiceTest`, `GrantTableTest`, `GrantTargetTest`, `GrantScopesTest`: idempotency, re-arming, scope, batch
+  grants, events, the transaction and the connection.
 - `RoleServiceTest`, `RoleObserverTest`: the lock order, cycles across tenants, role permissions and guard parity.
 - `PermissionServiceTest`, `PolicyServiceTest`, `RecordWriterTest`: the record writes, inline policies among them.
 - `InlinePoliciesTest`, `AuthorizablePolicyPivotObserverTest`, `OwnerUniquenessTest`, `GrantPrunerTest`: the grantee an

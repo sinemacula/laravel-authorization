@@ -324,6 +324,13 @@ $user->syncRoles([
 ], tenant: $organisation);
 ```
 
+`GrantService::grantRoles()` grants several roles in one call, each as `grantRole()` grants it, in one transaction and
+as one operation, revoking nothing, and returns each entry's `GrantOutcome` keyed as the roles. An entry takes a reach
+of its own the same way. A role listed twice is compared by the role it resolves to, so names a case-insensitive
+collation folds to one role count as one: listed with the same reach, it is granted once; listed with both reaches in a
+tenant, the call is refused with `InvalidArgumentException` before anything is written. Any entry refused leaves nothing
+written.
+
 Every row of a subtree is typed, so tenants of different types sharing an id are never confused. A tree whose source
 keeps ids alone, with tenants of more than one type, projects them onto typed rows in SQL, joining whatever records each
 tenant's type, and never types every tenant below with the type of the one asked about, nor looks tenants up one at a

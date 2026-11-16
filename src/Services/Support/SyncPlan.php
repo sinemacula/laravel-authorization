@@ -79,23 +79,17 @@ final readonly class SyncPlan
      */
     public static function reachesOf(GrantTarget $kind, GrantScope $written, array $listed): array
     {
-        $reaches = [];
+        $scoped = [];
 
         foreach ($listed as [$key, $reach]) {
             if ($reach === null) {
                 continue;
             }
 
-            $scope = new GrantScope($written->tenant, $written->application, $reach || $written->tenant === null);
-
-            if (($reaches[$key] ?? $scope)->includeSubtree !== $scope->includeSubtree) {
-                throw new \InvalidArgumentException("The {$kind->value} [{$key}] is listed with both reaches.");
-            }
-
-            $reaches[$key] = $scope;
+            $scoped[] = [$key, GrantScopes::written($written->tenant, $reach, $written->application)];
         }
 
-        return $reaches;
+        return GrantScopes::byKey($kind, $scoped);
     }
 
     /**

@@ -98,10 +98,11 @@ they read every pair and grant stored, whatever tenant owns it, so show them onl
 Once a pair is declared, every write that could let someone hold both its roles where their reach overlaps is refused
 with `RoleExclusionConflictException`, trusted or delegated, with no override:
 
-- **Role grants.** `GrantService::grantRole()` and `syncRoles()`, and `assignRole()` and `syncRoles()` on the
-  `HasRoles` trait, which call them; a re-armed grant, a later expiry and a reach widened below its tenant count as
-  grants. A sync is weighed as it leaves the grantee's roles, so swapping one role of a pair for the other in one sync
-  goes through. A grant that leaves a role as it was, a shorter expiry, a narrower reach and a revocation are never
+- **Role grants.** `GrantService::grantRole()`, `grantRoles()` and `syncRoles()`, and `assignRole()` and `syncRoles()`
+  on the `HasRoles` trait, which call them; a re-armed grant, a later expiry and a reach widened below its tenant count
+  as grants. A batch is weighed once every entry is written, so a batch holding both roles of a pair is refused. A
+  sync is weighed as it leaves the grantee's roles, so swapping one role of a pair for the other in one sync goes
+  through. A grant that leaves a role as it was, a shorter expiry, a narrower reach and a revocation are never
   weighed, so a conflict already stored can always be narrowed away.
 - **Parents.** `RoleService::setParent()`, or a role saved with a new `parent_id`, while the role hierarchy is enabled:
   every holder of the role, and of every role below it, is weighed as holding the new parent and its ancestors. A

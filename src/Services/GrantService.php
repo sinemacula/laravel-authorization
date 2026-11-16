@@ -203,7 +203,50 @@ final class GrantService
     ): GrantOutcome {
         PackageState::guardCurrent();
 
-        return $this->grant(GrantTarget::ROLE, $grantee, $role, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
+        return $this->grant(GrantTarget::ROLE, $grantee, [$role], $expiresAt, $actor, GrantScopes::ofCall($tenant, $includeSubtree, $application))[0];
+    }
+
+    /**
+     * Grant each of the given roles to the grantee as `grantRole()` grants one,
+     * in one transaction and as one operation, revoking nothing, and return
+     * each entry's outcome, keyed as the roles.
+     *
+     * An entry may give a role its own reach, as `RoleReach::of($role,
+     * includeSubtree: false)`, in place of `$includeSubtree`. A role listed
+     * twice with the same reach is granted once, each entry reporting its
+     * outcome. In a tenant, a role listed twice with different reaches,
+     * compared by the role each entry resolves to, is refused with
+     * `InvalidArgumentException` before anything is written; platform-wide,
+     * both entries name the same reach and the call goes ahead. An entry
+     * refused for any reason leaves nothing written.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|\SineMacula\Laravel\Authorization\Support\RoleReach|string>  $roles
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
+     * @param  string|null  $application
+     * @return array<int, \SineMacula\Laravel\Authorization\Enums\GrantOutcome>
+     *
+     * @throws \Throwable
+     */
+    public function grantRoles(
+        Model|Reference $grantee,
+        array $roles,
+        ?\DateTimeInterface $expiresAt = null,
+        ?ActingContext $actor = null,
+        Model|Reference|null $tenant = null,
+        bool $includeSubtree = true,
+        ?string $application = null,
+    ): array {
+        PackageState::guardCurrent();
+
+        [$targets, $reaches] = RoleReach::split($roles);
+
+        $outcomes = $this->grant(GrantTarget::ROLE, $grantee, $targets, $expiresAt, $actor, GrantScopes::ofCall($tenant, $includeSubtree, $application), $reaches);
+
+        return \array_combine(\array_keys($roles), $outcomes);
     }
 
     /**
@@ -273,7 +316,7 @@ final class GrantService
 
         [$targets, $reaches] = RoleReach::split($roles);
 
-        return $this->sync(GrantTarget::ROLE, $grantee, $targets, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application), $reaches);
+        return $this->sync(GrantTarget::ROLE, $grantee, $targets, $expiresAt, $actor, GrantScopes::ofCall($tenant, $includeSubtree, $application), $reaches);
     }
 
     /**
@@ -302,7 +345,7 @@ final class GrantService
     ): GrantOutcome {
         PackageState::guardCurrent();
 
-        return $this->grant(GrantTarget::PERMISSION, $grantee, $permission, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
+        return $this->grant(GrantTarget::PERMISSION, $grantee, [$permission], $expiresAt, $actor, GrantScopes::ofCall($tenant, $includeSubtree, $application))[0];
     }
 
     /**
@@ -359,7 +402,7 @@ final class GrantService
     ): SyncResult {
         PackageState::guardCurrent();
 
-        return $this->sync(GrantTarget::PERMISSION, $grantee, $permissions, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
+        return $this->sync(GrantTarget::PERMISSION, $grantee, $permissions, $expiresAt, $actor, GrantScopes::ofCall($tenant, $includeSubtree, $application));
     }
 
     /**
@@ -389,7 +432,7 @@ final class GrantService
     ): GrantOutcome {
         PackageState::guardCurrent();
 
-        return $this->grant(GrantTarget::POLICY, $grantee, $policy, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
+        return $this->grant(GrantTarget::POLICY, $grantee, [$policy], $expiresAt, $actor, GrantScopes::ofCall($tenant, $includeSubtree, $application))[0];
     }
 
     /**
@@ -438,7 +481,7 @@ final class GrantService
     ): SyncResult {
         PackageState::guardCurrent();
 
-        return $this->sync(GrantTarget::POLICY, $grantee, $policies, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
+        return $this->sync(GrantTarget::POLICY, $grantee, $policies, $expiresAt, $actor, GrantScopes::ofCall($tenant, $includeSubtree, $application));
     }
 
     /**
@@ -505,70 +548,130 @@ final class GrantService
     }
 
     /**
-     * Grant one row of the given kind in one transaction, in the scope its
-     * owner fixes or the tenant named, else platform-wide.
+     * Grant rows of the given kind in one transaction and one operation, each
+     * in the scope its owner fixes or the tenant named, else platform-wide,
+     * with the reach its entry names (by position), else the one named, and
+     * return each target's outcome in order.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
-     * @param  mixed  $target
+     * @param  array<int, mixed>  $targets
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $named
-     * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
+     * @param  array<int, bool>  $reaches
+     * @return list<\SineMacula\Laravel\Authorization\Enums\GrantOutcome>
      *
      * @throws \Throwable
      */
-    private function grant(GrantTarget $kind, Model|Reference $grantee, mixed $target, ?\DateTimeInterface $expiresAt, ?ActingContext $actor, GrantScope $named): GrantOutcome
-    {
+    private function grant(
+        GrantTarget $kind,
+        Model|Reference $grantee,
+        array $targets,
+        ?\DateTimeInterface $expiresAt,
+        ?ActingContext $actor,
+        GrantScope $named,
+        array $reaches = [],
+    ): array {
         $reference = self::grantee($grantee);
         $begun     = Operation::begin($actor, [$kind->grantAction()]);
+        $resolve   = static fn (): array => self::granted($kind, $grantee, $targets, $reaches, $named, $actor);
+        $propose   = static fn (array $grant): ProposedGrant => ProposedGrant::of($kind, $grant[0], $grant[1], $expiresAt);
 
-        /** @var \SineMacula\Laravel\Authorization\Enums\GrantOutcome $outcome */
-        $outcome = OperationScope::run($begun, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $named, $target, $expiresAt, $begun): GrantOutcome {
-            $resolve = static function () use ($kind, $grantee, $named, $target, $actor): array {
-                $model = $kind->resolve($target, GrantChanges::guard($grantee), $named->tenant);
-                $model = \is_string($target) ? $model : self::stored($kind, $model, $actor);
-
-                return [$model, self::scope(GrantScopes::of($kind, $model, $named->tenant), $named->includeSubtree, $named->application)];
-            };
-
-            // A grant that widens the identity's scope runs its hooks first,
+        /** @var list<\SineMacula\Laravel\Authorization\Enums\GrantOutcome> $outcomes */
+        $outcomes = OperationScope::run($begun, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $resolve, $propose, $expiresAt, $begun): array {
+            // Each grant that widens the identity's scope runs its hooks first,
             // before the package takes any lock for the call, handed the
             // operation as begun, with its client.
-            $hooks = WideningPhase::before($begun, $grantee, static function () use ($kind, $resolve, $expiresAt): array {
-                [$model, $scope] = $resolve();
-
-                return [ProposedGrant::of($kind, $model, $scope, $expiresAt)];
-            });
+            $hooks = WideningPhase::before($begun, $grantee, static fn (): array => \array_map($propose, $resolve()[0]));
 
             // The grantee's rows are locked before they are read, so a grant
             // weighed as only shortening one held is weighed on the row as it
             // stays until the write.
             OperationScope::pins()?->lockGrantees($reference);
 
-            [$model, $scope] = $resolve();
+            [$grants, $keys] = $resolve();
 
-            RoleParity::assertGrantable($kind->value, $model, GrantChanges::guard($grantee));
-            InlinePolicies::assertAttachable($model, $reference);
+            foreach ($grants as [$model]) {
+                RoleParity::assertGrantable($kind->value, $model, GrantChanges::guard($grantee));
+                InlinePolicies::assertAttachable($model, $reference);
+            }
 
-            $actor?->authorizeIn($operation, OperationResource::grant($kind->grantAction(), $reference, $model, $scope, $expiresAt));
+            $resource = static fn (array $grant): OperationResource => OperationResource::grant($kind->grantAction(), $reference, $grant[0], $grant[1], $expiresAt);
 
-            $hooks->assertCovers(static fn (): array => [ProposedGrant::of($kind, $model, $scope, $expiresAt)]);
+            $actor?->authorizeIn($operation, ...\array_map($resource, $grants));
 
-            $key    = GrantChanges::key($model);
-            $pairs  = ExclusionGuard::pairsFor($kind, [$key]);
-            $change = GrantChanges::table($kind, $reference, $operation->actor, $scope)->grant($key, $expiresAt);
+            $hooks->assertCovers(static fn (): array => \array_map($propose, $grants));
 
-            ExclusionGuard::assertGranted($pairs, $reference, [[$key, $scope, $change, $expiresAt]]);
+            $pairs   = ExclusionGuard::pairsFor($kind, \array_map(static fn (array $grant): string => GrantChanges::key($grant[0]), $grants));
+            $events  = [];
+            $changed = [];
+            $written = [];
 
-            OperationScope::dispatch(...$kind->changeEvents($operation, $reference, $model, $scope, $change, $expiresAt));
+            foreach ($grants as [$model, $scope]) {
+                $key           = GrantChanges::key($model);
+                $change        = GrantChanges::table($kind, $reference, $operation->actor, $scope)->grant($key, $expiresAt);
+                $events        = [...$events, ...$kind->changeEvents($operation, $reference, $model, $scope, $change, $expiresAt)];
+                $changed[$key] = $change->outcome;
+                $written[]     = [$key, $scope, $change, $expiresAt];
+            }
 
-            return $change->outcome;
+            ExclusionGuard::assertGranted($pairs, $reference, $written);
+
+            OperationScope::dispatch(...$events);
+
+            return \array_map(static fn (string $key): GrantOutcome => $changed[$key], $keys);
         }, $actor);
 
         self::forgetRelation($kind, $grantee);
 
-        return $outcome;
+        return $outcomes;
+    }
+
+    /**
+     * Resolve a grant's targets as one is resolved alone, each in the scope its
+     * owner fixes or the tenant named, with the reach its entry names (by
+     * position), else the one named. Return each row once, with its scope, and
+     * the key of each target in order; a row listed with both reaches is
+     * refused, except platform-wide, where both are the same.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  array<int, mixed>  $targets
+     * @param  array<int, bool>  $reaches
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $named
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
+     * @return array{list<array{\Illuminate\Database\Eloquent\Model, \SineMacula\Laravel\Authorization\Support\GrantScope}>, list<string>}
+     *
+     * @throws \InvalidArgumentException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
+     */
+    private static function granted(GrantTarget $kind, Model|Reference $grantee, array $targets, array $reaches, GrantScope $named, ?ActingContext $actor): array
+    {
+        $models = [];
+        $listed = [];
+
+        foreach ($targets as $index => $target) {
+            $model = $kind->resolve($target, GrantChanges::guard($grantee), $named->tenant);
+            $model = \is_string($target) ? $model : self::stored($kind, $model, $actor);
+            $key   = GrantChanges::key($model);
+
+            $models[$key] ??= $model;
+            $listed[] = [$key, GrantScopes::written(GrantScopes::of($kind, $model, $named->tenant), $reaches[$index] ?? $named->includeSubtree, $named->application)];
+        }
+
+        $scopes = GrantScopes::byKey($kind, $listed);
+        $grants = [];
+
+        foreach ($models as $key => $model) {
+            $grants[] = [$model, $scopes[$key]];
+        }
+
+        return [$grants, \array_column($listed, 0)];
     }
 
     /**
@@ -729,7 +832,7 @@ final class GrantService
         ?ActingContext $actor,
     ): SyncPlan {
         $scope   = $named->tenant ?? GrantScopes::commonOwner($kind, GrantChanges::guard($grantee), $targets);
-        $written = self::scope($scope, $named->includeSubtree, $named->application);
+        $written = GrantScopes::written($scope, $named->includeSubtree, $named->application);
         $table   = GrantChanges::table($kind, Reference::of($grantee), $grantedBy, $written);
         $held    = $table->held();
 
@@ -834,37 +937,5 @@ final class GrantService
         }
 
         return $reference;
-    }
-
-    /**
-     * Return the scope a call names: the tenant it names (a model taken as its
-     * reference), whether a grant reaches the tenants below it, and the
-     * application, each before the target's owner settles the tenant.
-     *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
-     * @param  bool  $includeSubtree
-     * @param  string|null  $application
-     * @return \SineMacula\Laravel\Authorization\Support\GrantScope
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
-     */
-    private static function named(Model|Reference|null $tenant, bool $includeSubtree, ?string $application): GrantScope
-    {
-        return new GrantScope(GrantScopes::named($tenant), $application, $includeSubtree);
-    }
-
-    /**
-     * Return the scope a grant is written in: its tenant, whether it also holds
-     * in the tenants below it, and its application. A platform-wide grant
-     * counts in every tenant, so it always reaches below.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
-     * @param  bool  $includeSubtree
-     * @param  string|null  $application
-     * @return \SineMacula\Laravel\Authorization\Support\GrantScope
-     */
-    private static function scope(?Reference $tenant, bool $includeSubtree, ?string $application): GrantScope
-    {
-        return new GrantScope($tenant, $application, $includeSubtree || $tenant === null);
     }
 }
