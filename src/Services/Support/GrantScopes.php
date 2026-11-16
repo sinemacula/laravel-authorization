@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\RecordOwner;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
@@ -41,6 +42,63 @@ final class GrantScopes
         [$type, $id] = TenantScope::extractTenantPair($tenant);
 
         return new Reference($type, $id);
+    }
+
+    /**
+     * Return the scope a call names: the tenant it names (a model taken as its
+     * reference), whether a grant reaches the tenants below it, and the
+     * application, each before the target's owner settles the tenant.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
+     * @param  string|null  $application
+     * @return \SineMacula\Laravel\Authorization\Support\GrantScope
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     */
+    public static function ofCall(Model|Reference|null $tenant, bool $includeSubtree, ?string $application): GrantScope
+    {
+        return new GrantScope(self::named($tenant), $application, $includeSubtree);
+    }
+
+    /**
+     * Return the scope a grant is written in: its tenant, whether it also holds
+     * in the tenants below it, and its application. A platform-wide grant
+     * counts in every tenant, so it always reaches below.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
+     * @param  string|null  $application
+     * @return \SineMacula\Laravel\Authorization\Support\GrantScope
+     */
+    public static function written(?Reference $tenant, bool $includeSubtree, ?string $application): GrantScope
+    {
+        return new GrantScope($tenant, $application, $includeSubtree || $tenant === null);
+    }
+
+    /**
+     * Return the scope each key listed is written in, keyed by key, refusing a
+     * key listed with both reaches with `InvalidArgumentException`.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  list<array{string, \SineMacula\Laravel\Authorization\Support\GrantScope}>  $listed
+     * @return array<string, \SineMacula\Laravel\Authorization\Support\GrantScope>
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function byKey(GrantTarget $kind, array $listed): array
+    {
+        $scopes = [];
+
+        foreach ($listed as [$key, $scope]) {
+            if (($scopes[$key] ?? $scope)->includeSubtree !== $scope->includeSubtree) {
+                throw new \InvalidArgumentException("The {$kind->value} [{$key}] is listed with both reaches.");
+            }
+
+            $scopes[$key] = $scope;
+        }
+
+        return $scopes;
     }
 
     /**

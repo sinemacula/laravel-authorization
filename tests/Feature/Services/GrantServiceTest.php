@@ -871,6 +871,255 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
+     * A batch grant writes each role as a grant of it alone would, by name or
+     * by model, returns each outcome keyed as the roles, and is one operation
+     * whose events are dispatched once, after it commits.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testGrantingRolesGrantsEachAsOneOperation(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+        $viewer = self::role('viewer');
+
+        self::role('editor');
+        self::role('author');
+        self::service()->grantRole($user, $viewer, tenant: $tenant);
+
+        Event::fake();
+
+        $outcomes = DB::transaction(static function () use ($user, $viewer, $tenant): array {
+            $outcomes = self::service()->grantRoles($user, [3 => 'editor', 1 => $viewer, 4 => 'author'], tenant: $tenant);
+
+            Event::assertNotDispatched(RoleAssigned::class);
+
+            return $outcomes;
+        });
+
+        $events = self::dispatchedEvents(RoleAssigned::class);
+
+        self::assertSame([3 => GrantOutcome::GRANTED, 1 => GrantOutcome::UNCHANGED, 4 => GrantOutcome::GRANTED], $outcomes);
+        self::assertEquals(['viewer' => true, 'editor' => true, 'author' => true], self::heldReaches());
+        self::assertCount(2, $events);
+        self::assertCount(1, \array_unique(\array_map(static fn (RoleAssigned $event): string => $event->operation->id, $events)));
+        self::assertSame([PackagePermissions::ROLE_GRANT], $events[0]->operation->actions);
+        self::assertSame([], self::service()->grantRoles($user, []));
+    }
+
+    /**
+     * A batch grant that fails part-way, or whose enclosing transaction rolls
+     * back, writes nothing and dispatches nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABatchGrantThatRollsBackWritesNothing(): void
+    {
+        $user = self::user();
+
+        self::role('editor');
+        self::role('viewer');
+
+        Event::fake();
+
+        $rolledBack = self::refusalOf(static fn (): never => DB::transaction(static function () use ($user): never {
+            self::service()->grantRoles($user, ['editor', 'viewer']);
+
+            throw new \RuntimeException('Rolled back.');
+        }));
+
+        $inserts = 0;
+
+        DB::listen(static function (QueryExecuted $query) use (&$inserts): void {
+            if (!\str_starts_with(\strtolower($query->sql), 'insert') || !\str_contains($query->sql, 'authorizable_roles') || ++$inserts < 2) {
+                return;
+            }
+
+            throw new \RuntimeException('Write failed.');
+        });
+
+        $failed = self::refusalOf(static fn (): array => self::service()->grantRoles($user, ['editor', 'viewer']));
+
+        self::assertSame(['Rolled back.', 'Write failed.'], [$rolledBack->getMessage(), $failed->getMessage()]);
+        self::assertSame(2, $inserts);
+        self::assertSame(0, DB::table('authorizable_roles')->count());
+        self::assertNoGrantEvents();
+    }
+
+    /**
+     * In a tenant, a role listed in a batch with both reaches, by names the
+     * database folds to the one role, or by name and by model, is refused
+     * before anything is written.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleListedInABatchWithBothReachesIsRefused(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+        $viewer = self::role('viewer');
+        $folded = Role::query()->where('name', 'VIEWER')->exists() ? 'VIEWER' : $viewer;
+
+        self::role('editor');
+
+        Event::fake();
+
+        $calls = [
+            static fn (): array => self::service()->grantRoles($user, ['editor', RoleReach::of('viewer', false), RoleReach::of($folded, true)], tenant: $tenant),
+            static fn (): array => self::service()->grantRoles($user, [RoleReach::of('viewer', true), 'editor', $viewer], tenant: $tenant, includeSubtree: false),
+        ];
+
+        foreach ($calls as $call) {
+            $refusal = self::refusalOf($call);
+
+            self::assertInstanceOf(\InvalidArgumentException::class, $refusal);
+            self::assertSame("The role [{$viewer->id}] is listed with both reaches.", $refusal->getMessage());
+        }
+
+        self::assertSame(0, DB::table('authorizable_roles')->count());
+        self::assertNoGrantEvents();
+    }
+
+    /**
+     * A platform-wide batch grant reaches everywhere, so a role listed with
+     * both reaches names the same reach there and is granted once.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPlatformBatchGrantGoesAheadWithBothReaches(): void
+    {
+        $user   = self::user();
+        $editor = self::role('editor');
+
+        Event::fake();
+
+        self::assertSame([GrantOutcome::GRANTED, GrantOutcome::GRANTED], self::service()->grantRoles($user, [RoleReach::of('editor', false), RoleReach::of($editor, true)]));
+        self::assertEquals(['editor' => true], self::heldReaches());
+        Event::assertDispatchedTimes(RoleAssigned::class, 1);
+    }
+
+    /**
+     * A role listed twice with the same reach is granted once, each later key
+     * repeating the first one's outcome.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleListedTwiceWithOneReachIsGrantedOnce(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+        $editor = self::role('editor');
+
+        Event::fake();
+
+        $outcomes = self::service()->grantRoles($user, [2 => 'editor', 5 => $editor, 9 => RoleReach::of('editor', true)], tenant: $tenant);
+
+        self::assertSame([2 => GrantOutcome::GRANTED, 5 => GrantOutcome::GRANTED, 9 => GrantOutcome::GRANTED], $outcomes);
+        self::assertSame(1, DB::table('authorizable_roles')->count());
+        Event::assertDispatchedTimes(RoleAssigned::class, 1);
+        self::assertSame([4 => GrantOutcome::UNCHANGED, 0 => GrantOutcome::UNCHANGED], self::service()->grantRoles($user, [4 => $editor, 0 => 'editor'], tenant: $tenant));
+    }
+
+    /**
+     * A batch holding both roles of a declared pair is refused, leaving no row.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABatchHoldingBothRolesOfAPairIsRefused(): void
+    {
+        $user    = self::user();
+        $clerk   = self::role('clerk');
+        $auditor = self::role('auditor');
+
+        RoleExclusionService::instance()?->declare($clerk, $auditor);
+
+        $refusal = self::refusalOf(static fn () => self::service()->grantRoles($user, [$clerk, $auditor]));
+
+        self::assertInstanceOf(RoleExclusionConflictException::class, $refusal);
+        self::assertSame(0, DB::table('authorizable_roles')->count());
+    }
+
+    /**
+     * A role listed twice is granted as its first entry gives it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleListedTwiceIsGrantedAsItsFirstEntry(): void
+    {
+        $user = self::user();
+        $copy = Role::query()->findOrFail(self::role('editor')->id);
+
+        $copy->name = 'renamed';
+
+        Event::fake();
+
+        self::service()->grantRoles($user, [$copy, 'editor']);
+
+        Event::assertDispatchedTimes(RoleAssigned::class, 1);
+        Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->name === 'renamed');
+    }
+
+    /**
+     * Each entry with a reach of its own keeps it in place of the call's, and
+     * any other takes the call's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEachBatchEntryKeepsItsOwnReach(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+
+        \array_map(self::role(...), ['plain', 'narrow', 'wide']);
+
+        self::service()->grantRoles($user, ['plain', RoleReach::of('narrow', false), RoleReach::of('wide', true)], tenant: $tenant, includeSubtree: false);
+
+        self::assertEquals(['plain' => false, 'narrow' => false, 'wide' => true], self::heldReaches());
+
+        self::service()->grantRoles($user, ['plain', RoleReach::of('wide', false)], tenant: $tenant);
+
+        self::assertEquals(['plain' => true, 'narrow' => false, 'wide' => false], self::heldReaches());
+    }
+
+    /**
+     * A delegated batch grant with one role the actor may not grant is refused,
+     * writing nothing, while the others alone are granted.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedBatchGrantRefusedForOneRoleWritesNothing(): void
+    {
+        $admin = self::administrator([PackagePermissions::ROLE_GRANT]);
+        $user  = self::user();
+
+        self::role('editor');
+        RoleService::instance()?->grantPermission(self::role('author'), Permission::query()->create(['name' => 'posts:read']));
+
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, static fn (): array => self::service()->grantRoles($user, ['editor', 'author'], actor: $admin));
+        self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', 'user-1')->count());
+        self::assertNoGrantEvents();
+        self::assertSame([GrantOutcome::GRANTED], self::service()->grantRoles($user, ['editor'], actor: $admin));
+    }
+
+    /**
      * A sync reads and writes only the rows of its own scope: a row of the role
      * naming half a tenant, or held in another tenant or for one application,
      * is neither held, changed nor revoked by a sync in a tenant or on the
@@ -2836,6 +3085,7 @@ final class GrantServiceTest extends TestCase
     public static function grantEntryPointProvider(): iterable
     {
         yield 'grantRole' => ['grantRole', PackagePermissions::ROLE_GRANT];
+        yield 'grantRoles' => ['grantRoles', PackagePermissions::ROLE_GRANT];
         yield 'grantPermission' => ['grantPermission', PackagePermissions::PERMISSION_GRANT];
         yield 'attachPolicy' => ['attachPolicy', PackagePermissions::POLICY_ATTACH];
         yield 'syncRoles' => ['syncRoles', PackagePermissions::ROLE_GRANT];
@@ -3254,6 +3504,7 @@ final class GrantServiceTest extends TestCase
 
         $this->assertEachRefused([
             'grantRole'        => static fn () => $service->grantRole($user, $role),
+            'grantRoles'       => static fn () => $service->grantRoles($user, [$role]),
             'revokeRole'       => static fn () => $service->revokeRole($user, $role),
             'syncRoles'        => static fn () => $service->syncRoles($user, [$role]),
             'grantPermission'  => static fn () => $service->grantPermission($user, 'posts:read'),
@@ -3319,6 +3570,7 @@ final class GrantServiceTest extends TestCase
 
         return match ($entry) {
             'grantRole'       => self::service()->grantRole($grantee, self::role($name), actor: $actor, tenant: $tenant),
+            'grantRoles'      => self::service()->grantRoles($grantee, [self::role($name)], actor: $actor, tenant: $tenant),
             'grantPermission' => self::service()->grantPermission($grantee, self::permission('posts:' . $name), actor: $actor, tenant: $tenant),
             'attachPolicy'    => self::service()->attachPolicy($grantee, self::denying($name), actor: $actor, tenant: $tenant),
             'syncRoles'       => self::service()->syncRoles($grantee, [self::role($name)], actor: $actor, tenant: $tenant),
