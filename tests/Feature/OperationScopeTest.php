@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantHookRecursionException;
 use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
@@ -405,6 +406,88 @@ final class OperationScopeTest extends TestCase
 
         self::assertSame($memo, $cache->rememberRoles(new StubIdentity(['id' => 'user-2']), static fn (): Resolution => new Resolution(['other'])));
         self::assertSame($tokens[2], $store->tokens([$key])[$key] ?? null);
+    }
+
+    /**
+     * A grant whose transaction rolls back is denied again, in the request and
+     * the next, though a check inside the transaction stored its allow.
+     *
+     * @return void
+     */
+    public function testARolledBackGrantIsDeniedAgain(): void
+    {
+        [$user, $role] = $this->cachedEditor();
+
+        DB::beginTransaction();
+        $user->assignRole($role);
+        $inside = self::fresh($user)->hasPermission('posts:edit');
+        DB::rollBack();
+
+        self::assertTrue($inside);
+        self::assertSame([false, false], $this->checks($user));
+    }
+
+    /**
+     * A revoke whose transaction rolls back is allowed again, though a check
+     * inside the transaction stored its denial.
+     *
+     * @return void
+     */
+    public function testARolledBackRevokeIsAllowedAgain(): void
+    {
+        [$user, $role] = $this->cachedEditor();
+
+        $user->assignRole($role);
+
+        DB::beginTransaction();
+        $user->revokeRole($role);
+        $inside = self::fresh($user)->hasPermission('posts:edit');
+        DB::rollBack();
+
+        self::assertFalse($inside);
+        self::assertSame([true, true], $this->checks($user));
+    }
+
+    /**
+     * A grant in a savepoint that rolls back is denied again, before and after
+     * the enclosing transaction commits.
+     *
+     * @return void
+     */
+    public function testAGrantInARolledBackSavepointIsDeniedAgain(): void
+    {
+        [$user, $role] = $this->cachedEditor();
+
+        DB::beginTransaction();
+        DB::beginTransaction();
+        $user->assignRole($role);
+        $inside = self::fresh($user)->hasPermission('posts:edit');
+        DB::rollBack();
+        $afterSavepoint = $this->checks($user);
+        DB::commit();
+
+        self::assertTrue($inside);
+        self::assertSame([[false, false], [false, false]], [$afterSavepoint, $this->checks($user)]);
+    }
+
+    /**
+     * A write rolled back with no resolution cache bound rolls back cleanly.
+     *
+     * @return void
+     */
+    public function testAWriteRolledBackWithoutACacheRollsBackCleanly(): void
+    {
+        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $role = Role::query()->create(['name' => 'editor']);
+
+        $this->app?->offsetUnset(ResolutionCache::class);
+
+        DB::beginTransaction();
+        $user->assignRole($role);
+        DB::rollBack();
+
+        self::assertNull(ResolutionCache::instance());
+        self::assertFalse(self::fresh($user)->roles()->exists());
     }
 
     /**
@@ -926,6 +1009,51 @@ final class OperationScopeTest extends TestCase
         }
 
         return null;
+    }
+
+    /**
+     * Keep entries in the array store, from a new request, and return a user
+     * and a role that gives `posts:edit`.
+     *
+     * @return array{\Tests\Feature\Stubs\StubIdentity, \SineMacula\Laravel\Authorization\Models\Role}
+     */
+    private function cachedEditor(): array
+    {
+        config(['authorization.cache.store' => 'array']);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        $role = Role::query()->create(['name' => 'editor']);
+
+        $role->givePermission(Permission::query()->create(['name' => 'posts:edit']));
+
+        return [StubIdentity::query()->create(['id' => 'user-1']), $role];
+    }
+
+    /**
+     * Return whether the user may edit posts in this request, then in the next.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @return array{bool, bool}
+     */
+    private function checks(StubIdentity $user): array
+    {
+        $now = self::fresh($user)->hasPermission('posts:edit');
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        return [$now, self::fresh($user)->hasPermission('posts:edit')];
+    }
+
+    /**
+     * Read the user afresh, as the next request does.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @return \Tests\Feature\Stubs\StubIdentity
+     */
+    private static function fresh(StubIdentity $user): StubIdentity
+    {
+        return StubIdentity::query()->whereKey($user->getKey())->firstOrFail();
     }
 
     /**

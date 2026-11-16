@@ -45,7 +45,8 @@ use SineMacula\Laravel\Authorization\Preview\Previewing;
  * allow what it took away. Once it has committed, before any listener runs, the
  * versions are bumped again so an entry a concurrent check stored from the rows
  * before the commit never holds; a failure then is written to the log channel,
- * since the write cannot be undone. A write made with no transaction open has
+ * since the write cannot be undone. They are bumped again, with nothing
+ * dispatched, when it rolls back. A write made with no transaction open has
  * already committed: it is invalidated the same way, and a failure of the first
  * bump is thrown.
  *
@@ -291,8 +292,8 @@ final class OperationScope
 
     /**
      * Invalidate the resolution cache for the events, again once the package
-     * connection's transaction commits, or straight away when it has none open,
-     * and then, when asked, dispatch them.
+     * connection's transaction commits or rolls back, or straight away when it
+     * has none open, and dispatch them, when asked, unless it rolls back.
      *
      * @param  list<\SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent>  $events
      * @param  bool  $isDispatched
@@ -321,6 +322,7 @@ final class OperationScope
         }
 
         $connection->afterCommit($send);
+        $cache?->invalidateOnRollback($keys);
     }
 
     /**
