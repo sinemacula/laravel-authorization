@@ -218,10 +218,11 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
   subject that is no saved record, such as an unsaved model or an object that is not a model, is named by no reference.
   Which decisions `DecisionEvaluated` reports is set by `events.decisions` (invariant 14); by default an ordinary allow
   is not reported, so a listener that needs every allow sets `allows` to `all`.
-- **The resolution cache is invalidated around the commit.** `OperationScope::dispatch()` bumps the versions the
-  events affect inside the transaction, so a store that fails rolls the write back, and again once it commits, before
-  any listener runs, so an entry a concurrent check stored from the rows before the commit never holds (see
-  `Cache\Invalidation`).
+- **The resolution cache is invalidated around the transaction.** `OperationScope::dispatch()` bumps the versions the
+  events affect inside the transaction, so a store that fails rolls the write back, and again once the transaction
+  commits, before any listener runs, or rolls back, so an entry a check stored while it was open, from the rows before
+  the commit or from rows that roll back, never holds (see `Cache\Invalidation`). Listeners run only on commit.
+  `ResolutionCache::treeChanged()` bumps the tenant's version the same way.
 - **Raw writes report nothing.** A pivot written through a relation (`$role->permissions()->attach()`), a query builder
   update or delete, and `saveQuietly()` or `deleteQuietly()` dispatch no event.
 - **A delete outside a transaction** reads its grantees and removes the row in separate statements; through the
@@ -281,7 +282,8 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
   `AuthorizationManagerTest`: the provenance of the last decision; `CheckBatchTest`: the dispatch and store switches;
   `BreakGlassAttributionTest`: the activations an allow names, and its report, through a check, a bulk check, a
   listing and a preview's listing, cold and warm.
-- `OperationScopeTest`: after-commit dispatch, nesting, rollback and the current operation.
+- `OperationScopeTest`: after-commit dispatch, nesting, rollback, the cache bumped on commit and rollback, and the
+  current operation; `ResolutionCacheTest` (Feature): a tree change bumped on commit and rollback.
 - `ResourcePolicyServiceTest`, `PolicyAttachedTest`, `PolicyDetachedTest`, `ResourcePolicyEventTest`: the resource
   policy events and the shape they share, after commit and only for a change.
 - `BoundaryServiceTest`, `BoundarySetTest`, `BoundaryRemovedTest`, `BoundaryEventTest`: the boundary events, the policy
