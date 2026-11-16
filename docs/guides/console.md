@@ -70,7 +70,16 @@ grants that no longer exist and coverage older than `authorization.usage.retenti
 `authorization:migrate-spatie` copies roles, permissions and grants from `spatie/laravel-permission` through the
 management services, its `guard_name` becoming `guard`. It reports and skips any role or permission whose name the
 package refuses, and any permission whose name contains `*`, along with its grants. `--dry-run` reports the counts
-without writing. The aliases kept for a port are listed in [Spatie compatibility](../design/spatie-compatibility.md).
+without writing. Spatie's tables are read on the connection `--connection` names, the default one when left out, under
+the names `--roles-table`, `--permissions-table`, `--role-has-permissions-table`, `--model-has-roles-table` and
+`--model-has-permissions-table` give, Spatie's own by default. The command refuses before reading anything when one of
+them is a table it writes on the same connection, which the default configuration hits, as both name `roles` and
+`permissions`. A re-run carries on where an earlier run stopped: a platform role or permission of the same name and
+guard is reused, and a grant already held with no expiry is left as it is, both counted as already present. A grant
+given an expiry since, or expired, is granted again without one. Two Spatie roles, or two permissions, that map to the
+same one stop the import before anything is written, on a dry run as well. A dry run looks the roles and permissions
+up but counts every grant as a row. The aliases kept for a port are listed in
+[Spatie compatibility](../design/spatie-compatibility.md).
 
 ## Checking the configuration
 

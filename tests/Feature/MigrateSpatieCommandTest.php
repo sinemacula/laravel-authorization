@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Database\Schema\Builder as SchemaBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
@@ -23,6 +25,8 @@ use SineMacula\Laravel\Authorization\Events\Permission\Created as PermissionCrea
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Exceptions\GrantRefusedException;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Concerns\WidensGrants;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
@@ -217,16 +221,17 @@ final class MigrateSpatieCommandTest extends TestCase
     /**
      * The import runs in one transaction on the package's connection: when a
      * write fails part-way, the rows written before it are rolled back there.
-     * The second role collides with a row the package's table already holds,
-     * after the first role has been written.
+     * The permission's kept id collides with a row the package's table already
+     * holds, after the role has been written.
      *
      * @return void
      */
     public function testAFailedImportIsRolledBackOnThePackageConnection(): void
     {
         $this->useAnAuthorizationConnection();
+        $this->recreateSpatieTablesWithStringIds();
 
-        self::authorizationConnection()->table('auth_roles')->insert(['id' => '0192f0c4-3b1a-7d2e-9a4b-000000000001', 'name' => 'editor', 'guard' => 'web']);
+        self::authorizationConnection()->table('auth_permissions')->insert(['id' => self::STRING_PERMISSION_ID, 'name' => 'other', 'guard' => 'web']);
 
         $failure = null;
 
@@ -237,7 +242,260 @@ final class MigrateSpatieCommandTest extends TestCase
         }
 
         self::assertInstanceOf(QueryException::class, $failure);
-        self::assertSame(['editor'], self::authorizationConnection()->table('auth_roles')->pluck('name')->all());
+        self::assertSame(0, self::authorizationConnection()->table('auth_roles')->count());
+        self::assertSame(['other'], self::authorizationConnection()->table('auth_permissions')->pluck('name')->all());
+    }
+
+    /**
+     * A second run over the same source writes nothing, dispatches nothing and
+     * reports every row as already present.
+     *
+     * @return void
+     */
+    public function testARerunAfterAFullRunChangesNothing(): void
+    {
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie'));
+
+        $before = self::targetRows();
+        $events = [RoleCreated::class, PermissionCreated::class, RolePermissionGranted::class, RoleAssigned::class, PermissionGranted::class];
+
+        Event::fake($events);
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie'));
+
+        $output = Artisan::output();
+
+        foreach ($events as $event) {
+            Event::assertNotDispatched($event);
+        }
+
+        self::assertSame($before, self::targetRows());
+        self::assertMatchesRegularExpression('/\|\s+Target Table\s+\|\s+Rows\s+\|\s+Already Present\s+\|/', $output);
+
+        foreach (['roles' => 2, 'permissions' => 3, 'role_permissions' => 2, 'authorizable_roles' => 1, 'authorizable_permissions' => 1] as $table => $present) {
+            self::assertMatchesRegularExpression("/\\|\\s+{$table}\\s+\\|\\s+0\\s+\\|\\s+{$present}\\s+\\|/", $output);
+        }
+    }
+
+    /**
+     * A run a grant hook stopped after the catalogue committed is carried on by
+     * a re-run, which reuses the roles and permissions and makes the grants.
+     *
+     * @return void
+     */
+    public function testARerunAfterAPartialRunCarriesOn(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        [, [$principal]] = $this->principals('person', ['42']);
+
+        foreach (['model_has_roles', 'model_has_permissions'] as $table) {
+            DB::table($table)->update(['model_type' => $principal->getMorphClass()]);
+        }
+
+        $this->app?->instance(GrantHook::class, new RefusingGrantHook);
+
+        $failure = null;
+
+        try {
+            Artisan::call('authorization:migrate-spatie');
+        } catch (\Throwable $exception) {
+            $failure = $exception;
+        }
+
+        self::assertInstanceOf(GrantRefusedException::class, $failure);
+        self::assertSame(0, self::authorizationConnection()->table('auth_authorizable_roles')->count());
+
+        $this->hook();
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie'));
+
+        $output = Artisan::output();
+
+        self::assertSame(2, self::authorizationConnection()->table('auth_roles')->count());
+        self::assertSame(3, self::authorizationConnection()->table('auth_permissions')->count());
+        self::assertSame(2, self::authorizationConnection()->table('auth_role_permissions')->count());
+        self::assertSame(1, self::authorizationConnection()->table('auth_authorizable_roles')->count());
+        self::assertSame(1, self::authorizationConnection()->table('auth_authorizable_permissions')->count());
+        self::assertMatchesRegularExpression('/\|\s+roles\s+\|\s+0\s+\|\s+2\s+\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s+authorizable_roles\s+\|\s+1\s+\|\s+0\s+\|/', $output);
+    }
+
+    /**
+     * Only the platform's row of the same name and guard is reused: a role of
+     * another guard, or owned by a tenant, is left alone and a new one made.
+     *
+     * @return void
+     */
+    public function testReusesOnlyThePlatformRowOfTheSameNameAndGuard(): void
+    {
+        $editorId = '0192f0c4-3b1a-7d2e-9a4b-000000000001';
+
+        DB::table('auth_roles')->insert([
+            ['id' => $editorId, 'name' => 'editor', 'guard' => 'web', 'tenant_type' => null, 'tenant_id' => null],
+            ['id' => '0192f0c4-3b1a-7d2e-9a4b-000000000002', 'name' => 'admin', 'guard' => 'api', 'tenant_type' => null, 'tenant_id' => null],
+            ['id' => '0192f0c4-3b1a-7d2e-9a4b-000000000003', 'name' => 'admin', 'guard' => 'web', 'tenant_type' => 'team', 'tenant_id' => '1'],
+        ]);
+
+        self::assertSame(0, TenantScope::within(new Reference('team', '1'), null, static fn (): int => Artisan::call('authorization:migrate-spatie')));
+
+        $adminId = DB::table('auth_roles')->where('name', 'admin')->where('guard', 'web')->whereNull('tenant_type')->value('id');
+
+        self::assertIsString($adminId);
+        self::assertSame(4, DB::table('auth_roles')->count());
+        self::assertSame([$editorId], DB::table('auth_roles')->where('name', 'editor')->pluck('id')->all());
+        self::assertSame([$adminId], DB::table('auth_authorizable_roles')->pluck('role_id')->all());
+        self::assertMatchesRegularExpression('/\|\s+roles\s+\|\s+1\s+\|\s+1\s+\|/', Artisan::output());
+    }
+
+    /**
+     * Return a Spatie table and a name it already holds on the `web` guard,
+     * with the refusal a second row of that name and guard gives.
+     *
+     * @return iterable<string, array{string, string, string}>
+     */
+    public static function duplicateSpatieRows(): iterable
+    {
+        yield 'role' => ['roles', 'admin', 'Spatie roles 1 and 8 both map to role \'admin\' with guard \'web\'.'];
+        yield 'permission' => ['permissions', 'posts:edit', 'Spatie permissions 2 and 8 both map to permission \'posts:edit\' with guard \'web\'.'];
+    }
+
+    /**
+     * Two Spatie rows that map to the same role or permission stop the import,
+     * a dry run too, before anything is written; the same name on another guard
+     * does not.
+     *
+     * @param  string  $table
+     * @param  string  $name
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('duplicateSpatieRows')]
+    public function testTwoSpatieRowsOfTheSameNameAndGuardStopTheImport(string $table, string $name, string $message): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        DB::table($table)->insert(['id' => 7, 'name' => $name, 'guard_name' => 'api', 'created_at' => now(), 'updated_at' => now()]);
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie', ['--dry-run' => true]));
+
+        DB::table($table)->insert(['id' => 8, 'name' => $name, 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()]);
+
+        foreach ([['--dry-run' => true], []] as $options) {
+            $failure = null;
+
+            try {
+                Artisan::call('authorization:migrate-spatie', $options);
+            } catch (\Throwable $exception) {
+                $failure = $exception;
+            }
+
+            self::assertInstanceOf(\UnexpectedValueException::class, $failure);
+            self::assertSame($message, $failure->getMessage());
+        }
+
+        self::assertSame(0, self::authorizationConnection()->table('auth_roles')->count());
+        self::assertSame(0, self::authorizationConnection()->table('auth_permissions')->count());
+    }
+
+    /**
+     * The options name Spatie's tables and their connection: the tables they
+     * name are read, the defaults are not, and a table named as a package table
+     * on another connection is no collision. A dry run reads them too.
+     *
+     * @return void
+     */
+    public function testReadsTheTablesAndConnectionTheOptionsName(): void
+    {
+        $this->app?->make(ConfigRepository::class)->set('database.connections.spatie', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+
+        $tables = [
+            'roles'                 => 'auth_roles',
+            'permissions'           => 'legacy_permissions',
+            'role_has_permissions'  => 'legacy_role_has_permissions',
+            'model_has_roles'       => 'legacy_model_has_roles',
+            'model_has_permissions' => 'legacy_model_has_permissions',
+        ];
+
+        $spatie = DB::connection('spatie');
+
+        $this->createSpatieTables($spatie->getSchemaBuilder(), $tables);
+
+        $spatie->table('auth_roles')->insert(['id' => 1, 'name' => 'auditor', 'guard_name' => 'web']);
+        $spatie->table('legacy_permissions')->insert(['id' => 1, 'name' => 'reports:read', 'guard_name' => 'web']);
+        $spatie->table('legacy_role_has_permissions')->insert(['permission_id' => 1, 'role_id' => 1]);
+        $spatie->table('legacy_model_has_roles')->insert(['role_id' => 1, 'model_type' => 'App\Models\User', 'model_id' => 7]);
+        $spatie->table('legacy_model_has_permissions')->insert(['permission_id' => 1, 'model_type' => 'App\Models\User', 'model_id' => 7]);
+
+        $options = [
+            '--connection'                  => 'spatie',
+            '--roles-table'                 => 'auth_roles',
+            '--permissions-table'           => 'legacy_permissions',
+            '--role-has-permissions-table'  => 'legacy_role_has_permissions',
+            '--model-has-roles-table'       => 'legacy_model_has_roles',
+            '--model-has-permissions-table' => 'legacy_model_has_permissions',
+        ];
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie', [...$options, '--dry-run' => true]));
+        self::assertMatchesRegularExpression('/\|\s+roles\s+\|\s+1\s+\|\s+0\s+\|/', Artisan::output());
+        self::assertSame(0, DB::table('auth_roles')->count());
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie', $options));
+        self::assertSame(['auditor'], DB::table('auth_roles')->pluck('name')->all());
+        self::assertSame(['reports:read'], DB::table('auth_permissions')->pluck('name')->all());
+        self::assertSame(1, DB::table('auth_role_permissions')->count());
+        self::assertSame(['7'], DB::table('auth_authorizable_roles')->pluck('authorizable_id')->all());
+        self::assertSame(['7'], DB::table('auth_authorizable_permissions')->pluck('authorizable_id')->all());
+    }
+
+    /**
+     * A source table that is one of the package's tables on the same connection
+     * is refused before anything is read, naming the option to set, dry run or
+     * not; with the defaults this is Spatie's `roles`.
+     *
+     * @return void
+     */
+    public function testRefusesASourceTableThatIsAPackageTable(): void
+    {
+        Schema::drop('model_has_roles');
+
+        $connection = DB::connection()->getName();
+
+        self::assertSame(1, Artisan::call('authorization:migrate-spatie', ['--model-has-roles-table' => 'auth_authorizable_roles', '--dry-run' => true]));
+        self::assertStringContainsString(
+            "Spatie source table 'auth_authorizable_roles' is one of this package's tables on connection '{$connection}'. Pass --model-has-roles-table or --connection",
+            Artisan::output(),
+        );
+
+        $this->app?->make(ConfigRepository::class)->set('authorization.tables.roles', 'roles');
+
+        self::assertSame(1, Artisan::call('authorization:migrate-spatie'));
+        self::assertStringContainsString(
+            "Spatie source table 'roles' is one of this package's tables on connection '{$connection}'. Pass --roles-table or --connection to name Spatie's table.",
+            Artisan::output(),
+        );
+        self::assertSame(0, DB::table('auth_roles')->count());
+    }
+
+    /**
+     * A dry run after a full run reports the roles and permissions as already
+     * present and writes nothing.
+     *
+     * @return void
+     */
+    public function testADryRunAfterAFullRunReportsTheCatalogueAsPresent(): void
+    {
+        Artisan::call('authorization:migrate-spatie');
+
+        $before = self::targetRows();
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie', ['--dry-run' => true]));
+
+        $output = Artisan::output();
+
+        self::assertMatchesRegularExpression('/\|\s+roles\s+\|\s+0\s+\|\s+2\s+\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s+permissions\s+\|\s+0\s+\|\s+3\s+\|/', $output);
+        self::assertSame($before, self::targetRows());
     }
 
     /**
@@ -838,64 +1096,57 @@ final class MigrateSpatieCommandTest extends TestCase
     }
 
     /**
-     * Create Spatie's default tables with auto-increment IDs.
+     * Return every row of the package's target tables, in a stable order.
      *
-     * @return void
+     * @return array<string, array<int, string>>
      */
-    private function createSpatieTables(): void
+    private static function targetRows(): array
     {
-        $this->createSpatieAuthorityTables();
-        $this->createSpatiePivotTables();
+        $rows = [];
+
+        foreach (['auth_roles', 'auth_permissions', 'auth_role_permissions', 'auth_authorizable_roles', 'auth_authorizable_permissions'] as $table) {
+            $rows[$table] = DB::table($table)->get()->map(static fn (object $row): string => (string) \json_encode($row))->sort()->values()->all();
+        }
+
+        return $rows;
     }
 
     /**
-     * Create the Spatie role and permission master tables.
+     * Create Spatie's tables with auto-increment IDs, under Spatie's default
+     * names unless others are given.
      *
+     * @param  \Illuminate\Database\Schema\Builder|null  $schema
+     * @param  array<string, string>  $names
      * @return void
      */
-    private function createSpatieAuthorityTables(): void
+    private function createSpatieTables(?SchemaBuilder $schema = null, array $names = []): void
     {
-        Schema::create('roles', static function (Blueprint $table): void {
-            $table->increments('id');
-            $table->string('name');
-            $table->string('guard_name');
-            $table->timestamps();
-        });
+        $schema ??= DB::connection()->getSchemaBuilder();
+        $name = static fn (string $table): string => $names[$table] ?? $table;
 
-        Schema::create('permissions', static function (Blueprint $table): void {
-            $table->increments('id');
-            $table->string('name');
-            $table->string('guard_name');
-            $table->timestamps();
-        });
-    }
+        foreach (['roles', 'permissions'] as $table) {
+            $schema->create($name($table), static function (Blueprint $blueprint): void {
+                $blueprint->increments('id');
+                $blueprint->string('name');
+                $blueprint->string('guard_name');
+                $blueprint->timestamps();
+            });
+        }
 
-    /**
-     * Create the Spatie pivot tables (role / model junctions).
-     *
-     * @return void
-     */
-    private function createSpatiePivotTables(): void
-    {
-        Schema::create('role_has_permissions', static function (Blueprint $table): void {
+        $schema->create($name('role_has_permissions'), static function (Blueprint $table): void {
             $table->unsignedInteger('permission_id');
             $table->unsignedInteger('role_id');
             $table->primary(['permission_id', 'role_id']);
         });
 
-        Schema::create('model_has_roles', static function (Blueprint $table): void {
-            $table->unsignedInteger('role_id');
-            $table->string('model_type');
-            $table->unsignedBigInteger('model_id');
-            $table->index(['model_id', 'model_type']);
-        });
-
-        Schema::create('model_has_permissions', static function (Blueprint $table): void {
-            $table->unsignedInteger('permission_id');
-            $table->string('model_type');
-            $table->unsignedBigInteger('model_id');
-            $table->index(['model_id', 'model_type']);
-        });
+        foreach (['model_has_roles' => 'role_id', 'model_has_permissions' => 'permission_id'] as $table => $column) {
+            $schema->create($name($table), static function (Blueprint $blueprint) use ($column): void {
+                $blueprint->unsignedInteger($column);
+                $blueprint->string('model_type');
+                $blueprint->unsignedBigInteger('model_id');
+                $blueprint->index(['model_id', 'model_type']);
+            });
+        }
     }
 
     /**
