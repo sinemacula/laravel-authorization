@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -21,14 +22,15 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  *
  * Provides convenience assertions that delegate to the authorization manager's
  * evaluation surface. The assertion methods require the using class to extend
- * `PHPUnit\Framework\TestCase`, which supplies the `assertTrue` / `assertFalse`
- * static entry points. The `actingAsIdentity` and `actingAsSubject` helpers
- * intentionally do not depend on the TestCase base — they can be composed into
- * any consumer utility and fall back to the global container when `$this->app`
- * is not available.
+ * `PHPUnit\Framework\TestCase`, which supplies the `assertTrue`, `assertFalse`
+ * and `assertSame` static entry points. The `actingAsIdentity` and
+ * `actingAsSubject` helpers intentionally do not depend on the TestCase base;
+ * they can be composed into any consumer utility and fall back to the global
+ * container when `$this->app` is not available.
  *
  * @method static void assertTrue(bool $condition, string $message = '')
  * @method static void assertFalse(bool $condition, string $message = '')
+ * @method static void assertSame(mixed $expected, mixed $actual, string $message = '')
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -66,15 +68,17 @@ trait AuthorizationAssertions
      * Assert that the principal is denied the action.
      *
      * On failure, the evaluation trace is included in the message so the
-     * developer can see why the check was unexpectedly allowed.
+     * developer can see why the check was unexpectedly allowed. Given a reason,
+     * the denial must also be for that reason.
      *
      * @param  object  $principal
      * @param  string  $action
      * @param  mixed  $resource
      * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null  $reason
      * @return void
      */
-    public function assertCannot(object $principal, string $action, mixed $resource = null, array $context = []): void
+    public function assertCannot(object $principal, string $action, mixed $resource = null, array $context = [], ?DecisionReason $reason = null): void
     {
         $decision = Authorization::for($principal)->check($action, $resource, $context);
 
@@ -84,6 +88,22 @@ trait AuthorizationAssertions
                 "Failed asserting that the principal cannot perform '%s'%s.\nDecision:\n%s",
                 $action,
                 self::describeResource($resource),
+                $decision->explain()->toText(),
+            ),
+        );
+
+        if ($reason === null) {
+            return;
+        }
+
+        self::assertSame(
+            $reason,
+            $decision->reason,
+            \sprintf(
+                "Failed asserting that the principal is denied '%s'%s for '%s'.\nDecision:\n%s",
+                $action,
+                self::describeResource($resource),
+                $reason->value,
                 $decision->explain()->toText(),
             ),
         );
