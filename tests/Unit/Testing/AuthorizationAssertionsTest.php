@@ -153,13 +153,17 @@ final class AuthorizationAssertionsTest extends TestCase
     }
 
     /**
-     * `assertCannot` is public, so a helper outside the test case can call it.
+     * `assertCannot` can be called from outside the test case, as by a helper.
      *
      * @return void
      */
-    public function testAssertCannotIsPublic(): void
+    public function testAssertCannotIsCallableFromOutsideTheTestCase(): void
     {
-        self::assertTrue((new \ReflectionMethod(self::class, 'assertCannot'))->isPublic());
+        $user = StubIdentity::create(['id' => '5c7e9a1b-3d5f-4a7c-9e1b-3d5f7a9c1e3b']);
+
+        $outside = \Closure::bind(static fn (AuthorizationAssertionsTest $test) => $test->assertCannot($user, 'docs:delete', reason: DecisionReason::NO_MATCH), null, null);
+
+        $outside($this);
     }
 
     /**
