@@ -235,6 +235,32 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * A tree change made in a savepoint that commits inside a transaction that
+     * rolls back bumps the tenant's version again, so an entry stored from the
+     * tree inside it never holds.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATreeChangeBumpsAgainOnceItsTransactionRollsBack(): void
+    {
+        [$account, $org] = \array_map(self::createTenant(...), ['account', 'org']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org)));
+        $this->actAsTenant($account);
+
+        DB::beginTransaction();
+        DB::transaction(fn () => $this->request()->treeChanged(Reference::of($org)));
+        $this->permissions($this->request());
+        DB::rollBack();
+
+        $this->permissions($this->request());
+
+        self::assertSame(2, $this->resolutions);
+    }
+
+    /**
      * Without a store a tree change empties the memo only.
      *
      * @return void

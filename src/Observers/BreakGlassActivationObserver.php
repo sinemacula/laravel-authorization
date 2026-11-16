@@ -16,8 +16,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * A save that moves the activation to another grantee bumps both. The versions
  * are bumped at once, a failure of the store thrown so the write rolls back,
- * and again once the caller's transaction commits, so an entry a concurrent
- * check stored before the commit never holds; a failure then is written to the
+ * and again once the caller's transaction commits or rolls back, so an entry a
+ * check stored while it was open never holds; a failure then is written to the
  * log channel.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -53,7 +53,7 @@ final class BreakGlassActivationObserver
 
     /**
      * Empty the resolution memo and bump the versions of the grantees now, and
-     * again once the caller's transaction commits.
+     * again once the caller's transaction commits or rolls back.
      *
      * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\Reference|null>  $grantees
      * @return void
@@ -74,6 +74,8 @@ final class BreakGlassActivationObserver
         $transactions = Container::getInstance()->make('db.transactions');
 
         $transactions->addCallback(static fn () => $cache->invalidateQuietly($keys));
+
+        $cache->invalidateOnRollback($keys);
     }
 
     /**
