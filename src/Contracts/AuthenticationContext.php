@@ -14,8 +14,9 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  * passes, and only rebinding this contract replaces it.
  *
  * The shipped default supplies what Laravel knows: the default guard's name and
- * the signed-in user's key and morph type. Under the suite it is
- * `laravel-authentication`'s authentication context, with its key names.
+ * the signed-in user's key and morph type, keys the catalogue declares only
+ * while it is the one bound. Under the suite it is `laravel-authentication`'s
+ * authentication context, with its key names.
  *
  * It also declares the names that make a key of its namespaces an assurance
  * key, beside the package's fixed `AssuranceKeys::NAMES`, so a sibling

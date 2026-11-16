@@ -4,15 +4,21 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Context;
 
+use Illuminate\Contracts\Auth\Factory as AuthFactory;
+use Illuminate\Contracts\Config\Repository as Config;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Context\AssuranceKeys;
 use SineMacula\Laravel\Authorization\Context\ContextKey;
 use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
+use Tests\Feature\Stubs\ContributingAuthenticationContext;
+use Tests\Feature\Stubs\SiblingAuthenticationContext;
 
 /**
  * Unit tests for `DeclaredContextKeyCatalogue`, the context keys declared to
@@ -40,23 +46,20 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
 
         self::assertInstanceOf(ContextKeyCatalogue::class, $catalogue);
         self::assertEquals([
-            'authentication.guard'     => new ContextKey('authentication.guard', ContextKeyType::STRING),
-            'authentication.user_id'   => new ContextKey('authentication.user_id', ContextKeyType::STRING),
-            'authentication.user_type' => new ContextKey('authentication.user_type', ContextKeyType::STRING),
-            'environment.time'         => new ContextKey('environment.time', ContextKeyType::TIME),
-            'request.ip'               => new ContextKey('request.ip', ContextKeyType::IP),
-            'request.method'           => new ContextKey('request.method', ContextKeyType::STRING),
-            'request.route'            => new ContextKey('request.route', ContextKeyType::STRING),
-            'resource.id'              => new ContextKey('resource.id', ContextKeyType::STRING),
-            'resource.tenant.id'       => new ContextKey('resource.tenant.id', ContextKeyType::STRING),
-            'resource.tenant.type'     => new ContextKey('resource.tenant.type', ContextKeyType::STRING),
-            'resource.type'            => new ContextKey('resource.type', ContextKeyType::STRING),
-            'subject.id'               => new ContextKey('subject.id', ContextKeyType::STRING),
-            'subject.tenant.id'        => new ContextKey('subject.tenant.id', ContextKeyType::STRING),
-            'subject.tenant.type'      => new ContextKey('subject.tenant.type', ContextKeyType::STRING),
-            'subject.type'             => new ContextKey('subject.type', ContextKeyType::STRING),
+            'environment.time'     => new ContextKey('environment.time', ContextKeyType::TIME),
+            'request.ip'           => new ContextKey('request.ip', ContextKeyType::IP),
+            'request.method'       => new ContextKey('request.method', ContextKeyType::STRING),
+            'request.route'        => new ContextKey('request.route', ContextKeyType::STRING),
+            'resource.id'          => new ContextKey('resource.id', ContextKeyType::STRING),
+            'resource.tenant.id'   => new ContextKey('resource.tenant.id', ContextKeyType::STRING),
+            'resource.tenant.type' => new ContextKey('resource.tenant.type', ContextKeyType::STRING),
+            'resource.type'        => new ContextKey('resource.type', ContextKeyType::STRING),
+            'subject.id'           => new ContextKey('subject.id', ContextKeyType::STRING),
+            'subject.tenant.id'    => new ContextKey('subject.tenant.id', ContextKeyType::STRING),
+            'subject.tenant.type'  => new ContextKey('subject.tenant.type', ContextKeyType::STRING),
+            'subject.type'         => new ContextKey('subject.type', ContextKeyType::STRING),
         ], $catalogue->keys());
-        self::assertSame(['authentication', 'environment', 'request', 'resource', 'subject'], $catalogue->namespaces());
+        self::assertSame(['environment', 'request', 'resource', 'subject'], $catalogue->namespaces());
     }
 
     /**
@@ -106,7 +109,7 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
         self::assertEquals(new ContextKey('tenant.plan', ContextKeyType::STRING), $catalogue->find('tenant.plan'));
         self::assertEquals(new ContextKey('tenant.limits.seats', ContextKeyType::NUMBER), $catalogue->find('tenant.limits.seats'));
         self::assertEquals(new ContextKey('input.post.status', ContextKeyType::STRING), $catalogue->find('input.post.status'));
-        self::assertSame(['authentication', 'environment', 'input', 'request', 'resource', 'subject', 'tenant'], $catalogue->namespaces());
+        self::assertSame(['environment', 'input', 'request', 'resource', 'subject', 'tenant'], $catalogue->namespaces());
     }
 
     /**
@@ -144,10 +147,7 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
         self::assertSame(['alpha', 'authentication', 'device', 'environment', 'request', 'resource', 'subject'], $catalogue->namespaces());
         self::assertSame([
             'alpha.tags',
-            'authentication.guard',
             'authentication.level',
-            'authentication.user_id',
-            'authentication.user_type',
             'device.id',
             'device.trusted',
             'environment.time',
@@ -466,7 +466,7 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
      */
     public function testAssuranceKeysAreAlwaysUntestable(): void
     {
-        $catalogue = new DeclaredContextKeyCatalogue(['authentication' => ['amr' => 'list', 'auth_time' => 'time']], [], ['mfa']);
+        $catalogue = new DeclaredContextKeyCatalogue(['authentication' => ['amr' => 'list', 'auth_time' => 'time', 'guard' => 'string']], [], ['mfa']);
 
         $catalogue->declare('mfa.multifactor', ContextKeyType::BOOL);
         $catalogue->register('mfa', ['seconds_since_step_up' => 'number', 'enrolled' => 'bool']);
@@ -532,10 +532,10 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
     {
         /** @var \ArrayObject<int, bool> $reads */
         $reads  = new \ArrayObject;
-        $source = static function () use ($reads): AssuranceKeys {
+        $source = static function () use ($reads): AuthenticationContext {
             $reads->append(true);
 
-            return new AssuranceKeys(['mfa'], ['level']);
+            return new ContributingAuthenticationContext(['mfa'], ['level']);
         };
 
         $catalogue = new DeclaredContextKeyCatalogue(['mfa' => ['level' => 'number']], [], $source);
@@ -562,10 +562,10 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
     {
         /** @var \ArrayObject<int, bool> $reads */
         $reads  = new \ArrayObject;
-        $source = static function () use ($reads): AssuranceKeys {
+        $source = static function () use ($reads): AuthenticationContext {
             $reads->append(true);
 
-            return new AssuranceKeys(['mfa'], ['level']);
+            return new ContributingAuthenticationContext(['mfa'], ['level']);
         };
 
         $catalogue = new DeclaredContextKeyCatalogue([], [], $source);
@@ -596,7 +596,7 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
      */
     public function testAnAssuranceKeyDeclaredAgainBeforeTheFirstReadIsAccepted(): void
     {
-        $catalogue = new DeclaredContextKeyCatalogue([], [], static fn (): AssuranceKeys => new AssuranceKeys(['mfa'], ['level']));
+        $catalogue = new DeclaredContextKeyCatalogue([], [], static fn (): AuthenticationContext => new ContributingAuthenticationContext(['mfa'], ['level']));
         $catalogue->declare('mfa.level', ContextKeyType::NUMBER, false);
         $catalogue->declare('mfa.level', ContextKeyType::NUMBER);
         $catalogue->declare('mfa.enrolled', ContextKeyType::BOOL);
@@ -641,10 +641,10 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
     {
         /** @var \ArrayObject<int, bool> $reads */
         $reads     = new \ArrayObject;
-        $catalogue = new DeclaredContextKeyCatalogue(['mfa' => ['level' => 'number']], [], static function () use ($reads): AssuranceKeys {
+        $catalogue = new DeclaredContextKeyCatalogue(['mfa' => ['level' => 'number']], [], static function () use ($reads): AuthenticationContext {
             $reads->append(true);
 
-            return new AssuranceKeys(['mfa'], ['level']);
+            return new ContributingAuthenticationContext(['mfa'], ['level']);
         });
 
         $catalogue->declare('mfa.factors', ContextKeyType::LIST, false);
@@ -671,10 +671,10 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
     {
         /** @var \ArrayObject<int, bool> $reads */
         $reads     = new \ArrayObject;
-        $catalogue = new DeclaredContextKeyCatalogue(['mfa' => ['level' => 'number']], [], static function () use ($reads): AssuranceKeys {
+        $catalogue = new DeclaredContextKeyCatalogue(['mfa' => ['level' => 'number']], [], static function () use ($reads): AuthenticationContext {
             $reads->append(true);
 
-            return new AssuranceKeys(['mfa'], ['le.vel']);
+            return new ContributingAuthenticationContext(['mfa'], ['le.vel']);
         });
 
         foreach ([static fn (): bool => $catalogue->permits('mfa.level', 'eq'), static fn (): ?ContextKey => $catalogue->find('mfa.level')] as $read) {
@@ -687,5 +687,127 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
         }
 
         self::assertCount(2, $reads);
+    }
+
+    /**
+     * While the default authentication context is the one read, its keys are
+     * declared at the first read, whichever read it is, testable and with their
+     * types.
+     *
+     * @return void
+     */
+    public function testDeclaresTheDefaultContextsKeysAtTheFirstRead(): void
+    {
+        $catalogue = static fn (): DeclaredContextKeyCatalogue => new DeclaredContextKeyCatalogue([], [], static fn (): AuthenticationContext => self::guardContext());
+        $declared  = [
+            'authentication.guard'     => new ContextKey('authentication.guard', ContextKeyType::STRING),
+            'authentication.user_id'   => new ContextKey('authentication.user_id', ContextKeyType::STRING),
+            'authentication.user_type' => new ContextKey('authentication.user_type', ContextKeyType::STRING),
+        ];
+
+        self::assertSame(['authentication', 'environment', 'request', 'resource', 'subject'], $catalogue()->namespaces());
+        self::assertEquals($declared, \array_intersect_key($catalogue()->keys(), $declared));
+
+        foreach ($declared as $path => $key) {
+            self::assertEquals($key, $catalogue()->find($path));
+            self::assertTrue($catalogue()->permits($path, 'eq'));
+        }
+    }
+
+    /**
+     * With another authentication context read, the default context's keys are
+     * not declared, and the keys its owner declares are.
+     *
+     * @return void
+     */
+    public function testAnotherContextLeavesTheDefaultContextsKeysUndeclared(): void
+    {
+        $catalogue = new DeclaredContextKeyCatalogue([], [], static fn (): AuthenticationContext => new SiblingAuthenticationContext);
+        $catalogue->register('authentication', SiblingAuthenticationContext::KEYS);
+
+        foreach (\array_keys(GuardAuthenticationContext::KEYS) as $path) {
+            self::assertNull($catalogue->find($path));
+            self::assertFalse($catalogue->permits($path));
+        }
+
+        $authentication = \array_filter($catalogue->keys(), static fn (ContextKey $key): bool => $key->namespace() === 'authentication');
+
+        self::assertSame(['authentication.identity_id', 'authentication.session_id'], \array_keys($authentication));
+        self::assertTrue($catalogue->permits('authentication.identity_id', 'eq'));
+    }
+
+    /**
+     * The context read at the first read decides, not the one bound when the
+     * catalogue was built, and what it decided is kept.
+     *
+     * @return void
+     */
+    public function testTheContextReadAtTheFirstReadDecides(): void
+    {
+        /** @var \ArrayObject<int, \SineMacula\Laravel\Authorization\Contracts\AuthenticationContext> $bound */
+        $bound     = new \ArrayObject([new SiblingAuthenticationContext]);
+        $catalogue = new DeclaredContextKeyCatalogue([], [], static fn (): ?AuthenticationContext => $bound[0]);
+
+        $bound[0] = self::guardContext();
+
+        self::assertTrue($catalogue->permits('authentication.guard', 'eq'));
+
+        $bound[0] = new SiblingAuthenticationContext;
+
+        self::assertTrue($catalogue->permits('authentication.guard', 'eq'));
+    }
+
+    /**
+     * Provide declarations of a default context key that differ from the
+     * context's, with how each refusal states the key.
+     *
+     * @return iterable<string, array{string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType, bool, string}>
+     */
+    public static function redeclaredDefaultKeys(): iterable
+    {
+        yield 'another type' => ['authentication.guard', ContextKeyType::LIST, true, 'list.'];
+        yield 'another testability' => ['authentication.user_id', ContextKeyType::STRING, false, 'string, untestable.'];
+    }
+
+    /**
+     * A key of the default context declared before the first read as the
+     * context declares it is accepted; declared another way, it is refused at
+     * that read and every later one.
+     *
+     * @param  string  $path
+     * @param  \SineMacula\Laravel\Authorization\Enums\ContextKeyType  $type
+     * @param  bool  $isTestable
+     * @param  string  $declared
+     * @return void
+     */
+    #[DataProvider('redeclaredDefaultKeys')]
+    public function testADefaultContextKeyDeclaredAnotherWayIsRefusedAtTheFirstRead(string $path, ContextKeyType $type, bool $isTestable, string $declared): void
+    {
+        $alike = new DeclaredContextKeyCatalogue([], [], static fn (): AuthenticationContext => self::guardContext());
+        $alike->declare($path, ContextKeyType::STRING);
+
+        self::assertTrue($alike->permits($path, 'eq'));
+
+        $catalogue = new DeclaredContextKeyCatalogue([], [], static fn (): AuthenticationContext => self::guardContext());
+        $catalogue->declare($path, $type, $isTestable);
+
+        foreach ([1, 2] as $read) {
+            try {
+                $catalogue->keys();
+                self::fail("Read {$read} accepted a key of the default context declared another way.");
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame("Context key '{$path}' is already declared as {$declared}", $exception->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Build the default authentication context.
+     *
+     * @return \SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext
+     */
+    private static function guardContext(): GuardAuthenticationContext
+    {
+        return new GuardAuthenticationContext(self::createStub(AuthFactory::class), self::createStub(Config::class));
     }
 }

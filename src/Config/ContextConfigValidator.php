@@ -8,6 +8,7 @@ use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Context\AssuranceKeys;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
@@ -21,9 +22,10 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * `context.keys` must map each namespace to its keys, each a dot path within
  * the namespace mapped to the name of a type, which the context key catalogue
  * accepts: a valid path, a known type, and no key declared again with another
- * type. `context.sources` must list classes implementing `ContextSource`, each
- * resolved from the container to read its namespace, which must be a name, not
- * reserved and claimed by no other source.
+ * type, the default authentication context's keys among them while it is the
+ * one bound. `context.sources` must list classes implementing `ContextSource`,
+ * each resolved from the container to read its namespace, which must be a name,
+ * not reserved and claimed by no other source.
  *
  * The bound `AuthenticationContext` is resolved too, to read the namespaces it
  * contributes beside `authentication`: each must be a name, not reserved and
@@ -36,9 +38,10 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * left out, and refused when set to null.
  *
  * The checks of the values' shape (`keys()`, `sources()`) build nothing and can
- * run alone, as the configuration report runs them; the check of the namespaces
- * (`namespaces()`) builds each source and the authentication context, so it
- * runs at boot only.
+ * run alone, as the configuration report runs them. `validate()` builds the
+ * authentication context once, for the keys and the namespaces, and the check
+ * of the namespaces (`namespaces()`) builds each source, so both run at boot
+ * only.
  *
  * It runs at boot, after every service provider has registered, so the
  * authentication context read is the one bound last, whichever provider bound
@@ -71,10 +74,11 @@ final class ContextConfigValidator
      */
     public static function validate(mixed $config, Container $container): void
     {
-        $block = ConfigBlock::of('authorization.context', $config, self::SETTINGS);
+        $block          = ConfigBlock::of('authorization.context', $config, self::SETTINGS);
+        $authentication = $container->bound(AuthenticationContext::class) ? $container->make(AuthenticationContext::class) : null;
 
-        self::keys(ConfigBlock::entry($block, 'keys', []));
-        self::namespaces(self::sources(ConfigBlock::entry($block, 'sources', [])), $container);
+        self::keys(ConfigBlock::entry($block, 'keys', []), $authentication === null ? null : $authentication::class);
+        self::namespaces(self::sources(ConfigBlock::entry($block, 'sources', [])), $container, $authentication);
     }
 
     /**
@@ -119,20 +123,33 @@ final class ContextConfigValidator
 
     /**
      * Validate that `context.keys` maps namespaces to their keys' types, and
-     * that the context key catalogue accepts every key. Nothing is built but
-     * the catalogue, from the configuration alone.
+     * that the context key catalogue accepts every key, alongside the default
+     * authentication context's keys while the bound context's class is
+     * `GuardAuthenticationContext`, a null class being none bound or one not
+     * known. Nothing is built but the catalogue. Another context's namespaces
+     * and assurance keys are checked by `namespaces()`.
      *
      * @param  mixed  $value
+     * @param  string|null  $contextClass
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    public static function keys(mixed $value): void
+    public static function keys(mixed $value, ?string $contextClass = null): void
     {
         $keys = self::keyMap($value);
 
         try {
-            new DeclaredContextKeyCatalogue($keys);
+            $catalogue = new DeclaredContextKeyCatalogue;
+
+            // Declared first, so a clash names the default context's key.
+            foreach ($contextClass !== null && \is_a($contextClass, GuardAuthenticationContext::class, true) ? GuardAuthenticationContext::KEYS : [] as $path => $type) {
+                $catalogue->declare($path, ContextKeyType::from($type));
+            }
+
+            foreach ($keys as $namespace => $namespaceKeys) {
+                $catalogue->register($namespace, $namespaceKeys);
+            }
         } catch (\InvalidArgumentException $exception) {
             throw new InvalidAuthorizationConfigException(self::KEYS, $exception->getMessage(), IssueCode::INVALID_VALUE, 'keys the context key catalogue accepts', 'array');
         }
@@ -159,18 +176,20 @@ final class ContextConfigValidator
 
     /**
      * Validate that the namespaces the sources and the authentication context
-     * supply are names, not reserved and supplied once. Each source and the
-     * authentication context are built to read them, so this runs at boot only.
+     * supply are names, not reserved and supplied once. Each source is built to
+     * read its namespace, so this runs at boot only. A null authentication
+     * context is none bound.
      *
      * @param  array<array-key, class-string<\SineMacula\Laravel\Authorization\Contracts\ContextSource>>  $sources
      * @param  \Illuminate\Contracts\Container\Container  $container
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthenticationContext|null  $authentication
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    public static function namespaces(array $sources, Container $container): void
+    public static function namespaces(array $sources, Container $container, ?AuthenticationContext $authentication): void
     {
-        $claimed = self::contributedNamespaces($container);
+        $claimed = self::contributedNamespaces($authentication);
 
         foreach ($sources as $index => $class) {
             /** @var \SineMacula\Laravel\Authorization\Contracts\ContextSource $source */
@@ -225,26 +244,24 @@ final class ContextConfigValidator
     }
 
     /**
-     * Return each namespace the bound authentication context contributes beside
+     * Return each namespace the authentication context contributes beside
      * `authentication`, mapped to the context's class, refusing one that is not
      * a name, is reserved or is listed twice, and refusing a malformed
-     * declaration of its assurance keys. A container with no authentication
-     * context bound, as in library-mode embedding, contributes none.
+     * declaration of its assurance keys. No context bound, as in library-mode
+     * embedding, contributes none.
      *
-     * @param  \Illuminate\Contracts\Container\Container  $container
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthenticationContext|null  $authentication
      * @return array<string, string>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    private static function contributedNamespaces(Container $container): array
+    private static function contributedNamespaces(?AuthenticationContext $authentication): array
     {
-        if (!$container->bound(AuthenticationContext::class)) {
+        if ($authentication === null) {
             return [];
         }
 
-        /** @var \SineMacula\Laravel\Authorization\Contracts\AuthenticationContext $authentication */
-        $authentication = $container->make(AuthenticationContext::class);
-        $claimed        = [];
+        $claimed = [];
 
         try {
             AssuranceKeys::of($authentication);

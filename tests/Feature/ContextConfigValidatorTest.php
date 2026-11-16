@@ -4,9 +4,11 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Contracts\Foundation\Application;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Config\ContextConfigValidator;
+use SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
@@ -15,6 +17,7 @@ use Tests\Concerns\ReadsRefusedSettings;
 use Tests\Feature\Stubs\ContributingAuthenticationContext;
 use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\ReservedContextSource;
+use Tests\Feature\Stubs\SiblingAuthenticationContext;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -300,6 +303,66 @@ final class ContextConfigValidatorTest extends TestCase
     }
 
     /**
+     * A key clashing with one of the default authentication context's is
+     * refused while that context is bound, naming its declaration, and accepted
+     * while another or none is bound.
+     *
+     * @return void
+     */
+    public function testRefusesAKeyClashingWithTheDefaultContextsKeysWhileItIsBound(): void
+    {
+        $config = ['keys' => ['authentication' => ['guard' => 'list', 'user_id' => 'number']]];
+
+        ContextConfigValidator::validate(['keys' => ['authentication' => ['guard' => 'string']]], $this->container());
+
+        try {
+            ContextConfigValidator::validate($config, $this->container());
+            self::fail('InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame('authorization.context.keys', $exception->getConfigKey());
+            self::assertSame('Context key \'authentication.guard\' is already declared as string.', $exception->getReason());
+        }
+
+        $this->container()->instance(AuthenticationContext::class, new SiblingAuthenticationContext);
+
+        ContextConfigValidator::validate($config, $this->container());
+
+        unset($this->container()[AuthenticationContext::class]);
+
+        ContextConfigValidator::validate($config, $this->container());
+        ContextConfigValidator::keys($config['keys']);
+
+        self::assertSame('invalid_value', self::refusedSetting(static fn () => ContextConfigValidator::keys($config['keys'], GuardAuthenticationContext::class))[1]);
+
+        ContextConfigValidator::keys($config['keys'], SiblingAuthenticationContext::class);
+    }
+
+    /**
+     * Boot decides by the context bound, however it is bound: a class binding
+     * or a factory building the default context refuses a clashing key, and a
+     * factory building another context does not.
+     *
+     * @return void
+     */
+    public function testDecidesTheDefaultContextByTheContextBound(): void
+    {
+        $app    = $this->container();
+        $config = ['keys' => ['authentication' => ['guard' => 'list']]];
+
+        $app->bind(AuthenticationContext::class, GuardAuthenticationContext::class);
+
+        self::assertSame('invalid_value', self::refusedSetting(static fn () => ContextConfigValidator::validate($config, $app))[1]);
+
+        $app->bind(AuthenticationContext::class, static fn (Application $app): AuthenticationContext => $app->make(GuardAuthenticationContext::class));
+
+        self::assertSame('invalid_value', self::refusedSetting(static fn () => ContextConfigValidator::validate($config, $app))[1]);
+
+        $app->bind(AuthenticationContext::class, static fn (): AuthenticationContext => new SiblingAuthenticationContext);
+
+        ContextConfigValidator::validate($config, $app);
+    }
+
+    /**
      * The checks of the values' shape build nothing: neither a source nor the
      * authentication context is resolved; the check of the namespaces does, and
      * each refusal is structured.
@@ -324,9 +387,11 @@ final class ContextConfigValidatorTest extends TestCase
             self::refusedSetting(static fn () => ContextConfigValidator::source(2, \stdClass::class)),
         );
 
-        ContextConfigValidator::namespaces([PlanContextSource::class], $app);
+        ContextConfigValidator::namespaces([PlanContextSource::class], $app, null);
 
         self::assertTrue($app->resolved(PlanContextSource::class));
-        self::assertSame('duplicate', self::refusedSetting(static fn () => ContextConfigValidator::namespaces([PlanContextSource::class, PlanContextSource::class], $app))[1]);
+        $twice = [PlanContextSource::class, PlanContextSource::class];
+
+        self::assertSame('duplicate', self::refusedSetting(static fn () => ContextConfigValidator::namespaces($twice, $app, null))[1]);
     }
 }

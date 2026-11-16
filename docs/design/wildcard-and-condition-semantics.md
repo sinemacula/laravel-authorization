@@ -203,23 +203,26 @@ to name, so it adds no key to the trace; a fault in one key's operand records th
 
 The context a check's statements read is nested namespaces, each made by one source:
 
-| Namespace        | Keys the package declares                 | Source                                                |
-|------------------|-------------------------------------------|-------------------------------------------------------|
-| `authentication` | `guard`, `user_id`, `user_type` (strings) | `AuthenticationContext`; `GuardAuthenticationContext` |
-| `request`        | `ip` (ip), `method`, `route` (strings)    | `RequestContext`; `RoutedRequestContext`              |
-| `environment`    | `time` (time)                             | `EnvironmentContext`; `ClockEnvironmentContext`       |
-| `subject`        | `id`, `type`, `tenant.type`, `tenant.id`  | The check's subject; a `SubjectAttributeProvider`     |
-| `resource`       | `id`, `type`, `tenant.type`, `tenant.id`  | The check's resource; a `ResourceAttributeProvider`   |
-| `input`          | none                                      | What the caller passes                                |
-| Any other        | none                                      | A `ContextSource` in `authorization.context.sources`  |
+| Namespace        | Keys the package declares                                                              | Source                                                |
+|------------------|----------------------------------------------------------------------------------------|-------------------------------------------------------|
+| `authentication` | `guard`, `user_id`, `user_type` (strings), while `GuardAuthenticationContext` is bound | `AuthenticationContext`; `GuardAuthenticationContext` |
+| `request`        | `ip` (ip), `method`, `route` (strings)                                                 | `RequestContext`; `RoutedRequestContext`              |
+| `environment`    | `time` (time)                                                                          | `EnvironmentContext`; `ClockEnvironmentContext`       |
+| `subject`        | `id`, `type`, `tenant.type`, `tenant.id`                                               | The check's subject; a `SubjectAttributeProvider`     |
+| `resource`       | `id`, `type`, `tenant.type`, `tenant.id`                                               | The check's resource; a `ResourceAttributeProvider`   |
+| `input`          | none                                                                                   | What the caller passes                                |
+| Any other        | none                                                                                   | A `ContextSource` in `authorization.context.sources`  |
 
 - **Trusted namespaces.** `authentication` holds the default guard's name and, when someone is signed in on it, the
-  user's key as a string and morph type; with nobody signed in only `guard`. An `AuthenticationContext` may supply
-  further namespaces beside it (`mfa`, `sso`), named by its `namespaces()`. `request` holds Laravel's trusted-proxy
-  `ip()`, the method and the route name, and only when the container's request has a route, so in a queued job or a
-  console command the namespace is absent. `environment.time` is `now()` in UTC as `Y-m-d\TH:i:s\Z`, fixed the first
-  time the check reads `environment`, then kept for the rest of the check. Each is replaced only by rebinding its
-  contract.
+  user's key as a string and morph type; with nobody signed in only `guard`. These three keys are the default context's
+  (`GuardAuthenticationContext::KEYS`), declared only while it is the bound context; another context has key names of
+  its own, which its owner declares, and a policy naming one of the three is then refused on write as undeclared. One
+  stored before is still read and evaluated with the key missing: an allow testing it never applies and a deny testing
+  it does, unless the test is `_if_exists` or `null`. An `AuthenticationContext` may supply further namespaces beside it
+  (`mfa`, `sso`), named by its `namespaces()`. `request` holds Laravel's trusted-proxy `ip()`, the method and the route
+  name, and only when the container's request has a route, so in a queued job or a console command the namespace is
+  absent. `environment.time` is `now()` in UTC as `Y-m-d\TH:i:s\Z`, fixed the first time the check reads `environment`,
+  then kept for the rest of the check. Each is replaced only by rebinding its contract.
 - **Subject and resource**. `subject` and `resource` describe who the check is about and what it is on, and their
   built-in keys are strings. `subject.id` is the subject's key (`getKey()` for a model), `subject.type` its morph class
   or, without one, its class name, and `subject.tenant.type` and `subject.tenant.id` its tenant, as `TenantScope`
@@ -275,16 +278,20 @@ path always see the same value.
 
 Every key a policy reads must be declared in the bound `ContextKeyCatalogue`, as a full dot path with a type and whether
 a condition may test it (by default it may). The default, `DeclaredContextKeyCatalogue`, is held by the container and
-has no static state. It declares the package's fifteen keys (`PACKAGE_KEYS`: seven of the trusted namespaces and the
-eight built-ins of `subject` and `resource`), those of `authorization.context.keys` (`namespace => [path => type]`,
-checked by the configuration validator at boot) and those the attribute providers declare, each under its namespace, and
-a service provider registers more with `register($namespace, [$path => $type])` or `declare($path, $type, $isTestable)`.
-Keys of `input` are declared like any other. Declaring a key again as it was changes nothing; with another type it is
-refused, and so is another testability unless the key is an assurance key. A key under `subject` or `resource` is
-refused when declared or registered (`ContextSource::ATTRIBUTE_NAMESPACES`): their keys come only from the package and
-the providers. At boot, `AttributeConfigValidator` refuses a provider that does not implement its contract or cannot be
-resolved, one declaring a built-in (`id`, `type` or anything under `tenant`), and two declaring one key with different
-types; two providers may declare one key alike.
+has no static state. It declares the package's twelve keys (`PACKAGE_KEYS`: four of `request` and `environment` and the
+eight built-ins of `subject` and `resource`), the default authentication context's three while it is the bound context,
+those of `authorization.context.keys` (`namespace => [path => type]`, checked by the configuration validator at boot
+against the bound context) and those the attribute providers declare, each under its namespace, and a service provider
+registers more with `register($namespace, [$path => $type])` or `declare($path, $type, $isTestable)`. Whether the
+default context is bound is decided at the catalogue's first read, with its assurance keys, so a context a later
+provider binds is the one that counts. The catalogue and the boot decide by the context built, `authorization:check` by
+the bound class read without building it, and it leaves a clash to the boot when a factory hides the class. Keys of
+`input` are declared like any other. Declaring a key again as it was changes nothing; with another type it is refused,
+and so is another testability unless the key is an assurance key. A key under `subject` or `resource` is refused when
+declared or registered (`ContextSource::ATTRIBUTE_NAMESPACES`): their keys come only from the package and the providers.
+At boot, `AttributeConfigValidator` refuses a provider that does not implement its contract or cannot be resolved, one
+declaring a built-in (`id`, `type` or anything under `tenant`), and two declaring one key with different types; two
+providers may declare one key alike.
 
 A key's type decides the operators a condition may test it with. The `_if_exists` form of an operator follows it, and
 `null` suits every type:
@@ -670,6 +677,14 @@ document, then a summary, and exits 1 when any is invalid.
 - `DeclaredContextKeyCatalogueTest`, `ContextKeyTypeTest` and `ContextConfigValidatorTest` -- the catalogue, the type
   rules and the configuration; `GuardAuthenticationContextTest`, `RoutedRequestContextTest` and
   `ClockEnvironmentContextTest` -- the trusted sources.
+- `DeclaredContextKeyCatalogueTest::testDeclaresTheDefaultContextsKeysAtTheFirstRead`,
+  `testAnotherContextLeavesTheDefaultContextsKeysUndeclared` and `testTheContextReadAtTheFirstReadDecides`,
+  `ContextBindingsTest::testTheCatalogueDeclaresTheDefaultContextsKeysWhileItIsBound` and
+  `GuardAuthenticationContextTest::testAnotherContextLeavesItsKeysUndeclared` -- the default context's keys, declared
+  only while it is bound; `ContextBindingsTest::testTheCatalogueDecidesTheDefaultContextByTheContextBound`,
+  `ContextConfigValidatorTest::testDecidesTheDefaultContextByTheContextBound` and
+  `ExtensionChecksTest::testRefusesAKeyClashingWithTheDefaultContextsKeys` -- the catalogue, the boot and the
+  configuration check deciding it alike.
 - `AttributeNamespacesTest`, `AttributeProvidersTest`, `AttributeConfigValidatorTest` and
   `CheckContextTest::testABuilderThatThrowsIsNeverRetried` -- the built-ins, the providers, the declared keys only, the
   boot checks and a failed build; `AuthorizationManagerTest::testTheSubjectAndResourceBuiltInsDecideTheCheck`,

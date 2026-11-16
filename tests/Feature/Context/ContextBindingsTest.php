@@ -26,6 +26,7 @@ use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
 use Tests\Feature\Stubs\ReservedContextSource;
+use Tests\Feature\Stubs\SiblingAuthenticationContext;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\TestCase;
 
@@ -243,6 +244,56 @@ final class ContextBindingsTest extends TestCase
     }
 
     /**
+     * The catalogue declares the default authentication context's keys while it
+     * is the one bound, and not while another is, including one bound after the
+     * catalogue is built but before its first read.
+     *
+     * @return void
+     */
+    public function testTheCatalogueDeclaresTheDefaultContextsKeysWhileItIsBound(): void
+    {
+        $default = ContextBindings::catalogue($this->application());
+        $later   = ContextBindings::catalogue($this->application());
+
+        self::assertTrue($default->permits('authentication.user_id', 'eq'));
+
+        $this->application()->instance(AuthenticationContext::class, new SiblingAuthenticationContext);
+
+        $sibling = ContextBindings::catalogue($this->application());
+
+        foreach ([$later, $sibling] as $catalogue) {
+            self::assertNull($catalogue->find('authentication.guard'));
+            self::assertFalse($catalogue->permits('authentication.user_id'));
+            self::assertNotContains('authentication', $catalogue->namespaces());
+        }
+
+        self::assertTrue($default->permits('authentication.user_id', 'eq'));
+    }
+
+    /**
+     * The catalogue decides by the context bound, however it is bound: a class
+     * binding or a factory building the default context declares its keys.
+     *
+     * @return void
+     */
+    public function testTheCatalogueDecidesTheDefaultContextByTheContextBound(): void
+    {
+        $app = $this->application();
+
+        $app->bind(AuthenticationContext::class, GuardAuthenticationContext::class);
+
+        self::assertTrue(ContextBindings::catalogue($app)->permits('authentication.guard', 'eq'));
+
+        $app->bind(AuthenticationContext::class, static fn (Application $app): AuthenticationContext => $app->make(GuardAuthenticationContext::class));
+
+        self::assertTrue(ContextBindings::catalogue($app)->permits('authentication.guard', 'eq'));
+
+        $app->bind(AuthenticationContext::class, static fn (): AuthenticationContext => new SiblingAuthenticationContext);
+
+        self::assertNull(ContextBindings::catalogue($app)->find('authentication.guard'));
+    }
+
+    /**
      * Without an authentication context bound, only `authentication` holds
      * assurance keys, under the fixed names.
      *
@@ -259,6 +310,7 @@ final class ContextBindingsTest extends TestCase
         self::assertTrue($catalogue->permits('mfa.amr', 'any_value_in'));
         self::assertFalse($catalogue->permits('authentication.amr', 'any_value_in'));
         self::assertTrue($catalogue->permits('authentication.amr'));
+        self::assertNull($catalogue->find('authentication.guard'));
     }
 
     /**
