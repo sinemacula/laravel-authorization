@@ -790,6 +790,49 @@ final class ResourcePolicyServiceTest extends TestCase
     }
 
     /**
+     * An attachment another writer detached, or whose policy it deleted, after
+     * the attachments were read is neither counted nor reported as detached.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAttachmentGoneBeforeItsDetachmentIsNotCounted(): void
+    {
+        Event::fake([PolicyDetached::class]);
+
+        /** @var \SplQueue<\Closure(): int> $pending */
+        $pending = new \SplQueue;
+
+        DB::listen(static function (QueryExecuted $query) use ($pending): void {
+            if ($pending->isEmpty() || !\str_starts_with($query->sql, 'select') || !\str_contains($query->sql, 'resource_policies')) {
+                return;
+            }
+
+            ($pending->dequeue())();
+        });
+
+        $changes = [
+            static fn (Policy $policy): int => DB::table('resource_policies')->where('policy_id', $policy->id)->delete(),
+            static fn (Policy $policy): int => DB::table('policies')->where('id', $policy->id)->delete(),
+        ];
+
+        foreach ($changes as $index => $change) {
+            $policy = self::sharing('sharing-' . $index);
+
+            self::service()->attach($policy, ['posts', 7]);
+
+            $pending->enqueue(static fn (): int => $change($policy));
+
+            self::assertSame(0, self::service()->detachAll(['posts', 7]));
+            self::assertCount(0, $pending);
+            self::assertSame(0, DB::table('resource_policies')->count());
+        }
+
+        self::assertSame([], self::dispatchedEvents(PolicyDetached::class));
+    }
+
+    /**
      * Detaching every policy from a record detaches each attachment it holds,
      * in every scope, reporting each, and leaves its type's and another
      * record's; a whole type is refused.

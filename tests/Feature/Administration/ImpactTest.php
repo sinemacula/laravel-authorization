@@ -103,8 +103,9 @@ final class ImpactTest extends TestCase
      * The actor must be strictly senior to every holder but itself anywhere the
      * reach goes, and to a rank the change gives them; a holder or an actor
      * whose rank cannot be read cannot be compared, and a reach whose tenants
-     * cannot be read is refused by the scope rule before rank is weighed; with
-     * rank turned off, rank stands in nobody's way.
+     * cannot be read is refused by the scope rule before rank is weighed, or,
+     * for a tenant's node alone, which the scope rule reads no further than,
+     * cannot be compared; with rank turned off, rank stands in nobody's way.
      *
      * @return void
      *
@@ -137,8 +138,10 @@ final class ImpactTest extends TestCase
         $this->app?->instance(TenantTree::class, new FailingTenantTree(failing: ['a']));
 
         $unreadable = Impact::reachOf(new Reference('tenant', 'a'));
+        $node       = new GrantScope(new Reference('tenant', 'a'), null, false);
 
         self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, Impact::refusal(self::operation(), self::resource(), $unreadable, [$junior], $checks));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE, Impact::refusal(self::operation(), self::resource(), $node, [$junior], $checks));
 
         config(['authorization.rank.enabled' => false]);
 

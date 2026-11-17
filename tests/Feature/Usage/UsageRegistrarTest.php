@@ -165,6 +165,41 @@ final class UsageRegistrarTest extends TestCase
     }
 
     /**
+     * A recorder built again replaces the one the container watched, and the
+     * container is watched once, so it terminates flushing the new recorder
+     * alone, once.
+     *
+     * @return void
+     */
+    public function testARecorderBuiltAgainIsTheOneFlushed(): void
+    {
+        $app = $this->application();
+
+        Bus::fake([RecordGrantUsage::class]);
+        config(['authorization.usage.enabled' => true]);
+
+        (new UsageRegistrar($app))->boot();
+
+        $callbacks = new \ReflectionProperty($app, 'terminatingCallbacks');
+        $before    = \count((array) $callbacks->getValue($app));
+        $grant     = new StoredGrant(GrantTarget::PERMISSION, 'p', new Reference('user', 'ann'), null, null, null, null);
+        $first     = $app->make(GrantUsageRecorder::class);
+
+        $app->forgetInstance(GrantUsageRecorder::class);
+
+        $second = $app->make(GrantUsageRecorder::class);
+
+        $first->observe([new GrantRoute('a', $grant)]);
+        $second->observe([new GrantRoute('b', $grant)]);
+        $app->terminate();
+
+        self::assertCount($before + 1, (array) $callbacks->getValue($app));
+        self::assertSame(1, $first->pending());
+        Bus::assertDispatchedTimes(RecordGrantUsage::class, 1);
+        Bus::assertDispatched(RecordGrantUsage::class, static fn (RecordGrantUsage $job): bool => \array_column($job->batch->routes, 0) === ['b']);
+    }
+
+    /**
      * The store is bound through the seam bindings: a store bound before the
      * package registers stands and is recorded as earlier, and the package's
      * own store is its default, as the provider reports it.

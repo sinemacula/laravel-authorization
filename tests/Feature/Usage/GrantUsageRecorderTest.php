@@ -245,6 +245,30 @@ final class GrantUsageRecorderTest extends TestCase
     }
 
     /**
+     * A failure noting the routes is written to the log channel and never
+     * thrown, and nothing is noted.
+     *
+     * @return void
+     */
+    public function testAFailureNotingTheRoutesNeverThrows(): void
+    {
+        $logger = new RecordingLogger;
+
+        $this->app?->instance('log', $logger);
+        config(['authorization.usage.batch' => 0]);
+
+        $recorder = $this->recorder();
+
+        $recorder->observe([self::route('a')]);
+
+        $reason = 'Invalid authorization config at \'authorization.usage.batch\': expected a whole number of at least 1, got 0 (int).';
+
+        self::assertSame(0, $recorder->pending());
+        self::assertSame(['Authorization: the grants a check used could not be noted — ' . $reason], $logger->messages());
+        self::assertSame($reason, $logger->records[0]['context']['reason'] ?? null);
+    }
+
+    /**
      * Return the keys of the routes each job sent carries, in the order sent.
      *
      * @return list<list<string>>

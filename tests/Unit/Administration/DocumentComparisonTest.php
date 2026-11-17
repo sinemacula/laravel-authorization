@@ -119,6 +119,22 @@ final class DocumentComparisonTest extends TestCase
     }
 
     /**
+     * A statement that cannot be encoded is the same only as itself, never as
+     * another that says the same thing.
+     *
+     * @return void
+     */
+    public function testAStatementThatCannotBeEncodedIsOnlyItself(): void
+    {
+        $unencodable = [...self::READ, 'conditions' => ['eq' => ['resource.owner' => "\xff"]]];
+        $statement   = Statement::fromArray($unencodable);
+        $old         = new Policy('document', [$statement]);
+
+        self::assertTrue(DocumentComparison::isNarrower($old, new Policy('document', [$statement])));
+        self::assertFalse(DocumentComparison::isNarrower($old, self::document([$unencodable])));
+    }
+
+    /**
      * A comparison with no document on either side reads nothing of the one
      * that is missing: it is never narrower, and keeps no deny, without a
      * warning.
