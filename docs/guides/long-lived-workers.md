@@ -66,9 +66,8 @@ its first check to its last, and the usage recorder sends what it noted only as 
 units of work in one process calls `Support\RequestState::forget($app)` between them. It forgets the scoped instances
 held under the package's own names and nothing else, so what Laravel or another package keeps scoped for the command,
 such as its context or the callbacks deferred with `defer()`, stands; `RequestState::abstracts($app)` lists what it
-would forget (see [Resetting between units of work](console.md#checking-the-configuration)). Resolve the manager from
-the container after forgetting: the `Authorization` facade keeps the manager it first resolved until Laravel clears its
-facades, as the queue worker does before each job.
+would forget (see [Resetting between units of work](console.md#checking-the-configuration)). It clears the manager the
+`Authorization` facade resolved too, so the facade's next call reaches a fresh one.
 
 ## Example: a command that works through every account
 
@@ -79,7 +78,7 @@ meanwhile reach the next account at once:
 ```php
 use App\Models\Account;
 use Illuminate\Console\Command;
-use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\RequestState;
 
@@ -90,10 +89,9 @@ final class AuditExports extends Command
     public function handle(): int
     {
         foreach (Account::query()->with('owner')->lazyById() as $account) {
-                        $authorization = $this->laravel->make(AuthorizationManager::class);
-            $owner         = new Subject($account->owner, $account->owner, $account);
+            $owner = new Subject($account->owner, $account->owner, $account);
 
-            if ($authorization->for($owner)->cannot('reports:export')) {
+            if (Authorization::for($owner)->cannot('reports:export')) {
                 $account->disableScheduledExports();
             }
 
