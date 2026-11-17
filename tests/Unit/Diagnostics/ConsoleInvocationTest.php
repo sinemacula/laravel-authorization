@@ -114,6 +114,21 @@ final class ConsoleInvocationTest extends TestCase
     }
 
     /**
+     * The parser reads a shortcut as a flag and never refuses a missing value,
+     * which holds only while none of the console's own options has a shortcut
+     * taking a value or requires one.
+     *
+     * @return void
+     */
+    public function testNoConsoleOptionHasAShortcutTakingAValueOrRequiresOne(): void
+    {
+        foreach (ConsoleInvocation::definition()->getOptions() as $option) {
+            self::assertFalse($option->getShortcut() !== null && $option->acceptValue(), $option->getName());
+            self::assertFalse($option->isValueRequired(), $option->getName());
+        }
+    }
+
+    /**
      * Another command, an abbreviation and an empty or lone dash argument are
      * read as given, never expanded, a lone dash never taken as `--env`'s
      * value, and a command a sibling declares found past an option of its own.

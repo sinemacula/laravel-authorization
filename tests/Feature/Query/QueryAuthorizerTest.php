@@ -608,6 +608,37 @@ final class QueryAuthorizerTest extends TestCase
     }
 
     /**
+     * A document that cannot be read in the tenant of rows a platform-wide
+     * grant admits is refused, never compiled to no rows.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnUnreadableDocumentInAnAdmittedTenantIsRefused(): void
+    {
+        $tenant  = StubTenant::query()->create(['id' => 't1']);
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user);
+        $deny    = self::storedPolicy('deny', [['effect' => 'deny', 'actions' => ['posts:view']]]);
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+        TenantScopedPost::query()->create(['title' => 't1', 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => 't1']);
+        app(ResourcePolicyService::class)->attach($deny, TenantScopedPost::class, new Reference($tenant->getMorphClass(), 't1'));
+
+        $broken = \json_encode(['statements' => [['effect' => 'deny', 'actions' => ['*'], 'unexpected' => true]]]);
+
+        DB::table('policies')->where('id', $deny->getKey())->update(['document' => $broken]);
+
+        // Written past the policy service, so the request's memo is dropped.
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        $refusal = self::refusalOf(static fn (): string => self::authorizer()->compile($manager->currentSubject(), new TenantScopedPost, 'posts:view'));
+
+        self::assertSame([RefusalReason::INVALID_POLICY], $refusal->reasons());
+    }
+
+    /**
      * A material statement that cannot be evaluated is refused; one that does
      * not name the action is not.
      *

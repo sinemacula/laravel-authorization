@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Usage;
 
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Pivot;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -51,6 +53,29 @@ final class StoredGrantTest extends TestCase
         self::assertEquals($grant, StoredGrant::fromArray($grant->toArray()));
         self::assertNull(StoredGrant::of(GrantTarget::ROLE, 'r', new Reference('user', 'u'), ['tenant_type' => []])->tenantType);
         self::assertNull(StoredGrant::of(GrantTarget::ROLE, 'r', new Reference('user', 'u'), [])->createdAt);
+    }
+
+    /**
+     * A stored grant read through a related model is keyed by the model and
+     * read from its pivot's columns; a model with no key is keyed by none.
+     *
+     * @return void
+     */
+    public function testAStoredGrantIsReadThroughAPivot(): void
+    {
+        $related = new class extends Model {};
+        $pivot   = (new Pivot)->setRawAttributes(['tenant_type' => 'tenant', 'tenant_id' => 7, 'application' => 'web', 'created_at' => null]);
+        $grantee = new Reference('user', 'u');
+
+        $related->setRawAttributes(['id' => 42])->setRelation('pivot', $pivot);
+
+        $grant = StoredGrant::throughPivot(GrantTarget::PERMISSION, $related, $grantee);
+
+        self::assertEquals(new StoredGrant(GrantTarget::PERMISSION, '42', $grantee, 'tenant', '7', 'web', null), $grant);
+
+        $related->setRawAttributes([]);
+
+        self::assertSame('', StoredGrant::throughPivot(GrantTarget::PERMISSION, $related, $grantee)->grantId);
     }
 
     /**

@@ -42,6 +42,14 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  *
  * @phpstan-import-type RoleGrants from \SineMacula\Laravel\Authorization\Resolvers\GrantResolver
  *
+ * @phpstan-type Attachment array{
+ *     policy_id: string,
+ *     authorizable_id: string,
+ *     tenant_type: string|null,
+ *     tenant_id: string|null,
+ *     expires_at?: string|null
+ * }
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -102,8 +110,8 @@ final class RolePolicies
      *
      * A resolution tracking grant usage (see `ResolutionPins::isRouting()`), or
      * one holding a role through a break-glass activation, reads, in the same
-     * queries, the chain of each role held and the role each attachment is to,
-     * so it can say which route each policy came through, and which activations
+     * queries, the chain of each role held, which with the role each attachment
+     * is to says which route each policy came through, and which activations
      * are behind it (see `BreakGlassActivations::behind()`).
      *
      * @param  \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role>  $held
@@ -117,9 +125,8 @@ final class RolePolicies
     {
         // With no role held, every read below returns at once, without a query.
         /** @var list<string> $keys */
-        $keys    = \array_keys($held->getDictionary());
-        $reach   = RoleGraph::reach($keys);
-        $columns = ['policy_id', 'expires_at', 'tenant_type', 'tenant_id'];
+        $keys  = \array_keys($held->getDictionary());
+        $reach = RoleGraph::reach($keys);
 
         $pins->roles(\array_keys($reach));
 
@@ -135,10 +142,10 @@ final class RolePolicies
 
         $fresh  = $within === null ? RoleGraph::chainsOf(self::afresh($roles, $keys)) : [];
         $type   = $roles->getRelated()->getMorphClass();
-        $rows   = self::attachments($type, $within ?? RoleGraph::keysOf($fresh), $isByRole ? [...$columns, 'authorizable_id'] : $columns);
+        $rows   = self::attachments($type, $within ?? RoleGraph::keysOf($fresh), ['policy_id', 'authorizable_id', 'tenant_type', 'tenant_id', 'expires_at']);
         $grants = $rows === [] ? [] : $held->map(static fn (Model $role): mixed => self::grantExpiry($role))->all();
         $placed = self::placed($rows);
-        $found  = \array_values(\array_filter(\array_column($rows, 'policy_id'), \is_string(...)));
+        $found  = \array_column($rows, 'policy_id');
         $byRole = $isByRole ? self::byRole($placed) : [];
 
         return new InheritedPolicies(
@@ -147,7 +154,7 @@ final class RolePolicies
             $within !== null,
             $chains,
             $byRole,
-            \array_values(\array_diff($found, \array_filter(\array_column($placed, 'policy_id'), \is_string(...)))),
+            \array_values(\array_diff($found, \array_column($placed, 'policy_id'))),
             $isByRole ? BreakGlassActivations::behind($held, $chains ?? $fresh, $byRole) : [],
         );
     }
@@ -166,11 +173,9 @@ final class RolePolicies
      */
     public static function attachedTo(string $type, array $keys): array
     {
-        /** @var list<array{policy_id: string, authorizable_id: string, tenant_type: string|null, tenant_id: string|null}> $attached */
-        $attached = self::attachments($type, $keys, ['policy_id', 'authorizable_id', 'tenant_type', 'tenant_id']);
-        $rows     = [];
+        $rows = [];
 
-        foreach ($attached as $row) {
+        foreach (self::attachments($type, $keys, ['policy_id', 'authorizable_id', 'tenant_type', 'tenant_id']) as $row) {
             $rows[] = ['policy_id' => $row['policy_id'], 'role_id' => $row['authorizable_id'], 'is_whole' => !TenantColumns::isHalf($row['tenant_type'], $row['tenant_id'])];
         }
 
@@ -180,19 +185,19 @@ final class RolePolicies
     /**
      * Return the attachments naming no half tenant, whose allows count too.
      *
-     * @param  list<array<string, mixed>>  $rows
-     * @return list<array<string, mixed>>
+     * @param  list<Attachment>  $rows
+     * @return list<Attachment>
      */
     private static function placed(array $rows): array
     {
-        return \array_values(\array_filter($rows, static fn (array $row): bool => !TenantColumns::isHalf($row['tenant_type'] ?? null, $row['tenant_id'] ?? null)));
+        return \array_values(\array_filter($rows, static fn (array $row): bool => !TenantColumns::isHalf($row['tenant_type'], $row['tenant_id'])));
     }
 
     /**
      * Return the keys of the policies attached to each role, by the role's key,
      * from the attachments read.
      *
-     * @param  list<array<string, mixed>>  $rows
+     * @param  list<Attachment>  $rows
      * @return array<string, list<string>>
      */
     private static function byRole(array $rows): array
@@ -200,14 +205,7 @@ final class RolePolicies
         $attached = [];
 
         foreach ($rows as $row) {
-            $role   = $row['authorizable_id'] ?? null;
-            $policy = $row['policy_id']       ?? null;
-
-            if (!\is_scalar($role) || !\is_scalar($policy)) {
-                continue;
-            }
-
-            $attached[(string) $role][] = (string) $policy;
+            $attached[$row['authorizable_id']][] = $row['policy_id'];
         }
 
         return $attached;
@@ -250,9 +248,9 @@ final class RolePolicies
      * @param  string  $type
      * @param  list<string>  $keys
      * @param  list<string>  $columns
-     * @return list<array<string, mixed>>
+     * @return list<Attachment>
      */
-    private static function attachments(string $type, array $keys, array $columns = ['policy_id', 'expires_at']): array
+    private static function attachments(string $type, array $keys, array $columns): array
     {
         if ($keys === []) {
             return [];
@@ -260,7 +258,7 @@ final class RolePolicies
 
         $table = self::table();
 
-        /** @var list<array<string, mixed>> */
+        /** @var list<Attachment> */
         return self::scoped($table)
             ->useWritePdo()
             ->where($table . '.authorizable_type', $type)
