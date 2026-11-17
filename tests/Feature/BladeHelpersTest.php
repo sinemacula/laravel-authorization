@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use Tests\Concerns\ChecksAccess;
+use Tests\Concerns\LagsTheReadConnection;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\FixedSubjectResolver;
@@ -39,7 +40,7 @@ use Tests\TestCase;
 #[CoversClass(BladeHelpers::class)]
 final class BladeHelpersTest extends TestCase
 {
-    use ChecksAccess, RefusesThePackage;
+    use ChecksAccess, LagsTheReadConnection, RefusesThePackage;
 
     /**
      * The role helpers count the roles the subject's identity holds, and none
@@ -64,6 +65,28 @@ final class BladeHelpersTest extends TestCase
 
         self::assertFalse(BladeHelpers::hasRole('staff'));
         self::assertFalse(BladeHelpers::hasAllRoles(['editor', 'staff']));
+    }
+
+    /**
+     * The role helpers read the roles on the write connection, so a read
+     * replica that lags never shows a role revoked since.
+     *
+     * @return void
+     */
+    public function testTheRoleHelpersReadTheWriteConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $identity = self::identityHolding(roles: ['admin', 'editor']);
+
+        self::lagTheReadConnection();
+
+        $identity->revokeRole('admin');
+        $this->actAs(StubIdentity::query()->findOrFail($identity->getKey()));
+
+        self::assertFalse(BladeHelpers::hasRole('admin'));
+        self::assertFalse(BladeHelpers::hasAllRoles(['admin', 'editor']));
+        self::assertTrue(BladeHelpers::hasRole('editor'));
     }
 
     /**
