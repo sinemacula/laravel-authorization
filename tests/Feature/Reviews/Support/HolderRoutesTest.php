@@ -274,7 +274,8 @@ final class HolderRoutesTest extends TestCase
 
     /**
      * A policy that only denies is held, directly and through a role and the
-     * roles below it; a boundary and a resource policy are not held.
+     * roles below it, or directly alone when asked; a boundary and a resource
+     * policy are not held.
      *
      * @return void
      *
@@ -297,6 +298,8 @@ final class HolderRoutesTest extends TestCase
             'policy_attachment ann deny-delete',
             'role_policy bob [child>parent] deny-delete',
         ], self::described(self::trusted(ReviewQuery::holders($policy, ReviewScope::everywhere()))));
+
+        self::assertSame(['policy_attachment ann deny-delete'], self::described(self::trusted(ReviewQuery::holders($policy, ReviewScope::everywhere(), true))));
     }
 
     /**

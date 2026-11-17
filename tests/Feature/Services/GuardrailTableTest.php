@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -188,6 +189,37 @@ final class GuardrailTableTest extends TestCase
         self::assertSame([], self::table(null)->removeMalformed($policy));
         self::assertSame(3, DB::table('guardrails')->count());
         self::assertSame(1, DB::table('guardrails')->where('policy_id', $other)->count());
+    }
+
+    /**
+     * A row naming half a tenant that another writer removed once the rows were
+     * read is passed over, and only those removed here are returned.
+     *
+     * @return void
+     */
+    public function testPassesOverARowNamingHalfATenantRemovedMeanwhile(): void
+    {
+        $policy = self::policy('cap');
+        $isGone = false;
+
+        DB::table('guardrails')->insert([
+            ['policy_id' => $policy, 'tenant_type' => null, 'tenant_id' => 'tenant-a'],
+            ['policy_id' => $policy, 'tenant_type' => 'stub_tenant', 'tenant_id' => null],
+        ]);
+
+        DB::listen(static function (QueryExecuted $query) use (&$isGone): void {
+            if ($isGone || !\str_starts_with($query->sql, 'select') || !\str_contains($query->sql, 'guardrails')) {
+                return;
+            }
+
+            $isGone = true;
+
+            DB::table('guardrails')->whereNull('tenant_type')->delete();
+        });
+
+        self::assertSame([['tenant_type' => 'stub_tenant', 'tenant_id' => null]], self::table(null)->removeMalformed($policy));
+        self::assertTrue($isGone);
+        self::assertSame(0, DB::table('guardrails')->count());
     }
 
     /**

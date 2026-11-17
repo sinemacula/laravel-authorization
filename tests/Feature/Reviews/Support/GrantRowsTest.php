@@ -148,6 +148,39 @@ final class GrantRowsTest extends TestCase
     }
 
     /**
+     * The grants of many grantees are read a chunk of them at a time, each
+     * chunk's queries in turn, the rows in the order of the chunks.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheGrantsOfManyGranteesAreReadAChunkAtATime(): void
+    {
+        $role     = self::role('editor');
+        $table    = GrantTarget::ROLE->table();
+        $grantees = [];
+
+        for ($index = 0; $index <= GrantRows::CHUNK; $index++) {
+            $grantees[] = new Reference('principal', \sprintf('p%04d', $index));
+        }
+
+        self::grants()->grantRole($grantees[GrantRows::CHUNK], $role);
+        self::grants()->grantRole($grantees[0], $role);
+
+        $chunks = [];
+        $rows   = GrantRows::allOf(\array_reverse($grantees), static function (array $chunk) use ($table, &$chunks): array {
+            $chunks[] = \count($chunk);
+
+            return ['grants' => GrantRows::grantedTo(GrantRows::of(GrantTarget::ROLE), $table, $chunk)];
+        }, 'role');
+
+        self::assertSame([GrantRows::CHUNK, 1], $chunks);
+        self::assertSame(['p0500', 'p0000'], \array_map(static fn (GrantRow $row): string => $row->grantee->id, $rows));
+        self::assertSame(['role', 'role'], \array_map(static fn (GrantRow $row): string => $row->source, $rows));
+    }
+
+    /**
      * Rows are ordered by target, grantee and scope, an activation after its
      * scope's grant, and paged by keyset from one query, never an offset.
      *

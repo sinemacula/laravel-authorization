@@ -88,6 +88,22 @@ final class RootChecksTest extends TestCase
     }
 
     /**
+     * A tables block that is not an array is refused, and every table it would
+     * name is skipped.
+     *
+     * @return void
+     */
+    public function testARefusedTablesBlockSkipsEveryTable(): void
+    {
+        $skipped = \array_map(
+            static fn (string $key): array => ["authorization.tables.{$key}", 'skipped'],
+            TableConfigValidator::keys(),
+        );
+
+        self::assertSame([['authorization.tables', 'invalid_type'], ...$skipped], $this->issues(['tables' => 'authz_']));
+    }
+
+    /**
      * Each seam is checked on its own, a null policy store meaning none, and a
      * refused block skips each setting it holds.
      *

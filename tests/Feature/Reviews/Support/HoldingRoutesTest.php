@@ -376,6 +376,45 @@ final class HoldingRoutesTest extends TestCase
     }
 
     /**
+     * A role deleted once its grant is read holds nothing, no route through it
+     * listed, while the subject's other grants still are.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleDeletedWhileItsGrantIsReadHoldsNothing(): void
+    {
+        $editor = self::role('editor');
+        $ann    = self::identity('ann');
+        $events = new \ArrayObject;
+
+        $editor->givePermissionTo(self::permission('posts:edit'));
+
+        self::grants()->grantRole($ann, $editor);
+        self::grants()->grantPermission($ann, self::permission('posts:read'));
+
+        DB::listen(static function (QueryExecuted $executed) use ($editor, $events): void {
+            $sql = \strtolower($executed->sql);
+
+            if ($events->count() > 0 || !\str_starts_with($sql, 'select') || !\str_contains($sql, 'authorizable_roles')) {
+                return;
+            }
+
+            $events->append($sql);
+
+            DB::table($editor->getTable())->where($editor->getKeyName(), $editor->getKey())->delete();
+        });
+
+        $result = self::trusted(ReviewQuery::holdings(new Subject($ann, $ann), ReviewScope::everywhere()));
+
+        $this->app?->make('events')->forget(QueryExecuted::class);
+
+        self::assertCount(1, $events);
+        self::assertSame(['permission_grant ann posts:read'], self::described($result));
+    }
+
+    /**
      * A subject whose principal is neither a model nor a reference has no
      * holdings to review.
      *

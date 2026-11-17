@@ -314,13 +314,8 @@ final class RecordAttachments
      */
     private function storable(): string
     {
-        $shape = $this->shape;
-
-        if ($shape->keyKind !== ColumnKind::STRING) {
-            return QueryAuthorizer::EVERY_ROW;
-        }
-
-        $length = $shape->dialect->keyLength($shape->key, $shape->keyKind, $shape->isIntegerCast);
+        $shape  = $this->shape;
+        $length = $shape->keyKind === ColumnKind::STRING ? $shape->dialect->keyLength($shape->key, $shape->keyKind, $shape->isIntegerCast) : null;
 
         if ($length === null) {
             return QueryAuthorizer::EVERY_ROW;
