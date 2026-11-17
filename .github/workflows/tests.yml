@@ -64,7 +64,7 @@ jobs:
 
             -   name: Coverage gate
                 run: |
-                    php -r '$m = simplexml_load_file("clover.xml")->project->metrics; $s = (int) $m["statements"]; $c = (int) $m["coveredstatements"]; echo "Lines covered: {$c}/{$s}\n"; exit($c < $s ? 1 : 0);'
+                    php -r '$x = simplexml_load_file("clover.xml"); foreach ($x->xpath("//file") as $f) { foreach ($f->xpath("line[@count=0]") as $l) { echo $f["name"], ":", $l["num"], "\n"; } } $m = $x->project->metrics; $s = (int) $m["statements"]; $c = (int) $m["coveredstatements"]; echo "Lines covered: {$c}/{$s}\n"; exit($c < $s ? 1 : 0);'
 
             -   name: Publish code coverage
                 if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && matrix.php == '8.3' }}
