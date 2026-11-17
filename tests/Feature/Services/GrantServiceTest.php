@@ -35,6 +35,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\GranteeGuardMismatchException;
@@ -44,6 +45,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException;
+use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -2899,6 +2901,99 @@ final class GrantServiceTest extends TestCase
             PolicyDetached::class,
             static fn (PolicyDetached $event): bool => self::refersTo($event->grantee, $role) && self::refersTo($event->policy, $policy),
         );
+    }
+
+    /**
+     * A system role's policies are not attached, detached or synced without the
+     * override, by model or by reference, and nothing is written or reported.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASystemRolesPoliciesDoNotChangeWithoutTheOverride(): void
+    {
+        $admin    = Role::query()->create(['name' => 'admin', 'is_system' => true]);
+        $editors  = self::policy('editors');
+        $auditors = self::policy('auditors');
+
+        self::service()->attachPolicy($admin->forceSystem(), $editors);
+
+        self::fakePackageEvents();
+
+        $writes = [
+            static fn (): GrantOutcome => self::service()->attachPolicy($admin, $auditors),
+            static fn (): GrantOutcome => self::service()->attachPolicy(Reference::of($admin), $auditors),
+            static fn (): int => self::service()->detachPolicy($admin, $editors),
+            static fn (): SyncResult => self::service()->syncPolicies($admin, [$auditors]),
+        ];
+
+        foreach ($writes as $write) {
+            $refusal = self::refusalOf($write);
+
+            self::assertInstanceOf(SystemRoleProtectedException::class, $refusal);
+            self::assertSame(['admin', 'policy-change'], [$refusal->getRoleName(), $refusal->getOperation()]);
+        }
+
+        self::assertSame([$editors->id], DB::table('authorizable_policies')->pluck('policy_id')->all());
+        self::assertSame([], self::changesDispatched());
+    }
+
+    /**
+     * Each change `forceSystem()` unlocks on a system role's policies is made
+     * and reported once, with the call's operation, and the unlock is used up
+     * by it; a write that changes nothing needs no override.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnUnlockedChangeToASystemRolesPoliciesIsReported(): void
+    {
+        $admin   = Role::query()->create(['name' => 'admin', 'is_system' => true]);
+        $editors = self::policy('editors');
+
+        Event::fake([SystemOverrideUsed::class, PolicyAttached::class, PolicyDetached::class]);
+
+        $admin->forceSystem()->attachPolicy($editors);
+
+        self::assertSame(GrantOutcome::UNCHANGED, self::service()->attachPolicy($admin, $editors));
+        self::assertSame(1, self::service()->detachPolicy($admin->forceSystem(), $editors));
+        self::assertSame([$editors->id], self::service()->syncPolicies($admin->forceSystem(), [$editors])->granted);
+        self::assertInstanceOf(SystemRoleProtectedException::class, self::refusalOf(static fn (): int => self::service()->detachPolicy($admin, $editors)));
+
+        $overrides = self::dispatchedEvents(SystemOverrideUsed::class);
+        $changes   = [...self::dispatchedEvents(PolicyAttached::class), ...self::dispatchedEvents(PolicyDetached::class)];
+
+        self::assertCount(3, $overrides);
+        self::assertSame(['policy-change'], \array_values(\array_unique(\array_map(static fn (SystemOverrideUsed $event): string => $event->protectedOperation, $overrides))));
+        self::assertTrue(self::refersTo($overrides[0]->record, $admin));
+        self::assertEqualsCanonicalizing(
+            \array_map(static fn (SystemOverrideUsed $event): string => $event->operation->id, $overrides),
+            \array_map(static fn (PolicyAttached|PolicyDetached $event): string => $event->operation->id, $changes),
+        );
+    }
+
+    /**
+     * A delegated call guards the role as stored, so the override on the role
+     * given does not reach it and the change is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedChangeToASystemRolesPoliciesIsRefusedDespiteTheOverride(): void
+    {
+        $actor   = self::administrator();
+        $admin   = Role::query()->create(['name' => 'admin', 'is_system' => true]);
+        $editors = self::policy('editors');
+
+        self::service()->attachPolicy($admin->forceSystem(), $editors);
+
+        $refusal = self::refusalOf(static fn (): int => self::service()->detachPolicy($admin->forceSystem(), $editors, $actor));
+
+        self::assertInstanceOf(SystemRoleProtectedException::class, $refusal);
+        self::assertSame(1, DB::table('authorizable_policies')->count());
     }
 
     /**

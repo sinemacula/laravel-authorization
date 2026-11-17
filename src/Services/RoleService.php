@@ -43,10 +43,15 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * Every write runs in one transaction on the package's connection, through the
  * role class `authorization.models.role` configures, so the role observer, name
- * validation and system protection apply. A role named by a string is looked up
- * under the package's default guard; a permission named by a string under the
- * role's own guard, else the default. A role model that has not been saved, as
- * the role or as the parent, is refused with `UnsavedRecordException`.
+ * validation and system protection apply. A change to a system role's
+ * permissions is refused with `SystemRoleProtectedException` unless
+ * `forceSystem()` on the role given unlocked it, and reported with
+ * `SystemOverrideUsed`, as a change to its columns is; a delegated call works
+ * on the role as stored, which carries no unlock. A role named by a string is
+ * looked up under the package's default guard; a permission named by a string
+ * under the role's own guard, else the default. A role model that has not been
+ * saved, as the role or as the parent, is refused with
+ * `UnsavedRecordException`.
  *
  * Setting a parent locks the role and the parent, and the observer walks the
  * parent's ancestors under the same lock and outside the tenant scope, so two
@@ -309,7 +314,7 @@ final class RoleService
 
             $change = (new RolePermissionTable($model))->grant($target->id, $expiresAt);
 
-            OperationScope::dispatch(...self::changeEvents($operation, $model, $target, $change, $expiresAt));
+            $model->dispatchRelationChange('permission-change', ...self::changeEvents($operation, $model, $target, $change, $expiresAt));
 
             return $change->outcome;
         }, $actor);
@@ -362,7 +367,9 @@ final class RoleService
             $model->unsetRelation('permissions');
             $model->permissions()->detach(\array_map(static fn (Permission $target): string => $target->id, $revoked));
 
-            OperationScope::dispatch(...\array_map(static fn (Permission $target): RolePermissionRevoked => self::revokedEvent($operation, $model, $target), $revoked));
+            $events = \array_map(static fn (Permission $target): RolePermissionRevoked => self::revokedEvent($operation, $model, $target), $revoked);
+
+            $model->dispatchRelationChange('permission-change', ...$events);
 
             return \count($revoked);
         }, $actor);
@@ -439,7 +446,7 @@ final class RoleService
                 $events[] = self::revokedEvent($operation, $model, $target);
             }
 
-            OperationScope::dispatch(...$events);
+            $model->dispatchRelationChange('permission-change', ...$events);
 
             return new SyncResult($changed[GrantOutcome::GRANTED->value] ?? [], $changed[GrantOutcome::REARMED->value] ?? [], $revoked);
         }, $actor);

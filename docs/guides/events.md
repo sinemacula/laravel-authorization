@@ -42,8 +42,9 @@ access.
 Each is dispatched only once its write commits on the package's connection: inside your own transaction it waits for the
 outermost commit, and a transaction that rolls back dispatches nothing. Every event of one service call carries the same
 operation, with its id, its actor and identity, whether it was trusted, any impersonator and its actions; a write made
-through a model outside the services is a trusted operation of its own with no actor. A change `forceSystem()` unlocked
-dispatches `SystemOverrideUsed`, naming the record, the change and the actor.
+through a model outside the services is a trusted operation of its own with no actor. A change `forceSystem()` unlocked,
+to a system record or to a system role's permissions or policies, dispatches `SystemOverrideUsed`, naming the record,
+the change and the actor.
 
 ## Reading a change for an audit log
 

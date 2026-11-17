@@ -23,6 +23,7 @@ use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Services\Support\StoredRecords;
 use SineMacula\Laravel\Authorization\Services\Support\SyncPlan;
+use SineMacula\Laravel\Authorization\Services\Support\SystemRoleGuard;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -162,11 +163,15 @@ use SineMacula\Laravel\Authorization\Support\RoleReach;
  *
  * A grantee is an identity or a role: a policy attached to a role applies to
  * whoever holds the role, within both grants' scopes, and to whoever holds a
- * role below it. An inline policy is attached only to the grantee it belongs
- * to; attaching or syncing it to any other throws
- * `InlinePolicyAttachmentException` before anything is written. A policy whose
- * statements name `principals` is refused for any grantee with
- * `ResourcePolicyException` (see `PolicyPrincipals`).
+ * role below it. A change to a system role's grants is refused with
+ * `SystemRoleProtectedException` unless `forceSystem()` on the role given
+ * unlocked it, and reported with `SystemOverrideUsed`; a delegated call, or a
+ * role named by a reference, guards the role as stored, which carries no
+ * unlock. An inline policy is attached only to the grantee it belongs to;
+ * attaching or syncing it to any other throws `InlinePolicyAttachmentException`
+ * before anything is written. A policy whose statements name `principals` is
+ * refused for any grantee with `ResourcePolicyException` (see
+ * `PolicyPrincipals`).
  *
  * Every operation refuses while the package is not healthy (see
  * `PackageState`), before it reads or writes.
@@ -618,7 +623,7 @@ final class GrantService
 
             ExclusionGuard::assertGranted($pairs, $reference, $written);
 
-            OperationScope::dispatch(...$events);
+            SystemRoleGuard::dispatch($kind, $grantee, $actor, ...$events);
 
             return \array_map(static fn (string $key): GrantOutcome => $changed[$key], $keys);
         }, $actor);
@@ -715,7 +720,7 @@ final class GrantService
                 $events[] = $kind->revokedEvent($operation, $reference, $model, $scope);
             }
 
-            OperationScope::dispatch(...$events);
+            SystemRoleGuard::dispatch($kind, $grantee, $actor, ...$events);
 
             return \count($events);
         }, $actor);
@@ -756,7 +761,7 @@ final class GrantService
         $planFor   = static fn (?Reference $grantedBy): SyncPlan => self::plan($kind, $grantee, $grantedBy, $named, $targets, $reaches, $actor);
 
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult $result */
-        $result = OperationScope::run($begun, static function (Operation $operation) use ($actor, $grantee, $reference, $planFor, $expiresAt, $begun): SyncResult {
+        $result = OperationScope::run($begun, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $planFor, $expiresAt, $begun): SyncResult {
             $plan = static fn (): SyncPlan => $planFor($operation->actor);
 
             // Every addition, and every change of reach, that widens the
@@ -784,7 +789,7 @@ final class GrantService
 
             [$events, $changed] = $sync->write($operation, $reference, $expiresAt, $now, GrantChanges::keptAsHeld($rows, $sync->reaches));
 
-            OperationScope::dispatch(...$events, ...$sync->revokedEvents($operation, $reference, $dropped));
+            SystemRoleGuard::dispatch($kind, $grantee, $actor, ...$events, ...$sync->revokedEvents($operation, $reference, $dropped));
 
             return new SyncResult(
                 $changed[GrantOutcome::GRANTED->value] ?? [],

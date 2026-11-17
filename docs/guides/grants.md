@@ -171,7 +171,19 @@ refused when it is saved. A permission can be a wildcard: `posts:*`, `posts.*`, 
 while `*:*` matches only names with a `:`. With the role hierarchy enabled, a role inherits its parent's permissions.
 
 A role, permission or policy flagged `is_system` cannot be edited, deleted or have the flag cleared unless
-`forceSystem()` on the model unlocks the next change.
+`forceSystem()` on the model unlocks the next change. The same holds for a system role's permissions and policies:
+`RoleService::grantPermission()`, `revokePermission()` and `syncPermissions()`, and `GrantService::attachPolicy()`,
+`detachPolicy()` and `syncPolicies()` with the role as the grantee, throw `SystemRoleProtectedException` unless the role
+they are given was unlocked:
+
+```php
+$roles->grantPermission($superAdmin->forceSystem(), 'reports:export');
+$superAdmin->forceSystem()->attachPolicy($policy);
+```
+
+The unlock is used up by the next write to the role, and a write that changes nothing needs none. Each change it
+unlocks dispatches `SystemOverrideUsed` once the write commits. A delegated call works on the role as stored, and a role
+named by a string or a reference is read afresh, so neither carries the unlock and the change is refused.
 
 `authorization:sync` is the one writer that does not go through the services: it writes the permission catalogue
 through the permission model, in one transaction on the package's connection and as one operation, and decides

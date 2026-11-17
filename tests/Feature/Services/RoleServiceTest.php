@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Events\Role\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
+use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
@@ -458,6 +459,125 @@ final class RoleServiceTest extends TestCase
         $this->expectException(SystemRoleProtectedException::class);
 
         self::service()->rename('admin', 'owner');
+    }
+
+    /**
+     * A system role's permissions are not granted, revoked or synced without
+     * the override, by model or by name, and nothing is written or reported.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASystemRolesPermissionsDoNotChangeWithoutTheOverride(): void
+    {
+        $admin = self::role('admin', ['is_system' => true]);
+        $read  = Permission::query()->create(['name' => 'posts:read']);
+        $edit  = Permission::query()->create(['name' => 'posts:edit']);
+
+        self::service()->grantPermission($admin->forceSystem(), $read);
+
+        self::fakePackageEvents();
+
+        $writes = [
+            static fn (): GrantOutcome => self::service()->grantPermission($admin, $edit),
+            static fn (): GrantOutcome => self::service()->grantPermission('admin', 'posts:edit'),
+            static fn (): int => self::service()->revokePermission($admin, $read),
+            static fn (): SyncResult => self::service()->syncPermissions('admin', [$edit]),
+        ];
+
+        foreach ($writes as $write) {
+            $refusal = self::refusalOf($write);
+
+            self::assertInstanceOf(SystemRoleProtectedException::class, $refusal);
+            self::assertSame(['admin', 'permission-change'], [$refusal->getRoleName(), $refusal->getOperation()]);
+        }
+
+        self::assertSame([$read->id], DB::table('role_permissions')->pluck('permission_id')->all());
+        self::assertSame([], self::changesDispatched());
+    }
+
+    /**
+     * Each change `forceSystem()` unlocks is made and reported once, with the
+     * call's operation, and the unlock is used up by it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnUnlockedChangeToASystemRolesPermissionsIsReported(): void
+    {
+        $admin = self::role('admin', ['is_system' => true]);
+        $read  = Permission::query()->create(['name' => 'posts:read']);
+        $edit  = Permission::query()->create(['name' => 'posts:edit']);
+
+        Event::fake([SystemOverrideUsed::class, PermissionGranted::class, PermissionRevoked::class]);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantPermission($admin->forceSystem(), $read));
+        self::assertSame(1, self::service()->revokePermission($admin->forceSystem(), $read));
+        self::assertSame([$edit->id], self::service()->syncPermissions($admin->forceSystem(), [$edit])->granted);
+        self::assertInstanceOf(SystemRoleProtectedException::class, self::refusalOf(static fn (): GrantOutcome => self::service()->grantPermission($admin, $read)));
+
+        $overrides = self::dispatchedEvents(SystemOverrideUsed::class);
+        $changes   = [...self::dispatchedEvents(PermissionGranted::class), ...self::dispatchedEvents(PermissionRevoked::class)];
+
+        self::assertCount(3, $overrides);
+        self::assertSame(['permission-change'], \array_values(\array_unique(\array_map(static fn (SystemOverrideUsed $event): string => $event->protectedOperation, $overrides))));
+        self::assertTrue(self::refersTo($overrides[0]->record, $admin));
+        self::assertSame('admin', $overrides[0]->name);
+        self::assertEqualsCanonicalizing(
+            \array_map(static fn (SystemOverrideUsed $event): string => $event->operation->id, $overrides),
+            \array_map(static fn (PermissionGranted|PermissionRevoked $event): string => $event->operation->id, $changes),
+        );
+    }
+
+    /**
+     * A write that changes nothing on a system role needs no override, reports
+     * none, and uses up an unlock it was given.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testANoOpWriteToASystemRoleNeedsNoOverride(): void
+    {
+        $admin = self::role('admin', ['is_system' => true]);
+        $read  = Permission::query()->create(['name' => 'posts:read']);
+
+        Permission::query()->create(['name' => 'posts:edit']);
+
+        self::service()->grantPermission($admin->forceSystem(), $read);
+
+        Event::fake([SystemOverrideUsed::class]);
+
+        self::assertSame(GrantOutcome::UNCHANGED, self::service()->grantPermission($admin, $read));
+        self::assertSame(0, self::service()->revokePermission($admin, 'posts:edit'));
+        self::assertEquals(new SyncResult([], [], []), self::service()->syncPermissions($admin, [$read]));
+        self::assertSame(GrantOutcome::UNCHANGED, self::service()->grantPermission($admin->forceSystem(), $read));
+        self::assertInstanceOf(SystemRoleProtectedException::class, self::refusalOf(static fn (): int => self::service()->revokePermission($admin, $read)));
+
+        Event::assertNotDispatched(SystemOverrideUsed::class);
+    }
+
+    /**
+     * A delegated call works on the role as stored, so the override on the role
+     * given does not reach it and the change is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedChangeToASystemRoleIsRefusedDespiteTheOverride(): void
+    {
+        $actor = self::administrator();
+        $admin = self::role('admin', ['is_system' => true]);
+
+        Permission::query()->create(['name' => 'posts:read']);
+
+        $refusal = self::refusalOf(static fn (): GrantOutcome => self::service()->grantPermission($admin->forceSystem(), 'posts:read', actor: $actor));
+
+        self::assertInstanceOf(SystemRoleProtectedException::class, $refusal);
+        self::assertSame(0, DB::table('role_permissions')->count());
     }
 
     /**

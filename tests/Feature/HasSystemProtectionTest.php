@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
@@ -29,7 +30,9 @@ use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
+use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Fixtures\ExtendedRole;
 use Tests\Fixtures\QueryRecorder;
@@ -484,6 +487,100 @@ final class HasSystemProtectionTest extends TestCase
     }
 
     /**
+     * A change to a system record's grants is refused without the override:
+     * none of its events is dispatched.
+     *
+     * @return void
+     */
+    public function testARelationChangeIsRefusedWithoutTheOverride(): void
+    {
+        $role = $this->makeSystemRole('super-admin');
+
+        Event::fake([SystemOverrideUsed::class, RolePermissionGranted::class]);
+
+        $exception = $this->captureRoleRefusal(static fn () => $role->dispatchRelationChange('permission-change', self::permissionGranted($role)));
+
+        self::assertSame(['super-admin', 'permission-change'], [$exception->getRoleName(), $exception->getOperation()]);
+
+        Event::assertNotDispatched(RolePermissionGranted::class);
+        Event::assertNotDispatched(SystemOverrideUsed::class);
+    }
+
+    /**
+     * A change to a system record's grants the override unlocks dispatches its
+     * events and reports the override after them, and uses the unlock up.
+     *
+     * @return void
+     */
+    public function testAnUnlockedRelationChangeIsReported(): void
+    {
+        $role  = $this->makeSystemRole('super-admin');
+        $event = self::permissionGranted($role);
+
+        Event::fake([SystemOverrideUsed::class, RolePermissionGranted::class]);
+
+        $role->forceSystem()->dispatchRelationChange('permission-change', $event);
+
+        Event::assertDispatched(RolePermissionGranted::class, static fn (RolePermissionGranted $dispatched): bool => $dispatched === $event);
+        Event::assertDispatchedTimes(SystemOverrideUsed::class, 1);
+        Event::assertDispatched(SystemOverrideUsed::class, static fn (SystemOverrideUsed $override): bool => $override->record->id === $role->id
+            && $override->name                                                                                                     === 'super-admin'
+            && $override->protectedOperation                                                                                       === 'permission-change');
+
+        $exception = $this->captureRoleRefusal(static fn () => $role->dispatchRelationChange('permission-change', $event));
+
+        self::assertSame('permission-change', $exception->getOperation());
+    }
+
+    /**
+     * A write to a system record's grants that changed nothing needs no
+     * override and reports none, and it uses up an unlock it was given, as a
+     * clean save does.
+     *
+     * @return void
+     */
+    public function testARelationWriteThatChangedNothingUsesTheUnlockUp(): void
+    {
+        $role = $this->makeSystemRole('super-admin');
+
+        Event::fake([SystemOverrideUsed::class]);
+
+        $role->dispatchRelationChange('permission-change');
+        $role->forceSystem()->dispatchRelationChange('permission-change');
+
+        $exception = $this->captureRoleRefusal(static fn () => $role->update(['description' => 'Edited.']));
+
+        self::assertSame('modify', $exception->getOperation());
+
+        Event::assertNotDispatched(SystemOverrideUsed::class);
+    }
+
+    /**
+     * An override a failed save consumed is not reported by a later write to
+     * the record's grants that used none.
+     *
+     * @return void
+     */
+    public function testAnOverrideAFailedSaveConsumedIsNotReportedByARelationWrite(): void
+    {
+        $role = $this->makeSystemRole('super-admin');
+
+        Role::updated(static function (Role $updated) use ($role): void {
+            if ($updated->id === $role->id) {
+                throw new \RuntimeException('The write failed.');
+            }
+        });
+
+        rescue(static fn (): bool => $role->forceSystem()->update(['description' => 'Failed.']), null, false);
+
+        Event::fake([SystemOverrideUsed::class]);
+
+        $role->dispatchRelationChange('permission-change');
+
+        Event::assertNotDispatched(SystemOverrideUsed::class);
+    }
+
+    /**
      * An unlock that no change uses, a refused change and an edit of a record
      * that is not system report nothing.
      *
@@ -903,6 +1000,17 @@ final class HasSystemProtectionTest extends TestCase
             'guard'     => 'web',
             'is_system' => true,
         ]);
+    }
+
+    /**
+     * Build the event of a grant of a permission to the role.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @return \SineMacula\Laravel\Authorization\Events\Role\PermissionGranted
+     */
+    private static function permissionGranted(Role $role): RolePermissionGranted
+    {
+        return new RolePermissionGranted(Operation::begin(), Reference::of($role), $role->name, new Reference('permission', '1'), 'posts:read', null, null);
     }
 
     /**
