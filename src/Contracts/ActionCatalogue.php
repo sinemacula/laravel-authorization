@@ -15,7 +15,8 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  * declare: the validator accepts them whatever it holds. The shipped default
  * reads the permissions the code declares in `authorization.permission_enums`
  * and `authorization.permission_providers`, the package's own left out; an
- * application may bind its own.
+ * application may bind its own. Every permission the services create, rename or
+ * grant is held to the same rule (see `Support\DeclaredPermissions`).
  *
  * A catalogue that covers no pattern, not even `*`, declares no actions, and
  * every policy write whose patterns need any action but the package's own is

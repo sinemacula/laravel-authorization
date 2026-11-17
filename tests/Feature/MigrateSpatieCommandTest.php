@@ -27,10 +27,13 @@ use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Exceptions\GrantRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\UndeclaredPermissionException;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Testing\FakeTenantTree;
+use Tests\Concerns\DeclaresPermissions;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Concerns\WidensGrants;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
@@ -55,7 +58,7 @@ use Tests\TestCase;
 #[CoversClass(MigrateSpatieCommand::class)]
 final class MigrateSpatieCommandTest extends TestCase
 {
-    use UsesAnAuthorizationConnection, WidensGrants;
+    use DeclaresPermissions, UsesAnAuthorizationConnection, WidensGrants;
 
     /** @var string The Spatie role ID used by the string-keyed fixture. */
     private const string STRING_ROLE_ID = '0192f0c4-3b1a-7d2e-9a4b-1c2d3e4f5a6b';
@@ -900,6 +903,37 @@ final class MigrateSpatieCommandTest extends TestCase
         );
         self::assertSame(2, DB::table('auth_role_permissions')->count());
         self::assertSame(2, DB::table('auth_authorizable_roles')->count());
+        self::assertSame(1, DB::table('auth_authorizable_permissions')->count());
+    }
+
+    /**
+     * A permission the code does not declare is reported and skipped with its
+     * grants, on a dry run too, and a stored row of its name is neither reused
+     * nor granted.
+     *
+     * @return void
+     */
+    public function testUndeclaredPermissionsAreReportedAndSkippedWithTheirGrants(): void
+    {
+        $this->declarePermissions('posts:create', 'posts:edit');
+
+        $stale = Permission::query()->create(['name' => 'posts:delete', 'guard' => 'web']);
+        $line  = 'Skipped: ' . (new UndeclaredPermissionException('posts:delete'))->getMessage() . ' Its grants are not migrated.';
+
+        Artisan::call('authorization:migrate-spatie', ['--dry-run' => true]);
+
+        self::assertStringContainsString($line, Artisan::output());
+
+        $exitCode = Artisan::call('authorization:migrate-spatie');
+
+        self::assertSame(0, $exitCode);
+        self::assertStringContainsString($line, Artisan::output());
+        self::assertSame(
+            ['posts:create', 'posts:delete', 'posts:edit'],
+            DB::table('auth_permissions')->pluck('name')->sort()->values()->all(),
+        );
+        self::assertSame(1, DB::table('auth_role_permissions')->count());
+        self::assertFalse(DB::table('auth_role_permissions')->where('permission_id', $stale->id)->exists());
         self::assertSame(1, DB::table('auth_authorizable_permissions')->count());
     }
 

@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
-use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\DeclaredPermissions;
 
 /**
  * Boot-time validator for the `authorization.session` config, run by
@@ -150,7 +150,7 @@ final class SessionConfigValidator
 
         foreach ($patterns as $scope => $list) {
             foreach ($list as $pattern) {
-                if (!PackagePermissions::covers($pattern) && !$catalogue->covers($pattern)) {
+                if (!DeclaredPermissions::covers($pattern, $catalogue)) {
                     $reason = "the scope '{$scope}' names '{$pattern}', which covers no declared permission.";
 
                     throw new InvalidAuthorizationConfigException(self::SCOPES, $reason, IssueCode::INVALID_VALUE, 'patterns that each cover a declared permission');

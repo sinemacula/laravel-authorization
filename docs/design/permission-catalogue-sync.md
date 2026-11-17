@@ -22,9 +22,10 @@ when either names one. This note documents what the sync changes, what it only r
    fails the sync before anything is written.
 
 4. **Stale rows are reported, not removed.** A platform permission that no enum or provider declares is listed as
-   `stale` and left alone, because it may have been imported, created by hand or declared by a provider that is not
-   installed in every environment. Only `--prune` deletes stale rows. There is no deprecation column: a permission is
-   either in the catalogue or reported as stale.
+   `stale` and left alone, because it may have been declared once, written outside the services or declared by a
+   provider that is not installed in every environment. Only `--prune` deletes stale rows. There is no deprecation
+   column: a permission is either in the catalogue or reported as stale. A stale row keeps the grants already made of
+   it, but cannot be granted again (invariant 9).
 
 5. **System rows are never changed.** A system row refuses every edit and delete without an explicit override
    (`forceSystem()`). When one is stale, or declared with a different description or category, the sync lists it as
@@ -49,6 +50,16 @@ when either names one. This note documents what the sync changes, what it only r
    The Gate asks the package about them as about every declared permission. An application declaration of the
    same name, also guard-agnostic, is merged with it as any duplicate is, and refused when its description or category
    differ.
+
+9. **Only declared permissions are created or granted.** `PermissionService::create()` and `rename()`, every
+   permission grant and sync of `RoleService` and `GrantService`, and so `authorization:migrate-spatie`, refuse a name
+   that covers no declared permission with `UndeclaredPermissionException`, before anything is decided or written.
+   Declared is decided by `DeclaredPermissions`, the rule a policy's action patterns are held to: the name is one of
+   the package's own or covers an action of the bound `ActionCatalogue`, so a wildcard such as `posts:*` must cover at
+   least one. A tenant-owned permission must name a declared one too, so a tenant keeps its own copy of a declared
+   permission rather than inventing one. The sync writes declared permissions alone, so it is never refused; a row it
+   reports as stale stays, with its grants, until it is revoked, synced away or pruned, but granting it, or listing it
+   in a sync, is refused.
 
 ## Declaring the Catalogue
 
@@ -173,6 +184,8 @@ A stale row is drift only under `--prune`, since without it the sync would leave
 - Catalogue: `src/Support/PermissionCatalogue.php`; the package's own permissions: `src/Support/PackagePermissions.php`
 - Policy actions: `src/Support/DeclaredActionCatalogue.php`, the declared names a policy's `actions` and `not_actions`
   patterns must match when it is written
+- Declared rule: `src/Support/DeclaredPermissions.php`, held by policies and by every permission the services create,
+  rename or grant; refusal: `src/Exceptions/UndeclaredPermissionException.php`
 - Diff: `src/Console/Support/PermissionDiffBuilder.php`, `src/Console/Support/PermissionDiff.php`
 - Command: `src/Console/SyncPermissionsCommand.php`
 - Exception: `src/Exceptions/InvalidPermissionCatalogueException.php`
@@ -188,6 +201,8 @@ A stale row is drift only under `--prune`, since without it the sync would leave
   `tests/Unit/Support/PackagePermissionsTest.php`.
 - `tests/Unit/Support/PermissionMetadataReaderTest.php`, `tests/Unit/Support/PermissionDefinitionTest.php`.
 - `tests/Feature/NoDatabaseAtBootTest.php`: booting with an enum and a provider and no tables runs no query.
+- `tests/Feature/DeclaredPermissionsTest.php`, and the undeclared-name tests of `PermissionServiceTest`,
+  `RoleServiceTest`, `GrantServiceTest`, `MigrateSpatieCommandTest` and `DelegatedDefinitionsTest`.
 - `tests/Feature/ConfigValidatorTest.php`: enums backed by integers are refused at boot.
 
 ## Change Triggers
@@ -197,4 +212,5 @@ Update this note when any of the following changes:
 - The `#[Permission]` attribute or `PermissionDefinition` gains or loses a field.
 - An action is added or changes meaning, or the exit codes change.
 - Pruning moves to the services, or the treatment of system or tenant-owned rows changes.
+- A permission nothing declares becomes creatable or grantable, or the declared rule changes.
 - The sync gains or loses a flag.
