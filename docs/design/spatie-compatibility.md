@@ -220,10 +220,12 @@ The package deliberately does **not** ship the following Spatie surface:
 (`--connection`, `--roles-table`, `--permissions-table`, `--role-has-permissions-table`, `--model-has-roles-table`,
 `--model-has-permissions-table`), the default connection and Spatie's names when left out. It refuses before reading
 anything when one of them is a table it writes on the same connection, as the default configuration's `roles` and
-`permissions` are. It reuses the role or permission of the same name, guard and owner, so a re-run carries on after
-a run that stopped part-way, reporting those rows as already present. A grant already held with no expiry is left as it
-is; one given an expiry since, or expired, is granted again without one. Two Spatie roles, or two permissions, that
-map to the same one stop the import before anything is written.
+`permissions` are. It reuses the role or permission of the same name, guard and owner, so a re-run carries on after a
+run that stopped part-way, reporting those rows as already present. A grant already held with no expiry is left as it
+is; one given an expiry since, or expired, is granted again without one. Two Spatie roles, or two permissions, that map
+to the same one stop the import before anything is written, and so does an import that would grant a system role it
+reuses a permission, or grant one again without its expiry, on a dry run too: only `forceSystem()` changes a system
+role's permissions.
 
 With teams enabled, Spatie keeps a team id on `roles`, `model_has_roles` and `model_has_permissions`, in the column
 `--team-column` names, else Spatie's `permission.column_names.team_foreign_key`, else `team_id`. `--team-tenant-type`

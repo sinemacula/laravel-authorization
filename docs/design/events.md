@@ -56,7 +56,8 @@ carry references, names and ids, never a value the decision read, and are dispat
   grantee who surrendered or the revoker. Surrendered and revoked extend `Identity\BreakGlassEnded`, the abstract,
   readonly shape they share, which is never dispatched itself. Each implements `IdentityEvent`, naming the grantee
   (see [Break-glass](break-glass.md)).
-- **`SystemOverrideUsed`.** A change to a system role, permission or policy that `forceSystem()` unlocked.
+- **`SystemOverrideUsed`.** A change to a system role, permission or policy, or to a system role's permissions or
+  policies, that `forceSystem()` unlocked.
 
 ## Invariants
 
@@ -144,7 +145,8 @@ carry references, names and ids, never a value the decision read, and are dispat
 
 12. **Every override is reported.** A change `forceSystem()` unlocked dispatches `SystemOverrideUsed` with the record,
     its name before the change, its tenant, the change allowed (`delete`, `unprotect`, `rename`, `document-rewrite` or
-    `modify`) and the operation, alongside the record's own event and with the same operation.
+    `modify`, or `permission-change`, `policy-change` or `revoke-all` for a system role's grants) and the operation,
+    alongside the change's own events and with the same operation.
 
 13. **Audit accessors.** Every change event implements `Contracts\AuthorizationMutation`, so an audit mapper reads it
     through accessors rather than its properties: `operation()`, a stable identifier unique to the event class (such as
@@ -265,7 +267,7 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
   guardrail's policy.
 - `Services\RoleExclusionService`: the role exclusion events.
 - `Services\BreakGlassService`, `Services\Support\ExpiredActivations`: the break-glass events.
-- `Concerns\HasSystemProtection`: the override event.
+- `Concerns\HasSystemProtection`, `Services\Support\SystemRoleGuard`: the override event.
 - `Console\Support\ActorOption`: the commands' `--actor`.
 
 ## Authoritative Tests
@@ -302,7 +304,8 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
   the grantor columns, one operation id per call, rollback and the morph map.
 - `RoleObserverTest`, `PermissionObserverTest`, `PolicyObserverTest`, `RecordChangesTest`: the payloads, the deleted
   grantees and the digests; `GrantTargetTest`: the holders a delete reads, a role's live activations included.
-- `HasSystemProtectionTest`: the override event.
+- `HasSystemProtectionTest`: the override event; `RoleServiceTest`, `GrantServiceTest`, `SystemRoleGuardTest`: a system
+  role's grants refused and their override reported.
 - `InvalidationTest`, `OperationScopeTest`: the versions each write bumps, before and after its commit, and a rollback
   when the cache store fails.
 - `ActorOptionTest`, `GrantRoleCommandTest`, `RevokeRoleCommandTest`, `SyncPermissionsCommandTest`: `--actor`.

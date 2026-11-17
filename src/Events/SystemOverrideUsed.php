@@ -13,11 +13,13 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * `forceSystem()` unlocked has been written.
  *
  * A system record cannot be renamed, edited, deleted or have its system flag
- * cleared except through this explicit override, and each use of it is
- * reported. `protectedOperation` names the change the override allowed:
- * `delete`, `unprotect`, `rename`, `document-rewrite` or `modify`. The record
- * event for the change (`Updated` or `Deleted`) is dispatched as well, with the
- * same operation.
+ * cleared, nor a system role have its permissions or policies changed, except
+ * through this explicit override, and each use of it is reported.
+ * `protectedOperation` names the change the override allowed: `delete`,
+ * `unprotect`, `rename`, `document-rewrite` or `modify`, or, for a role's
+ * grants, the kind changed, such as `permission-change` or `policy-change`, or
+ * `revoke-all`. The events of the change (`Updated` or `Deleted`, or the grant
+ * events) are dispatched as well, with the same operation.
  *
  * A snapshot of plain values, never a model. It is dispatched once the write
  * commits, on the package's connection, and never for a write that rolls back
