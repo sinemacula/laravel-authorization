@@ -140,12 +140,12 @@ under the old tree have lapsed. Reporting runs no grant hook: an integration tha
 
 ## A failing store
 
-A store that throws on a read or write is never fatal to a check. The failure is written to the log channel, the store
-is not used again for the rest of the request or job, and checks read the database. A stored value without the shape of
-an entry is resolved again, and an entry whose contents cannot be decoded is discarded with a warning and resolved
-again.
+A store that throws on a read or write, or returns false from a write, is never fatal to a check. The failure is
+written to the log channel, the store is not used again for the rest of the request or job, and checks read the
+database. A stored value without the shape of an entry is resolved again, and an entry whose contents cannot be decoded
+is discarded with a warning and resolved again.
 
-Invalidation is stricter. A bump that throws inside a write's transaction is not caught, so the write rolls back rather
+Invalidation is stricter. A bump that fails inside a write's transaction is not caught, so the write rolls back rather
 than commit with entries that still allow what it took away: while the store cannot be written, writes through the
 package fail. A write made with no transaction open has already committed, and the first bump's failure is still thrown.
 A bump once the write has committed cannot undo it, so its failure is written to the log channel. `treeChanged()` throws
