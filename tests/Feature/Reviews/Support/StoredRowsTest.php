@@ -16,6 +16,10 @@ use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Reviews\Support\GrantRow;
+use SineMacula\Laravel\Authorization\Reviews\Support\GrantRows;
+use SineMacula\Laravel\Authorization\Reviews\Support\ReviewRun;
+use SineMacula\Laravel\Authorization\Reviews\Support\ReviewUsage;
+use SineMacula\Laravel\Authorization\Reviews\Support\RowCollector;
 use SineMacula\Laravel\Authorization\Reviews\Support\StoredRows;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
@@ -220,6 +224,36 @@ final class StoredRowsTest extends TestCase
         foreach ([1, 2, 4] as $size) {
             self::assertSame($whole, \array_map(self::describe(...), self::pagedThrough($query, $size)['rows']), "by {$size}");
         }
+    }
+
+    /**
+     * Unused grants are read on past a whole chunk the filter keeps none of,
+     * from the row after the chunk's last, until the rows are full.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testUnusedGrantsAreReadOnPastAChunkKeepingNone(): void
+    {
+        $permission = Reference::of(self::permission('posts:read'));
+        $grants     = [];
+
+        for ($index = 0; $index < GrantRows::CHUNK + 3; $index++) {
+            $grants[] = ['permission_id' => $permission->id, 'authorizable_type' => 'principal', 'authorizable_id' => \sprintf('p%04d', $index), 'created_at' => Carbon::now()];
+        }
+
+        foreach (\array_chunk($grants, 100) as $chunk) {
+            DB::table('authorizable_permissions')->insert($chunk);
+        }
+
+        $run  = ReviewRun::of(ReviewScope::everywhere());
+        $kept = static fn (ReviewRow $row): bool => $row->grantee->id >= \sprintf('p%04d', GrantRows::CHUNK);
+        $rows = new RowCollector($run, 2, null, $kept);
+
+        StoredRows::unused($run, $rows, new ReviewUsage(null, 3600, null, $run->now));
+
+        self::assertSame(['p0500', 'p0501'], \array_map(static fn (ReviewRow $row): string => $row->grantee->id, $rows->rows()));
     }
 
     /**

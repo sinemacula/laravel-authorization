@@ -251,6 +251,20 @@ final class ResolutionCodecTest extends TestCase
     }
 
     /**
+     * A resolution read as policies that found anything but policies is
+     * refused.
+     *
+     * @return void
+     */
+    public function testRefusesAPolicyResolutionOfAnythingElse(): void
+    {
+        $this->expectException(\UnexpectedValueException::class);
+        $this->expectExceptionMessage('Resolved policy is not an evaluation policy.');
+
+        ResolutionCodec::policyResolution(new Resolution([Policy::fromArray(['name' => 'p', 'statements' => []]), 'editor']));
+    }
+
+    /**
      * Return each stored value that is not lists of keys by grant, with why it
      * is refused.
      *

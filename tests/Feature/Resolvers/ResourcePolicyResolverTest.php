@@ -252,7 +252,8 @@ final class ResourcePolicyResolverTest extends TestCase
 
     /**
      * A policy attached to the record and to its type is read once, as the
-     * record's, whichever row is read first.
+     * record's, whichever row is read first; one attached to the type in two
+     * scopes that both hold is read once, as the type's.
      *
      * @return void
      *
@@ -261,13 +262,18 @@ final class ResourcePolicyResolverTest extends TestCase
     public function testAPolicyAttachedTwiceIsReadOnceAsTheRecords(): void
     {
         $policy = self::sharing('both');
+        $tenant = self::createTenant('tenant-a');
 
         self::service()->attach($policy, 'posts');
         self::service()->attach($policy, ['posts', 7]);
-        self::service()->attach($policy, ['posts', 7], self::createTenant('tenant-a'));
+        self::service()->attach($policy, ['posts', 7], $tenant);
 
         self::assertSame(['both@posts:7'], self::read(ResourceReference::record('posts', '7')));
         self::assertSame(['both@posts:*'], self::read(ResourceReference::record('posts', '8')));
+
+        self::service()->attach($policy, 'posts', $tenant);
+
+        self::assertSame(['both@posts:*'], TenantScope::within($tenant, null, static fn (): array => self::read(ResourceReference::record('posts', '8'))));
     }
 
     /**
