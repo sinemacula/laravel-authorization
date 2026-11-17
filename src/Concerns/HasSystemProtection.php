@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Concerns;
 
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -22,7 +23,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * The guard runs on the model's `updating` and `deleting` events, so writes
  * that fire no model events skip it: `saveQuietly()`, `deleteQuietly()`, and
  * mass updates or deletes through the query builder. These are an explicit
- * developer bypass, outside the package's own write paths.
+ * developer bypass, outside the package's own write paths. The services guard
+ * their writes to a role's permissions and policies through
+ * `dispatchRelationChange()`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,10 +58,43 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
     }
 
     /**
+     * Dispatch the events of a write the services made to the record's grants,
+     * such as a role's permissions or policies, once it is allowed: refused
+     * unless `forceSystem()` unlocked it, and the override reported once it
+     * commits. No events means the write changed nothing, which is allowed.
+     * Either way the unlock is used up, as a save uses it up. Whether the row
+     * is a system row is read as stored, whatever the instance loaded, so a
+     * stale instance cannot lift the protection; a row that is gone is not.
+     *
+     * @param  string  $operation
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent  ...$events
+     * @return void
+     *
+     * @throws \Throwable
+     *
+     * @internal
+     */
+    public function dispatchRelationChange(string $operation, AuthorizationEvent ...$events): void
+    {
+        $this->systemOverrideUsed = null;
+
+        if ($events !== []) {
+            $this->allowSystemChange((bool) $this->storedSystemFlag(), $operation);
+        }
+
+        $this->systemProtectionBypassed = false;
+
+        OperationScope::dispatch(...$events);
+
+        $this->reportSystemOverride();
+    }
+
+    /**
      * Construct the per-model exception raised when a protected mutation is
      * refused. The operation label (`'delete'`, `'unprotect'`, `'rename'`,
-     * `'document-rewrite'` or `'modify'`) is carried on the exception alongside
-     * the row's canonical name.
+     * `'document-rewrite'`, `'modify'`, or a change to the record's grants such
+     * as `'permission-change'`) is carried on the exception alongside the row's
+     * canonical name.
      *
      * @param  string  $operation
      * @return \Throwable
@@ -127,7 +163,22 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
      */
     protected function assertSystemProtectionAllows(string $operation): void
     {
-        if (!$this->isPersistedAsSystem()) {
+        $this->allowSystemChange($this->isPersistedAsSystem(), $operation);
+    }
+
+    /**
+     * Allow the mutation of a row that is not a system row, or one the bypass
+     * unlocked, consuming the bypass, and refuse it otherwise.
+     *
+     * @param  bool  $isSystem
+     * @param  string  $operation
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private function allowSystemChange(bool $isSystem, string $operation): void
+    {
+        if (!$isSystem) {
             return;
         }
 
@@ -204,13 +255,22 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
             return (bool) $this->original['is_system'];
         }
 
-        $persisted = $this->newQueryWithoutScopes()
+        return (bool) ($this->storedSystemFlag() ?? true);
+    }
+
+    /**
+     * Read the row's `is_system` flag from the database on the write
+     * connection, or null when the row cannot be found.
+     *
+     * @return mixed
+     */
+    private function storedSystemFlag(): mixed
+    {
+        return $this->newQueryWithoutScopes()
             ->whereKey($this->getKeyForSaveQuery())
             ->toBase()
             ->useWritePdo()
             ->value('is_system');
-
-        return (bool) ($persisted ?? true);
     }
 
     /**

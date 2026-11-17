@@ -18,6 +18,7 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
+use SineMacula\Laravel\Authorization\Console\Support\SpatieRows;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Events\Grantee\PermissionGranted;
@@ -29,6 +30,7 @@ use SineMacula\Laravel\Authorization\Exceptions\GrantRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\UndeclaredPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -56,6 +58,7 @@ use Tests\TestCase;
  * @SuppressWarnings("php:S1192")
  */
 #[CoversClass(MigrateSpatieCommand::class)]
+#[CoversClass(SpatieRows::class)]
 final class MigrateSpatieCommandTest extends TestCase
 {
     use DeclaresPermissions, UsesAnAuthorizationConnection, WidensGrants;
@@ -140,6 +143,62 @@ final class MigrateSpatieCommandTest extends TestCase
         self::assertSame(2, DB::table('auth_role_permissions')->count());
         self::assertSame(1, DB::table('auth_authorizable_roles')->count());
         self::assertSame(1, DB::table('auth_authorizable_permissions')->count());
+    }
+
+    /**
+     * An import that would grant a permission to a system role it reuses, or
+     * grant one again without its expiry, is refused before anything is
+     * written, naming each such permission, on a dry run too.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnImportThatWouldChangeASystemRoleIsRefused(): void
+    {
+        $admin  = Role::query()->create(['name' => 'admin', 'guard' => 'web', 'is_system' => true]);
+        $create = Permission::query()->create(['name' => 'posts:create', 'guard' => 'web']);
+        $delete = Permission::query()->create(['name' => 'posts:delete', 'guard' => 'web']);
+
+        $admin->permissions()->attach($create->id, ['expires_at' => null]);
+        $admin->permissions()->attach($delete->id, ['expires_at' => Carbon::parse('2030-01-01')]);
+
+        foreach ([['--dry-run' => true], []] as $options) {
+            self::assertSame(1, Artisan::call('authorization:migrate-spatie', $options));
+
+            $output = Artisan::output();
+
+            self::assertStringContainsString('The import would change the permissions of system role \'admin\': posts:delete.', $output);
+            self::assertStringNotContainsString('posts:create', $output);
+            self::assertStringNotContainsString('Migration summary', $output);
+        }
+
+        self::assertSame(1, DB::table('auth_roles')->count());
+        self::assertSame(2, DB::table('auth_permissions')->count());
+        self::assertSame(2, DB::table('auth_role_permissions')->count());
+        self::assertSame(0, DB::table('auth_authorizable_roles')->count());
+    }
+
+    /**
+     * A system role the import reuses that already holds each of its Spatie
+     * permissions forever is imported as any other role.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASystemRoleTheImportLeavesAsItIsIsReused(): void
+    {
+        $admin = Role::query()->create(['name' => 'admin', 'guard' => 'web', 'is_system' => true]);
+
+        foreach (['posts:create', 'posts:delete'] as $name) {
+            $admin->permissions()->attach(Permission::query()->create(['name' => $name, 'guard' => 'web'])->id, ['expires_at' => null]);
+        }
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie'));
+        self::assertSame(2, DB::table('auth_roles')->count());
+        self::assertSame(2, DB::table('auth_role_permissions')->count());
+        self::assertSame(1, DB::table('auth_authorizable_roles')->where('role_id', $admin->id)->count());
     }
 
     /**
