@@ -44,32 +44,32 @@ A resolver can say more about the subject than who and where. `scopes` says what
 such as an API token, carries, for the session policy source to cap its checks with (see [Session caps and
 machines](caps.md#session-caps-and-machines)): `CredentialScopes::uncapped()` when the credential carries no cap, and
 `CredentialScopes::of([...])` with the scopes it carries, where `of([])` carries none granted and allows nothing. Left
-null, the subject says nothing about them, which is not the same as no cap: the source then establishes the scopes of
-the credential the subject names, and fails closed when it cannot. `platform` marks a subject acting on the platform, as
-a queued job or a console command acting for no tenant does: it names no tenant, and `for()` of it decides on the
-platform whatever tenant is in place (see [The programmatic API](checking-access.md#the-programmatic-api)). Marking the
-request's subject moves neither `forUser()` nor a model named through `for()` out of the scope in place. The shipped
-resolver sets neither.
+null, the subject says nothing about them: the shipped source then sets no cap, except that a machine principal is
+allowed nothing, and a source that knows credentials establishes them itself and fails closed when it cannot. `platform`
+marks a subject acting on the platform, as a queued job or a console command acting for no tenant does: it names no
+tenant, and `for()` of it decides on the platform whatever tenant is in place (see [The programmatic
+API](checking-access.md#the-programmatic-api)). Marking the request's subject moves neither `forUser()` nor a model
+named through `for()` out of the scope in place. The shipped resolver sets neither.
 
 Every seam the package gives a default for can also be bound directly on its contract, from any service provider: the
 subject resolver, the tenant tree, the identity directory, the grant hook, the console subject resolver, the resource
 tenant resolver, the policy store, the policy resolver, the action catalogue, the context key catalogue, the
 authentication requirement checker, the session policy source, the grant usage store and the authentication, request and
-environment contexts. The package binds its default only when nothing is bound to the contract yet, so a binding made
-before it registers, by a sibling package or by your application, `instance()` included, stands, and a binding made
-afterwards with `bind()`, `singleton()`, `scoped()` or `instance()` replaces the default. A class you name in
-`config/authorization.php` is different: when `subject_resolver`, `tenant_tree`, `identity_directory`,
-`resource_tenant_resolver`, `requirement_checker` or `session.source` names a class other than the package's default, or
-when `policy_store` names any class, the package binds the contract to it even over a binding a sibling package made
-before it registered, since your configuration is the explicit choice. The same holds for a sibling package's deferred
-provider, which would otherwise bind the contract at its first resolution and so replace your class: the package loads
-that provider before binding your class. A value equal to the package's default, or no value, binds nothing over an
-earlier binding, and nor does a value that names no class implementing the contract (null, a number or an empty string
-among them): the package binds its default as though nothing were configured, so registering never fails on it, and the
-boot refuses the setting. `policy_store` differs on both counts: the package has no store of its own, so such a value
-binds nothing at all, and null is not refused, since it means no store. From the highest precedence down, a contract
-resolves to a binding made after the package registers, then the class your configuration names, then a binding made
-before the package registers, then the package's default. Binding your configured class over a contract follows
+environment contexts (see [Seams and the suite](seams.md)). The package binds its default only when nothing is bound to
+the contract yet, so a binding made before it registers, by a sibling package or by your application, `instance()`
+included, stands, and a binding made afterwards with `bind()`, `singleton()`, `scoped()` or `instance()` replaces the
+default. A class you name in `config/authorization.php` is different: when `subject_resolver`, `tenant_tree`,
+`identity_directory`, `resource_tenant_resolver`, `requirement_checker` or `session.source` names a class other than the
+package's default, or when `policy_store` names any class, the package binds the contract to it even over a binding a
+sibling package made before it registered, since your configuration is the explicit choice. The same holds for a sibling
+package's deferred provider, which would otherwise bind the contract at its first resolution and so replace your class:
+the package loads that provider before binding your class. A value equal to the package's default, or no value, binds
+nothing over an earlier binding, and nor does a value that names no class implementing the contract (null, a number or
+an empty string among them): the package binds its default as though nothing were configured, so registering never fails
+on it, and the boot refuses the setting. `policy_store` differs on both counts: the package has no store of its own, so
+such a value binds nothing at all, and null is not refused, since it means no store. From the highest precedence down, a
+contract resolves to a binding made after the package registers, then the class your configuration names, then a binding
+made before the package registers, then the package's default. Binding your configured class over a contract follows
 Laravel's rules for any binding: an extender a sibling package registered on the contract is applied to your class, so
 one typed to the sibling's own class fails, and when the contract was already resolved, a callback watching it with
 `rebinding()` or `refresh()` is called, which may resolve your class as the application boots. The grant hook is the one
@@ -81,7 +81,8 @@ application for example, the later one wins as usual, and a `bindIf()`, `singlet
 contract nothing has bound yet, so one made after the package registers is skipped and the package's default, or your
 configured class, stands. To replace a seam whatever order providers register in, bind it unconditionally. A binding of
 your own is kept as you bound it across the reset between queue jobs and Octane requests, while the package's defaults
-and configured classes, the context key catalogue aside, are built afresh for each.
+and configured classes, the context key catalogue aside, are built afresh for each (see [Octane and long-lived
+workers](long-lived-workers.md)).
 
 **When the configured classes are bound.** The package's `register()` records what your configuration names, as names
 alone: it loads no class, loads no deferred provider, binds no configured class over another binding and extends no
@@ -153,11 +154,12 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 ```
 
 Roles, permissions, policies, boundaries and guardrails are read through a resolution cache, kept in memory for the
-request or job and, when `cache.store` names a cache store, in that store too. Its entries are versioned, so every
-write takes effect on the next check in every worker, and a write that rolls back bumps the versions too, so nothing a
-check stored from it inside the transaction is served. A store that fails, by throwing or by returning false from a
-write, is skipped while checks read the database, and a write whose versions it fails to bump inside the transaction
-rolls back.
+request or job and, when `cache.store` (`AUTHORIZATION_CACHE_STORE`) names a cache store, in that store too. An entry
+lives at most `cache.ttl` seconds (`AUTHORIZATION_CACHE_TTL_SECONDS`, 300 by default), under a key that starts with
+`cache.prefix` (`AUTHORIZATION_CACHE_PREFIX`, `authorization` by default). Its entries are versioned, so a write is read
+from the next request or job in every worker, and a write that rolls back bumps the versions too. A store that fails,
+by throwing or by returning false from a write, is skipped while checks read the database, and a write whose versions it
+fails to bump inside the transaction rolls back. See [Caching](caching.md).
 
 To add columns or behaviour to the `Role`, `Permission` or `Policy` model, name a subclass of it under `models` (see
 [Model extension](../design/model-extension.md)).
