@@ -27,8 +27,9 @@ use SineMacula\Laravel\Authorization\Usage\RouteMap;
  * was built from, and of the tenant it was built in and that tenant's
  * ancestors, and holds only while all of them are unchanged; every write bumps
  * the tokens it affects (see `Invalidation`), so a change takes effect on the
- * next check in every worker, on any store. A hit costs two reads of the store
- * and no query.
+ * next check in the worker that made it, and from the next request or job in
+ * every other worker, on any store. A hit costs two reads of the store and no
+ * query.
  *
  * A cache built while break-glass is enabled keeps its persistent entries under
  * a namespace of their own, so an entry that counted an activation never
