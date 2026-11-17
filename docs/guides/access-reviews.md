@@ -273,13 +273,12 @@ offered.
 **From the console.** `authorization:review` exports a review as JSON Lines on the trusted path (see
 [Exporting an access review from the console](console.md#exporting-an-access-review-from-the-console)).
 
-**Indexes.** The migration `2026_11_08_000001_add_access_review_indexes` adds an index on the `granted_by` pair of each
-grant table, which a review of an actor's grants is matched on, and one on the permission of the role permission edges,
-which the holders of a permission are found by (MySQL already indexes that column for its foreign key, and keeps that
-index). On PostgreSQL it also adds an index on each grant table's target and its grantee's type and key, collated `C`,
-the order a page of direct holders is read and resumed in. The other review queries are served by the indexes the
-tables already have: on MySQL and SQLite, whose reference columns compare their bytes, a target's grants by each grant
-table's unique index. The migration honours the configured table names and connection.
+**Indexes.** The migrations index the `granted_by` pair of each grant table, which a review of an actor's grants is
+matched on, and the permission of the role permission edges, which the holders of a permission are found by (on MySQL,
+the index the foreign key on that column already has). On PostgreSQL they also index each grant table's target and its
+grantee's type and key, collated `C`, the order a page of direct holders is read and resumed in. The other review
+queries are served by the tables' other indexes: on MySQL and SQLite, whose reference columns compare their bytes, a
+target's grants by each grant table's unique index.
 
 **What is left out.** Boundaries, guardrails and resource-policy attachments restrict or extend what a check decides,
 but are not held, so no review lists them. Snapshot exports and CSV are not offered. See

@@ -67,6 +67,10 @@ return new class extends Migration {
             $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
             $blueprint->index('policy_id', $table . '_policy_index');
 
+            // A row naming a tenant's type without its key is found as a range
+            // of this index, as the tenant index leads with the type.
+            $blueprint->index(['tenant_id', 'tenant_type'], $table . '_tenant_id_index');
+
             // A policy in use as a guardrail is never deleted from under it:
             // the policy observer refuses the delete first, and the key refuses
             // one made past the model.
