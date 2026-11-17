@@ -84,6 +84,10 @@ return new class extends Migration {
             $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
             $blueprint->index(['owner_type', 'owner_id'], $table . '_owner_index');
 
+            // A row naming a tenant's type without its key is found as a range
+            // of this index, as the tenant index leads with the type.
+            $blueprint->index(['tenant_id', 'tenant_type'], $table . '_tenant_id_index');
+
             // An inline policy's name is unique among its grantee's inline
             // policies. A managed policy's null owner columns are distinct from
             // each other inside the index, so this key never compares two

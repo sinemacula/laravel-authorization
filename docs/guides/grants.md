@@ -280,20 +280,20 @@ a key without a type, is neither the platform's nor any tenant's, and fails clos
 
 This holds in a check, a bulk check, `permissionsFor()` and query scoping alike, cold or from the resolution cache. A
 check reads such rows through queries of their own, each a range of an index, so with none it does no more work than it
-would without them; the `2026_11_11_000001_add_half_tenant_indexes` migration adds the `tenant_id` indexes of
-`guardrails`, `resource_policies` and `policies` these reads use. An explanation never names such a row as the
-platform's or as where an allow came from. A role, permission or policy owned that way is never granted, attached or
-linked to a role anywhere (`InvalidTenantColumnsException`); a link to one already stored applies nowhere, so it never
-keeps the guard of a role or permission from changing. A rewrite of a policy that a boundary stored that way uses is
-decided at platform scope, since the boundary caps everywhere. Such a row is removed by a removal in every scope:
-`revokeAll()`, `BoundaryService::removeAll()` and `ResourcePolicyService::detachAll()`, which `authorization:prune`
-runs, and, for a guardrail, removing its policy's guardrail at the platform. Each decides it at platform scope, in its
-application, so an acting context needs the platform authority for the action, never a tenant's; it is removed as
-stored, counted, and, once the removal commits, written to the log as malformed rather than reported by an event, and
-the cache forgets it. A row another writer removed first is neither counted nor written. An expired one is pruned the
-same way. `authorization:list-roles` and `authorization:list-permissions` show such an owner as
-`malformed (tenant_type=..., tenant_id=...)`, a policy's guardrail refusal counts such guardrails as malformed, and an
-[access review](access-reviews.md#access-reviews) lists such a row as `malformed`.
+would without them; the `tenant_id` indexes of `guardrails`, `resource_policies` and `policies` serve these reads. An
+explanation never names such a row as the platform's or as where an allow came from. A role, permission or policy owned
+that way is never granted, attached or linked to a role anywhere (`InvalidTenantColumnsException`); a link to one
+already stored applies nowhere, so it never keeps the guard of a role or permission from changing. A rewrite of a policy
+that a boundary stored that way uses is decided at platform scope, since the boundary caps everywhere. Such a row is
+removed by a removal in every scope: `revokeAll()`, `BoundaryService::removeAll()` and
+`ResourcePolicyService::detachAll()`, which `authorization:prune` runs, and, for a guardrail, removing its policy's
+guardrail at the platform. Each decides it at platform scope, in its application, so an acting context needs the
+platform authority for the action, never a tenant's; it is removed as stored, counted, and, once the removal commits,
+written to the log as malformed rather than reported by an event, and the cache forgets it. A row another writer removed
+first is neither counted nor written. An expired one is pruned the same way. `authorization:list-roles` and
+`authorization:list-permissions` show such an owner as `malformed (tenant_type=..., tenant_id=...)`, a policy's
+guardrail refusal counts such guardrails as malformed, and an [access review](access-reviews.md#access-reviews) lists
+such a row as `malformed`.
 
 Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class
 implementing `SineMacula\Laravel\Authorization\Contracts\TenantTree` as `tenant_tree` in `config/authorization.php`,
