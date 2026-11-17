@@ -157,8 +157,9 @@ Roles, permissions, policies, boundaries and guardrails are read through a resol
 request or job and, when `cache.store` (`AUTHORIZATION_CACHE_STORE`) names a cache store, in that store too. An entry
 lives at most `cache.ttl` seconds (`AUTHORIZATION_CACHE_TTL_SECONDS`, 300 by default), under a key that starts with
 `cache.prefix` (`AUTHORIZATION_CACHE_PREFIX`, `authorization` by default). Its entries are versioned, so a write is read
-from the next request or job in every worker, and a write that rolls back bumps the versions too. A store that fails is
-skipped while checks read the database. See [Caching](caching.md).
+from the next request or job in every worker, and a write that rolls back bumps the versions too. A store that fails,
+by throwing or by returning false from a write, is skipped while checks read the database, and a write whose versions it
+fails to bump inside the transaction rolls back. See [Caching](caching.md).
 
 To add columns or behaviour to the `Role`, `Permission` or `Policy` model, name a subclass of it under `models` (see
 [Model extension](../design/model-extension.md)).

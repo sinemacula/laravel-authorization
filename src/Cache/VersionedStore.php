@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Cache;
 
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Str;
+use SineMacula\Laravel\Authorization\Exceptions\CacheWriteRefusedException;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -23,12 +24,13 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * without tags. A token is random rather than a counter, so a token the store
  * evicted and created again can never match an entry recorded before.
  *
- * A store that fails is never fatal to a check: the read or write is skipped,
- * the failure is written to the package's log channel once, and the store is
- * not used again by this instance, which lasts one request or job, so checks
- * fall back to the database. A bump that runs inside a write's transaction is
- * the exception: its failure is thrown, so the write rolls back rather than
- * leave a stale entry that still allows.
+ * A store fails when it throws, or when a write returns false. A store that
+ * fails is never fatal to a check: the read or write is skipped, the failure is
+ * written to the package's log channel once, and the store is not used again by
+ * this instance, which lasts one request or job, so checks fall back to the
+ * database. A bump that runs inside a write's transaction is the exception: its
+ * failure is thrown, so the write rolls back rather than leave a stale entry
+ * that still allows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -169,7 +171,8 @@ final class VersionedStore
     /**
      * Store the entry at the key for the given number of seconds, unless the
      * store fails. A lifetime of zero or less forgets the key instead, as an
-     * entry that has already lapsed is never stored.
+     * entry that has already lapsed is never stored, and a key that is not
+     * there to forget is no failure.
      *
      * @param  string  $key
      * @param  array<string, mixed>  $entry
@@ -178,7 +181,7 @@ final class VersionedStore
      */
     public function put(string $key, array $entry, int $seconds): void
     {
-        $this->attempt(fn (): bool => $this->store->put($key, $entry, $seconds));
+        $this->attempt(fn (): bool => $this->store->put($key, $entry, $seconds) || $seconds <= 0 || throw new CacheWriteRefusedException);
     }
 
     /**
@@ -217,7 +220,8 @@ final class VersionedStore
     /**
      * Store each entry at its key, in one write for the entries of each
      * lifetime, unless the store fails. A lifetime of zero or less forgets its
-     * keys instead, as an entry that has already lapsed is never stored.
+     * keys instead, as an entry that has already lapsed is never stored, and a
+     * key that is not there to forget is no failure.
      *
      * @param  array<int, array<string, array<string, mixed>>>  $entries
      * @return void
@@ -225,7 +229,7 @@ final class VersionedStore
     public function putMany(array $entries): void
     {
         foreach ($entries as $seconds => $byKey) {
-            $this->attempt(fn (): bool => $this->store->setMultiple($byKey, $seconds));
+            $this->attempt(fn (): bool => $this->store->setMultiple($byKey, $seconds) || $seconds <= 0 || throw new CacheWriteRefusedException);
         }
     }
 
@@ -276,10 +280,14 @@ final class VersionedStore
      *
      * @param  list<string>  $keys
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\CacheWriteRefusedException
      */
     public function bump(array $keys): void
     {
-        $this->store->setMultiple(\array_fill_keys($keys, self::token()));
+        if (!$this->store->setMultiple(\array_fill_keys($keys, self::token()))) {
+            throw new CacheWriteRefusedException;
+        }
     }
 
     /**
