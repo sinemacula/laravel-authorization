@@ -9,10 +9,12 @@ use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Console\Support\SpatieRows;
+use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
+use SineMacula\Laravel\Authorization\Exceptions\UndeclaredPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -20,6 +22,7 @@ use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
+use SineMacula\Laravel\Authorization\Support\DeclaredPermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -36,10 +39,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * permission names are checked against the models' name rule before they are
  * written; a name that fails it is reported and skipped together with its
  * grants, as is a permission name containing `*`, because `*` is a wildcard
- * here. This package's tables are written on its own connection
- * (`authorization.connection`), and the command refuses, before reading
- * anything, when a source table is one of them. The `--dry-run` flag reports
- * counts without writing.
+ * here, and one that covers no declared permission (see
+ * `Support\DeclaredPermissions`). This package's tables are written on its own
+ * connection (`authorization.connection`), and the command refuses, before
+ * reading anything, when a source table is one of them. The `--dry-run` flag
+ * reports counts without writing.
  *
  * Spatie's team ids, in the column `--team-column` names (Spatie's
  * `team_foreign_key`, else `team_id`), map to tenants of the type
@@ -539,7 +543,8 @@ final class MigrateSpatieCommand extends Command
      * A name the package refuses is reported and skipped. A name containing `*`
      * is reported and skipped as well: Spatie compares it literally unless its
      * wildcard permissions are enabled, while here it would become a wildcard
-     * granting every permission its pattern matches.
+     * granting every permission its pattern matches. So is a name the code does
+     * not declare, which the permission and grant services refuse.
      *
      * @param  string  $name
      * @return bool
@@ -552,16 +557,20 @@ final class MigrateSpatieCommand extends Command
             return false;
         }
 
-        if (!\str_contains($name, '*')) {
-            return true;
+        /** @var \SineMacula\Laravel\Authorization\Contracts\ActionCatalogue $catalogue */
+        $catalogue = $this->laravel->make(ActionCatalogue::class);
+
+        $reason = match (true) {
+            \str_contains($name, '*')                       => "permission name '{$name}' contains '*', which is a wildcard here and would grant other permissions.",
+            !DeclaredPermissions::covers($name, $catalogue) => (new UndeclaredPermissionException($name))->getMessage(),
+            default                                         => null,
+        };
+
+        if ($reason !== null) {
+            $this->warn("Skipped: {$reason} Its grants are not migrated.");
         }
 
-        $this->warn(
-            "Skipped: permission name '{$name}' contains '*', which is a wildcard here and would grant other "
-            . 'permissions. Its grants are not migrated.',
-        );
-
-        return false;
+        return $reason === null;
     }
 
     /**

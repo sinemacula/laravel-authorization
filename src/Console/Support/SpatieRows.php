@@ -4,11 +4,14 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Console\Support;
 
+use Illuminate\Container\Container;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
+use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\DeclaredPermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
 
@@ -115,10 +118,13 @@ final class SpatieRows
     {
         $targets = [];
 
+        /** @var \SineMacula\Laravel\Authorization\Contracts\ActionCatalogue $catalogue */
+        $catalogue = Container::getInstance()->make(ActionCatalogue::class);
+
         foreach ($permissions as $row) {
             $name = self::text($row['name'] ?? null);
 
-            if (!Permission::isValidAuthorizationName($name) || \str_contains($name, '*')) {
+            if (!Permission::isValidAuthorizationName($name) || \str_contains($name, '*') || !DeclaredPermissions::covers($name, $catalogue)) {
                 continue;
             }
 

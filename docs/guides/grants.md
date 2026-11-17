@@ -99,12 +99,13 @@ List the enums and providers under `permission_enums` and `permission_providers`
 [Configuration](configuration.md)).
 
 `authorization:sync` adds the declared permissions that have no row and updates the description and category of those
-that differ, in one transaction, through the configured permission model. A platform permission that no enum or
-provider declares is reported as `stale` and left alone; `--prune` deletes stale permissions, except system ones, which
-are reported as `protected` and never changed. Permissions owned by a tenant are never read or changed. Every row is
-listed with its action, as a table or, with `--format=json`, as JSON. A name outside the package's name rules, an empty
-guard list or a guard that is not a non-empty string fails the sync with exit code `2` before anything is written. In
-CI, `--dry-run` exits with `1` when anything would be added, updated or pruned:
+that differ, in one transaction, through the configured permission model. A platform permission that no enum or provider
+declares is reported as `stale` and left alone, with the grants already made of it, but can no longer be granted (see
+[Managing roles, permissions and grants](#managing-roles-permissions-and-grants)); `--prune` deletes stale permissions,
+except system ones, which are reported as `protected` and never changed. Permissions owned by a tenant are never read or
+changed. Every row is listed with its action, as a table or, with `--format=json`, as JSON. A name outside the package's
+name rules, an empty guard list or a guard that is not a non-empty string fails the sync with exit code `2` before
+anything is written. In CI, `--dry-run` exits with `1` when anything would be added, updated or pruned:
 
 ```bash
 php artisan authorization:sync --dry-run --format=json
@@ -169,6 +170,15 @@ Roles and permissions are Eloquent models with UUID keys, granted through polymo
 stored in UTC whatever zone it is given in. A name is made of letters, digits and `_ - : . *`, and anything else is
 refused when it is saved. A permission can be a wildcard: `posts:*`, `posts.*`, `*:create`, or `*` for everything,
 while `*:*` matches only names with a `:`. With the role hierarchy enabled, a role inherits its parent's permissions.
+
+Only declared permissions are created or granted. `PermissionService::create()` and `rename()`, and every permission
+grant and sync of `RoleService` and `GrantService`, refuse a name that covers no declared permission with
+`UndeclaredPermissionException` before anything is written: the name must be one the configured enums or providers
+declare, or one of the package's own, and a wildcard must cover at least one, as a policy's action patterns must (see
+[Writing policies](policies.md#writing-policies)). A tenant's own permission names a declared one too, so a tenant
+creates its own copy of `posts:edit`, never a permission the code cannot check. A stale permission keeps the grants
+already made of it until they are revoked, synced away or pruned; granting it again, or listing it in a sync, is
+refused.
 
 A role, permission or policy flagged `is_system` cannot be edited, deleted or have the flag cleared unless
 `forceSystem()` on the model unlocks the next change. The same holds for a system role's permissions and policies:

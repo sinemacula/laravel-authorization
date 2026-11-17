@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Console\Support\SpatieRows;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\DeclaresPermissions;
 use Tests\TestCase;
 
 /**
@@ -26,6 +27,8 @@ use Tests\TestCase;
 #[CoversClass(SpatieRows::class)]
 final class SpatieRowsTest extends TestCase
 {
+    use DeclaresPermissions;
+
     /**
      * The row reused is the one of the name and guard the owner holds, the
      * platform's for no owner.
@@ -99,6 +102,28 @@ final class SpatieRowsTest extends TestCase
             ['admin' => ['posts:edit', 'posts:create'], 'owner' => ['posts:create']],
             SpatieRows::systemRoleChanges($roles, $permissions, $rolePermissions, $tenantOf),
         );
+    }
+
+    /**
+     * A permission the code does not declare is skipped by the import, so it
+     * is no change to a system role.
+     *
+     * @return void
+     */
+    public function testAnUndeclaredPermissionIsNoChange(): void
+    {
+        $this->declarePermissions('posts:read');
+
+        Role::query()->create(['name' => 'admin', 'guard' => 'web', 'is_system' => true]);
+
+        $changes = SpatieRows::systemRoleChanges(
+            [['id' => 1, 'name' => 'admin', 'guard_name' => 'web']],
+            [['id' => 1, 'name' => 'posts:read', 'guard_name' => 'web'], ['id' => 2, 'name' => 'posts:purge', 'guard_name' => 'web']],
+            [['role_id' => 1, 'permission_id' => 1], ['role_id' => 1, 'permission_id' => 2]],
+            static fn (array $row): ?Reference => null,
+        );
+
+        self::assertSame(['admin' => ['posts:read']], $changes);
     }
 
     /**

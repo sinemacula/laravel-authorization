@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Services\Support\StoredRecords;
 use SineMacula\Laravel\Authorization\Services\Support\SyncPlan;
 use SineMacula\Laravel\Authorization\Services\Support\SystemRoleGuard;
+use SineMacula\Laravel\Authorization\Support\DeclaredPermissions;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -67,6 +68,11 @@ use SineMacula\Laravel\Authorization\Support\RoleReach;
  * never surfaces a unique-constraint violation. Re-granting a grant that has
  * expired re-arms it with the new expiry, and a different expiry on a live
  * grant is reported as a change.
+ *
+ * A permission is granted, or listed by a sync, only when its name covers a
+ * declared permission (see `Support\DeclaredPermissions`), else the call throws
+ * `UndeclaredPermissionException` before anything is decided or written. A
+ * grantee keeps an undeclared permission it holds until it is revoked.
  *
  * The identity events (`RoleAssigned`, `PermissionGranted`, `PolicyAttached`,
  * their revoked and detached counterparts, and the expiry-changed events) are
@@ -666,6 +672,10 @@ final class GrantService
             $model = \is_string($target) ? $model : self::stored($kind, $model, $actor);
             $key   = GrantChanges::key($model);
 
+            if ($model instanceof Permission) {
+                DeclaredPermissions::assertStored($model);
+            }
+
             $models[$key] ??= $model;
             $listed[] = [$key, GrantScopes::written(GrantScopes::of($kind, $model, $named->tenant), $reaches[$index] ?? $named->includeSubtree, $named->application)];
         }
@@ -877,6 +887,10 @@ final class GrantService
             $models = \is_string($target) ? $kind->heldOrFirst($target, GrantChanges::guard($grantee), $held, $scope) : [self::stored($kind, $kind->assertTarget($target), $actor)];
 
             foreach ($models as $model) {
+                if ($model instanceof Permission) {
+                    DeclaredPermissions::assertStored($model);
+                }
+
                 GrantScopes::assertGrantableIn($kind, $model, $scope);
                 RoleParity::assertGrantable($kind->value, $model, GrantChanges::guard($grantee));
                 InlinePolicies::assertAttachable($model, Reference::of($grantee));

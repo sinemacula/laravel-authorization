@@ -69,25 +69,28 @@ grants that no longer exist and coverage older than `authorization.usage.retenti
 
 `authorization:migrate-spatie` copies roles, permissions and grants from `spatie/laravel-permission` through the
 management services, its `guard_name` becoming `guard`. It reports and skips any role or permission whose name the
-package refuses, and any permission whose name contains `*`, along with its grants. `--dry-run` reports the counts
-without writing. Spatie's tables are read on the connection `--connection` names, the default one when left out, under
-the names `--roles-table`, `--permissions-table`, `--role-has-permissions-table`, `--model-has-roles-table` and
-`--model-has-permissions-table` give, Spatie's own by default. The command refuses before reading anything when one of
-them is a table it writes on the same connection, which the default configuration hits, as both name `roles` and
-`permissions`. A re-run carries on where an earlier run stopped: a role or permission of the same name, guard and owner
-is reused, and a grant already held with no expiry is left as it is, both counted as already present. A grant given an
-expiry since, or expired, is granted again without one. Two Spatie roles, or two permissions, that map to the same one
-stop the import before anything is written, on a dry run as well, and so does an import that would grant a system role
-it reuses a permission, or grant one again without its expiry, naming each: only `forceSystem()` changes a system role's
-permissions. A dry run looks the roles and permissions up but counts every grant as a row. Spatie's team ids, in the
-column `--team-column` names (Spatie's `permission.column_names.team_foreign_key`, else `team_id`), map to tenants of
-the type `--team-tenant-type` gives: a role with a team id is owned by that team's tenant, and a grant with one is made
-in that tenant alone, not the tenants below it. A grant with no team id is made platform-wide, except a grant of a
-team's role, which the grant service makes in the role's tenant, again alone. A grant of a team's role under another
-team's id stops the import, on a dry run as well, as the grant service refuses a role outside its tenant. Without
-`--team-tenant-type`, the command refuses before writing anything, on a dry run as well, when the roles or grant tables
-hold a team id; rows with none are imported platform-wide. With it, the command refuses when none of those tables has
-the team column. The aliases kept for a port are listed in [Spatie compatibility](../design/spatie-compatibility.md).
+package refuses, any permission whose name contains `*`, and any permission the code does not declare, along with its
+grants; a row of that name already in the package's table is skipped too. Declare Spatie's permissions in an enum or
+provider before importing them (see [Declaring permissions](grants.md#declaring-permissions)); a re-run after declaring
+the rest carries on. `--dry-run` reports the counts without writing. Spatie's tables are read on the connection
+`--connection` names, the default one when left out, under the names `--roles-table`, `--permissions-table`,
+`--role-has-permissions-table`, `--model-has-roles-table` and `--model-has-permissions-table` give, Spatie's own by
+default. The command refuses before reading anything when one of them is a table it writes on the same connection, which
+the default configuration hits, as both name `roles` and `permissions`. A re-run carries on where an earlier run
+stopped: a role or permission of the same name, guard and owner is reused, and a grant already held with no expiry is
+left as it is, both counted as already present. A grant given an expiry since, or expired, is granted again without one.
+Two Spatie roles, or two permissions, that map to the same one stop the import before anything is written, on a dry run
+as well, and so does an import that would grant a system role it reuses a permission, or grant one again without its
+expiry, naming each: only `forceSystem()` changes a system role's permissions. A dry run looks the roles and permissions
+up but counts every grant as a row. Spatie's team ids, in the column `--team-column` names (Spatie's
+`permission.column_names.team_foreign_key`, else `team_id`), map to tenants of the type `--team-tenant-type` gives: a
+role with a team id is owned by that team's tenant, and a grant with one is made in that tenant alone, not the tenants
+below it. A grant with no team id is made platform-wide, except a grant of a team's role, which the grant service makes
+in the role's tenant, again alone. A grant of a team's role under another team's id stops the import, on a dry run as
+well, as the grant service refuses a role outside its tenant. Without `--team-tenant-type`, the command refuses before
+writing anything, on a dry run as well, when the roles or grant tables hold a team id; rows with none are imported
+platform-wide. With it, the command refuses when none of those tables has the team column. The aliases kept for a port
+are listed in [Spatie compatibility](../design/spatie-compatibility.md).
 
 ## Checking the configuration
 
