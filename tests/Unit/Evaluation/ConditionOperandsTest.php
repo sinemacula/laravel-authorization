@@ -6,6 +6,7 @@ namespace Tests\Unit\Evaluation;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\ConditionOperands;
@@ -83,6 +84,21 @@ final class ConditionOperandsTest extends TestCase
         foreach (['bogus', 'cidr', 'string_like', 'not_null', 'eq_if_exists'] as $operator) {
             self::assertFalse(ConditionOperands::isValid($operator, 'x'), $operator);
             self::assertFalse(ConditionOperands::isValid($operator, true), $operator);
+        }
+    }
+
+    /**
+     * In a fresh process the first check builds the rules, and every operator
+     * is judged by its own.
+     *
+     * @return void
+     */
+    #[RunInSeparateProcess]
+    public function testTheFirstCheckInAProcessBuildsEveryRule(): void
+    {
+        foreach (self::operandProvider() as [$operator, $valid, $invalid]) {
+            self::assertTrue(ConditionOperands::isValid($operator, $valid), $operator);
+            self::assertFalse(ConditionOperands::isValid($operator, $invalid), $operator);
         }
     }
 

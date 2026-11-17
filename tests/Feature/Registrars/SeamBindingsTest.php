@@ -352,6 +352,24 @@ final class SeamBindingsTest extends TestCase
     }
 
     /**
+     * A seam with no default, the policy store's, is left unbound and
+     * unrecorded when the configuration names no class implementing it.
+     *
+     * @return void
+     */
+    public function testWithNoDefaultAndNoClassConfiguredNothingIsBound(): void
+    {
+        foreach ([[], ['policy_store' => \stdClass::class]] as $authorization) {
+            $app = self::application($authorization);
+
+            self::seams($app)->bindConfigured(PolicyStore::class, 'authorization.policy_store', null);
+
+            self::assertFalse($app->bound(PolicyStore::class));
+            self::assertNull(BindingRegistry::of($app)->get(PolicyStore::class));
+        }
+    }
+
+    /**
      * With no hook listed the grant hook's default holds none, and a hook bound
      * before stands alone; with hooks listed the bound hook is wrapped.
      *
@@ -901,6 +919,29 @@ final class SeamBindingsTest extends TestCase
     }
 
     /**
+     * Handed the steps, an application that is no Illuminate container, whose
+     * extenders cannot be reordered, still has the listed hooks extended around
+     * the bound hook once they run.
+     *
+     * @return void
+     */
+    public function testHandedTheStepsAnyApplicationHasTheGrantHooksExtended(): void
+    {
+        $app     = \Mockery::mock(ApplicationContract::class, \ArrayAccess::class)->shouldIgnoreMissing();
+        $pending = new PendingRegistration;
+
+        $app->shouldReceive('offsetGet')->with('config')->andReturn(new Repository(['authorization' => ['grant_hooks' => [RecordingGrantHook::class]]]));
+
+        (new SeamBindings($app, static fn (string $key): \Closure => static fn (ApplicationContract $app): mixed => $app->make($key), $pending))->bindGrantHooks();
+
+        $app->shouldNotHaveReceived('extend');
+
+        $pending->run();
+
+        $app->shouldHaveReceived('extend')->once()->with(GrantHook::class, \Mockery::type(\Closure::class));
+    }
+
+    /**
      * Handed the steps, an instance or an alias a provider puts on a contract
      * the configuration names a class for, after the package registered, stands
      * once they run, as a binding made afterwards does.
@@ -930,6 +971,65 @@ final class SeamBindingsTest extends TestCase
             self::assertSame($tree, $app->make(TenantTree::class), $kind);
             self::assertTrue(BindingRegistry::of($app)->get(TenantTree::class)?->configured, $kind);
         }
+    }
+
+    /**
+     * Handed the steps, an instance put on a contract a deferred provider also
+     * provides, after the package registered, stands over the provider's
+     * binding once they run, the provider loaded beneath it.
+     *
+     * @return void
+     */
+    public function testHandedTheStepsALaterInstanceStandsOverADeferredProvider(): void
+    {
+        $tree = new FlatTenantTree;
+        $app  = self::application(['tenant_tree' => StubTenantTree::class]);
+
+        DeferredBindingProvider::$objects = [TenantTree::class => new FlatTenantTree];
+
+        $app->addDeferredServices([TenantTree::class => DeferredBindingProvider::class]);
+
+        $pending = new PendingRegistration;
+
+        self::seams($app, $pending)->bindConfigured(TenantTree::class, 'authorization.tenant_tree', FlatTenantTree::class);
+
+        $app->instance(TenantTree::class, $tree);
+        $pending->run();
+
+        self::assertTrue($app->providerIsLoaded(DeferredBindingProvider::class));
+        self::assertSame($tree, $app->make(TenantTree::class));
+        self::assertTrue(BindingRegistry::of($app)->get(TenantTree::class)?->configured);
+    }
+
+    /**
+     * Handed the steps, a binding made before the package registered on a
+     * contract a deferred provider also provides, and removed after, leaves the
+     * contract to the provider's binding once they run, the class configured
+     * held under the package-owned key.
+     *
+     * @return void
+     */
+    public function testHandedTheStepsARemovedBindingLeavesADeferredProvidersBinding(): void
+    {
+        $provided = new FlatTenantTree;
+        $app      = self::application(['tenant_tree' => StubTenantTree::class]);
+
+        DeferredBindingProvider::$objects = [TenantTree::class => $provided];
+
+        $app->addDeferredServices([TenantTree::class => DeferredBindingProvider::class]);
+        $app->bind(TenantTree::class, static fn (): TenantTree => new FlatTenantTree);
+
+        $pending = new PendingRegistration;
+
+        self::seams($app, $pending)->bindConfigured(TenantTree::class, 'authorization.tenant_tree', FlatTenantTree::class);
+
+        unset($app[TenantTree::class]);
+
+        $pending->run();
+
+        self::assertTrue($app->providerIsLoaded(DeferredBindingProvider::class));
+        self::assertSame($provided, $app->make(TenantTree::class));
+        self::assertInstanceOf(StubTenantTree::class, $app->make('authorization.default:' . TenantTree::class));
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Container\Container;
+use Illuminate\Support\Facades\Facade;
 use SineMacula\Laravel\Authorization\Diagnostics\ContainerState;
 
 /**
@@ -42,7 +43,8 @@ final class RequestState
 
     /**
      * Forget the scoped instances the container holds under the package's
-     * names, so the next unit of work builds them afresh.
+     * names, and the facade instances resolved from them, so the next unit of
+     * work builds them afresh.
      *
      * @param  \Illuminate\Container\Container  $container
      * @return void
@@ -51,6 +53,7 @@ final class RequestState
     {
         foreach (self::abstracts($container) as $abstract) {
             $container->forgetInstance($abstract);
+            Facade::clearResolvedInstance($abstract);
         }
     }
 
