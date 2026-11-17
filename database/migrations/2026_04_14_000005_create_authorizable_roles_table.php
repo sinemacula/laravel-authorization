@@ -45,9 +45,10 @@ return new class extends Migration {
 
         (new MigrationCollisionGuard($schema))->ensureNotExists($table);
 
-        $exact = new ExactReferences($schema->getConnection());
+        $exact      = new ExactReferences($schema->getConnection());
+        $isPostgres = $schema->getConnection()->getDriverName() === 'pgsql';
 
-        $schema->create($table, static function (Blueprint $blueprint) use ($table, $rolesTable, $exact): void {
+        $schema->create($table, static function (Blueprint $blueprint) use ($table, $rolesTable, $exact, $isPostgres): void {
             $blueprint->uuid('role_id');
 
             // The grantee. References are bounded to 191 characters, as the
@@ -81,6 +82,15 @@ return new class extends Migration {
             $blueprint->index(['authorizable_type', 'authorizable_id'], $table . '_morph_index');
             $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
             $blueprint->index('expires_at', $table . '_expires_at_index');
+
+            // A review of an actor's grants matches the pair exactly.
+            $blueprint->index(['granted_by_type', 'granted_by_id'], $table . '_granted_by_index');
+
+            // On PostgreSQL, the order a page of a role's direct holders is
+            // read and resumed in (see `Reviews\Support\ReviewOrder`).
+            if ($isPostgres) {
+                $blueprint->rawIndex('role_id, (authorizable_type collate "C"), (authorizable_id collate "C")', $table . '_review_order_index');
+            }
 
             $blueprint->foreign('role_id')->references('id')->on($rolesTable)->cascadeOnDelete();
 

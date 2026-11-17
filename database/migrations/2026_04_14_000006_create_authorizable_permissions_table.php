@@ -45,9 +45,10 @@ return new class extends Migration {
 
         (new MigrationCollisionGuard($schema))->ensureNotExists($table);
 
-        $exact = new ExactReferences($schema->getConnection());
+        $exact      = new ExactReferences($schema->getConnection());
+        $isPostgres = $schema->getConnection()->getDriverName() === 'pgsql';
 
-        $schema->create($table, static function (Blueprint $blueprint) use ($table, $permissionsTable, $exact): void {
+        $schema->create($table, static function (Blueprint $blueprint) use ($table, $permissionsTable, $exact, $isPostgres): void {
             $blueprint->uuid('permission_id');
 
             // The grantee. References are bounded to 191 characters, as the
@@ -81,6 +82,15 @@ return new class extends Migration {
             $blueprint->index(['authorizable_type', 'authorizable_id'], $table . '_morph_index');
             $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
             $blueprint->index('expires_at', $table . '_expires_at_index');
+
+            // A review of an actor's grants matches the pair exactly.
+            $blueprint->index(['granted_by_type', 'granted_by_id'], $table . '_granted_by_index');
+
+            // On PostgreSQL, the order a page of a permission's direct holders
+            // is read and resumed in (see `Reviews\Support\ReviewOrder`).
+            if ($isPostgres) {
+                $blueprint->rawIndex('permission_id, (authorizable_type collate "C"), (authorizable_id collate "C")', $table . '_review_order_index');
+            }
 
             $blueprint->foreign('permission_id')->references('id')->on($permissionsTable)->cascadeOnDelete();
 

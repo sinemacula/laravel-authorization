@@ -18,9 +18,10 @@ use Tests\TestCase;
 /**
  * Feature tests for the shipped migrations under `tables.prefix`, on every
  * database: each table left at its default is created with the longest prefix
- * allowed before its name, one set explicitly under the name as written, every
- * index and key name they build fits in the limit, the models read and write
- * the prefixed tables, and the tables are dropped cleanly again.
+ * allowed before its name, one set explicitly under the name as written, the
+ * review and half-tenant indexes are built, every index and key name they build
+ * fits in the limit, the models read and write the prefixed tables, and the
+ * tables are dropped cleanly again.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,9 +49,7 @@ final class TablePrefixMigrationTest extends TestCase
         '2026_04_14_000008_create_resource_policies_table',
         '2026_04_14_000009_create_authorizable_boundaries_table',
         '2026_04_14_000010_create_guardrails_table',
-        '2026_11_08_000001_add_access_review_indexes',
         '2026_11_09_000001_create_grant_usage_tables',
-        '2026_11_11_000001_add_half_tenant_indexes',
         '2026_11_12_000001_create_break_glass_activations_table',
         '2026_11_12_000002_create_role_exclusions_table',
     ];
@@ -117,11 +116,43 @@ final class TablePrefixMigrationTest extends TestCase
         }
 
         self::assertFalse(Schema::hasTable(self::PREFIX . 'guardrails'));
-        self::assertTrue(Schema::hasIndex(self::PREFIX . 'authorizable_roles', ['granted_by_type', 'granted_by_id']));
-        self::assertTrue(Schema::hasIndex(self::PREFIX . 'role_permissions', ['permission_id']));
+    }
+
+    /**
+     * The review and half-tenant indexes are built on the prefixed tables: the
+     * review order index, collated `C`, on PostgreSQL alone, and the edges'
+     * permission index where the foreign key does not index the column already.
+     *
+     * @return void
+     */
+    public function testTheReadIndexesAreCreated(): void
+    {
+        $isPostgres = DB::connection()->getDriverName() === 'pgsql';
+        $isMysql    = DB::connection()->getDriverName() === 'mysql';
+
+        foreach (['authorizable_roles', 'authorizable_permissions', 'authorizable_policies'] as $key) {
+            $table = self::PREFIX . $key;
+
+            self::assertTrue(Schema::hasIndex($table, $table . '_granted_by_index'), $table);
+            self::assertTrue(Schema::hasIndex($table, ['granted_by_type', 'granted_by_id']), $table);
+            self::assertSame($isPostgres, Schema::hasIndex($table, $table . '_review_order_index'), $table);
+        }
+
+        if ($isPostgres) {
+            /** @var object{indexdef: string} $order */
+            $order = DB::selectOne('select indexdef from pg_indexes where indexname = ?', [self::PREFIX . 'authorizable_roles_review_order_index']);
+
+            self::assertStringContainsString('(role_id, authorizable_type COLLATE "C", authorizable_id COLLATE "C")', $order->indexdef);
+        }
+
+        $edges = self::PREFIX . 'role_permissions';
+
+        self::assertSame(!$isMysql, Schema::hasIndex($edges, $edges . '_permission_id_index'));
+        self::assertTrue(Schema::hasIndex($edges, ['permission_id']));
 
         foreach ([self::PREFIX . 'policies', self::PREFIX . 'resource_policies', self::EXPLICIT] as $table) {
             self::assertTrue(Schema::hasIndex($table, $table . '_tenant_id_index'), $table);
+            self::assertTrue(Schema::hasIndex($table, ['tenant_id', 'tenant_type']), $table);
         }
     }
 
