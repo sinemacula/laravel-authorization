@@ -142,6 +142,9 @@ php artisan migrate --force
 php artisan authorization:sync
 ```
 
+Only permissions are synced. Roles, the permissions each carries and policies are kept in the application's own
+seeders, which call the [management services](grants.md#managing-roles-permissions-and-grants).
+
 The package writes its warnings (a discarded cache entry, a policy whose document cannot be read) to your default log
 channel. To send them elsewhere, name a channel from `config/logging.php`; a name that is not one is refused at boot:
 
