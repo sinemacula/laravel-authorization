@@ -145,8 +145,8 @@ carry references, names and ids, never a value the decision read, and are dispat
 
 12. **Every override is reported.** A change `forceSystem()` unlocked dispatches `SystemOverrideUsed` with the record,
     its name before the change, its tenant, the change allowed (`delete`, `unprotect`, `rename`, `document-rewrite` or
-    `modify`, or `permission-change` or `policy-change` for a system role's grants) and the operation, alongside the
-    change's own events and with the same operation.
+    `modify`, or `permission-change`, `policy-change` or `revoke-all` for a system role's grants) and the operation,
+    alongside the change's own events and with the same operation.
 
 13. **Audit accessors.** Every change event implements `Contracts\AuthorizationMutation`, so an audit mapper reads it
     through accessors rather than its properties: `operation()`, a stable identifier unique to the event class (such as

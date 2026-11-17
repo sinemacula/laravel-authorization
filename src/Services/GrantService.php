@@ -167,11 +167,12 @@ use SineMacula\Laravel\Authorization\Support\RoleReach;
  * `SystemRoleProtectedException` unless `forceSystem()` on the role given
  * unlocked it, and reported with `SystemOverrideUsed`; a delegated call, or a
  * role named by a reference, guards the role as stored, which carries no
- * unlock. An inline policy is attached only to the grantee it belongs to;
- * attaching or syncing it to any other throws `InlinePolicyAttachmentException`
- * before anything is written. A policy whose statements name `principals` is
- * refused for any grantee with `ResourcePolicyException` (see
- * `PolicyPrincipals`).
+ * unlock; `revokeAll()` on a system role is guarded the same way, as
+ * `revoke-all`, and a role whose row is gone has nothing left to guard. An
+ * inline policy is attached only to the grantee it belongs to; attaching or
+ * syncing it to any other throws `InlinePolicyAttachmentException` before
+ * anything is written. A policy whose statements name `principals` is refused
+ * for any grantee with `ResourcePolicyException` (see `PolicyPrincipals`).
  *
  * Every operation refuses while the package is not healthy (see
  * `PackageState`), before it reads or writes.
@@ -521,7 +522,7 @@ final class GrantService
         $actions   = [PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE];
         $operation = Operation::begin($actor, $actions);
 
-        $revoked = OperationScope::run($operation, static function (Operation $operation) use ($actor, $reference): int {
+        $revoked = OperationScope::run($operation, static function (Operation $operation) use ($actor, $grantee, $reference): int {
             if ($actor === null) {
                 [$events, $malformed] = GrantChanges::revokeEverywhere($reference, $operation);
             } else {
@@ -540,7 +541,7 @@ final class GrantService
                 $malformed = GrantChanges::revokeMalformed($reference, $operation, $grants, $boundaries);
             }
 
-            OperationScope::dispatch(...$events);
+            SystemRoleGuard::dispatch('revoke-all', $grantee, $actor, ...$events);
 
             return \count($events) + $malformed;
         }, $actor);
@@ -623,7 +624,7 @@ final class GrantService
 
             ExclusionGuard::assertGranted($pairs, $reference, $written);
 
-            SystemRoleGuard::dispatch($kind, $grantee, $actor, ...$events);
+            SystemRoleGuard::dispatch("{$kind->value}-change", $grantee, $actor, ...$events);
 
             return \array_map(static fn (string $key): GrantOutcome => $changed[$key], $keys);
         }, $actor);
@@ -720,7 +721,7 @@ final class GrantService
                 $events[] = $kind->revokedEvent($operation, $reference, $model, $scope);
             }
 
-            SystemRoleGuard::dispatch($kind, $grantee, $actor, ...$events);
+            SystemRoleGuard::dispatch("{$kind->value}-change", $grantee, $actor, ...$events);
 
             return \count($events);
         }, $actor);
@@ -789,7 +790,7 @@ final class GrantService
 
             [$events, $changed] = $sync->write($operation, $reference, $expiresAt, $now, GrantChanges::keptAsHeld($rows, $sync->reaches));
 
-            SystemRoleGuard::dispatch($kind, $grantee, $actor, ...$events, ...$sync->revokedEvents($operation, $reference, $dropped));
+            SystemRoleGuard::dispatch("{$kind->value}-change", $grantee, $actor, ...$events, ...$sync->revokedEvents($operation, $reference, $dropped));
 
             return new SyncResult(
                 $changed[GrantOutcome::GRANTED->value] ?? [],

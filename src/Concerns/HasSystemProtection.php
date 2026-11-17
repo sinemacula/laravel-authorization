@@ -62,7 +62,9 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
      * such as a role's permissions or policies, once it is allowed: refused
      * unless `forceSystem()` unlocked it, and the override reported once it
      * commits. No events means the write changed nothing, which is allowed.
-     * Either way the unlock is used up, as a save uses it up.
+     * Either way the unlock is used up, as a save uses it up. Whether the row
+     * is a system row is read as stored, whatever the instance loaded, so a
+     * stale instance cannot lift the protection; a row that is gone is not.
      *
      * @param  string  $operation
      * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent  ...$events
@@ -77,7 +79,7 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
         $this->systemOverrideUsed = null;
 
         if ($events !== []) {
-            $this->assertSystemProtectionAllows($operation);
+            $this->allowSystemChange((bool) $this->storedSystemFlag(), $operation);
         }
 
         $this->systemProtectionBypassed = false;
@@ -161,7 +163,22 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
      */
     protected function assertSystemProtectionAllows(string $operation): void
     {
-        if (!$this->isPersistedAsSystem()) {
+        $this->allowSystemChange($this->isPersistedAsSystem(), $operation);
+    }
+
+    /**
+     * Allow the mutation of a row that is not a system row, or one the bypass
+     * unlocked, consuming the bypass, and refuse it otherwise.
+     *
+     * @param  bool  $isSystem
+     * @param  string  $operation
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private function allowSystemChange(bool $isSystem, string $operation): void
+    {
+        if (!$isSystem) {
             return;
         }
 
@@ -238,13 +255,22 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
             return (bool) $this->original['is_system'];
         }
 
-        $persisted = $this->newQueryWithoutScopes()
+        return (bool) ($this->storedSystemFlag() ?? true);
+    }
+
+    /**
+     * Read the row's `is_system` flag from the database on the write
+     * connection, or null when the row cannot be found.
+     *
+     * @return mixed
+     */
+    private function storedSystemFlag(): mixed
+    {
+        return $this->newQueryWithoutScopes()
             ->whereKey($this->getKeyForSaveQuery())
             ->toBase()
             ->useWritePdo()
             ->value('is_system');
-
-        return (bool) ($persisted ?? true);
     }
 
     /**

@@ -5,11 +5,11 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Services\Support;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationGrantee;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
-use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -30,11 +30,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 final class SystemRoleGuard
 {
     /**
-     * Dispatch the events of a write of the kind to the grantee, through the
-     * role's protection when the grantee is a role, labelled as a change of
-     * that kind, such as `permission-change`.
+     * Dispatch the events of a write to the grantee, through the role's
+     * protection when the grantee is a role, labelled as the operation given,
+     * such as `policy-change`.
      *
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  string  $operation
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent  ...$events
@@ -42,7 +42,7 @@ final class SystemRoleGuard
      *
      * @throws \Throwable
      */
-    public static function dispatch(GrantTarget $kind, Model|Reference $grantee, ?ActingContext $actor, AuthorizationEvent ...$events): void
+    public static function dispatch(string $operation, Model|Reference $grantee, ?ActingContext $actor, AuthorizationEvent ...$events): void
     {
         $role = $grantee instanceof Role && $actor === null ? $grantee : self::stored(Reference::of($grantee));
 
@@ -52,12 +52,14 @@ final class SystemRoleGuard
             return;
         }
 
-        $role->dispatchRelationChange("{$kind->value}-change", ...$events);
+        $role->dispatchRelationChange($operation, ...$events);
     }
 
     /**
      * Return the role the reference names, read as stored through the class
-     * `authorization.models.role` configures, or null when it names no role.
+     * `authorization.models.role` configures, or null when it names no role:
+     * none of its type, none with its key, or a key that is not a UUID, which
+     * keys no role on any database (PostgreSQL would refuse to compare it).
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @return \SineMacula\Laravel\Authorization\Models\Role|null
@@ -66,7 +68,7 @@ final class SystemRoleGuard
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
         $class = ModelClasses::get('role');
-        $role  = OperationGrantee::isRole($grantee) ? (new $class)->newQueryWithoutScopes()->useWritePdo()->find($grantee->id) : null;
+        $role  = OperationGrantee::isRole($grantee) && Str::isUuid($grantee->id) ? (new $class)->newQueryWithoutScopes()->useWritePdo()->find($grantee->id) : null;
 
         return $role instanceof Role ? $role : null;
     }

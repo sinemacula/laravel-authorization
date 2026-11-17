@@ -17,9 +17,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * through this explicit override, and each use of it is reported.
  * `protectedOperation` names the change the override allowed: `delete`,
  * `unprotect`, `rename`, `document-rewrite` or `modify`, or, for a role's
- * grants, the kind changed, such as `permission-change` or `policy-change`. The
- * events of the change (`Updated` or `Deleted`, or the grant events) are
- * dispatched as well, with the same operation.
+ * grants, the kind changed, such as `permission-change` or `policy-change`, or
+ * `revoke-all`. The events of the change (`Updated` or `Deleted`, or the grant
+ * events) are dispatched as well, with the same operation.
  *
  * A snapshot of plain values, never a model. It is dispatched once the write
  * commits, on the package's connection, and never for a write that rolls back

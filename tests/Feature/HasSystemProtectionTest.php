@@ -533,6 +533,33 @@ final class HasSystemProtectionTest extends TestCase
     }
 
     /**
+     * A change to a record's grants reads the system flag as stored: a stale
+     * instance loaded before the row was made system is refused, and one whose
+     * row is gone has nothing left to protect.
+     *
+     * @return void
+     */
+    public function testARelationChangeReadsTheStoredFlag(): void
+    {
+        $stale = self::reload(Role::query()->create(['name' => 'editor']));
+        $gone  = $this->makeSystemRole('super-admin');
+
+        Role::query()->whereKey($stale->id)->toBase()->update(['is_system' => true]);
+        Role::query()->whereKey($gone->id)->toBase()->delete();
+
+        Event::fake([RolePermissionGranted::class]);
+
+        self::assertFalse($stale->is_system);
+
+        $exception = $this->captureRoleRefusal(static fn () => $stale->dispatchRelationChange('permission-change', self::permissionGranted($stale)));
+
+        $gone->dispatchRelationChange('permission-change', self::permissionGranted($gone));
+
+        self::assertSame(['editor', 'permission-change'], [$exception->getRoleName(), $exception->getOperation()]);
+        Event::assertDispatchedTimes(RolePermissionGranted::class, 1);
+    }
+
+    /**
      * A write to a system record's grants that changed nothing needs no
      * override and reports none, and it uses up an unlock it was given, as a
      * clean save does.

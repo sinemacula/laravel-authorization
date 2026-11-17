@@ -560,6 +560,26 @@ final class RoleServiceTest extends TestCase
     }
 
     /**
+     * A role loaded before it was made a system role is guarded as stored, so
+     * the stale model cannot lift the protection.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAStaleModelOfASystemRoleIsStillGuarded(): void
+    {
+        $stale = Role::query()->findOrFail(self::role('admin')->id);
+
+        Permission::query()->create(['name' => 'posts:read']);
+        Role::query()->whereKey($stale->id)->update(['is_system' => true]);
+
+        self::assertFalse($stale->is_system);
+        self::assertInstanceOf(SystemRoleProtectedException::class, self::refusalOf(static fn (): GrantOutcome => self::service()->grantPermission($stale, 'posts:read')));
+        self::assertSame(0, DB::table('role_permissions')->count());
+    }
+
+    /**
      * A delegated call works on the role as stored, so the override on the role
      * given does not reach it and the change is refused.
      *

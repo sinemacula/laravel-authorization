@@ -2997,6 +2997,80 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
+     * Revoking everything a system role holds is refused without the override,
+     * by model or by reference, and reported when the override unlocks it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingEverythingASystemRoleHoldsNeedsTheOverride(): void
+    {
+        $admin = Role::query()->create(['name' => 'admin', 'is_system' => true]);
+
+        $admin->forceSystem()->attachPolicy(self::policy('editors'));
+
+        Event::fake([SystemOverrideUsed::class, PolicyDetached::class]);
+
+        foreach ([$admin, Reference::of($admin)] as $grantee) {
+            $refusal = self::refusalOf(static fn (): int => self::service()->revokeAll($grantee));
+
+            self::assertInstanceOf(SystemRoleProtectedException::class, $refusal);
+            self::assertSame('revoke-all', $refusal->getOperation());
+        }
+
+        self::assertSame(1, DB::table('authorizable_policies')->count());
+        Event::assertNothingDispatched();
+
+        self::assertSame(1, self::service()->revokeAll($admin->forceSystem()));
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+        Event::assertDispatched(SystemOverrideUsed::class, static fn (SystemOverrideUsed $event): bool => $event->protectedOperation === 'revoke-all');
+        Event::assertDispatchedTimes(PolicyDetached::class, 1);
+    }
+
+    /**
+     * Deleting a system role through the override still revokes everything it
+     * held: once its row is gone, nothing is left to protect.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDeletingASystemRoleThroughTheOverrideRevokesItsGrants(): void
+    {
+        $admin = Role::query()->create(['name' => 'admin', 'is_system' => true]);
+
+        $admin->forceSystem()->attachPolicy(self::policy('editors'));
+
+        Event::fake([SystemOverrideUsed::class, PolicyDetached::class]);
+
+        $admin->forceSystem()->delete();
+
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+        Event::assertDispatched(SystemOverrideUsed::class, static fn (SystemOverrideUsed $event): bool => $event->protectedOperation === 'delete');
+        Event::assertDispatchedTimes(SystemOverrideUsed::class, 1);
+        Event::assertDispatchedTimes(PolicyDetached::class, 1);
+    }
+
+    /**
+     * A grantee referenced as a role with a key that is not a UUID names no
+     * role, as one whose role does not exist names none, so the write goes
+     * ahead without comparing the key with the roles' keys, on every database.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleReferenceWithAKeyThatIsNoUuidNamesNoRole(): void
+    {
+        $grantee = new Reference((new Role)->getMorphClass(), 'not-a-uuid');
+        $policy  = self::policy('editors');
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->attachPolicy($grantee, $policy));
+        self::assertSame(1, self::service()->detachPolicy($grantee, $policy));
+    }
+
+    /**
      * A grant weighed as only shortening a row the grantee holds is weighed on
      * the row as locked: a row revoked while the service reads it has the grant
      * tried again, and decided as the new grant it is, refused, never written

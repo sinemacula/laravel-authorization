@@ -6,24 +6,21 @@ namespace SineMacula\Laravel\Authorization\Console;
 
 use Illuminate\Console\Command;
 use Illuminate\Database\Connection;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
-use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
+use SineMacula\Laravel\Authorization\Console\Support\SpatieRows;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * Migrate data from Spatie's `laravel-permission` tables into this package's
@@ -58,7 +55,9 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * earlier run stopped and reports those rows as already present. A grant given
  * an expiry since, or expired, is granted again without one. Two Spatie rows
  * that map to the same role or permission stop the import before anything is
- * written.
+ * written. A system role it reuses keeps its permissions: when the import would
+ * grant one a permission, or grant one again without an expiry, the command
+ * reports each and refuses before anything is written, on a dry run too.
  *
  * The import runs in two steps. The roles, the permissions and the roles'
  * permissions are written first, in one transaction, which commits before any
@@ -146,8 +145,18 @@ final class MigrateSpatieCommand extends Command
         $column           = $this->option('team-column') ?? config('permission.column_names.team_foreign_key');
         $this->teamColumn = \is_string($column) && $column !== '' ? $column : self::DEFAULT_TEAM_COLUMN;
 
-        if (!$this->isSourceApartFromTarget() || !$this->verifySourceSchema() || !$this->verifyTargetSchema() || !$this->isEveryTeamMapped()) {
-            return self::FAILURE;
+        $checks = [
+            $this->isSourceApartFromTarget(...),
+            $this->verifySourceSchema(...),
+            $this->verifyTargetSchema(...),
+            $this->isEveryTeamMapped(...),
+            $this->isEverySystemRoleKept(...),
+        ];
+
+        foreach ($checks as $check) {
+            if (!$check()) {
+                return self::FAILURE;
+            }
         }
 
         /** @var bool $dryRun */
@@ -323,10 +332,33 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
+     * Determine whether the import leaves the permissions of every system role
+     * it reuses as they are, reporting each it would change: only
+     * `forceSystem()` unlocks such a change, which the import never makes.
+     *
+     * @return bool
+     */
+    private function isEverySystemRoleKept(): bool
+    {
+        $rows    = fn (string $option): array => \array_map(static fn (object $row): array => (array) $row, $this->source()->table($this->sourceTable($option))->get()->all());
+        $changes = SpatieRows::systemRoleChanges($rows('roles-table'), $rows('permissions-table'), $rows('role-has-permissions-table'), $this->teamTenant(...));
+
+        foreach ($changes as $role => $permissions) {
+            $this->error("The import would change the permissions of system role '{$role}': " . \implode(', ', $permissions) . '.');
+        }
+
+        if ($changes !== []) {
+            $this->line('Nothing was written. Change the system role through forceSystem(), or leave these out of Spatie\'s role permissions, then re-run.');
+        }
+
+        return $changes === [];
+    }
+
+    /**
      * Return the tenant a Spatie row's team id maps to, or null for a row with
      * no team id.
      *
-     * @param  array<string, mixed>  $row
+     * @param  array<array-key, mixed>  $row
      * @return \SineMacula\Laravel\Authorization\Support\Reference|null
      */
     private function teamTenant(array $row): ?Reference
@@ -379,30 +411,6 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Return the row of the configured model with the name and guard that the
-     * owner holds, the platform when null, which a re-run reuses, or null when
-     * there is none.
-     *
-     * @param  'permission'|'role'  $model
-     * @param  string  $name
-     * @param  string|null  $guard
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $owner
-     * @return \Illuminate\Database\Eloquent\Model|null
-     */
-    private static function ownedRow(string $model, string $name, ?string $guard, ?Reference $owner): ?Model
-    {
-        /** @var class-string<\Illuminate\Database\Eloquent\Model> $class */
-        $class = ModelClasses::get($model);
-        $query = $class::query()->withoutGlobalScope(TenantScope::class)->where('name', $name)->where('guard', $guard);
-
-        if ($owner === null) {
-            return TenantChain::whereNullTenant($query, 'tenant_type', 'tenant_id')->first();
-        }
-
-        return $query->where('tenant_type', $owner->type)->where('tenant_id', $owner->id)->first();
-    }
-
-    /**
      * Migrate roles from Spatie's `roles` table through the role service, so
      * each is validated and reported as any role created here is, reusing the
      * role of the same name, guard and owner. A role with a team id is owned by
@@ -434,7 +442,7 @@ final class MigrateSpatieCommand extends Command
             $owner = $this->teamTenant($roleRow);
 
             /** @var \SineMacula\Laravel\Authorization\Models\Role|null $existing */
-            $existing = self::ownedRow('role', $roleRow['name'], $guard, $owner);
+            $existing = SpatieRows::owned('role', $roleRow['name'], $guard, $owner);
 
             $idMap[$roleRow['id']] = $existing ?? ($dryRun
                 ? RecordWriter::ownedBy(new Role(['name' => $roleRow['name'], 'guard' => $guard]), $owner)
@@ -475,7 +483,7 @@ final class MigrateSpatieCommand extends Command
             $guard = $permissionRow['guard_name'] ?? null;
 
             /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $existing */
-            $existing = self::ownedRow('permission', $permissionRow['name'], $guard, null);
+            $existing = SpatieRows::owned('permission', $permissionRow['name'], $guard, null);
 
             $idMap[$permissionRow['id']] = $existing ?? ($dryRun
                 ? new Permission(['name' => $permissionRow['name'], 'guard' => $guard])
