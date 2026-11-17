@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use Tests\Concerns\ChecksAccess;
+use Tests\Concerns\LagsTheReadConnection;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
@@ -38,7 +39,7 @@ use Tests\TestCase;
 #[CoversClass(AbstractAuthorizationMiddleware::class)]
 final class RequireRoleTest extends TestCase
 {
-    use ChecksAccess;
+    use ChecksAccess, LagsTheReadConnection;
 
     /**
      * A role the subject's identity holds admits the request; a subject or
@@ -279,6 +280,26 @@ final class RequireRoleTest extends TestCase
 
         $this->actingAsIdentity(StubIdentity::query()->findOrFail('manager-1'), $tenantB);
         self::assertFalse($this->admits(RequireRole::class, self::request(), 'manager'));
+    }
+
+    /**
+     * The check reads the roles on the write connection, so a read replica that
+     * lags never admits a role revoked since.
+     *
+     * @return void
+     */
+    public function testARoleRevokedOnTheWriterIsDenied(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $identity = self::identityHolding(roles: ['admin']);
+
+        self::lagTheReadConnection();
+
+        $identity->revokeRole('admin');
+        $this->actAs(StubIdentity::query()->findOrFail($identity->getKey()));
+
+        self::assertSame(DecisionReason::NO_MATCH, self::denialOf(fn (): Response => $this->handle('admin'))->getReason());
     }
 
     /**

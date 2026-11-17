@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\GrantRelation;
@@ -31,6 +32,9 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
  */
 trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 {
+    /** @var \WeakMap<\Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>, true>|null The grants a check read on the write connection. */
+    private static ?\WeakMap $authorizationWriterReads = null;
+
     /**
      * Build the relation onto one kind of grant: polymorphic on the grantee,
      * through the target's grant table and pivot class, with the expiry and
@@ -84,8 +88,9 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     }
 
     /**
-     * Return the grants of the given relation, loading them first when they are
-     * not loaded yet.
+     * Return the grants of the given relation, read on the write connection
+     * first when the relation is not loaded or was loaded other than here, as
+     * one the application loaded may have come from a read replica that lags.
      *
      * Loading is explicit, never lazy, so an identity hydrated from a query of
      * several rows resolves under `Model::preventLazyLoading()` as well.
@@ -95,10 +100,20 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      */
     private function authorizationLoadedGrants(string $relation): EloquentCollection
     {
-        $this->loadMissing($relation);
+        $read   = self::$authorizationWriterReads ??= new \WeakMap;
+        $loaded = $this->relationLoaded($relation) ? $this->getRelation($relation) : null;
 
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model> */
-        return $this->getRelation($relation);
+        if ($loaded instanceof EloquentCollection && isset($read[$loaded])) {
+            return $loaded;
+        }
+
+        $this->load([$relation => static fn (Relation $grants): Builder => $grants->getQuery()->useWritePdo()]);
+
+        /** @var \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model> $grants */
+        $grants        = $this->getRelation($relation);
+        $read[$grants] = true;
+
+        return $grants;
     }
 
     /**
