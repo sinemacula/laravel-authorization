@@ -6,7 +6,7 @@ namespace Tests\Feature\Stubs;
 
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Concerns\HasAuthorization;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 
 /**
  * Test stub - identity that does not declare the hook, so the trait falls back
@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
  *
  * @internal
  */
-final class DefaultGuardUser extends Model implements AuthorizableIdentity // @phpstan-ignore-line
+final class DefaultGuardUser extends Model implements AuthorizableGrantee // @phpstan-ignore-line
 {
     use HasAuthorization;
 
@@ -34,5 +34,5 @@ final class DefaultGuardUser extends Model implements AuthorizableIdentity // @p
     protected $fillable = ['id']; // @phpstan-ignore property.phpDocType
 
     /** @var string */
-    protected $table = 'stub_identities'; // @phpstan-ignore property.phpDocType
+    protected $table = 'stub_grantees'; // @phpstan-ignore property.phpDocType
 }

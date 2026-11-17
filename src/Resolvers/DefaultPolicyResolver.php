@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Resolvers;
 
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder;
@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Evaluation\EvidenceRecorder;
  *
  * Unions the policies returned by an optional external `PolicyStore`, asked on
  * every check, such as policies shipped in code, with the policies attached to
- * the principal itself when it is an `AuthorizableIdentity`, which
+ * the principal itself when it is an `AuthorizableGrantee`, which
  * `getPolicies()` reads through the resolution cache: its own attachments,
  * inline policies included, and the policies attached to the roles it holds and
  * to the roles above them, each where both grants hold. A principal that
@@ -55,7 +55,7 @@ final readonly class DefaultPolicyResolver implements PolicyResolver
      * Return every policy applicable to the supplied principal.
      *
      * Unions the optional `PolicyStore`'s contribution with the principal's own
-     * attached policies when the principal is an `AuthorizableIdentity`.
+     * attached policies when the principal is an `AuthorizableGrantee`.
      *
      * @param  object  $principal
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
@@ -69,7 +69,7 @@ final readonly class DefaultPolicyResolver implements PolicyResolver
             $policies = $this->store->policiesFor($principal);
         }
 
-        if ($principal instanceof AuthorizableIdentity) {
+        if ($principal instanceof AuthorizableGrantee) {
             $policies = \array_merge($policies, $principal->getPolicies());
         }
 
@@ -97,7 +97,7 @@ final readonly class DefaultPolicyResolver implements PolicyResolver
 
         $recorder->notePolicies($policies, null);
 
-        if ($principal instanceof AuthorizableIdentity) {
+        if ($principal instanceof AuthorizableGrantee) {
             $policies = \array_merge($policies, GrantProvenanceResolver::policiesOf($principal, $recorder));
         }
 

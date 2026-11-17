@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot;
 use SineMacula\Laravel\Authorization\Observers\AuthorizablePolicyPivotObserver;
 use Tests\Concerns\CatchesRefusals;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -41,8 +41,8 @@ final class AuthorizablePolicyPivotTest extends TestCase
         self::assertCount(1, $attributes);
         self::assertSame([AuthorizablePolicyPivotObserver::class], $attributes[0]->getArguments());
 
-        $owner  = StubIdentity::create(['id' => 'user-1']);
-        $other  = StubIdentity::create(['id' => 'user-2']);
+        $owner  = StubGrantee::create(['id' => 'user-1']);
+        $other  = StubGrantee::create(['id' => 'user-2']);
         $inline = $owner->createInlinePolicy('mine', ['version' => 1, 'statements' => []]);
 
         $refusal = self::refusalOf(static fn () => $other->policies()->attach($inline->id));

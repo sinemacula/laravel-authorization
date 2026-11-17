@@ -23,9 +23,9 @@ use SineMacula\Laravel\Authorization\Enums\WideningReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
-use SineMacula\Laravel\Authorization\Events\Identity\BreakGlassActivated;
-use SineMacula\Laravel\Authorization\Events\Identity\BreakGlassRevoked;
-use SineMacula\Laravel\Authorization\Events\Identity\BreakGlassSurrendered;
+use SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassActivated;
+use SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassSurrendered;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\BreakGlassRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
@@ -60,9 +60,9 @@ use Tests\Concerns\ReportsEveryDecision;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Concerns\WidensGrants;
 use Tests\Feature\Stubs\ApiGuardedUser;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\TestCase;
@@ -146,7 +146,7 @@ final class BreakGlassServiceTest extends TestCase
      */
     public function testATrustedActivationGrantsTheRoleInItsScopeAlone(): void
     {
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
         $role = self::emergencyRole(self::ACTION);
 
         self::assertFalse($user->hasRole('responder'));
@@ -172,7 +172,7 @@ final class BreakGlassServiceTest extends TestCase
 
         Carbon::setTestNow('2026-07-01 12:30:00');
 
-        self::assertFalse(self::allows(StubIdentity::query()->findOrFail('user-1'), 'acct1'));
+        self::assertFalse(self::allows(StubGrantee::query()->findOrFail('user-1'), 'acct1'));
     }
 
     /**
@@ -186,7 +186,7 @@ final class BreakGlassServiceTest extends TestCase
      */
     public function testAPlatformActivationReachesEveryTenantOfItsApplication(): void
     {
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
         $role = self::emergencyRole(self::ACTION);
 
         $user->load('roles');
@@ -263,8 +263,8 @@ final class BreakGlassServiceTest extends TestCase
 
         $role  = self::emergencyRole(self::ACTION);
         $actor = self::administrator();
-        $first = StubIdentity::query()->create(['id' => 'user-1']);
-        $other = StubIdentity::query()->create(['id' => 'user-2']);
+        $first = StubGrantee::query()->create(['id' => 'user-1']);
+        $other = StubGrantee::query()->create(['id' => 'user-2']);
         $grant = $this->lockedBeforeDeciding(PackagePermissions::ROLE_GRANT, static fn () => GrantService::instance()?->grantRole($first, $role, actor: $actor));
 
         $activation = $this->lockedBeforeDeciding(PackagePermissions::BREAK_GLASS_GRANT, static fn () => self::activateFor($other, $actor, role: $role));
@@ -285,7 +285,7 @@ final class BreakGlassServiceTest extends TestCase
      */
     public function testTheRightsAreDecidedInTheActivationsScope(): void
     {
-        $user  = StubIdentity::query()->create(['id' => 'user-1']);
+        $user  = StubGrantee::query()->create(['id' => 'user-1']);
         $actor = self::administrator([], 'admin-1', null);
         $admin = self::principalOf($actor);
 
@@ -395,7 +395,7 @@ final class BreakGlassServiceTest extends TestCase
         self::emergencyRole(self::ACTION);
         self::emergencyRole('posts:audit', 'auditor');
 
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
 
         self::service()->activate($user, 'responder', GrantScope::platform(), 30, 'incident', 'éééé');
         self::service()->activate($user, 'auditor', GrantScope::platform(), 60, 'audit');
@@ -415,16 +415,16 @@ final class BreakGlassServiceTest extends TestCase
      */
     public function testTheRoleAndGranteeAreHeldToWhatAGrantIsHeldTo(): void
     {
-        $user  = StubIdentity::query()->create(['id' => 'user-1']);
+        $user  = StubGrantee::query()->create(['id' => 'user-1']);
         $owned = Role::query()->withoutGlobalScopes()->create(['name' => 'responder', 'tenant_type' => 'tenant', 'tenant_id' => 'org1']);
         $api   = ApiGuardedUser::query()->create(['id' => 'api-1']);
         $web   = Role::query()->withoutGlobalScopes()->create(['name' => 'responder', 'guard' => 'web']);
 
-        $keyless         = new StubIdentity;
+        $keyless         = new StubGrantee;
         $keyless->exists = true;
 
         self::assertInstanceOf(UnknownRoleException::class, self::refusalOf(static fn () => self::activateFor($user, role: 'auditor')));
-        self::assertInstanceOf(InvalidGranteeException::class, self::refusalOf(static fn () => self::activateFor(new StubIdentity)));
+        self::assertInstanceOf(InvalidGranteeException::class, self::refusalOf(static fn () => self::activateFor(new StubGrantee)));
         self::assertInstanceOf(InvalidGranteeException::class, self::refusalOf(static fn () => self::activateFor($keyless)));
         self::assertInstanceOf(GrantScopeMismatchException::class, self::refusalOf(static fn () => self::activateFor($user, role: $owned)));
         self::assertInstanceOf(GranteeGuardMismatchException::class, self::refusalOf(static fn () => self::activateFor($api, role: $web)));
@@ -446,8 +446,8 @@ final class BreakGlassServiceTest extends TestCase
      */
     public function testTheGranteeAloneSurrendersItsActivation(): void
     {
-        $user       = StubIdentity::query()->create(['id' => 'user-1']);
-        $other      = StubIdentity::query()->create(['id' => 'user-2']);
+        $user       = StubGrantee::query()->create(['id' => 'user-1']);
+        $other      = StubGrantee::query()->create(['id' => 'user-2']);
         $role       = self::emergencyRole(self::ACTION);
         $activation = self::service()->activate($user, $role, GrantScope::platform(), 10, 'incident');
         $beside     = self::service()->activate($other, $role, GrantScope::platform(), 10, 'incident');
@@ -455,7 +455,7 @@ final class BreakGlassServiceTest extends TestCase
         GrantService::instance()?->grantRole($other, $role);
 
         $refusal = self::refusalOf(static fn () => self::service()->surrender($activation->id, ActingContext::for($other)));
-        $alike   = self::refusalOf(static fn () => self::service()->surrender($activation->id, ActingContext::for(StubSecondIdentity::query()->create(['id' => 'user-1']))));
+        $alike   = self::refusalOf(static fn () => self::service()->surrender($activation->id, ActingContext::for(StubSecondGrantee::query()->create(['id' => 'user-1']))));
         $posing  = self::refusalOf(static fn () => self::service()->surrender($activation->id, ActingContext::for($user)->impersonatedBy($other)));
 
         self::assertInstanceOf(BreakGlassRefusedException::class, $refusal);
@@ -473,10 +473,10 @@ final class BreakGlassServiceTest extends TestCase
 
         self::assertSame('2026-07-01 12:04:00', $ended->ended_at?->toDateTimeString());
         self::assertSame([$user->getMorphClass(), 'user-1', 'surrendered'], [$ended->ended_by_type, $ended->ended_by_id, $ended->end_reason]);
-        self::assertFalse(self::allows(StubIdentity::query()->findOrFail('user-1'), null));
+        self::assertFalse(self::allows(StubGrantee::query()->findOrFail('user-1'), null));
         self::assertSame(0, self::service()->surrender($activation->id, ActingContext::for($user)));
         self::assertSame(1, self::service()->surrender($beside, ActingContext::for($other)));
-        self::assertTrue(self::allows(StubIdentity::query()->findOrFail('user-2'), null));
+        self::assertTrue(self::allows(StubGrantee::query()->findOrFail('user-2'), null));
     }
 
     /**
@@ -493,7 +493,7 @@ final class BreakGlassServiceTest extends TestCase
     {
         $this->reportEveryDecision();
 
-        $user    = StubIdentity::query()->create(['id' => 'user-1']);
+        $user    = StubGrantee::query()->create(['id' => 'user-1']);
         $role    = self::emergencyRole(self::ACTION);
         $scope   = new GrantScope(self::tenant('acct1'), 'admin');
         $first   = self::service()->activate($user, $role, $scope, 10, 'incident');
@@ -536,7 +536,7 @@ final class BreakGlassServiceTest extends TestCase
      */
     public function testEachEndLocksTheActivationOnce(): void
     {
-        $user   = StubIdentity::query()->create(['id' => 'user-1']);
+        $user   = StubGrantee::query()->create(['id' => 'user-1']);
         $role   = self::emergencyRole(self::ACTION);
         $holder = self::administrator([PackagePermissions::BREAK_GLASS_REVOKE], 'holder-1', null);
         $locks  = $this->recordRowLocks();
@@ -574,7 +574,7 @@ final class BreakGlassServiceTest extends TestCase
 
         config(['authorization.administration.retries' => 1]);
 
-        $user       = StubIdentity::query()->create(['id' => 'user-1']);
+        $user       = StubGrantee::query()->create(['id' => 'user-1']);
         $actor      = self::administrator([PackagePermissions::BREAK_GLASS_GRANT, PackagePermissions::BREAK_GLASS_REVOKE], 'admin-1', null);
         $rows       = DB::table('authorizable_permissions')->where('authorizable_id', $actor->principal()->id);
         $touch      = static fn (string $at): \Closure => static fn (): int => (clone $rows)->update(['updated_at' => $at]);
@@ -613,7 +613,7 @@ final class BreakGlassServiceTest extends TestCase
     {
         config(['authorization.administration.retries' => 0]);
 
-        $user       = StubIdentity::query()->create(['id' => 'user-1']);
+        $user       = StubGrantee::query()->create(['id' => 'user-1']);
         $activation = self::activateFor($user, role: self::emergencyRole(self::ACTION));
 
         /** @var \ArrayObject<int, array{\SineMacula\Laravel\Authorization\Support\Reference|null, string}> $failed */
@@ -646,7 +646,7 @@ final class BreakGlassServiceTest extends TestCase
      */
     public function testEndingLeavesANormalGrantAndWorksWhileDisabled(): void
     {
-        $user       = StubIdentity::query()->create(['id' => 'user-1']);
+        $user       = StubGrantee::query()->create(['id' => 'user-1']);
         $role       = self::emergencyRole(self::ACTION);
         $activation = self::service()->activate($user, $role, new GrantScope(self::tenant('acct1')), 10, 'incident');
 
@@ -659,7 +659,7 @@ final class BreakGlassServiceTest extends TestCase
         self::assertFalse(self::allows($user, 'acct1'));
         self::assertSame(1, self::service()->revoke($activation));
         Event::assertDispatchedTimes(BreakGlassRevoked::class, 1);
-        self::assertTrue(self::allows(StubIdentity::query()->findOrFail('user-1'), 'acct2'));
+        self::assertTrue(self::allows(StubGrantee::query()->findOrFail('user-1'), 'acct2'));
         self::assertSame(1, DB::table('authorizable_roles')->where('authorizable_id', 'user-1')->count());
     }
 
@@ -674,7 +674,7 @@ final class BreakGlassServiceTest extends TestCase
      */
     public function testAnActivationIsReportedWithItsGranter(): void
     {
-        $user  = StubIdentity::query()->create(['id' => 'user-1']);
+        $user  = StubGrantee::query()->create(['id' => 'user-1']);
         $role  = self::emergencyRole(self::ACTION);
         $actor = self::administrator([PackagePermissions::BREAK_GLASS_GRANT], 'admin-1', null);
         $scope = new GrantScope(self::tenant('acct1'), 'admin', false);
@@ -710,7 +710,7 @@ final class BreakGlassServiceTest extends TestCase
      */
     public function testEachEndIsReportedOnceWithWhoEndedIt(): void
     {
-        $user   = StubIdentity::query()->create(['id' => 'user-1']);
+        $user   = StubGrantee::query()->create(['id' => 'user-1']);
         $role   = self::emergencyRole(self::ACTION);
         $holder = self::administrator([PackagePermissions::BREAK_GLASS_REVOKE], 'holder-1', null);
         $scope  = new GrantScope(self::tenant('acct1'), 'admin', false);
@@ -756,8 +756,8 @@ final class BreakGlassServiceTest extends TestCase
      */
     public function testNothingIsReportedForARefusalOrARollback(): void
     {
-        $user  = StubIdentity::query()->create(['id' => 'user-1']);
-        $other = StubIdentity::query()->create(['id' => 'user-2']);
+        $user  = StubGrantee::query()->create(['id' => 'user-1']);
+        $other = StubGrantee::query()->create(['id' => 'user-2']);
         $role  = self::emergencyRole(self::ACTION);
         $kept  = self::service()->activate($user, $role, GrantScope::platform(), 10, 'incident');
         $none  = self::administrator([PackagePermissions::BREAK_GLASS_GRANT], 'none-1', null);
@@ -887,7 +887,7 @@ final class BreakGlassServiceTest extends TestCase
     {
         $this->reportEveryDecision();
 
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
         $role = self::emergencyRole(self::ACTION);
         $gone = static fn (): int => DB::table('roles')->where('id', $role->getKey())->delete();
 
@@ -918,7 +918,7 @@ final class BreakGlassServiceTest extends TestCase
     {
         $this->reportEveryDecision();
 
-        $user  = StubIdentity::query()->create(['id' => 'user-1']);
+        $user  = StubGrantee::query()->create(['id' => 'user-1']);
         $actor = self::administrator([PackagePermissions::BREAK_GLASS_GRANT], 'admin-1', null);
         $admin = self::principalOf($actor);
 
@@ -948,7 +948,7 @@ final class BreakGlassServiceTest extends TestCase
     {
         $this->reportEveryDecision();
 
-        $user  = StubIdentity::query()->create(['id' => 'user-1']);
+        $user  = StubGrantee::query()->create(['id' => 'user-1']);
         $actor = self::administrator([PackagePermissions::BREAK_GLASS_GRANT], 'admin-1', null);
 
         self::emergencyRole(self::ACTION);
@@ -975,8 +975,8 @@ final class BreakGlassServiceTest extends TestCase
     {
         $responder = self::emergencyRole(self::ACTION);
         $auditor   = self::emergencyRole(self::ACTION, 'auditor');
-        $granted   = StubIdentity::query()->create(['id' => 'user-1']);
-        $activated = StubIdentity::query()->create(['id' => 'user-2']);
+        $granted   = StubGrantee::query()->create(['id' => 'user-1']);
+        $activated = StubGrantee::query()->create(['id' => 'user-2']);
         $actor     = self::administrator([PackagePermissions::BREAK_GLASS_GRANT], 'admin-1', null);
 
         self::exclusions()->declare($responder, $auditor);
@@ -1012,8 +1012,8 @@ final class BreakGlassServiceTest extends TestCase
     public function testActivationsOfOneRoleShareItsLock(): void
     {
         $this->raceOrSkip(static function (): void {
-            $first  = StubIdentity::query()->create(['id' => 'user-1']);
-            $second = StubIdentity::query()->create(['id' => 'user-2']);
+            $first  = StubGrantee::query()->create(['id' => 'user-1']);
+            $second = StubGrantee::query()->create(['id' => 'user-2']);
             $role   = self::emergencyRole(self::ACTION);
 
             self::assertSame(['ok', 'ok', true], self::raced(static fn () => self::activateFor($first), self::ROLE_LOCK, static fn () => self::activateFor($second)));
@@ -1053,7 +1053,7 @@ final class BreakGlassServiceTest extends TestCase
             self::exclusions()->declare($responder, $auditor);
 
             foreach ($races as $name => [$write, $pattern, $concurrent, $ended]) {
-                $user = StubIdentity::query()->create(['id' => $name]);
+                $user = StubGrantee::query()->create(['id' => $name]);
 
                 self::assertSame($ended, self::raced(static fn () => $write($user), $pattern, static fn () => $concurrent($user)), $name);
             }
@@ -1074,7 +1074,7 @@ final class BreakGlassServiceTest extends TestCase
      */
     public function testEveryOperationRefusesOnceThePackageRefuses(): void
     {
-        $user    = StubIdentity::query()->create(['id' => 'user-1']);
+        $user    = StubGrantee::query()->create(['id' => 'user-1']);
         $actor   = ActingContext::for($user);
         $service = $this->container()->make(BreakGlassService::class);
 
@@ -1134,7 +1134,7 @@ final class BreakGlassServiceTest extends TestCase
         } finally {
             $grants = ['break_glass_activations', 'role_exclusions', 'authorizable_roles', 'authorizable_permissions', 'role_permissions'];
 
-            foreach ([...$grants, 'permissions', 'roles', 'stub_identities', ClosureTenantTree::TABLE] as $table) {
+            foreach ([...$grants, 'permissions', 'roles', 'stub_grantees', ClosureTenantTree::TABLE] as $table) {
                 DB::table($table)->delete();
             }
         }
@@ -1272,7 +1272,7 @@ final class BreakGlassServiceTest extends TestCase
             return StubMachine::query()->create(['id' => 'machine-1']);
         }
 
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
 
         if ($kind === 'identity') {
             BreakGlassActivations::markIdentity($user);
@@ -1324,11 +1324,11 @@ final class BreakGlassServiceTest extends TestCase
      * Return the acting principal's model.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function principalOf(ActingContext $actor): StubIdentity
+    private static function principalOf(ActingContext $actor): StubGrantee
     {
-        return StubIdentity::query()->whereKey($actor->principal()->id)->firstOrFail();
+        return StubGrantee::query()->whereKey($actor->principal()->id)->firstOrFail();
     }
 
     /**
@@ -1392,7 +1392,7 @@ final class BreakGlassServiceTest extends TestCase
      * Return what the activation event reports: the grantee, the role, its
      * name, the scope, the activation, the code and the expiry.
      *
-     * @param  \SineMacula\Laravel\Authorization\Events\Identity\BreakGlassActivated  $event
+     * @param  \SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassActivated  $event
      * @return list<mixed>
      */
     private static function activated(BreakGlassActivated $event): array
@@ -1404,7 +1404,7 @@ final class BreakGlassServiceTest extends TestCase
      * Return what the end event reports: the grantee, the role, its name, the
      * scope, the activation and when it ended.
      *
-     * @param  \SineMacula\Laravel\Authorization\Events\Identity\BreakGlassRevoked|\SineMacula\Laravel\Authorization\Events\Identity\BreakGlassSurrendered  $event
+     * @param  \SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassRevoked|\SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassSurrendered  $event
      * @return list<mixed>
      */
     private static function ended(BreakGlassRevoked|BreakGlassSurrendered $event): array
@@ -1416,7 +1416,7 @@ final class BreakGlassServiceTest extends TestCase
      * Return who the end event names as ending it: whether the call was
      * trusted, its actor, the identity behind it and any impersonator.
      *
-     * @param  \SineMacula\Laravel\Authorization\Events\Identity\BreakGlassRevoked|\SineMacula\Laravel\Authorization\Events\Identity\BreakGlassSurrendered  $event
+     * @param  \SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassRevoked|\SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassSurrendered  $event
      * @return list<mixed>
      */
     private static function callOf(BreakGlassRevoked|BreakGlassSurrendered $event): array

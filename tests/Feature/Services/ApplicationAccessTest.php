@@ -25,7 +25,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\RequestSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSessionPolicySource;
 use Tests\Feature\Stubs\StubSubjectResolver;
@@ -67,7 +67,7 @@ final class ApplicationAccessTest extends TestCase
      */
     public function testAnApplicationNotNamedIsOpen(): void
     {
-        self::assertTrue(self::access()->mayUse('web', StubIdentity::create(['id' => 'user-1']), null));
+        self::assertTrue(self::access()->mayUse('web', StubGrantee::create(['id' => 'user-1']), null));
     }
 
     /**
@@ -78,8 +78,8 @@ final class ApplicationAccessTest extends TestCase
      */
     public function testANamedApplicationRequiresItsPermission(): void
     {
-        $staff    = StubIdentity::create(['id' => 'staff']);
-        $customer = StubIdentity::create(['id' => 'customer']);
+        $staff    = StubGrantee::create(['id' => 'staff']);
+        $customer = StubGrantee::create(['id' => 'customer']);
 
         Role::create(['name' => 'staff'])->givePermission(Permission::create(['name' => 'admin:access']));
         $staff->assignRole('staff');
@@ -98,7 +98,7 @@ final class ApplicationAccessTest extends TestCase
      */
     public function testTheCheckIsDecidedOnTheApplicationAskedAbout(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         Permission::create(['name' => 'admin:access']);
         Permission::create(['name' => 'mobile:access']);
@@ -122,7 +122,7 @@ final class ApplicationAccessTest extends TestCase
      */
     public function testTheCheckIsDecidedInTheTenantGiven(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $own     = self::createTenant('tenant-a');
         $request = self::createTenant('tenant-b');
 
@@ -148,7 +148,7 @@ final class ApplicationAccessTest extends TestCase
      */
     public function testASubjectOnThePlatformIsDecidedOnTheApplicationAndTenantAskedAbout(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
         $own   = self::createTenant('tenant-a');
         $other = self::createTenant('tenant-b');
 
@@ -176,7 +176,7 @@ final class ApplicationAccessTest extends TestCase
      */
     public function testTheCheckHoldsWhileTheSubjectIsBeingResolved(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         Permission::create(['name' => 'admin:access']);
         $user->givePermission('admin:access', application: 'admin');
@@ -188,12 +188,12 @@ final class ApplicationAccessTest extends TestCase
             /**
              * Create a resolver that admits the principal as it resolves.
              *
-             * @param  \Tests\Feature\Stubs\StubIdentity  $user
+             * @param  \Tests\Feature\Stubs\StubGrantee  $user
              */
             public function __construct(
 
                 /** The principal admitted. */
-                private readonly StubIdentity $user,
+                private readonly StubGrantee $user,
             ) {}
 
             /**
@@ -280,7 +280,7 @@ final class ApplicationAccessTest extends TestCase
      */
     public function testAPersonIsAdmittedWhateverTheRequestsSessionCaps(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'admin:access']));
 
@@ -304,7 +304,7 @@ final class ApplicationAccessTest extends TestCase
      */
     public function testADenyStillRefuses(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $machine = StubMachine::create(['id' => 'svc-1']);
         $deny    = Policy::create(['name' => 'no-admin', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['admin:access']]]]]);
 
@@ -350,8 +350,8 @@ final class ApplicationAccessTest extends TestCase
      */
     public function testAGuardrailStillRefuses(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
-        $actor = StubIdentity::create(['id' => 'guardrail-admin']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
+        $actor = StubGrantee::create(['id' => 'guardrail-admin']);
 
         $user->givePermission(Permission::create(['name' => 'admin:access']));
         $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
@@ -397,7 +397,7 @@ final class ApplicationAccessTest extends TestCase
      */
     public function testAskingRefusesOnEveryPathOnceThePackageRefuses(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $this->refuseThePackage();
 

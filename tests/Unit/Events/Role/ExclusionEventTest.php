@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
-use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
+use SineMacula\Laravel\Authorization\Contracts\GranteeEvent;
 use SineMacula\Laravel\Authorization\Events\Role\ExclusionDeclared;
 use SineMacula\Laravel\Authorization\Events\Role\ExclusionEvent;
 use SineMacula\Laravel\Authorization\Events\Role\ExclusionRemoved;
@@ -44,7 +44,7 @@ final class ExclusionEventTest extends TestCase
         self::assertTrue($reflection->isReadOnly());
         self::assertTrue($reflection->implementsInterface(AuthorizationEvent::class));
         self::assertTrue($reflection->implementsInterface(AuthorizationMutation::class));
-        self::assertFalse($reflection->implementsInterface(IdentityEvent::class));
+        self::assertFalse($reflection->implementsInterface(GranteeEvent::class));
 
         foreach ([ExclusionDeclared::class, ExclusionRemoved::class] as $class) {
             $parent = (new \ReflectionClass($class))->getParentClass();

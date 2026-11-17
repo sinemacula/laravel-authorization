@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -61,9 +61,9 @@ final class RoleRankTest extends TestCase
         $actor->assignRole($seniorRole);
         $target->assignRole($juniorRole);
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshActor */
         $freshActor = $actor->fresh();
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertTrue($freshActor->canActOn($freshTarget));
@@ -85,9 +85,9 @@ final class RoleRankTest extends TestCase
         $actor->assignRole($juniorRole);
         $target->assignRole($seniorRole);
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshActor */
         $freshActor = $actor->fresh();
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertFalse($freshActor->canActOn($freshTarget));
@@ -109,9 +109,9 @@ final class RoleRankTest extends TestCase
         $alice->assignRole($roleA);
         $bob->assignRole($roleB);
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshAlice */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshAlice */
         $freshAlice = $alice->fresh();
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshBob */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshBob */
         $freshBob = $bob->fresh();
 
         self::assertFalse($freshAlice->canActOn($freshBob));
@@ -134,9 +134,9 @@ final class RoleRankTest extends TestCase
         $actor->assignRole($unrankedRole);
         $target->assignRole($rankedRole);
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshActor */
         $freshActor = $actor->fresh();
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertFalse($freshActor->canActOn($freshTarget));
@@ -158,9 +158,9 @@ final class RoleRankTest extends TestCase
         $actor->assignRole($rankedRole);
         $target->assignRole($unrankedRole);
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshActor */
         $freshActor = $actor->fresh();
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertTrue($freshActor->canActOn($freshTarget));
@@ -182,9 +182,9 @@ final class RoleRankTest extends TestCase
         $actor->assignRole($roleA);
         $target->assignRole($roleB);
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshActor */
         $freshActor = $actor->fresh();
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertFalse($freshActor->canActOn($freshTarget));
@@ -238,9 +238,9 @@ final class RoleRankTest extends TestCase
         $target->assignRole($seniorRole);
 
         // Junior acting on senior — normally blocked, but rank is disabled.
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshActor */
         $freshActor = $actor->fresh();
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertTrue($freshActor->canActOn($freshTarget));
@@ -268,9 +268,9 @@ final class RoleRankTest extends TestCase
         $target->assignRole($midRole);
 
         // Actor's best (1) < target's best (5) — can act.
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshActor */
         $freshActor = $actor->fresh();
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertTrue($freshActor->canActOn($freshTarget));
@@ -304,7 +304,7 @@ final class RoleRankTest extends TestCase
 
         $plainObject = new \stdClass;
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshActor */
         $freshActor = $actor->fresh();
 
         self::assertFalse($freshActor->canActOn($plainObject));
@@ -328,14 +328,14 @@ final class RoleRankTest extends TestCase
     }
 
     /**
-     * Build a stub identity with the given name.
+     * Build a stub grantee with the given name.
      *
      * @param  string  $name
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function makeIdentity(string $name): StubIdentity
+    private function makeIdentity(string $name): StubGrantee
     {
-        return StubIdentity::create([
+        return StubGrantee::create([
             'id'   => (string) Str::uuid(),
             'name' => $name,
         ]);

@@ -31,7 +31,7 @@ use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
@@ -259,7 +259,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         [$manager, $target] = $this->previewed();
 
-        $grantee = StubIdentity::query()->create(['id' => 'grantee']);
+        $grantee = StubGrantee::query()->create(['id' => 'grantee']);
         $preview = $manager->previewFor($target);
         /** @var \ArrayObject<int, mixed> $calls */
         $calls = new \ArrayObject;
@@ -397,7 +397,7 @@ final class AuthorizationManagerTest extends TestCase
      * the posts' actions; and the caller.
      *
      * @param  list<string>  $permissions
-     * @return array{\SineMacula\Laravel\Authorization\AuthorizationManager, \Tests\Feature\Stubs\StubIdentity, \Tests\Feature\Stubs\StubIdentity}
+     * @return array{\SineMacula\Laravel\Authorization\AuthorizationManager, \Tests\Feature\Stubs\StubGrantee, \Tests\Feature\Stubs\StubGrantee}
      *
      * @throws \Throwable
      */

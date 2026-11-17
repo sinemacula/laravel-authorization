@@ -28,7 +28,7 @@ use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\AmbientResourceTenantResolver;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FailingResourceAttributes;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
@@ -64,8 +64,8 @@ final class AuthorizationManagerTest extends TestCase
     /** @var \Tests\Feature\Stubs\StubTenant The tenant the request is in. */
     private StubTenant $second;
 
-    /** @var \Tests\Feature\Stubs\StubIdentity The subject the checks are about. */
-    private StubIdentity $user;
+    /** @var \Tests\Feature\Stubs\StubGrantee The subject the checks are about. */
+    private StubGrantee $user;
 
     /**
      * Grant the user the first action in the first tenant and the second
@@ -83,12 +83,12 @@ final class AuthorizationManagerTest extends TestCase
 
         $this->first  = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'A']);
         $this->second = StubTenant::query()->create(['id' => 'tenant-b', 'name' => 'B']);
-        $this->user   = StubIdentity::create(['id' => 'user-1']);
+        $this->user   = StubGrantee::create(['id' => 'user-1']);
 
         $this->user->givePermission(Permission::create(['name' => self::CREATE]), null, $this->first);
         $this->user->givePermission(Permission::create(['name' => self::DELETE]), null, null, true, 'admin');
 
-        $this->resolveRequest(StubIdentity::create(['id' => 'request-user']), $this->second, 'web');
+        $this->resolveRequest(StubGrantee::create(['id' => 'request-user']), $this->second, 'web');
     }
 
     /**
@@ -138,7 +138,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertFalse(Authorization::for($this->user)->can(self::CREATE));
         self::assertSame(['tenant-b', 'web'], self::provenance());
 
-        $this->resolveRequest(StubIdentity::create(['id' => 'request-user-2']), $this->first, 'admin');
+        $this->resolveRequest(StubGrantee::create(['id' => 'request-user-2']), $this->first, 'admin');
 
         self::assertTrue(Authorization::for($this->subject())->can(self::CREATE));
         self::assertTrue(Authorization::for($this->user)->can(self::DELETE));
@@ -287,7 +287,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         Event::fake([AuthorizationFailed::class]);
 
-        $this->resolveRequest(StubIdentity::create(['id' => 'request-user-2']), $this->second, 'web');
+        $this->resolveRequest(StubGrantee::create(['id' => 'request-user-2']), $this->second, 'web');
 
         $inFirst = Authorization::for($this->subject($this->first));
 
@@ -339,7 +339,7 @@ final class AuthorizationManagerTest extends TestCase
         config(['authorization.attributes.resources' => ['posts' => FailingResourceAttributes::class]]);
 
         $this->app?->forgetInstance(CheckContextFactory::class);
-        $this->resolveRequest(StubIdentity::create(['id' => 'request-user-2']), $this->second, 'web');
+        $this->resolveRequest(StubGrantee::create(['id' => 'request-user-2']), $this->second, 'web');
 
         $policy = EvaluationPolicy::fromArray(['name' => 'status', 'statements' => [
             ['effect' => 'allow', 'actions' => [self::DELETE], 'conditions' => ['eq' => ['resource.status' => 'published']]],
@@ -518,7 +518,7 @@ final class AuthorizationManagerTest extends TestCase
         config(['authorization.attributes.resources' => ['posts' => FailingResourceAttributes::class]]);
 
         $this->app?->forgetInstance(CheckContextFactory::class);
-        $this->resolveRequest(StubIdentity::create(['id' => 'request-user-2']), $this->second, 'web');
+        $this->resolveRequest(StubGrantee::create(['id' => 'request-user-2']), $this->second, 'web');
 
         $policy = EvaluationPolicy::fromArray(['name' => 'status', 'statements' => [
             ['effect' => 'allow', 'actions' => [self::DELETE], 'conditions' => ['eq' => ['resource.status' => 'published']]],
@@ -553,12 +553,12 @@ final class AuthorizationManagerTest extends TestCase
      * Return a member holding the first action in the request's tenant alone,
      * and a member of staff holding it on the platform, for every application.
      *
-     * @return array{0: \Tests\Feature\Stubs\StubIdentity, 1: \Tests\Feature\Stubs\StubIdentity}
+     * @return array{0: \Tests\Feature\Stubs\StubGrantee, 1: \Tests\Feature\Stubs\StubGrantee}
      */
     private function heldInTheRequestsTenantAndOnThePlatform(): array
     {
-        $member = StubIdentity::create(['id' => 'member-1']);
-        $staff  = StubIdentity::create(['id' => 'staff-1']);
+        $member = StubGrantee::create(['id' => 'member-1']);
+        $staff  = StubGrantee::create(['id' => 'staff-1']);
 
         $member->givePermission(self::CREATE, null, $this->second);
         $staff->givePermission(self::CREATE);

@@ -37,7 +37,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\DeclaresPermissions;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -234,8 +234,8 @@ final class DelegatedDefinitionsTest extends TestCase
         $first  = self::user('first');
         $second = self::user('second');
         $scoped = self::policy('scoped', [['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['posts:1']]]);
-        $attach = static fn (StubIdentity $user): \Closure => static fn (): mixed => self::grants()->attachPolicy($user, $scoped->fresh() ?? $scoped, actor: $actor);
-        $screen = static fn (StubIdentity $user): OperationResource => OperationResource::grant(Actions::POLICY_ATTACH, $user, $scoped->fresh() ?? $scoped, GrantScope::platform());
+        $attach = static fn (StubGrantee $user): \Closure => static fn (): mixed => self::grants()->attachPolicy($user, $scoped->fresh() ?? $scoped, actor: $actor);
+        $screen = static fn (StubGrantee $user): OperationResource => OperationResource::grant(Actions::POLICY_ATTACH, $user, $scoped->fresh() ?? $scoped, GrantScope::platform());
 
         self::allowGrantable($actor, self::digestOf($scoped));
         self::assertDecided(null, $actor, $screen($first), $attach($first));
@@ -456,18 +456,18 @@ final class DelegatedDefinitionsTest extends TestCase
         self::assertDecided(DecisionReason::ADMINISTRATION_RANK, $actor, $screen($role), $add($role, $actor));
 
         self::grants()->revokeRole($senior, $below);
-        self::grants()->grantRole(StubIdentity::query()->findOrFail('admin'), $below);
+        self::grants()->grantRole(StubGrantee::query()->findOrFail('admin'), $below);
 
         self::assertDecided(DecisionReason::ADMINISTRATION_SELF, $actor, $screen($role), $add($role, $actor));
 
-        self::grantAll(StubIdentity::query()->findOrFail('admin'), [Actions::ADMINISTRATION_SELF]);
+        self::grantAll(StubGrantee::query()->findOrFail('admin'), [Actions::ADMINISTRATION_SELF]);
 
         self::assertDecided(null, $actor, $screen($role), $add($role, $actor));
 
         $owned = Role::query()->withoutGlobalScopes()->create(['name' => 'owned', ...self::ownedBy($tenant)]);
         $node  = self::actor('node', [], 1);
 
-        self::grants()->grantPermission(StubIdentity::query()->findOrFail('node'), self::permission(Actions::PERMISSION_GRANT), tenant: $tenant, includeSubtree: false);
+        self::grants()->grantPermission(StubGrantee::query()->findOrFail('node'), self::permission(Actions::PERMISSION_GRANT), tenant: $tenant, includeSubtree: false);
         self::grants()->grantRole(self::user('local'), $owned, tenant: $tenant);
 
         self::inTenant($tenant, static fn (): mixed => self::assertDecided(DecisionReason::ADMINISTRATION_SCOPE, $node, $screen($owned), $add($owned, $node)));
@@ -566,7 +566,7 @@ final class DelegatedDefinitionsTest extends TestCase
         self::assertDecided(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $actor, self::rewriteOf($policy, $widened), $rewrite($widened));
         self::assertDecided(DecisionReason::ADMINISTRATION_UNPROVABLE, $actor, self::rewriteOf($policy, [$read, $edit]), $rewrite([$read, $edit]));
 
-        self::grantAll(StubIdentity::query()->findOrFail('admin'), ['posts:delete']);
+        self::grantAll(StubGrantee::query()->findOrFail('admin'), ['posts:delete']);
         self::grants()->grantRole($user, self::role('senior', rank: 0));
 
         self::assertDecided(DecisionReason::ADMINISTRATION_RANK, $actor, self::rewriteOf($policy, $widened), $rewrite($widened));
@@ -576,7 +576,7 @@ final class DelegatedDefinitionsTest extends TestCase
 
         self::assertDecided(DecisionReason::ADMINISTRATION_UNPROVABLE, $actor, self::rewriteOf($policy, $widened), $rewrite($widened));
 
-        self::grantAll(StubIdentity::query()->findOrFail('admin'), [Actions::ADMINISTRATION_UNBOUNDED]);
+        self::grantAll(StubGrantee::query()->findOrFail('admin'), [Actions::ADMINISTRATION_UNBOUNDED]);
 
         self::assertDecided(null, $actor, self::rewriteOf($policy, $widened), $rewrite($widened));
     }
@@ -734,11 +734,11 @@ final class DelegatedDefinitionsTest extends TestCase
      * Return the operation resource of a grant of the role to the user,
      * platform-wide.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return \SineMacula\Laravel\Authorization\Administration\OperationResource
      */
-    private static function roleGrant(StubIdentity $user, Role $role): OperationResource
+    private static function roleGrant(StubGrantee $user, Role $role): OperationResource
     {
         return OperationResource::grant(Actions::ROLE_GRANT, $user, $role, GrantScope::platform());
     }
@@ -832,13 +832,13 @@ final class DelegatedDefinitionsTest extends TestCase
     /**
      * Grant each permission to the identity, platform-wide.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  list<string>  $permissions
      * @return void
      *
      * @throws \Throwable
      */
-    private static function grantAll(StubIdentity $identity, array $permissions): void
+    private static function grantAll(StubGrantee $identity, array $permissions): void
     {
         foreach ($permissions as $permission) {
             self::grants()->grantPermission($identity, self::permission($permission));
@@ -851,13 +851,13 @@ final class DelegatedDefinitionsTest extends TestCase
      *
      * @param  string  $id
      * @param  int|null  $rank
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      *
      * @throws \Throwable
      */
-    private static function user(string $id, ?int $rank = null): StubIdentity
+    private static function user(string $id, ?int $rank = null): StubGrantee
     {
-        $user = StubIdentity::query()->firstOrCreate(['id' => $id]);
+        $user = StubGrantee::query()->firstOrCreate(['id' => $id]);
 
         if ($rank !== null) {
             self::grants()->grantRole($user, self::role('rank-' . $rank, rank: $rank));
@@ -869,10 +869,10 @@ final class DelegatedDefinitionsTest extends TestCase
     /**
      * Return the principal selector naming the identity.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @return string
      */
-    private static function selector(StubIdentity $identity): string
+    private static function selector(StubGrantee $identity): string
     {
         $reference = Reference::of($identity);
 

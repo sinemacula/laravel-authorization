@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\TestCase;
 
@@ -88,7 +88,7 @@ final class AccessReviewQueryBudgetTest extends TestCase
     {
         $this->hierarchy();
 
-        $ann   = StubIdentity::query()->create(['id' => 'ann']);
+        $ann   = StubGrantee::query()->create(['id' => 'ann']);
         $query = ReviewQuery::holdings(new Subject($ann, $ann), ReviewScope::everywhere());
 
         self::grantsOf($ann, 1);
@@ -194,7 +194,7 @@ final class AccessReviewQueryBudgetTest extends TestCase
     {
         [$role] = $this->attachedAtTheRoot(true);
 
-        $ann     = StubIdentity::query()->create(['id' => 'ann']);
+        $ann     = StubGrantee::query()->create(['id' => 'ann']);
         $query   = ReviewQuery::holdings(new Subject($ann, $ann), ReviewScope::everywhere());
         $granted = 0;
         $grant   = static function (int $count) use ($ann, $role, &$granted): void {
@@ -256,8 +256,8 @@ final class AccessReviewQueryBudgetTest extends TestCase
      */
     private static function grantedInTenantsOfTheirOwn(Role $role, int $count, bool $isSubtree): void
     {
-        for ($index = StubIdentity::query()->where('id', 'like', 'tenanted-%')->count(); $index < $count; $index++) {
-            $holder = StubIdentity::query()->create(['id' => 'tenanted-' . $index]);
+        for ($index = StubGrantee::query()->where('id', 'like', 'tenanted-%')->count(); $index < $count; $index++) {
+            $holder = StubGrantee::query()->create(['id' => 'tenanted-' . $index]);
             $tenant = new Reference('tenant', 'child-' . $index);
 
             ClosureTenantTree::add($tenant, new Reference('tenant', 'root'));
@@ -279,8 +279,8 @@ final class AccessReviewQueryBudgetTest extends TestCase
      */
     private static function grantedIn(Role $role, int $count, string $application): void
     {
-        for ($index = StubIdentity::query()->where('id', 'like', 'applied-%')->count(); $index < $count; $index++) {
-            self::grants()->grantRole(StubIdentity::query()->create(['id' => 'applied-' . $index]), $role, application: $application);
+        for ($index = StubGrantee::query()->where('id', 'like', 'applied-%')->count(); $index < $count; $index++) {
+            self::grants()->grantRole(StubGrantee::query()->create(['id' => 'applied-' . $index]), $role, application: $application);
         }
     }
 
@@ -333,8 +333,8 @@ final class AccessReviewQueryBudgetTest extends TestCase
     {
         $bottom = Role::query()->where('name', 'level-' . (self::DEPTH - 1))->firstOrFail();
 
-        for ($index = StubIdentity::query()->where('id', 'like', 'holder-%')->count(); $index < $count; $index++) {
-            $holder = StubIdentity::query()->create(['id' => 'holder-' . $index]);
+        for ($index = StubGrantee::query()->where('id', 'like', 'holder-%')->count(); $index < $count; $index++) {
+            $holder = StubGrantee::query()->create(['id' => 'holder-' . $index]);
 
             self::grants()->grantRole($holder, $bottom, now()->addYear(), tenant: new Reference('tenant', 'level-1'));
         }
@@ -344,13 +344,13 @@ final class AccessReviewQueryBudgetTest extends TestCase
      * Grant the grantee more roles and permissions, until it holds as many of
      * each as given.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubGrantee  $grantee
      * @param  int  $count
      * @return void
      *
      * @throws \Throwable
      */
-    private static function grantsOf(StubIdentity $grantee, int $count): void
+    private static function grantsOf(StubGrantee $grantee, int $count): void
     {
         for ($index = Role::query()->where('name', 'like', 'held-%')->count(); $index < $count; $index++) {
             $role = new Role;

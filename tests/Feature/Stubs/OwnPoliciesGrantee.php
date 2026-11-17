@@ -30,7 +30,7 @@ final class OwnPoliciesGrantee extends Model implements SupportsPolicies // @php
     protected $fillable = ['id', 'name'];
 
     /** @var string|null Backing table. */
-    protected $table = 'stub_identities';
+    protected $table = 'stub_grantees';
 
     /**
      * Attach nothing: the grantee's policies are fixed.

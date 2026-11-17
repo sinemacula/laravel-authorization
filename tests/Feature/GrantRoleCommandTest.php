@@ -10,12 +10,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\GrantRoleCommand;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\RoleExclusionService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -45,30 +45,30 @@ final class GrantRoleCommandTest extends TestCase
     }
 
     /**
-     * Successfully grants a role to an identity via morph alias.
+     * Successfully grants a role to a grantee via morph alias.
      *
      * @return void
      */
     public function testGrantsRoleViaMorphAlias(): void
     {
-        Relation::morphMap(['stub_identity' => StubIdentity::class]);
+        Relation::morphMap(['stub_grantee' => StubGrantee::class]);
 
         Role::create(['id' => '42008342-6351-490d-8a02-9615371eeb8d', 'name' => 'editor', 'guard' => 'web']);
-        $user = StubIdentity::create(['id' => 'af0f3486-876c-46ac-85fe-a5b7335b394a']);
+        $user = StubGrantee::create(['id' => 'af0f3486-876c-46ac-85fe-a5b7335b394a']);
 
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => 'stub_identity:af0f3486-876c-46ac-85fe-a5b7335b394a',
-            'role'     => 'editor',
+            'grantee' => 'stub_grantee:af0f3486-876c-46ac-85fe-a5b7335b394a',
+            'role'    => 'editor',
         ]);
 
         self::assertSame(0, $exitCode);
         self::assertStringContainsString('granted', Artisan::output());
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshUser */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshUser */
         $freshUser = $user->fresh();
         self::assertTrue($freshUser->hasRole('editor'));
 
         // Reset the shared morph map — `morphMap([])` merges rather than
-        // replaces, so without the `false` second arg the `stub_identity` alias
+        // replaces, so without the `false` second arg the `stub_grantee` alias
         // leaks into later tests in the run.
         Relation::morphMap([], false);
     }
@@ -81,29 +81,29 @@ final class GrantRoleCommandTest extends TestCase
     public function testGrantsRoleViaClassName(): void
     {
         Role::create(['id' => 'cbe9505c-00d8-4985-89ed-9bae2eb5e5b4', 'name' => 'admin', 'guard' => 'web']);
-        StubIdentity::create(['id' => 'abca5c3d-111a-4cdb-8a40-0916dbac1d93']);
+        StubGrantee::create(['id' => 'abca5c3d-111a-4cdb-8a40-0916dbac1d93']);
 
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => StubIdentity::class . ':abca5c3d-111a-4cdb-8a40-0916dbac1d93',
-            'role'     => 'admin',
+            'grantee' => StubGrantee::class . ':abca5c3d-111a-4cdb-8a40-0916dbac1d93',
+            'role'    => 'admin',
         ]);
 
         self::assertSame(0, $exitCode);
-        /** @var \Tests\Feature\Stubs\StubIdentity $found */
-        $found = StubIdentity::find('abca5c3d-111a-4cdb-8a40-0916dbac1d93');
+        /** @var \Tests\Feature\Stubs\StubGrantee $found */
+        $found = StubGrantee::find('abca5c3d-111a-4cdb-8a40-0916dbac1d93');
         self::assertTrue($found->hasRole('admin'));
     }
 
     /**
-     * Fails on invalid identity format.
+     * Fails on invalid grantee format.
      *
      * @return void
      */
-    public function testFailsOnInvalidIdentityFormat(): void
+    public function testFailsOnInvalidGranteeFormat(): void
     {
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => 'no-colon',
-            'role'     => 'editor',
+            'grantee' => 'no-colon',
+            'role'    => 'editor',
         ]);
 
         self::assertSame(1, $exitCode);
@@ -117,8 +117,8 @@ final class GrantRoleCommandTest extends TestCase
     public function testFailsOnUnresolvableClass(): void
     {
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => 'NonExistentClass:1',
-            'role'     => 'editor',
+            'grantee' => 'NonExistentClass:1',
+            'role'    => 'editor',
         ]);
 
         self::assertSame(1, $exitCode);
@@ -132,8 +132,8 @@ final class GrantRoleCommandTest extends TestCase
     public function testFailsWhenModelNotFound(): void
     {
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => StubIdentity::class . ':missing',
-            'role'     => 'editor',
+            'grantee' => StubGrantee::class . ':missing',
+            'role'    => 'editor',
         ]);
 
         self::assertSame(1, $exitCode);
@@ -146,11 +146,11 @@ final class GrantRoleCommandTest extends TestCase
      */
     public function testFailsWhenRoleDoesNotExist(): void
     {
-        StubIdentity::create(['id' => '538d1787-6f8a-44cc-81ad-19f2980fc83b']);
+        StubGrantee::create(['id' => '538d1787-6f8a-44cc-81ad-19f2980fc83b']);
 
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => StubIdentity::class . ':538d1787-6f8a-44cc-81ad-19f2980fc83b',
-            'role'     => 'nonexistent',
+            'grantee' => StubGrantee::class . ':538d1787-6f8a-44cc-81ad-19f2980fc83b',
+            'role'    => 'nonexistent',
         ]);
 
         self::assertSame(1, $exitCode);
@@ -164,11 +164,11 @@ final class GrantRoleCommandTest extends TestCase
      */
     public function testFailedGrantOutputsErrorMessage(): void
     {
-        StubIdentity::create(['id' => 'a1a1a1a1-0000-0000-0000-000000000001']);
+        StubGrantee::create(['id' => 'a1a1a1a1-0000-0000-0000-000000000001']);
 
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => StubIdentity::class . ':a1a1a1a1-0000-0000-0000-000000000001',
-            'role'     => 'does-not-exist',
+            'grantee' => StubGrantee::class . ':a1a1a1a1-0000-0000-0000-000000000001',
+            'role'    => 'does-not-exist',
         ]);
         $output = Artisan::output();
 
@@ -177,40 +177,40 @@ final class GrantRoleCommandTest extends TestCase
     }
 
     /**
-     * Success message includes both the role name and identity arg. Pins the
+     * Success message includes both the role name and grantee arg. Pins the
      * ReturnRemoval on line 59 (FAILURE return prevents reaching the info
      * line).
      *
      * @return void
      */
-    public function testSuccessMessageIncludesRoleAndIdentity(): void
+    public function testSuccessMessageIncludesRoleAndGrantee(): void
     {
         Role::create(['id' => 'a2a2a2a2-0000-0000-0000-000000000001', 'name' => 'msg-role', 'guard' => 'web']);
-        StubIdentity::create(['id' => 'a3a3a3a3-0000-0000-0000-000000000001']);
+        StubGrantee::create(['id' => 'a3a3a3a3-0000-0000-0000-000000000001']);
 
-        $identity = StubIdentity::class . ':a3a3a3a3-0000-0000-0000-000000000001';
+        $grantee  = StubGrantee::class . ':a3a3a3a3-0000-0000-0000-000000000001';
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => $identity,
-            'role'     => 'msg-role',
+            'grantee' => $grantee,
+            'role'    => 'msg-role',
         ]);
         $output = Artisan::output();
 
         self::assertSame(0, $exitCode);
         self::assertStringContainsString('msg-role', $output);
-        self::assertStringContainsString($identity, $output);
+        self::assertStringContainsString($grantee, $output);
     }
 
     /**
-     * Fails with empty identity key segment. Pins the `$parts[1] === ''` branch
-     * in ResolvesIdentity line 36.
+     * Fails with empty grantee key segment. Pins the `$parts[1] === ''` branch
+     * in ResolvesGrantee line 36.
      *
      * @return void
      */
     public function testFailsOnEmptyKeySegment(): void
     {
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => 'SomeClass:',
-            'role'     => 'editor',
+            'grantee' => 'SomeClass:',
+            'role'    => 'editor',
         ]);
 
         self::assertSame(1, $exitCode);
@@ -219,15 +219,15 @@ final class GrantRoleCommandTest extends TestCase
 
     /**
      * Fails with empty type segment. Pins the `$parts[0] === ''` branch in
-     * ResolvesIdentity line 36.
+     * ResolvesGrantee line 36.
      *
      * @return void
      */
     public function testFailsOnEmptyTypeSegment(): void
     {
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => ':123',
-            'role'     => 'editor',
+            'grantee' => ':123',
+            'role'    => 'editor',
         ]);
 
         self::assertSame(1, $exitCode);
@@ -236,15 +236,15 @@ final class GrantRoleCommandTest extends TestCase
 
     /**
      * Fails when class is not an Eloquent model. Pins the
-     * `is_subclass_of(Model)` branch in ResolvesIdentity line 54.
+     * `is_subclass_of(Model)` branch in ResolvesGrantee line 54.
      *
      * @return void
      */
     public function testFailsWhenClassIsNotEloquentModel(): void
     {
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => \stdClass::class . ':1',
-            'role'     => 'editor',
+            'grantee' => \stdClass::class . ':1',
+            'role'    => 'editor',
         ]);
 
         self::assertSame(1, $exitCode);
@@ -252,16 +252,16 @@ final class GrantRoleCommandTest extends TestCase
     }
 
     /**
-     * Fails when model does not implement AuthorizableIdentity. Pins the
-     * `!$model instanceof AuthorizableIdentity` branch in ResolvesIdentity
-     * lines 71-73 and the Concat on line 73.
+     * Fails when model does not implement AuthorizableGrantee. Pins the
+     * `!$model instanceof AuthorizableGrantee` branch in ResolvesGrantee lines
+     * 71-73 and the Concat on line 73.
      *
      * @return void
      */
     public function testFailsWhenModelNotAuthorizable(): void
     {
         // Use the Role model which IS an Eloquent model but does NOT implement
-        // AuthorizableIdentity.
+        // AuthorizableGrantee.
         $role = Role::create([
             'id'    => 'a4a4a4a4-0000-0000-0000-000000000001',
             'name'  => 'check',
@@ -269,26 +269,26 @@ final class GrantRoleCommandTest extends TestCase
         ]);
 
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => Role::class . ':' . $role->getKey(), // @phpstan-ignore binaryOp.invalid
-            'role'     => 'check',
+            'grantee' => Role::class . ':' . $role->getKey(), // @phpstan-ignore binaryOp.invalid
+            'role'    => 'check',
         ]);
         $output = Artisan::output();
 
         self::assertSame(1, $exitCode);
-        self::assertStringContainsString('AuthorizableIdentity', $output);
+        self::assertStringContainsString('AuthorizableGrantee', $output);
     }
 
     /**
      * Error message for unresolvable class includes the morph type. Pins the
-     * Concat/ConcatOperandRemoval on ResolvesIdentity line 49.
+     * Concat/ConcatOperandRemoval on ResolvesGrantee line 49.
      *
      * @return void
      */
     public function testErrorMessageIncludesMorphType(): void
     {
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => 'FakeNonExistentClass:999',
-            'role'     => 'editor',
+            'grantee' => 'FakeNonExistentClass:999',
+            'role'    => 'editor',
         ]);
         $output = Artisan::output();
 
@@ -298,15 +298,15 @@ final class GrantRoleCommandTest extends TestCase
 
     /**
      * Error message for missing model includes the key. Pins the
-     * MethodCallRemoval on ResolvesIdentity line 66 and Concat on line 73.
+     * MethodCallRemoval on ResolvesGrantee line 66 and Concat on line 73.
      *
      * @return void
      */
     public function testErrorMessageForMissingModelIncludesKey(): void
     {
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => StubIdentity::class . ':missing-key-99',
-            'role'     => 'editor',
+            'grantee' => StubGrantee::class . ':missing-key-99',
+            'role'    => 'editor',
         ]);
         $output = Artisan::output();
 
@@ -329,11 +329,11 @@ final class GrantRoleCommandTest extends TestCase
             'tenant_type' => 'tenant',
             'tenant_id'   => 't-1',
         ]);
-        $user = StubIdentity::create(['id' => 'e2e2e2e2-0000-0000-0000-000000000001']);
+        $user = StubGrantee::create(['id' => 'e2e2e2e2-0000-0000-0000-000000000001']);
 
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => StubIdentity::class . ':e2e2e2e2-0000-0000-0000-000000000001',
-            'role'     => 'owned-editor',
+            'grantee' => StubGrantee::class . ':e2e2e2e2-0000-0000-0000-000000000001',
+            'role'    => 'owned-editor',
         ]);
 
         self::assertSame(1, $exitCode);
@@ -342,7 +342,7 @@ final class GrantRoleCommandTest extends TestCase
     }
 
     /**
-     * Granting a role the identity already holds reports it as held, succeeds,
+     * Granting a role the grantee already holds reports it as held, succeeds,
      * writes nothing and dispatches nothing.
      *
      * @return void
@@ -350,16 +350,16 @@ final class GrantRoleCommandTest extends TestCase
     public function testReportsARoleThatIsAlreadyHeld(): void
     {
         Role::query()->create(['name' => 'editor', 'guard' => 'web']);
-        $user = StubIdentity::create(['id' => 'a1a1a1a1-0000-0000-0000-000000000002']);
+        $user = StubGrantee::create(['id' => 'a1a1a1a1-0000-0000-0000-000000000002']);
         $user->assignRole('editor');
 
         Event::fake([RoleAssigned::class]);
 
-        $identity = StubIdentity::class . ':a1a1a1a1-0000-0000-0000-000000000002';
-        $exitCode = Artisan::call('authorization:grant', ['identity' => $identity, 'role' => 'editor']);
+        $grantee  = StubGrantee::class . ':a1a1a1a1-0000-0000-0000-000000000002';
+        $exitCode = Artisan::call('authorization:grant', ['grantee' => $grantee, 'role' => 'editor']);
 
         self::assertSame(0, $exitCode);
-        self::assertSame("{$identity} already holds role 'editor'.", \trim(Artisan::output()));
+        self::assertSame("{$grantee} already holds role 'editor'.", \trim(Artisan::output()));
         Event::assertNotDispatched(RoleAssigned::class);
     }
 
@@ -376,13 +376,13 @@ final class GrantRoleCommandTest extends TestCase
         $clerk   = Role::query()->create(['name' => 'clerk', 'guard' => 'web']);
         $auditor = Role::query()->create(['name' => 'auditor', 'guard' => 'web']);
         $id      = 'a1a1a1a1-0000-0000-0000-000000000003';
-        $user    = StubIdentity::create(['id' => $id]);
+        $user    = StubGrantee::create(['id' => $id]);
 
         $user->assignRole($clerk);
 
         RoleExclusionService::instance()?->declare($clerk, $auditor);
 
-        $exitCode = Artisan::call('authorization:grant', ['identity' => StubIdentity::class . ':' . $id, 'role' => 'auditor']);
+        $exitCode = Artisan::call('authorization:grant', ['grantee' => StubGrantee::class . ':' . $id, 'role' => 'auditor']);
 
         self::assertSame(1, $exitCode);
         self::assertSame(
@@ -409,10 +409,10 @@ final class GrantRoleCommandTest extends TestCase
 
         Role::create(['name' => 'editor', 'guard' => 'web']);
         Role::create(['name' => 'author', 'guard' => 'web']);
-        StubIdentity::create(['id' => 'user-1']);
+        StubGrantee::create(['id' => 'user-1']);
 
-        $admin = StubIdentity::create(['id' => 'admin-1']);
-        $grant = ['identity' => StubIdentity::class . ':user-1', 'role' => 'editor', '--actor' => StubIdentity::class . ':admin-1'];
+        $admin = StubGrantee::create(['id' => 'admin-1']);
+        $grant = ['grantee' => StubGrantee::class . ':user-1', 'role' => 'editor', '--actor' => StubGrantee::class . ':admin-1'];
 
         $admin->givePermission(Permission::create(['name' => PackagePermissions::ROLE_GRANT]));
 
@@ -422,13 +422,13 @@ final class GrantRoleCommandTest extends TestCase
         $admin->assignRole(Role::create(['name' => 'chief', 'rank' => 0]));
 
         self::assertSame(0, Artisan::call('authorization:grant', $grant));
-        self::assertSame(0, Artisan::call('authorization:grant', ['identity' => StubIdentity::class . ':user-1', 'role' => 'author']));
+        self::assertSame(0, Artisan::call('authorization:grant', ['grantee' => StubGrantee::class . ':user-1', 'role' => 'author']));
 
         $rows = DB::table('authorizable_roles')->where('authorizable_id', 'user-1')->get(['granted_by_type', 'granted_by_id'])
             ->map(static fn (object $row): array => \array_values((array) $row))
             ->all();
 
-        self::assertEqualsCanonicalizing([[null, null], [StubIdentity::class, 'admin-1']], $rows);
+        self::assertEqualsCanonicalizing([[null, null], [StubGrantee::class, 'admin-1']], $rows);
         Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->name === 'editor' && $event->operation->actor?->id === 'admin-1');
         Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->name === 'author' && $event->operation->actor === null);
     }
@@ -441,9 +441,9 @@ final class GrantRoleCommandTest extends TestCase
     public function testFailsOnAnActorItCannotResolve(): void
     {
         Role::create(['name' => 'editor', 'guard' => 'web']);
-        StubIdentity::create(['id' => 'user-1']);
+        StubGrantee::create(['id' => 'user-1']);
 
-        self::assertSame(1, Artisan::call('authorization:grant', ['identity' => StubIdentity::class . ':user-1', 'role' => 'editor', '--actor' => 'nobody']));
+        self::assertSame(1, Artisan::call('authorization:grant', ['grantee' => StubGrantee::class . ':user-1', 'role' => 'editor', '--actor' => 'nobody']));
         self::assertStringContainsString('The actor must be in the format {morphType}:{key}', Artisan::output());
         self::assertSame(0, DB::table('authorizable_roles')->count());
     }

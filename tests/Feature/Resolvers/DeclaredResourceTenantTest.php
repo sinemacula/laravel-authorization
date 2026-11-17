@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\BulkChecks\CountingBulkTenants;
 use Tests\Fixtures\BulkChecks\UnreadableTenantPost;
 use Tests\Fixtures\QueryRecorder;
@@ -56,7 +56,7 @@ final class DeclaredResourceTenantTest extends TestCase
         $fallback = new FixedResourceTenantResolver(new Reference('fixed', '1'));
         $resolver = new DeclaredResourceTenant($fallback);
         $post     = TenantScopedPost::query()->create(['tenant_type' => 'teams', 'tenant_id' => '5']);
-        $other    = StubIdentity::create(['id' => 'u1']);
+        $other    = StubGrantee::create(['id' => 'u1']);
 
         self::assertEquals(new Reference('teams', '5'), $resolver->tenantOf($post));
         self::assertNull($resolver->tenantOf(new ScopedPost));
@@ -89,8 +89,8 @@ final class DeclaredResourceTenantTest extends TestCase
         self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, \str_repeat('9', 19)));
         self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, \str_repeat('9', 11)));
         self::assertFalse($resolver->tenantOfRecord('posts', '1'));
-        self::assertFalse($resolver->tenantOfRecord(StubIdentity::class, 'u1'));
-        self::assertSame([['posts', '1'], [StubIdentity::class, 'u1']], $fallback->askedRecords);
+        self::assertFalse($resolver->tenantOfRecord(StubGrantee::class, 'u1'));
+        self::assertSame([['posts', '1'], [StubGrantee::class, 'u1']], $fallback->askedRecords);
     }
 
     /**
@@ -242,7 +242,7 @@ final class DeclaredResourceTenantTest extends TestCase
         $post     = TenantScopedPost::query()->create(['tenant_type' => 'teams', 'tenant_id' => '5']);
         $partial  = new TenantScopedPost(['id' => 3]);
         $long     = new TenantScopedPost(['id' => 4, 'tenant_type' => 'teams', 'tenant_id' => \str_repeat('9', 192)]);
-        $other    = StubIdentity::create(['id' => 'u1']);
+        $other    = StubGrantee::create(['id' => 'u1']);
 
         $models = ['a' => $post, 'b' => new ScopedPost, 'c' => $partial, 'e' => $long, 'd' => $other];
 

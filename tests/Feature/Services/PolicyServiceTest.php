@@ -29,7 +29,7 @@ use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPolicy;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -96,7 +96,7 @@ final class PolicyServiceTest extends TestCase
 
         Event::fake([PolicyCreated::class]);
 
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = self::service()->createInline($user, 'mine', self::READ, 'Mine alone');
         $theirs = self::service()->createInline(new Reference('team', '7'), 'theirs', \json_encode(self::READ, \JSON_THROW_ON_ERROR));
 
@@ -124,7 +124,7 @@ final class PolicyServiceTest extends TestCase
      */
     public function testAnInlinePolicyNeedsASavedGrantee(): void
     {
-        foreach ([new StubIdentity(['id' => 'user-1']), new Reference('', '1'), new Reference('user', '')] as $owner) {
+        foreach ([new StubGrantee(['id' => 'user-1']), new Reference('', '1'), new Reference('user', '')] as $owner) {
             try {
                 self::service()->createInline($owner, 'mine', self::READ);
                 self::fail('The grantee was not refused.');
@@ -372,7 +372,7 @@ final class PolicyServiceTest extends TestCase
      */
     public function testEveryOperationRefusesOnceThePackageRefuses(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $policy  = new Policy(['name' => 'unsaved']);
         $service = $this->container()->make(PolicyService::class);
 

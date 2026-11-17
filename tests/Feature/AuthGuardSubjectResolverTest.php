@@ -22,8 +22,8 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Subject;
-use Tests\Feature\Stubs\AuthenticatableIdentity;
-use Tests\Feature\Stubs\EagerRolesIdentity;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
+use Tests\Feature\Stubs\EagerRolesGrantee;
 use Tests\TestCase;
 
 /**
@@ -156,7 +156,7 @@ final class AuthGuardSubjectResolverTest extends TestCase
         self::assertInstanceOf(AuthGuardSubjectResolver::class, $resolver);
         self::assertNull($resolver->resolve());
 
-        $user = AuthenticatableIdentity::create(['id' => 'a3c1f9c2-2b84-4d3e-9f3c-7f8d1c1e9a01']);
+        $user = AuthenticatableGrantee::create(['id' => 'a3c1f9c2-2b84-4d3e-9f3c-7f8d1c1e9a01']);
         $this->actingAs($user);
 
         $this->assertSubject($resolver->resolve(), $user, 'web');
@@ -173,11 +173,11 @@ final class AuthGuardSubjectResolverTest extends TestCase
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app?->make(ConfigRepository::class);
-        $config->set('auth.providers.users', ['driver' => 'eloquent', 'model' => EagerRolesIdentity::class]);
+        $config->set('auth.providers.users', ['driver' => 'eloquent', 'model' => EagerRolesGrantee::class]);
 
         Role::create(['name' => 'admin', 'guard' => 'web']);
 
-        $user = EagerRolesIdentity::create(['id' => 'b8e2c4d6-1a3f-4e5b-8c7d-9f0a1b2c3d4e']);
+        $user = EagerRolesGrantee::create(['id' => 'b8e2c4d6-1a3f-4e5b-8c7d-9f0a1b2c3d4e']);
         $user->assignRole('admin');
 
         /** @var \Illuminate\Auth\SessionGuard $guard */
@@ -192,7 +192,7 @@ final class AuthGuardSubjectResolverTest extends TestCase
 
         $subject = $this->app?->make(SubjectResolver::class)->resolve();
 
-        self::assertInstanceOf(EagerRolesIdentity::class, $subject?->subject);
+        self::assertInstanceOf(EagerRolesGrantee::class, $subject?->subject);
         self::assertSame($user->getKey(), $subject->subject->getKey());
         self::assertTrue($subject->subject->hasRole('admin'));
     }

@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
-use Tests\Fixtures\BenchmarkIdentity;
+use Tests\Fixtures\BenchmarkGrantee;
 
 /**
  * PHPBench micro-benchmark for `RequireRole::handle()` and
@@ -67,7 +67,7 @@ final class MiddlewareBench extends BenchmarkCase
 
         Role::query()->delete();
         Permission::query()->delete();
-        BenchmarkIdentity::query()->delete();
+        BenchmarkGrantee::query()->delete();
 
         $role = Role::create([
             'id'    => (string) Str::uuid(),
@@ -85,7 +85,7 @@ final class MiddlewareBench extends BenchmarkCase
             $role->permissions()->attach($permission->getKey());
         }
 
-        $user = BenchmarkIdentity::create(['id' => (string) Str::uuid()]);
+        $user = BenchmarkGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole(BenchmarkFixtures::roleName());
 
         $app->instance(SubjectResolver::class, new BenchmarkSubjectResolver($user));

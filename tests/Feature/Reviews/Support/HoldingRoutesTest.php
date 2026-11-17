@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Feature\Stubs\StubMachine;
-use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Feature\Stubs\SuspendableGrantee;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\TestCase;
 
@@ -289,7 +289,7 @@ final class HoldingRoutesTest extends TestCase
      */
     public function testAnInactiveSubjectKeepsItsGrants(): void
     {
-        $subject = SuspendableIdentity::query()->create(['id' => 'suspended']);
+        $subject = SuspendableGrantee::query()->create(['id' => 'suspended']);
 
         self::grants()->grantPermission($subject, self::permission('posts:read'));
 

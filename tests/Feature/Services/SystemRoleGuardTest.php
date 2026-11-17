@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Services\Support\SystemRoleGuard;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -45,7 +45,7 @@ final class SystemRoleGuardTest extends TestCase
     public function testAWriteToAnIdentityIsNotGuarded(): void
     {
         $role     = self::systemRole();
-        $identity = StubIdentity::query()->create(['id' => $role->id]);
+        $identity = StubGrantee::query()->create(['id' => $role->id]);
         $event    = self::event($role);
 
         Event::fake([PermissionGranted::class, SystemOverrideUsed::class]);
@@ -89,7 +89,7 @@ final class SystemRoleGuardTest extends TestCase
     public function testADelegatedOrReferencedWriteGuardsTheRoleAsStored(): void
     {
         $role  = self::systemRole();
-        $actor = ActingContext::for(StubIdentity::query()->create(['id' => 'admin-1']));
+        $actor = ActingContext::for(StubGrantee::query()->create(['id' => 'admin-1']));
 
         Event::fake([PermissionGranted::class, SystemOverrideUsed::class]);
 

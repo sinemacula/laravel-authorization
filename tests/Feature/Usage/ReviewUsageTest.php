@@ -22,10 +22,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Usage\DatabaseGrantUsageStore;
 use SineMacula\Laravel\Authorization\Usage\GrantUsageKey;
 use SineMacula\Laravel\Authorization\Usage\UsageBatch;
-use Tests\Feature\Stubs\CodedPoliciesIdentity;
-use Tests\Feature\Stubs\CustomGrantsIdentity;
-use Tests\Feature\Stubs\FailingPermissionsIdentity;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\CodedPoliciesGrantee;
+use Tests\Feature\Stubs\CustomGrantsGrantee;
+use Tests\Feature\Stubs\FailingPermissionsGrantee;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\Usage\CountingUsageStore;
 use Tests\TestCase;
 
@@ -163,7 +163,7 @@ final class ReviewUsageTest extends TestCase
         self::assertSame(UsageStatus::UNUSED, $this->statusOf(self::row(SourceKind::ROLE_POLICY, '2026-11-09 07:30:00'), '2026-11-09 08:00:00', self::AT));
         self::assertSame(UsageStatus::UNKNOWN, $this->statusOf(self::row(SourceKind::ROLE_PERMISSION_EDGE, '2026-11-09 07:30:00'), '2026-11-09 08:00:00', self::AT));
         self::assertSame(UsageStatus::UNKNOWN, $this->statusOf(self::row(SourceKind::ROLE_POLICY_ATTACHMENT, '2026-11-09 07:30:00'), '2026-11-09 08:00:00', self::AT));
-        $custom  = self::row(SourceKind::PERMISSION_GRANT, '2026-11-09 07:30:00', 'a', CustomGrantsIdentity::class);
+        $custom  = self::row(SourceKind::PERMISSION_GRANT, '2026-11-09 07:30:00', 'a', CustomGrantsGrantee::class);
         $unknown = self::row(SourceKind::PERMISSION_GRANT, '2026-11-09 07:30:00', 'a', 'no-such-class');
 
         self::assertSame(UsageStatus::UNKNOWN, $this->statusOf($custom, '2026-11-09 08:00:00', self::AT));
@@ -196,16 +196,16 @@ final class ReviewUsageTest extends TestCase
         $unused  = UsageStatus::UNUSED;
         $unknown = UsageStatus::UNKNOWN;
 
-        self::assertSame([$unused, $unused, $unused, $unused], $statuses(StubIdentity::class));
-        self::assertSame([$unknown, $unused, $unknown, $unknown], $statuses(FailingPermissionsIdentity::class));
-        self::assertSame([$unused, $unknown, $unknown, $unknown], $statuses(CodedPoliciesIdentity::class));
+        self::assertSame([$unused, $unused, $unused, $unused], $statuses(StubGrantee::class));
+        self::assertSame([$unknown, $unused, $unknown, $unknown], $statuses(FailingPermissionsGrantee::class));
+        self::assertSame([$unused, $unknown, $unknown, $unknown], $statuses(CodedPoliciesGrantee::class));
 
         $morphs = Relation::morphMap();
 
         try {
-            Relation::morphMap(['stub_identity' => StubIdentity::class]);
+            Relation::morphMap(['stub_grantee' => StubGrantee::class]);
 
-            self::assertSame([$unused, $unused, $unused, $unused], $statuses('stub_identity'));
+            self::assertSame([$unused, $unused, $unused, $unused], $statuses('stub_grantee'));
         } finally {
             Relation::morphMap($morphs, false);
         }
@@ -344,7 +344,7 @@ final class ReviewUsageTest extends TestCase
      * @param  array{activation: string, justification: string}|null  $breakGlass
      * @return \SineMacula\Laravel\Authorization\Reviews\ReviewRow
      */
-    private static function row(SourceKind $kind, ?string $created, string $target = 'p', string $grantee = StubIdentity::class, ?array $breakGlass = null): ReviewRow
+    private static function row(SourceKind $kind, ?string $created, string $target = 'p', string $grantee = StubGrantee::class, ?array $breakGlass = null): ReviewRow
     {
         return new ReviewRow(
             'row-' . $target,

@@ -34,7 +34,7 @@ use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\ChangingRequirementChecker;
 use Tests\Feature\Stubs\ChangingSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -89,7 +89,7 @@ final class ForgetsDecisionsTest extends TestCase
      */
     public function testADenialRememberedBeforeAStepUpIsForgotten(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $checker = new ChangingRequirementChecker(RequirementResult::unmet(['multifactor']));
         $manager = $this->signIn($user, $checker)->withPolicies([self::requiringPolicy()]);
         $denial  = $manager->check(self::EXPORT);
@@ -122,7 +122,7 @@ final class ForgetsDecisionsTest extends TestCase
      */
     public function testAnAllowRememberedBeforeAProofIsRevokedIsForgotten(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $checker = new ChangingRequirementChecker(RequirementResult::met());
         $manager = $this->signIn($user, $checker)->withPolicies([self::requiringPolicy()]);
         $events  = [];
@@ -156,7 +156,7 @@ final class ForgetsDecisionsTest extends TestCase
      */
     public function testAGrantRevokedInTheDatabaseIsSeenOnlyAfterTheCall(): void
     {
-        $this->signInHolding(StubIdentity::create(['id' => 'user-1']));
+        $this->signInHolding(StubGrantee::create(['id' => 'user-1']));
 
         self::assertTrue(Authorization::can(self::READ));
 
@@ -183,7 +183,7 @@ final class ForgetsDecisionsTest extends TestCase
         /** @var \Illuminate\Cache\ArrayStore $store */
         $store = Cache::store('array')->getStore();
 
-        $this->signInHolding(StubIdentity::create(['id' => 'user-1']));
+        $this->signInHolding(StubGrantee::create(['id' => 'user-1']));
 
         self::assertTrue(Authorization::can(self::READ));
 
@@ -212,7 +212,7 @@ final class ForgetsDecisionsTest extends TestCase
         $first    = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'A']);
         $second   = StubTenant::query()->create(['id' => 'tenant-b', 'name' => 'B']);
         $third    = StubTenant::query()->create(['id' => 'tenant-c', 'name' => 'C']);
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $resolver = $this->resolveAs(new Subject($user, $user, $first, null, 'web', self::SESSION));
 
         $user->givePermission(Permission::create(['name' => 'posts:edit']), null, $second);
@@ -252,11 +252,11 @@ final class ForgetsDecisionsTest extends TestCase
      */
     public function testAScopedManagerKeepsItsSubjectAndDecidesAfresh(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $this->signIn($user);
 
-        $other  = StubIdentity::create(['id' => 'other']);
+        $other  = StubGrantee::create(['id' => 'other']);
         $scoped = Authorization::for($other);
 
         $other->givePermission(Permission::create(['name' => self::READ]));
@@ -303,7 +303,7 @@ final class ForgetsDecisionsTest extends TestCase
     #[DataProvider('provideWhatChanged')]
     public function testEverythingIsForgottenWhateverTheArgumentsName(?string $session, ?string $identityId): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $this->signInHolding($user);
 
@@ -314,7 +314,7 @@ final class ForgetsDecisionsTest extends TestCase
 
         self::revokeDirectly('user-1');
 
-        Authorization::forgetDecisionsFor($session, $identityId === null ? null : StubIdentity::query()->firstOrCreate(['id' => $identityId]));
+        Authorization::forgetDecisionsFor($session, $identityId === null ? null : StubGrantee::query()->firstOrCreate(['id' => $identityId]));
 
         self::assertNull(Authorization::lastDecision());
         self::assertSame($generation + 1, DecisionMemory::current()->generation());
@@ -330,7 +330,7 @@ final class ForgetsDecisionsTest extends TestCase
      */
     public function testForgettingIsNotRefusedWhileThePackageRefuses(): void
     {
-        $this->signInHolding(StubIdentity::create(['id' => 'user-1']));
+        $this->signInHolding(StubGrantee::create(['id' => 'user-1']));
 
         self::assertTrue(Authorization::can(self::READ));
 
@@ -358,7 +358,7 @@ final class ForgetsDecisionsTest extends TestCase
      */
     public function testAManagerBuiltDirectlyForgets(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
         $store = new LastDecisionStore;
 
         $user->givePermission(Permission::create(['name' => self::READ]));
@@ -383,7 +383,7 @@ final class ForgetsDecisionsTest extends TestCase
      */
     public function testForgettingTheLastDecisionClearsItAlone(): void
     {
-        $this->signInHolding(StubIdentity::create(['id' => 'user-1']));
+        $this->signInHolding(StubGrantee::create(['id' => 'user-1']));
 
         self::assertTrue(Authorization::can(self::READ));
 
@@ -402,10 +402,10 @@ final class ForgetsDecisionsTest extends TestCase
      * Resolve the user as the request's subject in the session, holding the
      * read permission platform-wide.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @return void
      */
-    private function signInHolding(StubIdentity $user): void
+    private function signInHolding(StubGrantee $user): void
     {
         $user->givePermission(Permission::create(['name' => self::READ]));
 
@@ -416,11 +416,11 @@ final class ForgetsDecisionsTest extends TestCase
      * Resolve the user as the request's subject in the session, with the
      * checker bound when one is given, and return a manager built afresh.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  \SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker|null  $checker
      * @return \SineMacula\Laravel\Authorization\AuthorizationManager
      */
-    private function signIn(StubIdentity $user, ?AuthenticationRequirementChecker $checker = null): AuthorizationManager
+    private function signIn(StubGrantee $user, ?AuthenticationRequirementChecker $checker = null): AuthorizationManager
     {
         if ($checker !== null) {
             $this->container()->instance(AuthenticationRequirementChecker::class, $checker);

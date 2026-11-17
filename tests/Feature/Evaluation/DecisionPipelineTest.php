@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
@@ -54,11 +54,11 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\PreviewsSubjects;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubSessionPolicySource;
 use Tests\Feature\Stubs\StubTenant;
-use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Feature\Stubs\SuspendableGrantee;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
@@ -117,7 +117,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testAnInactiveSubjectIsDeniedAtTheSubjectStage(): void
     {
-        $user = SuspendableIdentity::create(['id' => 'suspended']);
+        $user = SuspendableGrantee::create(['id' => 'suspended']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
 
@@ -137,7 +137,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testAnUnidentifiableResourceIsDeniedAtTheResourceStage(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $policies = \Mockery::mock(PolicyResolver::class);
         $policies->shouldNotReceive('policiesFor');
 
@@ -156,7 +156,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testATenantOwnedResourceOutsideTheScopeIsDeniedAtTheTenantStage(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $subject  = new Subject($user, $user);
         $pipeline = $this->pipeline()->withPolicies([self::allowing('posts:read')]);
 
@@ -176,7 +176,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testAHeldPermissionAllows(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
 
@@ -200,8 +200,8 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testThePoliciesComeFromTheResolverTheIdentityAndTheResource(): void
     {
-        $principal = StubIdentity::create(['id' => 'account-1']);
-        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $principal = StubGrantee::create(['id' => 'account-1']);
+        $identity  = StubSecondGrantee::create(['id' => 'person-1']);
         $subject   = new Subject($principal, $identity);
         $post      = ResourceReference::record('posts', '7');
 
@@ -231,7 +231,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testAnOverrideReplacesThePoliciesAloneInANewPipeline(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($user, $user);
         $post    = ResourceReference::record('posts', '7');
 
@@ -261,7 +261,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testCapsIntersectInANewPipeline(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($user, $user);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
@@ -285,7 +285,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testTheSessionCapResolverCapsEachCheck(): void
     {
-        $machine = \Mockery::mock(AuthorizableIdentity::class, AuthorizableMachine::class);
+        $machine = \Mockery::mock(AuthorizableGrantee::class, AuthorizableMachine::class);
 
         $machine->shouldReceive('getPermissions')->andReturn(['*']);
         $machine->shouldReceive('getPolicies')->andReturn([]);
@@ -310,7 +310,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testAPipelineWithoutSessionCapsReadsNoCredential(): void
     {
-        $machine = \Mockery::mock(AuthorizableIdentity::class, AuthorizableMachine::class);
+        $machine = \Mockery::mock(AuthorizableGrantee::class, AuthorizableMachine::class);
 
         $machine->shouldReceive('getPermissions')->andReturn(['*']);
         $machine->shouldReceive('getPolicies')->andReturn([]);
@@ -342,7 +342,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testAnUnreadablePolicyIsAnInvalidPolicy(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
 
@@ -367,7 +367,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testTheGuardrailsCapEveryCheckButManagingThem(): void
     {
-        $user    = StubIdentity::create(['id' => 'guardrail-admin']);
+        $user    = StubGrantee::create(['id' => 'guardrail-admin']);
         $subject = new Subject($user, $user);
 
         $user->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
@@ -405,7 +405,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testOnlyTheGuardrailRightItselfIsExempt(): void
     {
-        $user    = StubIdentity::create(['id' => 'guardrail-admin']);
+        $user    = StubGrantee::create(['id' => 'guardrail-admin']);
         $subject = new Subject($user, $user);
 
         $user->givePermission(Permission::create(['name' => '*']));
@@ -438,7 +438,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testTheAdministrationStageFollowsTheAllow(): void
     {
-        $user    = StubIdentity::create(['id' => 'admin-1']);
+        $user    = StubGrantee::create(['id' => 'admin-1']);
         $subject = new Subject($user, $user);
         $role    = Role::create(['name' => 'editor']);
 
@@ -483,7 +483,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testAnAllowNamesTheActivationsBehindIt(): void
     {
-        $user    = StubIdentity::create(['id' => 'responder-1']);
+        $user    = StubGrantee::create(['id' => 'responder-1']);
         $subject = new Subject($user, $user);
         $role    = Role::create(['name' => 'responder']);
         $policy  = self::stored('deleting', [['effect' => 'allow', 'actions' => ['posts:delete']]]);
@@ -538,7 +538,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testAReviewsReachIsWeighedAfterTheAllow(): void
     {
-        $user    = StubIdentity::create(['id' => 'reviewer']);
+        $user    = StubGrantee::create(['id' => 'reviewer']);
         $subject = new Subject($user, $user);
         $tenant  = new Reference('tenant', 'a');
 
@@ -625,8 +625,8 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testAGrantRowIsDecidedInItsOwnTenant(): void
     {
-        $admin   = StubIdentity::create(['id' => 'admin-1']);
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $admin   = StubGrantee::create(['id' => 'admin-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($admin, $admin);
         $tenant  = new Reference('tenant', 'a');
 
@@ -652,7 +652,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testFurtherChecksOutsideADecisionAreDecidedWithNoContext(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($user, $user);
         $policy  = EvaluationPolicy::fromArray(['name' => 'inputs', 'statements' => [
             ['effect' => 'allow', 'actions' => ['posts:view'], 'conditions' => ['null' => ['input.flag' => true]]],
@@ -682,8 +682,8 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testAFurtherCheckIsDecidedWithoutTheStage(): void
     {
-        $admin   = StubIdentity::create(['id' => 'admin-1']);
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $admin   = StubGrantee::create(['id' => 'admin-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($admin, $admin);
         $edit    = Permission::create(['name' => 'posts:edit']);
 
@@ -744,7 +744,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testTheCallersValuesAreReadUnderInputAlone(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($user, $user);
         $policy  = EvaluationPolicy::fromArray(['name' => 'drafts', 'statements' => [
             ['effect' => 'allow', 'actions' => ['posts:edit'], 'conditions' => ['eq' => ['input.status' => 'draft']]],
@@ -777,7 +777,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testTheSourcesGatheredAreTheOnesWeighed(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
         $policy  = self::stored('mine', [['effect' => 'allow', 'actions' => ['posts:view'], 'conditions' => ['eq' => ['input.flag' => 'on']]]]);
 
@@ -809,7 +809,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testTheQueryCompilerSeesTheRecordAttachmentsUnlessOverridden(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
 
         $user->givePermission(Permission::query()->create(['name' => 'posts:view']));
@@ -840,13 +840,13 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testPreparingReadsTheAttachedPoliciesAhead(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
         $records = [ResourceReference::record('posts', '7'), ResourceReference::record('posts', '8'), ResourceReference::type('posts'), null, false];
 
         self::resourcePolicies()->attach(self::stored('type', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => [$user->getMorphClass() . ':u1']]]), 'posts');
 
-        $suspended            = SuspendableIdentity::create(['id' => 'suspended']);
+        $suspended            = SuspendableGrantee::create(['id' => 'suspended']);
         $suspended->suspended = true;
 
         $idle = [
@@ -889,7 +889,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testAnExplainingPipelineReturnsTheEvidence(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($user, $user);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
@@ -916,7 +916,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testTheSourcesOfAnExplainedCheckRecordTheTests(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($user, $user);
 
         self::assertTrue($this->pipeline()->sources($subject, 'posts:read', null, [], null, new EvidenceRecorder)->context->isExplaining());
@@ -933,8 +933,8 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testAFurtherCheckIsNeverExplained(): void
     {
-        $admin   = StubIdentity::create(['id' => 'admin-1']);
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $admin   = StubGrantee::create(['id' => 'admin-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($admin, $admin);
         $edit    = Permission::create(['name' => 'posts:edit']);
 
@@ -960,7 +960,7 @@ final class DecisionPipelineTest extends TestCase
      */
     public function testACustomResolverAndAnOverrideAreUnavailable(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $subject  = new Subject($user, $user);
         $policy   = EvaluationPolicy::fromArray(['name' => 'coded', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]);
         $resolver = new class ($policy) implements PolicyResolver {

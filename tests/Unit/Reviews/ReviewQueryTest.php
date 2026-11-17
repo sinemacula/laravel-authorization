@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Reviews\ReviewQuery;
 use SineMacula\Laravel\Authorization\Reviews\ReviewScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -83,7 +83,7 @@ final class ReviewQueryTest extends TestCase
      */
     public function testAReviewOfHoldingsTakesASubjectOrAnIdentity(): void
     {
-        $ann     = StubIdentity::query()->create(['id' => 'ann']);
+        $ann     = StubGrantee::query()->create(['id' => 'ann']);
         $subject = new Subject($ann, $ann);
         $scope   = ReviewScope::everywhere();
 
@@ -104,7 +104,7 @@ final class ReviewQueryTest extends TestCase
      */
     public function testAnUnnamedSubjectIsRefused(): void
     {
-        foreach ([new Subject(new StubIdentity, null), new StubIdentity, new Subject(new \stdClass, null)] as $subject) {
+        foreach ([new Subject(new StubGrantee, null), new StubGrantee, new Subject(new \stdClass, null)] as $subject) {
             try {
                 ReviewQuery::holdings($subject, ReviewScope::everywhere());
                 self::fail('An unnamed subject was taken.');
@@ -147,7 +147,7 @@ final class ReviewQueryTest extends TestCase
      */
     public function testAReviewOfAnActorNamesTheActor(): void
     {
-        $query = ReviewQuery::grantedBy(StubIdentity::query()->create(['id' => 'actor']), ReviewScope::everywhere());
+        $query = ReviewQuery::grantedBy(StubGrantee::query()->create(['id' => 'actor']), ReviewScope::everywhere());
 
         self::assertSame([ReviewKind::GRANTED_BY, 'actor'], [$query->kind, $query->actor?->id]);
 

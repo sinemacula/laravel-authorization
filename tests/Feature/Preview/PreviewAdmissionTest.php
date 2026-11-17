@@ -28,7 +28,7 @@ use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\ReportsEveryDecision;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -423,7 +423,7 @@ final class PreviewAdmissionTest extends TestCase
             ['effect' => 'deny', 'actions' => [PackagePermissions::SUBJECT_PREVIEW], 'conditions' => ['eq' => ['resource.identity_id' => 'protected']]],
         ]);
 
-        $protected = new Subject($junior, StubIdentity::query()->create(['id' => 'protected']));
+        $protected = new Subject($junior, StubGrantee::query()->create(['id' => 'protected']));
 
         $manager = $this->signIn($caller, 'session-1', $tenant);
 
@@ -534,13 +534,13 @@ final class PreviewAdmissionTest extends TestCase
      * Deny the caller the right to preview in the tenant, through a role it
      * holds there.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $caller
+     * @param  \Tests\Feature\Stubs\StubGrantee  $caller
      * @param  \Tests\Feature\Stubs\StubTenant  $tenant
      * @return void
      *
      * @throws \Throwable
      */
-    private static function denyInTenant(StubIdentity $caller, StubTenant $tenant): void
+    private static function denyInTenant(StubGrantee $caller, StubTenant $tenant): void
     {
         $name   = 'no-previews-' . Reference::of($tenant)->id;
         $role   = Role::query()->create(['name' => $name]);

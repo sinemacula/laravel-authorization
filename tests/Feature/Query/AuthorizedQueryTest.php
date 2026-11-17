@@ -25,7 +25,7 @@ use SineMacula\Laravel\Authorization\Query\Refusal;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ScopesQueries;
 use Tests\Concerns\UsesAnAuthorizationConnection;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\ReplicatedGuardedPost;
@@ -512,7 +512,7 @@ final class AuthorizedQueryTest extends TestCase
 
         self::createReplicatedTables($connection);
 
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         foreach ([1, 2, 3] as $id) {
             ReplicatedPost::query()->create(['id' => $id]);
@@ -547,10 +547,10 @@ final class AuthorizedQueryTest extends TestCase
      * and let the subject edit the posts of the organisation's subtree.
      *
      * @param  \Illuminate\Database\Connection  $connection
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @return void
      */
-    private function seedTree(Connection $connection, StubIdentity $user): void
+    private function seedTree(Connection $connection, StubGrantee $user): void
     {
         $type = (new StubTenant)->getMorphClass();
 

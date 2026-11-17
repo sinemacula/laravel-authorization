@@ -24,9 +24,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RecordsRowLocks;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
@@ -102,14 +102,14 @@ final class ConflictReaderTest extends TestCase
     {
         [$clerk, $auditor] = self::roles();
 
-        $user  = StubIdentity::query()->create(['id' => 'user']);
-        $other = StubIdentity::query()->create(['id' => 'other']);
+        $user  = StubGrantee::query()->create(['id' => 'user']);
+        $other = StubGrantee::query()->create(['id' => 'other']);
 
         self::grants()->grantRole($user, $clerk, tenant: self::tenant('child'));
         self::grants()->grantRole($user, $auditor, tenant: self::tenant('child'), includeSubtree: false);
         self::grants()->grantRole($other, $clerk);
         self::grants()->grantRole($other, $auditor, tenant: self::tenant('other'), includeSubtree: false);
-        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'lonely']), $clerk, tenant: self::tenant('sibling'));
+        self::grants()->grantRole(StubGrantee::query()->create(['id' => 'lonely']), $clerk, tenant: self::tenant('sibling'));
 
         $tree   = $this->tree();
         $report = self::report($clerk, $auditor);
@@ -146,8 +146,8 @@ final class ConflictReaderTest extends TestCase
     {
         [$clerk, $auditor] = self::roles();
 
-        $user  = StubIdentity::query()->create(['id' => 'user']);
-        $other = StubIdentity::query()->create(['id' => 'other']);
+        $user  = StubGrantee::query()->create(['id' => 'user']);
+        $other = StubGrantee::query()->create(['id' => 'other']);
 
         self::grants()->grantRole($user, $clerk);
         self::grants()->grantRole($user, $auditor);
@@ -186,7 +186,7 @@ final class ConflictReaderTest extends TestCase
         ];
 
         foreach ($holders as $id => [[$first, $firstBelow], [$second, $secondBelow]]) {
-            $holder = StubIdentity::query()->create(['id' => $id]);
+            $holder = StubGrantee::query()->create(['id' => $id]);
 
             self::grants()->grantRole($holder, $clerk, tenant: self::tenant($first), includeSubtree: $firstBelow);
             self::grants()->grantRole($holder, $auditor, tenant: self::tenant($second), includeSubtree: $secondBelow);
@@ -209,7 +209,7 @@ final class ConflictReaderTest extends TestCase
     {
         [$clerk, $auditor] = self::roles();
 
-        $holder = StubIdentity::query()->create(['id' => 'holder']);
+        $holder = StubGrantee::query()->create(['id' => 'holder']);
 
         self::grants()->grantRole($holder, $clerk, tenant: self::tenant('child'), includeSubtree: false);
         self::grants()->grantRole($holder, $auditor, tenant: self::tenant('child'), includeSubtree: false);
@@ -222,7 +222,7 @@ final class ConflictReaderTest extends TestCase
         self::assertSame($same, self::queriesOf(static fn (): ConflictReport => self::report($clerk, $auditor)));
 
         foreach (['one' => ['grandchild', 'parent'], 'two' => ['sibling', 'parent'], 'three' => ['other', 'parent']] as $id => [$first, $second]) {
-            $below = StubIdentity::query()->create(['id' => $id]);
+            $below = StubGrantee::query()->create(['id' => $id]);
 
             self::grants()->grantRole($below, $clerk, tenant: self::tenant($first), includeSubtree: false);
             self::grants()->grantRole($below, $auditor, tenant: self::tenant($second));
@@ -262,7 +262,7 @@ final class ConflictReaderTest extends TestCase
         ];
 
         foreach ($second as $id => [$role, $tenant, $isReaching]) {
-            $holder = StubIdentity::query()->create(['id' => $id]);
+            $holder = StubGrantee::query()->create(['id' => $id]);
 
             self::insertGrant($clerk, $holder, self::tenant('parent'), true);
             self::insertGrant($role, $holder, self::tenant($tenant), $isReaching);
@@ -292,7 +292,7 @@ final class ConflictReaderTest extends TestCase
         $requester = Role::query()->create(['name' => 'requester']);
 
         foreach (['below' => 'grandchild', 'beside' => 'sibling'] as $id => $tenant) {
-            $holder = StubIdentity::query()->create(['id' => $id]);
+            $holder = StubGrantee::query()->create(['id' => $id]);
 
             self::insertGrant($clerk, $holder, null, false);
             self::insertGrant($requester, $holder, self::tenant($tenant), false);
@@ -314,7 +314,7 @@ final class ConflictReaderTest extends TestCase
     {
         [$clerk, $auditor] = self::roles();
 
-        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'holder']), $clerk);
+        self::grants()->grantRole(StubGrantee::query()->create(['id' => 'holder']), $clerk);
 
         $pairs  = [[Reference::of($clerk), Reference::of($auditor)]];
         $reader = new ConflictReader(new ListedIdentityDirectory);
@@ -337,7 +337,7 @@ final class ConflictReaderTest extends TestCase
         $approver  = Role::query()->withoutGlobalScopes()->create(['name' => 'approver', 'tenant_type' => self::TENANT, 'tenant_id' => 'parent']);
         $junior    = Role::query()->withoutGlobalScopes()->create(['name' => 'junior', 'parent_id' => $approver->id, 'tenant_type' => self::TENANT, 'tenant_id' => 'child']);
         $requester = Role::query()->create(['name' => 'requester']);
-        $user      = StubIdentity::query()->create(['id' => 'user']);
+        $user      = StubGrantee::query()->create(['id' => 'user']);
 
         self::grants()->grantRole($user, $junior, tenant: self::tenant('child'));
         self::grants()->grantRole($user, $requester, tenant: self::tenant('child'));
@@ -366,7 +366,7 @@ final class ConflictReaderTest extends TestCase
         $holders = ['same' => ['admin', 'admin'], 'every' => [null, 'billing'], 'everyOther' => ['billing', null], 'apart' => ['admin', 'billing']];
 
         foreach ($holders as $id => [$first, $second]) {
-            $holder = StubIdentity::query()->create(['id' => $id]);
+            $holder = StubGrantee::query()->create(['id' => $id]);
 
             self::grants()->grantRole($holder, $clerk, application: $first);
             self::grants()->grantRole($holder, $auditor, application: $second);
@@ -390,7 +390,7 @@ final class ConflictReaderTest extends TestCase
 
         $deputy = Role::query()->create(['name' => 'deputy', 'parent_id' => $clerk->id]);
         $acting = Role::query()->create(['name' => 'acting', 'parent_id' => $deputy->id]);
-        $user   = StubIdentity::query()->create(['id' => 'user']);
+        $user   = StubGrantee::query()->create(['id' => 'user']);
 
         self::grants()->grantRole($user, $acting);
         self::grants()->grantRole($user, $auditor);
@@ -423,14 +423,14 @@ final class ConflictReaderTest extends TestCase
 
         [$clerk, $auditor] = self::roles();
 
-        $person  = StubIdentity::query()->create(['id' => 'person']);
-        $both    = StubIdentity::query()->create(['id' => 'both']);
-        $member  = StubSecondIdentity::query()->create(['id' => 'member']);
-        $reverse = StubSecondIdentity::query()->create(['id' => 'reverse']);
-        $first   = StubSecondIdentity::query()->create(['id' => 'first']);
-        $second  = StubSecondIdentity::query()->create(['id' => 'second']);
+        $person  = StubGrantee::query()->create(['id' => 'person']);
+        $both    = StubGrantee::query()->create(['id' => 'both']);
+        $member  = StubSecondGrantee::query()->create(['id' => 'member']);
+        $reverse = StubSecondGrantee::query()->create(['id' => 'reverse']);
+        $first   = StubSecondGrantee::query()->create(['id' => 'first']);
+        $second  = StubSecondGrantee::query()->create(['id' => 'second']);
         $machine = StubMachine::query()->create(['id' => 'machine']);
-        $robots  = StubIdentity::query()->create(['id' => 'robots']);
+        $robots  = StubGrantee::query()->create(['id' => 'robots']);
 
         self::grants()->grantRole($person, $clerk);
         self::grants()->grantRole($member, $auditor);
@@ -459,7 +459,7 @@ final class ConflictReaderTest extends TestCase
 
         self::assertTrue(self::refersTo($member->identity, $person));
         self::assertTrue(self::refersTo($member->first->grantee, $person));
-        self::assertTrue(self::refersTo($member->second->grantee, StubSecondIdentity::query()->findOrFail('member')));
+        self::assertTrue(self::refersTo($member->second->grantee, StubSecondGrantee::query()->findOrFail('member')));
 
         $reverse = self::conflictOf($report, $reverse);
 
@@ -481,12 +481,12 @@ final class ConflictReaderTest extends TestCase
     {
         [$clerk, $auditor] = self::roles();
 
-        $holder   = StubIdentity::query()->create(['id' => 'holder']);
-        $identity = StubIdentity::query()->create(['id' => 'identity']);
-        $active   = StubSecondIdentity::query()->create(['id' => 'active']);
-        $first    = StubSecondIdentity::query()->create(['id' => 'first']);
-        $second   = StubSecondIdentity::query()->create(['id' => 'second']);
-        $other    = StubIdentity::query()->create(['id' => 'other']);
+        $holder   = StubGrantee::query()->create(['id' => 'holder']);
+        $identity = StubGrantee::query()->create(['id' => 'identity']);
+        $active   = StubSecondGrantee::query()->create(['id' => 'active']);
+        $first    = StubSecondGrantee::query()->create(['id' => 'first']);
+        $second   = StubSecondGrantee::query()->create(['id' => 'second']);
+        $other    = StubGrantee::query()->create(['id' => 'other']);
 
         self::activate($clerk, $holder);
         self::grants()->grantRole($holder, $auditor);
@@ -515,8 +515,8 @@ final class ConflictReaderTest extends TestCase
     {
         [$clerk, $auditor] = self::roles();
 
-        $expired = StubIdentity::query()->create(['id' => 'expired']);
-        $half    = StubIdentity::query()->create(['id' => 'half']);
+        $expired = StubGrantee::query()->create(['id' => 'expired']);
+        $half    = StubGrantee::query()->create(['id' => 'half']);
 
         Carbon::setTestNow('2026-07-01 12:00:00');
 
@@ -570,7 +570,7 @@ final class ConflictReaderTest extends TestCase
         ];
 
         foreach ($holders as $id => [$first, $below, $second]) {
-            $holder = StubIdentity::query()->create(['id' => $id]);
+            $holder = StubGrantee::query()->create(['id' => $id]);
 
             self::grants()->grantRole($holder, $clerk, tenant: $first, includeSubtree: $below);
             self::grants()->grantRole($holder, $auditor, tenant: $second, includeSubtree: false);
@@ -592,9 +592,9 @@ final class ConflictReaderTest extends TestCase
     {
         [$clerk, $auditor] = self::roles();
 
-        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'one']), $clerk);
-        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'two']), $auditor);
-        StubIdentity::query()->create(['id' => 'idle']);
+        self::grants()->grantRole(StubGrantee::query()->create(['id' => 'one']), $clerk);
+        self::grants()->grantRole(StubGrantee::query()->create(['id' => 'two']), $auditor);
+        StubGrantee::query()->create(['id' => 'idle']);
 
         $directory = new ListedIdentityDirectory(isComplete: false);
         $reports   = self::read([[$clerk, $auditor], [Role::query()->create(['name' => 'idle-a']), Role::query()->create(['name' => 'idle-b'])]], $directory);
@@ -624,7 +624,7 @@ final class ConflictReaderTest extends TestCase
 
         $holders = static function (int $from, int $to) use ($clerk, $auditor, $payer): void {
             foreach (\range($from, $to) as $number) {
-                $holder = StubIdentity::query()->create(['id' => 'holder-' . \str_pad((string) $number, 3, '0', \STR_PAD_LEFT)]);
+                $holder = StubGrantee::query()->create(['id' => 'holder-' . \str_pad((string) $number, 3, '0', \STR_PAD_LEFT)]);
 
                 self::grants()->grantRole($holder, $clerk, tenant: self::tenant('child'));
                 self::grants()->grantRole($holder, $auditor, tenant: self::tenant('parent'));
@@ -665,7 +665,7 @@ final class ConflictReaderTest extends TestCase
     {
         [$clerk, $auditor] = self::roles();
 
-        $user = StubIdentity::query()->create(['id' => 'user']);
+        $user = StubGrantee::query()->create(['id' => 'user']);
 
         self::grants()->grantRole($user, $clerk, tenant: self::tenant('child'));
         self::grants()->grantRole($user, $clerk, tenant: self::tenant('other'));
@@ -785,7 +785,7 @@ final class ConflictReaderTest extends TestCase
         $listed = [];
 
         foreach ($principals as $identity => $models) {
-            $listed[ListedIdentityDirectory::key(new Reference((new StubIdentity)->getMorphClass(), $identity))] = \array_map(Reference::of(...), $models);
+            $listed[ListedIdentityDirectory::key(new Reference((new StubGrantee)->getMorphClass(), $identity))] = \array_map(Reference::of(...), $models);
         }
 
         return new ListedIdentityDirectory($listed);
@@ -838,12 +838,12 @@ final class ConflictReaderTest extends TestCase
      * as a tree move leaves one.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
-     * @param  \Tests\Feature\Stubs\StubIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubGrantee  $grantee
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
      * @return void
      */
-    private static function insertGrant(Role $role, StubIdentity $grantee, ?Reference $tenant, bool $includeSubtree): void
+    private static function insertGrant(Role $role, StubGrantee $grantee, ?Reference $tenant, bool $includeSubtree): void
     {
         DB::table('authorizable_roles')->insert([
             'role_id'           => $role->id,

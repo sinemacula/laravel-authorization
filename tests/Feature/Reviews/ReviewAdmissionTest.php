@@ -35,7 +35,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReviewsAccess;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\TestCase;
 
@@ -172,7 +172,7 @@ final class ReviewAdmissionTest extends TestCase
         self::assertRefusedAs(DecisionReason::SESSION_POLICY, static fn (): mixed => self::reviews()->review($query, ActingContext::current()->capped(['posts:*'])));
         self::assertSame([], self::reviews()->review($query, ActingContext::current()->capped(['authorization:review.*']))->rows);
 
-        $stepped = StubIdentity::query()->create(['id' => 'stepped']);
+        $stepped = StubGrantee::query()->create(['id' => 'stepped']);
 
         self::attachStatements($stepped, 'stepped-up-review', [self::requiring(PackagePermissions::REVIEW_READ)]);
 
@@ -236,7 +236,7 @@ final class ReviewAdmissionTest extends TestCase
     {
         Event::fake([AuthorizationFailed::class]);
 
-        $reviewer = StubIdentity::query()->create(['id' => 'nobody']);
+        $reviewer = StubGrantee::query()->create(['id' => 'nobody']);
         $holder   = self::identity('holder');
         $role     = self::role('reviewed');
 
@@ -297,7 +297,7 @@ final class ReviewAdmissionTest extends TestCase
     {
         $this->tree();
 
-        $reviewer = StubIdentity::query()->create(['id' => 'exporter']);
+        $reviewer = StubGrantee::query()->create(['id' => 'exporter']);
 
         self::grants()->grantPermission($reviewer, self::permission(PackagePermissions::REVIEW_EXPORT), tenant: self::tenant('org1'), includeSubtree: false);
 
@@ -333,7 +333,7 @@ final class ReviewAdmissionTest extends TestCase
             ReviewAdmission::admit(ActingContext::current(), $resource, PackagePermissions::REVIEW_READ, PackagePermissions::REVIEW_EXPORT);
         });
 
-        $exporter = StubIdentity::query()->create(['id' => 'exporter']);
+        $exporter = StubGrantee::query()->create(['id' => 'exporter']);
 
         self::grants()->grantPermission($exporter, self::permission(PackagePermissions::REVIEW_EXPORT));
 
@@ -600,7 +600,7 @@ final class ReviewAdmissionTest extends TestCase
      */
     public function testWithoutAManagerAReviewIsRefused(): void
     {
-        $reviewer  = StubIdentity::query()->create(['id' => 'reviewer']);
+        $reviewer  = StubGrantee::query()->create(['id' => 'reviewer']);
         $actor     = ActingContext::for(new Subject($reviewer, $reviewer));
         $resource  = ReviewResource::of(ReviewQuery::holders(self::role('reviewed'), ReviewScope::everywhere()));
         $container = Container::getInstance();
@@ -626,13 +626,13 @@ final class ReviewAdmissionTest extends TestCase
      * @param  string  $id
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $isSubtree
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      *
      * @throws \Throwable
      */
-    private static function reviewer(string $id, ?Reference $tenant, bool $isSubtree = true): StubIdentity
+    private static function reviewer(string $id, ?Reference $tenant, bool $isSubtree = true): StubGrantee
     {
-        $reviewer = StubIdentity::query()->create(['id' => $id]);
+        $reviewer = StubGrantee::query()->create(['id' => $id]);
 
         self::grants()->grantPermission($reviewer, self::right(), tenant: $tenant, includeSubtree: $isSubtree);
 

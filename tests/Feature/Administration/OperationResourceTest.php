@@ -18,7 +18,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -43,7 +43,7 @@ final class OperationResourceTest extends TestCase
     public function testAGrantNamesWhatItHandsOut(): void
     {
         $role   = Role::create(['name' => 'editor']);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $tenant = new Reference('stub_tenant', 'tenant-a');
         $expiry = Carbon::parse('2026-07-02 14:00:00', 'Europe/Paris');
         $grant  = OperationResource::grant(PackagePermissions::ROLE_GRANT, $user, $role, new GrantScope($tenant, 'admin', false), $expiry);
@@ -154,7 +154,7 @@ final class OperationResourceTest extends TestCase
         self::assertArrayNotHasKey('target_id', $created->attributes());
         self::assertArrayNotHasKey('permission', $created->attributes());
         self::assertArrayNotHasKey('change', OperationResource::definition(PackagePermissions::ROLE_DELETE, $role)->attributes());
-        self::assertArrayNotHasKey('role', OperationResource::definition(PackagePermissions::ROLE_DELETE, new StubIdentity(['id' => 'x']))->attributes());
+        self::assertArrayNotHasKey('role', OperationResource::definition(PackagePermissions::ROLE_DELETE, new StubGrantee(['id' => 'x']))->attributes());
     }
 
     /**
@@ -193,7 +193,7 @@ final class OperationResourceTest extends TestCase
      */
     public function testOnlyAPackageRecordsNameIsNamed(): void
     {
-        $named = OperationResource::definition(PackagePermissions::ROLE_DELETE, new StubIdentity(['id' => 'x', 'name' => 'Ann']))->attributes();
+        $named = OperationResource::definition(PackagePermissions::ROLE_DELETE, new StubGrantee(['id' => 'x', 'name' => 'Ann']))->attributes();
 
         self::assertArrayNotHasKey('', $named);
         self::assertSame([], \array_intersect_key($named, ['role' => true, 'permission' => true, 'policy' => true]));
@@ -270,7 +270,7 @@ final class OperationResourceTest extends TestCase
     public function testItHoldsTheChangeAsValues(): void
     {
         $role   = Role::create(['name' => 'editor']);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $scope  = new GrantScope(new Reference('stub_tenant', 'tenant-a'), 'admin', false);
         $expiry = Carbon::parse('2026-07-02 14:00:00', 'Europe/Paris');
         $grant  = OperationResource::grant(PackagePermissions::ROLE_GRANT, $user, $role, $scope, $expiry);
@@ -305,7 +305,7 @@ final class OperationResourceTest extends TestCase
      */
     public function testAGrantThatOnlyShortensOnlyNarrows(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $edit = Permission::create(['name' => 'posts:edit']);
         $read = Permission::create(['name' => 'posts:read']);
 

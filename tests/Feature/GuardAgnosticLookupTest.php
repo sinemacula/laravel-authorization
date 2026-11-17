@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -61,7 +61,7 @@ final class GuardAgnosticLookupTest extends TestCase
             'guard' => null,
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $user->assignRole(self::ROLE_NAME);
 
@@ -81,7 +81,7 @@ final class GuardAgnosticLookupTest extends TestCase
             'guard' => null,
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $user->givePermission(self::PERMISSION_NAME);
 
@@ -107,7 +107,7 @@ final class GuardAgnosticLookupTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $user->assignRole(self::PRECEDENCE_ROLE);
 
@@ -137,7 +137,7 @@ final class GuardAgnosticLookupTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $user->givePermission(self::PRECEDENCE_PERMISSION);
 

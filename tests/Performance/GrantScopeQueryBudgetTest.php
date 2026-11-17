@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantScopeQuery;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\TestCase;
@@ -80,8 +80,8 @@ final class GrantScopeQueryBudgetTest extends TestCase
     {
         $this->chain();
 
-        $few  = new Subject(StubIdentity::query()->findOrFail('few-principal-0'), StubIdentity::query()->findOrFail('few'));
-        $many = new Subject(StubIdentity::query()->findOrFail('many-principal-0'), StubIdentity::query()->findOrFail('many'));
+        $few  = new Subject(StubGrantee::query()->findOrFail('few-principal-0'), StubGrantee::query()->findOrFail('few'));
+        $many = new Subject(StubGrantee::query()->findOrFail('many-principal-0'), StubGrantee::query()->findOrFail('many'));
 
         $shallow = new Reference('tenant', 'level-1');
         $deep    = new Reference('tenant', 'level-' . self::DEPTH);
@@ -122,7 +122,7 @@ final class GrantScopeQueryBudgetTest extends TestCase
         self::assertCount(1, $within['queries']);
 
         for ($index = 0; $index < 3; $index++) {
-            self::grant(StubIdentity::create(['id' => 'more-' . $index]), 10);
+            self::grant(StubGrantee::create(['id' => 'more-' . $index]), 10);
         }
 
         foreach ([$shallow, $deep] as $tenant) {
@@ -162,7 +162,7 @@ final class GrantScopeQueryBudgetTest extends TestCase
         $principals = [];
 
         foreach (['few' => 1, 'many' => 10] as $name => $count) {
-            $grantees = [StubIdentity::create(['id' => $name]), StubIdentity::create(['id' => $name . '-principal-0']), StubIdentity::create(['id' => $name . '-principal-1'])];
+            $grantees = [StubGrantee::create(['id' => $name]), StubGrantee::create(['id' => $name . '-principal-0']), StubGrantee::create(['id' => $name . '-principal-1'])];
 
             $principals[ListedIdentityDirectory::key(Reference::of($grantees[0]))] = [Reference::of($grantees[1]), Reference::of($grantees[2])];
 
@@ -178,11 +178,11 @@ final class GrantScopeQueryBudgetTest extends TestCase
      * Grant the grantee the given number of roles, permissions and deny-only
      * policies, each at the top of the chain and reaching below it.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubGrantee  $grantee
      * @param  int  $count
      * @return void
      */
-    private static function grant(StubIdentity $grantee, int $count): void
+    private static function grant(StubGrantee $grantee, int $count): void
     {
         $top = new Reference('tenant', 'level-1');
 
@@ -198,14 +198,14 @@ final class GrantScopeQueryBudgetTest extends TestCase
     }
 
     /**
-     * Return the reference to the stub identity with the key.
+     * Return the reference to the stub grantee with the key.
      *
      * @param  string  $key
      * @return \SineMacula\Laravel\Authorization\Support\Reference
      */
     private static function reference(string $key): Reference
     {
-        return new Reference((new StubIdentity)->getMorphClass(), $key);
+        return new Reference((new StubGrantee)->getMorphClass(), $key);
     }
 
     /**

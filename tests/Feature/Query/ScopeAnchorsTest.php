@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\FixedSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
@@ -55,9 +55,9 @@ final class ScopeAnchorsTest extends TestCase
      */
     public function testEveryTenantASourceSitsAtIsRead(): void
     {
-        $user     = StubIdentity::create(['id' => 'u1']);
-        $identity = StubIdentity::create(['id' => 'u2']);
-        $other    = StubIdentity::create(['id' => 'u3']);
+        $user     = StubGrantee::create(['id' => 'u1']);
+        $identity = StubGrantee::create(['id' => 'u2']);
+        $other    = StubGrantee::create(['id' => 'u3']);
         $parent   = Role::create(['name' => 'parent', 'tenant_type' => 'teams', 'tenant_id' => 'owner']);
         $child    = Role::create(['name' => 'child', 'parent_id' => $parent->getKey(), 'tenant_type' => 'teams', 'tenant_id' => 'owner']);
         $owned    = Permission::create(['name' => 'posts:owned', 'tenant_type' => 'teams', 'tenant_id' => 'permission']);
@@ -100,7 +100,7 @@ final class ScopeAnchorsTest extends TestCase
      */
     public function testTenantsOfTheSameIdAndAnotherTypeAreToldApart(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:view']), null, new Reference('teams', '5'));
         DB::table('guardrails')->insert(['policy_id' => self::storedPolicy('railed', [])->getKey(), 'tenant_type' => 'orgs', 'tenant_id' => '5']);
@@ -125,7 +125,7 @@ final class ScopeAnchorsTest extends TestCase
      */
     public function testASubjectThatIsNotAModelReadsNoGrantTenant(): void
     {
-        $other = StubIdentity::create(['id' => 'u3']);
+        $other = StubGrantee::create(['id' => 'u3']);
 
         $other->givePermission(Permission::create(['name' => 'posts:view']), null, new Reference('teams', 'stranger'));
         $other->assignRole(Role::create(['name' => 'held']), null, new Reference('teams', 'held'));
@@ -138,7 +138,7 @@ final class ScopeAnchorsTest extends TestCase
         self::assertSame(['railed'], $ids($sources));
         self::assertSame(['railed'], $ids($admitted));
 
-        $identity = StubIdentity::create(['id' => 'u4']);
+        $identity = StubGrantee::create(['id' => 'u4']);
 
         $identity->givePermission(Permission::create(['name' => 'posts:list']), null, new Reference('teams', 'identity'));
 
@@ -157,8 +157,8 @@ final class ScopeAnchorsTest extends TestCase
      */
     public function testAPreviewsSubjectReadsItsPreviewersTenantsToo(): void
     {
-        $target = StubIdentity::create(['id' => 'target']);
-        $caller = StubIdentity::create(['id' => 'caller']);
+        $target = StubGrantee::create(['id' => 'target']);
+        $caller = StubGrantee::create(['id' => 'caller']);
 
         $target->givePermission(Permission::create(['name' => 'posts:view']), null, new Reference('teams', 'theirs'));
         $caller->givePermission(Permission::create(['name' => PackagePermissions::SUBJECT_PREVIEW]), null, new Reference('teams', 'callers'));
@@ -197,8 +197,8 @@ final class ScopeAnchorsTest extends TestCase
      */
     public function testEveryActivationsTenantAndItsRolesAreRead(): void
     {
-        $user   = StubIdentity::create(['id' => 'u1']);
-        $other  = StubIdentity::create(['id' => 'u3']);
+        $user   = StubGrantee::create(['id' => 'u1']);
+        $other  = StubGrantee::create(['id' => 'u3']);
         $parent = Role::create(['name' => 'parent']);
         $role   = Role::create(['name' => 'responder', 'parent_id' => $parent->getKey()]);
         $owned  = Permission::create(['name' => 'posts:owned', 'tenant_type' => 'teams', 'tenant_id' => 'permission']);

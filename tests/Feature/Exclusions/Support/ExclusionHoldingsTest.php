@@ -22,7 +22,7 @@ use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RecordsRowLocks;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -58,8 +58,8 @@ final class ExclusionHoldingsTest extends TestCase
         $intern  = Role::query()->create(['name' => 'intern']);
         $trainee = Role::query()->create(['name' => 'trainee', 'parent_id' => $intern->id]);
         $junior  = Role::query()->create(['name' => 'junior', 'parent_id' => $auditor->id]);
-        $user    = StubIdentity::query()->create(['id' => 'user']);
-        $other   = StubIdentity::query()->create(['id' => 'other']);
+        $user    = StubGrantee::query()->create(['id' => 'user']);
+        $other   = StubGrantee::query()->create(['id' => 'other']);
         $tenant  = new Reference('stub_tenant', 'a');
 
         self::grants()->grantRole($user, $trainee);
@@ -98,7 +98,7 @@ final class ExclusionHoldingsTest extends TestCase
         $clerk   = Role::query()->create(['name' => 'clerk']);
         $auditor = Role::query()->create(['name' => 'auditor', 'parent_id' => $clerk->id]);
         $intern  = Role::query()->create(['name' => 'intern', 'parent_id' => $auditor->id]);
-        $user    = StubIdentity::query()->create(['id' => 'user']);
+        $user    = StubGrantee::query()->create(['id' => 'user']);
         $tenant  = new Reference('stub_tenant', 'a');
         $until   = Carbon::now()->addDay();
 
@@ -143,8 +143,8 @@ final class ExclusionHoldingsTest extends TestCase
     {
         $chief = Role::query()->create(['name' => 'chief']);
         $clerk = Role::query()->create(['name' => 'clerk', 'parent_id' => $chief->id]);
-        $user  = StubIdentity::query()->create(['id' => 'user']);
-        $idle  = StubIdentity::query()->create(['id' => 'idle']);
+        $user  = StubGrantee::query()->create(['id' => 'user']);
+        $idle  = StubGrantee::query()->create(['id' => 'idle']);
 
         Carbon::setTestNow('2026-07-01 12:00:00');
 
@@ -184,8 +184,8 @@ final class ExclusionHoldingsTest extends TestCase
         $clerk   = Role::query()->create(['name' => 'clerk']);
         $auditor = Role::query()->create(['name' => 'auditor']);
         $idle    = Role::query()->create(['name' => 'idle']);
-        $one     = StubIdentity::query()->create(['id' => 'one']);
-        $two     = StubIdentity::query()->create(['id' => 'two']);
+        $one     = StubGrantee::query()->create(['id' => 'one']);
+        $two     = StubGrantee::query()->create(['id' => 'two']);
 
         self::grants()->grantRole($one, $clerk);
         self::grants()->grantRole($one, $auditor);
@@ -211,7 +211,7 @@ final class ExclusionHoldingsTest extends TestCase
      */
     public function testTheGrantsOfManyRolesAreReadAChunkAtATime(): void
     {
-        $user  = StubIdentity::query()->create(['id' => 'user']);
+        $user  = StubGrantee::query()->create(['id' => 'user']);
         $roles = [];
 
         foreach (\range(1, 501) as $number) {
@@ -243,7 +243,7 @@ final class ExclusionHoldingsTest extends TestCase
 
         $approver = Role::query()->withoutGlobalScopes()->create(['name' => 'approver', ...self::ownedBy($parent)]);
         $junior   = Role::query()->withoutGlobalScopes()->create(['name' => 'junior', 'parent_id' => $approver->id, ...self::ownedBy($child)]);
-        $user     = StubIdentity::query()->create(['id' => 'user']);
+        $user     = StubGrantee::query()->create(['id' => 'user']);
 
         self::grants()->grantRole($user, $junior, tenant: Reference::of($child));
 
@@ -258,7 +258,7 @@ final class ExclusionHoldingsTest extends TestCase
 
         $this->app?->instance(TenantTree::class, $moved);
 
-        $hidden = StubIdentity::query()->create(['id' => 'hidden']);
+        $hidden = StubGrantee::query()->create(['id' => 'hidden']);
 
         self::insertGrant($approver, $hidden, Reference::of($child), true);
 
@@ -289,9 +289,9 @@ final class ExclusionHoldingsTest extends TestCase
         $this->app?->instance(TenantTree::class, $tree);
 
         $approver = Role::query()->withoutGlobalScopes()->create(['name' => 'approver', ...self::ownedBy($below)]);
-        $reaching = StubIdentity::query()->create(['id' => 'reaching']);
-        $limited  = StubIdentity::query()->create(['id' => 'limited']);
-        $platform = StubIdentity::query()->create(['id' => 'platform']);
+        $reaching = StubGrantee::query()->create(['id' => 'reaching']);
+        $limited  = StubGrantee::query()->create(['id' => 'limited']);
+        $platform = StubGrantee::query()->create(['id' => 'platform']);
 
         self::insertGrant($approver, $reaching, Reference::of($top), true);
         self::insertGrant($approver, $limited, Reference::of($top), false);
@@ -331,7 +331,7 @@ final class ExclusionHoldingsTest extends TestCase
         $chief  = Role::query()->withoutGlobalScopes()->create(['name' => 'chief', ...self::ownedBy($top)]);
         $beside = Role::query()->withoutGlobalScopes()->create(['name' => 'beside', ...self::ownedBy($right)]);
         $clerk  = Role::query()->withoutGlobalScopes()->create(['name' => 'clerk', ...self::ownedBy($left)]);
-        $user   = StubIdentity::query()->create(['id' => 'user']);
+        $user   = StubGrantee::query()->create(['id' => 'user']);
 
         DB::table('roles')->where('id', $beside->id)->update(['parent_id' => $chief->id]);
         DB::table('roles')->where('id', $clerk->id)->update(['parent_id' => $beside->id]);
@@ -366,7 +366,7 @@ final class ExclusionHoldingsTest extends TestCase
         $chief  = Role::query()->create(['name' => 'chief']);
         $middle = Role::query()->create(['name' => 'middle', 'parent_id' => $chief->id]);
         $clerk  = Role::query()->create(['name' => 'clerk', 'parent_id' => $middle->id]);
-        $user   = StubIdentity::query()->create(['id' => 'user']);
+        $user   = StubGrantee::query()->create(['id' => 'user']);
 
         self::grants()->grantRole($user, $clerk);
 
@@ -416,7 +416,7 @@ final class ExclusionHoldingsTest extends TestCase
 
         self::assertSame($queries($flat), $queries($deep));
 
-        $user  = StubIdentity::query()->create(['id' => 'user']);
+        $user  = StubGrantee::query()->create(['id' => 'user']);
         $roles = [$deep->id, (string) $parent->parent_id, $parent->id];
 
         self::grants()->grantRole($user, $parent);
@@ -441,7 +441,7 @@ final class ExclusionHoldingsTest extends TestCase
         $clerk  = Role::query()->create(['name' => 'clerk', 'parent_id' => $chief->id]);
         $intern = Role::query()->create(['name' => 'intern', 'parent_id' => $clerk->id]);
 
-        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'user']), $intern);
+        self::grants()->grantRole(StubGrantee::query()->create(['id' => 'user']), $intern);
 
         DB::table('roles')->where('id', $chief->id)->update(['parent_id' => $clerk->id]);
 
@@ -467,7 +467,7 @@ final class ExclusionHoldingsTest extends TestCase
         $clerk  = Role::query()->create(['name' => 'clerk']);
         $deputy = Role::query()->create(['name' => 'deputy', 'parent_id' => $clerk->id]);
 
-        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'user']), $deputy);
+        self::grants()->grantRole(StubGrantee::query()->create(['id' => 'user']), $deputy);
 
         self::assertSame([], $this->lockedTables(static fn (): ExclusionHoldings => ExclusionHoldings::read([$clerk->id], new TenantRelations)));
         $locked = $this->lockedTables(static fn (): ExclusionHoldings => ExclusionHoldings::read([$clerk->id], new TenantRelations, true));
@@ -491,7 +491,7 @@ final class ExclusionHoldingsTest extends TestCase
 
         $clerk   = Role::query()->create(['name' => 'clerk']);
         $deputy  = Role::query()->create(['name' => 'deputy', 'parent_id' => $clerk->id]);
-        $user    = StubIdentity::query()->create(['id' => 'user']);
+        $user    = StubGrantee::query()->create(['id' => 'user']);
         $machine = StubMachine::query()->create(['id' => 'machine']);
         $tenant  = new Reference('stub_tenant', 'a');
 
@@ -566,13 +566,13 @@ final class ExclusionHoldingsTest extends TestCase
      * as a tree move leaves one.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
-     * @param  \Tests\Feature\Stubs\StubIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubGrantee  $grantee
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
      * @param  string|null  $application
      * @return void
      */
-    private static function insertGrant(Role $role, StubIdentity $grantee, ?Reference $tenant, bool $includeSubtree, ?string $application = null): void
+    private static function insertGrant(Role $role, StubGrantee $grantee, ?Reference $tenant, bool $includeSubtree, ?string $application = null): void
     {
         DB::table('authorizable_roles')->insert([
             'role_id'           => $role->id,

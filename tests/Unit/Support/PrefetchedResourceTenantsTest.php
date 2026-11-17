@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Support\PrefetchedResourceTenants;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\BulkChecks\CountingBulkTenants;
 use Tests\Fixtures\QueryScoping\SealedModels;
 
@@ -39,10 +39,10 @@ final class PrefetchedResourceTenantsTest extends TestCase
     {
         $tenant   = new Reference('teams', '5');
         $resolver = new CountingBulkTenants(['1' => $tenant, '2' => null, '7' => $tenant]);
-        $model    = new StubIdentity(['id' => '1']);
-        $keyless  = new StubIdentity;
+        $model    = new StubGrantee(['id' => '1']);
+        $keyless  = new StubGrantee;
         $values   = [$model, $keyless, ['posts', '2'], ['posts', 2], ['notes', '7'], ['posts'], 'posts:3', null, ResourceReference::record('posts', '8')];
-        $values[] = new StubIdentity(['id' => '1']);
+        $values[] = new StubGrantee(['id' => '1']);
 
         $tenants = PrefetchedResourceTenants::of($values, $resolver);
 
@@ -63,7 +63,7 @@ final class PrefetchedResourceTenantsTest extends TestCase
     {
         $tenant   = new Reference('teams', '5');
         $resolver = new FixedResourceTenantResolver($tenant, false);
-        $model    = new StubIdentity(['id' => '1']);
+        $model    = new StubGrantee(['id' => '1']);
         $tenants  = PrefetchedResourceTenants::of([$model, ['posts', '2']], $resolver);
 
         self::assertSame([], $resolver->asked);
@@ -92,7 +92,7 @@ final class PrefetchedResourceTenantsTest extends TestCase
         $tenant           = new Reference('teams', '5');
         $broken           = new CountingBulkTenants(['1' => $tenant, '2' => $tenant]);
         $broken->isBroken = true;
-        $model            = new StubIdentity(['id' => '1']);
+        $model            = new StubGrantee(['id' => '1']);
         $tenants          = PrefetchedResourceTenants::of([$model, ['posts', '2']], $broken);
 
         self::assertCount(2, $broken->bulkCalls);
@@ -123,8 +123,8 @@ final class PrefetchedResourceTenantsTest extends TestCase
         $tenant            = new Reference('teams', '5');
         $resolver          = new CountingBulkTenants(['1' => $tenant, '2' => $tenant, '3' => null]);
         $resolver->leftOut = ['1', '2'];
-        $first             = new StubIdentity(['id' => '1']);
-        $second            = new StubIdentity(['id' => '3']);
+        $first             = new StubGrantee(['id' => '1']);
+        $second            = new StubGrantee(['id' => '3']);
         $tenants           = PrefetchedResourceTenants::of([$first, $second, ['posts', '2'], ['posts', '3']], $resolver);
 
         self::assertNull($tenants->tenantOf($second));
@@ -148,7 +148,7 @@ final class PrefetchedResourceTenantsTest extends TestCase
 
         $naming->setAttribute('id', 9);
 
-        PrefetchedResourceTenants::of([$naming, new StubIdentity(['id' => '1'])], $resolver);
+        PrefetchedResourceTenants::of([$naming, new StubGrantee(['id' => '1'])], $resolver);
 
         self::assertSame([['1']], $resolver->bulkCalls);
     }

@@ -13,8 +13,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * Dispatched once a permission is revoked from a role, once for each permission
  * a revocation by name or a sync removes.
  *
- * Distinct from `Identity\PermissionRevoked`, which reports a permission
- * revoked from a grantee directly.
+ * Distinct from `Grantee\PermissionRevoked`, which reports a permission revoked
+ * from a grantee directly.
  *
  * A snapshot of plain values, never a model. It is dispatched once the write
  * commits, on the package's connection, and never for a write that rolls back

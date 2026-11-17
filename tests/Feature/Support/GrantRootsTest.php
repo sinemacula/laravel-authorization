@@ -24,9 +24,9 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\UsesAnAuthorizationConnection;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\SubtreeQueryTree;
 use Tests\TestCase;
@@ -56,7 +56,7 @@ final class GrantRootsTest extends TestCase
      */
     public function testRootsAreClassifiedAgainstTheTenant(): void
     {
-        $user   = StubIdentity::create(['id' => 'user']);
+        $user   = StubGrantee::create(['id' => 'user']);
         $tenant = new Reference('tenant', 'a');
         $within = GrantRoots::within($tenant, new FlatTenantTree);
         $roots  = static fn (?\Closure $within): array => [(new GrantRoots([Reference::of($user)]))->against($within)];
@@ -87,7 +87,7 @@ final class GrantRootsTest extends TestCase
         $within     = GrantRoots::within(new Reference('tenant', 'a'), new FlatTenantTree);
 
         foreach (['type' => ['tenant', null], 'key' => [null, 'a']] as $half => [$type, $id]) {
-            $user = StubIdentity::create(['id' => 'user-' . $half]);
+            $user = StubGrantee::create(['id' => 'user-' . $half]);
 
             DB::table('authorizable_permissions')->insert([
                 'permission_id'     => $permission->getKey(),
@@ -112,7 +112,7 @@ final class GrantRootsTest extends TestCase
      */
     public function testNoGranteesReadNothing(): void
     {
-        StubIdentity::create(['id' => 'other'])->givePermission(Permission::create(['name' => 'posts:read']));
+        StubGrantee::create(['id' => 'other'])->givePermission(Permission::create(['name' => 'posts:read']));
 
         $roots   = new GrantRoots([]);
         $queries = $this->queriesOf(static function () use ($roots): void {
@@ -154,8 +154,8 @@ final class GrantRootsTest extends TestCase
      */
     public function testGranteesSharingAKeyUnderTwoTypesAreBothRead(): void
     {
-        $first  = StubIdentity::create(['id' => 'shared-key']);
-        $second = new StubSecondIdentity(['id' => 'shared-key']);
+        $first  = StubGrantee::create(['id' => 'shared-key']);
+        $second = new StubSecondGrantee(['id' => 'shared-key']);
         $tenant = new Reference('tenant', 'a');
         $within = GrantRoots::within($tenant, new FlatTenantTree);
 
@@ -177,7 +177,7 @@ final class GrantRootsTest extends TestCase
      */
     public function testAGrantAppliesWhereACheckReadsIt(): void
     {
-        $user   = StubIdentity::create(['id' => 'user']);
+        $user   = StubGrantee::create(['id' => 'user']);
         $tenant = new Reference('tenant', 'a');
         $roots  = new GrantRoots([Reference::of($user)]);
 
@@ -204,7 +204,7 @@ final class GrantRootsTest extends TestCase
      */
     public function testAnActivatedGranteesLiveActivationIsAGrant(): void
     {
-        $user    = StubIdentity::create(['id' => 'user']);
+        $user    = StubGrantee::create(['id' => 'user']);
         $machine = StubMachine::query()->create(['id' => 'machine']);
         $role    = self::emergencyRole();
         $tenant  = new Reference('tenant', 'a');
@@ -243,7 +243,7 @@ final class GrantRootsTest extends TestCase
      */
     public function testAnotherGranteesInlinePolicyIsNoGrant(): void
     {
-        $user   = StubIdentity::create(['id' => 'user']);
+        $user   = StubGrantee::create(['id' => 'user']);
         $inline = Policy::create(['name' => 'theirs', 'owner_type' => 'stub', 'owner_id' => 'someone', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['*']]]]]);
         $roots  = new GrantRoots([Reference::of($user)]);
         $tenant = new Reference('tenant', 'a');
@@ -279,7 +279,7 @@ final class GrantRootsTest extends TestCase
 
         $org     = new Reference('tenant', 'org');
         $account = new Reference('tenant', 'account');
-        $user    = StubIdentity::create(['id' => 'user']);
+        $user    = StubGrantee::create(['id' => 'user']);
 
         ClosureTenantTree::add($org);
         ClosureTenantTree::add($account, $org);
@@ -307,7 +307,7 @@ final class GrantRootsTest extends TestCase
         $trees = [
             'another connection' => new SubtreeQueryTree(static fn (Reference $tenant): Builder => DB::connection('tenants')->query()
                 ->selectRaw('? as tenant_type, ? as tenant_id', [$tenant->type, $tenant->id])),
-            'a relation' => new SubtreeQueryTree(static fn (): Builder => (new StubIdentity)->roles()),
+            'a relation' => new SubtreeQueryTree(static fn (): Builder => (new StubGrantee)->roles()),
         ];
 
         foreach ($trees as $shape => $tree) {
@@ -335,7 +335,7 @@ final class GrantRootsTest extends TestCase
     {
         $this->useAnAuthorizationConnection();
 
-        $user       = StubIdentity::create(['id' => 'user']);
+        $user       = StubGrantee::create(['id' => 'user']);
         $connection = self::authorizationConnection();
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
@@ -359,13 +359,13 @@ final class GrantRootsTest extends TestCase
      */
     public function testAGrantAppliesUnderALockTableByTable(): void
     {
-        $user   = StubIdentity::create(['id' => 'user']);
+        $user   = StubGrantee::create(['id' => 'user']);
         $tenant = new Reference('tenant', 'a');
         $roots  = new GrantRoots([Reference::of($user)]);
         $inside = new TenantChain([$tenant, new Reference('tenant', 'parent')]);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']), null, new Reference('tenant', 'parent'));
-        StubIdentity::create(['id' => 'someone-else'])->givePermission(Permission::create(['name' => 'posts:edit']), null, $tenant);
+        StubGrantee::create(['id' => 'someone-else'])->givePermission(Permission::create(['name' => 'posts:edit']), null, $tenant);
 
         $locks = $this->recordRowLocks();
 
@@ -401,7 +401,7 @@ final class GrantRootsTest extends TestCase
      */
     public function testUnderALockAGrantCountsAsACheckReadsIt(): void
     {
-        $user   = StubIdentity::create(['id' => 'user']);
+        $user   = StubGrantee::create(['id' => 'user']);
         $tenant = new Reference('tenant', 'a');
         $parent = new Reference('tenant', 'parent');
         $roots  = new GrantRoots([Reference::of($user)]);
@@ -429,7 +429,7 @@ final class GrantRootsTest extends TestCase
      */
     public function testInsideADelegatedOperationTheGrantsArePinnedLast(): void
     {
-        $user      = StubIdentity::create(['id' => 'user']);
+        $user      = StubGrantee::create(['id' => 'user']);
         $roots     = new GrantRoots([Reference::of($user)]);
         $operation = new Operation((string) Str::uuid(), new Reference('user', 'actor'), CarbonImmutable::now('UTC'), false);
 

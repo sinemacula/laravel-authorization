@@ -13,7 +13,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * Dispatched once the expiry of a role's grant of a permission changes: a live
  * grant given a different expiry, or an expired grant re-armed.
  *
- * Distinct from `Identity\PermissionExpiryChanged`, which reports the expiry of
+ * Distinct from `Grantee\PermissionExpiryChanged`, which reports the expiry of
  * a permission granted to a grantee directly.
  *
  * A snapshot of plain values, never a model. It is dispatched once the write

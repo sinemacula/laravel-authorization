@@ -16,12 +16,12 @@ use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use Tests\Concerns\ChecksAccess;
 use Tests\Concerns\LagsTheReadConnection;
 use Tests\Concerns\RefusesThePackage;
-use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
-use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
+use Tests\Feature\Stubs\SuspendableGrantee;
 use Tests\TestCase;
 
 /**
@@ -50,8 +50,8 @@ final class BladeHelpersTest extends TestCase
      */
     public function testTheRoleHelpersCountTheIdentityUnlessInactive(): void
     {
-        $principal = SuspendableIdentity::create(['id' => 'account-1']);
-        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $principal = SuspendableGrantee::create(['id' => 'account-1']);
+        $identity  = StubSecondGrantee::create(['id' => 'person-1']);
 
         $principal->assignRole(Role::create(['name' => 'editor']));
         $identity->assignRole(Role::create(['name' => 'staff']));
@@ -82,7 +82,7 @@ final class BladeHelpersTest extends TestCase
         self::lagTheReadConnection();
 
         $identity->revokeRole('admin');
-        $this->actAs(StubIdentity::query()->findOrFail($identity->getKey()));
+        $this->actAs(StubGrantee::query()->findOrFail($identity->getKey()));
 
         self::assertFalse(BladeHelpers::hasRole('admin'));
         self::assertFalse(BladeHelpers::hasAllRoles(['admin', 'editor']));
@@ -216,7 +216,7 @@ final class BladeHelpersTest extends TestCase
     {
         config(['auth.guards.api' => ['driver' => 'session', 'provider' => 'users']]);
 
-        $identity = StubIdentity::create(['id' => 'guarded']);
+        $identity = StubGrantee::create(['id' => 'guarded']);
         $identity->assignRole(Role::create(['name' => 'admin', 'guard' => 'api']));
         $identity->assignRole(Role::create(['name' => 'auditor', 'guard' => null]));
 
@@ -346,11 +346,11 @@ final class BladeHelpersTest extends TestCase
     /**
      * Create a user holding the `admin` role and the `posts:create` permission.
      *
-     * @return \Tests\Feature\Stubs\AuthenticatableIdentity
+     * @return \Tests\Feature\Stubs\AuthenticatableGrantee
      */
-    private function seedGrantedUser(): AuthenticatableIdentity
+    private function seedGrantedUser(): AuthenticatableGrantee
     {
-        $user = AuthenticatableIdentity::create(['id' => 'signed-in']);
+        $user = AuthenticatableGrantee::create(['id' => 'signed-in']);
         $user->assignRole(Role::create(['name' => 'admin', 'guard' => 'web']));
         $user->givePermission(Permission::create(['name' => 'posts:create', 'guard' => 'web']));
 

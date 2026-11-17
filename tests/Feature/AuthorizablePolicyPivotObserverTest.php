@@ -11,8 +11,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\AuthorizablePolicyPivotObserver;
-use Tests\Feature\Stubs\NumberedIdentity;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\NumberedGrantee;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -37,7 +37,7 @@ final class AuthorizablePolicyPivotObserverTest extends TestCase
      */
     public function testTheRelationAttachesOwnAndManagedPolicies(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $inline  = $user->createInlinePolicy('mine', self::document());
         $managed = Policy::create(['name' => 'shared', 'document' => self::document()]);
 
@@ -55,8 +55,8 @@ final class AuthorizablePolicyPivotObserverTest extends TestCase
      */
     public function testTheRelationRefusesAnotherGranteesInlinePolicy(): void
     {
-        $owner  = StubIdentity::create(['id' => 'user-1']);
-        $other  = StubIdentity::create(['id' => 'user-2']);
+        $owner  = StubGrantee::create(['id' => 'user-1']);
+        $other  = StubGrantee::create(['id' => 'user-2']);
         $role   = Role::create(['name' => 'editor']);
         $inline = $owner->createInlinePolicy('mine', self::document());
 
@@ -86,8 +86,8 @@ final class AuthorizablePolicyPivotObserverTest extends TestCase
      */
     public function testTheRelationMatchesAnIntegerKeyedGrantee(): void
     {
-        $owner  = NumberedIdentity::create(['name' => 'Ada']);
-        $other  = NumberedIdentity::create(['name' => 'Grace']);
+        $owner  = NumberedGrantee::create(['name' => 'Ada']);
+        $other  = NumberedGrantee::create(['name' => 'Grace']);
         $inline = $owner->createInlinePolicy('mine', self::document());
 
         $owner->policies()->attach($inline->id);
@@ -106,7 +106,7 @@ final class AuthorizablePolicyPivotObserverTest extends TestCase
      */
     public function testARowNamingNoPolicyIsLeftToTheForeignKey(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $this->expectException(QueryException::class);
 

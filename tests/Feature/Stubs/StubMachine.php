@@ -6,19 +6,19 @@ namespace Tests\Feature\Stubs;
 
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Concerns\HasAuthorization;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 
 /**
  * A machine principal: a grantee like any other, marked as a machine, on the
- * second stub identity table.
+ * second stub grantee table.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
  */
-final class StubMachine extends Model implements AuthorizableIdentity, AuthorizableMachine // @phpstan-ignore-line
+final class StubMachine extends Model implements AuthorizableGrantee, AuthorizableMachine // @phpstan-ignore-line
 {
     use HasAuthorization;
 
@@ -35,5 +35,5 @@ final class StubMachine extends Model implements AuthorizableIdentity, Authoriza
     protected $fillable = ['id', 'name'];
 
     /** @var string|null Backing table. */
-    protected $table = 'stub_second_identities';
+    protected $table = 'stub_second_grantees';
 }

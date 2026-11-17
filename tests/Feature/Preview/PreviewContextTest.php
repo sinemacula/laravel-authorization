@@ -26,11 +26,11 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReadsDispatchedEvents;
-use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\Feature\Stubs\CredentialScopesSource;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -98,7 +98,7 @@ final class PreviewContextTest extends TestCase
     {
         $caller   = self::previewer();
         $machine  = self::target('principal');
-        $identity = StubIdentity::query()->create(['id' => 'identity']);
+        $identity = StubGrantee::query()->create(['id' => 'identity']);
 
         $tenant = StubTenant::query()->create(['id' => 'theirs', 'name' => 'theirs']);
 
@@ -204,7 +204,7 @@ final class PreviewContextTest extends TestCase
         $target  = self::target('target', ['posts:read', 'posts:edit']);
         $other   = self::target('other', ['posts:edit']);
 
-        $this->actingAs(AuthenticatableIdentity::query()->findOrFail('target'), 'web');
+        $this->actingAs(AuthenticatableGrantee::query()->findOrFail('target'), 'web');
 
         $guarded = $manager->previewFor(new Subject($target, $target, guard: 'web'));
 
@@ -562,7 +562,7 @@ final class PreviewContextTest extends TestCase
             self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $exception->getReason());
         }
 
-        $unsaved = new StubIdentity;
+        $unsaved = new StubGrantee;
 
         try {
             $this->signIn($unsaved)->previewFor($target);

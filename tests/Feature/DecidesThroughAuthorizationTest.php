@@ -17,9 +17,9 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\ReportsEveryDecision;
-use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\Feature\Stubs\DecidingLaravelPolicy;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -67,7 +67,7 @@ final class DecidesThroughAuthorizationTest extends TestCase
      */
     public function testAnAllowedDecisionIsAnAllow(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $tenant = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         $user->givePermission(Permission::create(['name' => 'tenants:publish']));
@@ -94,7 +94,7 @@ final class DecidesThroughAuthorizationTest extends TestCase
      */
     public function testADenialCarriesTheTranslatedLineAndTheReasonCode(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $tenant = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         $unmatched = Gate::forUser($user)->inspect('publish', $tenant);
@@ -128,7 +128,7 @@ final class DecidesThroughAuthorizationTest extends TestCase
 
         $translator->addLines(['authorization.denied' => 'Ask an administrator.'], 'en', 'authorization');
 
-        $response = (new DecidingLaravelPolicy)->decideFor(StubIdentity::create(['id' => 'user-1']), 'posts:read');
+        $response = (new DecidingLaravelPolicy)->decideFor(StubGrantee::create(['id' => 'user-1']), 'posts:read');
 
         self::assertSame('Ask an administrator.', $response->message());
         self::assertSame('no_match', $response->code());
@@ -142,7 +142,7 @@ final class DecidesThroughAuthorizationTest extends TestCase
      */
     public function testInsufficientAuthenticationKeepsItsCode(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $tenant = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         $user->attachPolicy(Policy::create(['name' => 'step-up', 'document' => ['statements' => [[
@@ -170,7 +170,7 @@ final class DecidesThroughAuthorizationTest extends TestCase
     {
         $tenant = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
-        $signedIn = AuthenticatableIdentity::create(['id' => 'signed-in']);
+        $signedIn = AuthenticatableGrantee::create(['id' => 'signed-in']);
 
         $signedIn->givePermission(Permission::create(['name' => 'tenants:publish']));
         $this->actingAs($signedIn);
@@ -196,18 +196,18 @@ final class DecidesThroughAuthorizationTest extends TestCase
      */
     public function testEveryResourceFormIsDecidedByItsIdentifier(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $tenant = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
         $policy = new DecidingLaravelPolicy;
 
-        $identifiers = [StubTenant::class . ':tenant-a', 'posts:7', 'comments:9', StubIdentity::class . ':*', 'arn:posts'];
+        $identifiers = [StubTenant::class . ':tenant-a', 'posts:7', 'comments:9', StubGrantee::class . ':*', 'arn:posts'];
 
         $user->attachPolicy(Policy::create(['name' => 'by-identifier', 'document' => ['statements' => [
             ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => $identifiers],
             ['effect' => 'allow', 'actions' => ['posts:edit'], 'conditions' => ['eq' => ['input.status' => 'draft']]],
         ]]]));
 
-        foreach ([$tenant, ['posts', 7], ResourceReference::record('comments', '9'), StubIdentity::class, 'arn:posts'] as $resource) {
+        foreach ([$tenant, ['posts', 7], ResourceReference::record('comments', '9'), StubGrantee::class, 'arn:posts'] as $resource) {
             self::assertTrue($policy->decideFor($user, 'posts:read', $resource)->allowed());
         }
 

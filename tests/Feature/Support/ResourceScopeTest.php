@@ -28,7 +28,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceScope;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -60,8 +60,8 @@ final class ResourceScopeTest extends TestCase
     /** @var \Tests\Feature\Stubs\StubTenant The sibling, below the organisation beside the account. */
     private StubTenant $sibling;
 
-    /** @var \Tests\Feature\Stubs\StubIdentity The user the checks are about. */
-    private StubIdentity $user;
+    /** @var \Tests\Feature\Stubs\StubGrantee The user the checks are about. */
+    private StubGrantee $user;
 
     /**
      * Create the organisation with the account and its sibling below it, bind
@@ -83,7 +83,7 @@ final class ResourceScopeTest extends TestCase
             ->put(Reference::of($this->account), Reference::of($this->org))
             ->put(Reference::of($this->sibling), Reference::of($this->org)));
 
-        $this->user = StubIdentity::query()->create(['id' => 'user-1']);
+        $this->user = StubGrantee::query()->create(['id' => 'user-1']);
 
         Permission::create(['name' => 'posts:edit']);
         Permission::create(['name' => 'posts:archive']);
@@ -473,10 +473,10 @@ final class ResourceScopeTest extends TestCase
 
         $this->user->givePermission('posts:edit', null, $this->account);
 
-        $out = Authorization::for($this->user)->check('posts:edit', StubIdentity::query()->create(['id' => 'out']));
+        $out = Authorization::for($this->user)->check('posts:edit', StubGrantee::query()->create(['id' => 'out']));
 
         self::assertSame(DecisionReason::TENANT_SCOPE, $out->reason);
-        self::assertTrue(Authorization::for($this->user)->check('posts:edit', StubIdentity::query()->create(['id' => 'in']))->isAllowed());
+        self::assertTrue(Authorization::for($this->user)->check('posts:edit', StubGrantee::query()->create(['id' => 'in']))->isAllowed());
     }
 
     /**

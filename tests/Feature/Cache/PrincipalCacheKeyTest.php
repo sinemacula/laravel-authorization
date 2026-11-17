@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Cache\PrincipalCacheKey;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -34,9 +34,9 @@ final class PrincipalCacheKeyTest extends TestCase
      */
     public function testAPrincipalIsKeyedByItsTypeAndKey(): void
     {
-        $user = new StubIdentity(['id' => 'ann']);
+        $user = new StubGrantee(['id' => 'ann']);
 
-        self::assertSame(StubIdentity::class . ':ann', PrincipalCacheKey::for($user));
+        self::assertSame(StubGrantee::class . ':ann', PrincipalCacheKey::for($user));
         self::assertStringStartsWith('stdClass:obj:', PrincipalCacheKey::for(new \stdClass));
     }
 

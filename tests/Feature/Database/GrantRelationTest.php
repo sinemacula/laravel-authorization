@@ -11,8 +11,8 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Database\GrantRelation;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
-use Tests\Feature\Stubs\NumberedIdentity;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\NumberedGrantee;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -38,10 +38,10 @@ final class GrantRelationTest extends TestCase
      */
     public function testAGranteesKeyIsBoundAsAString(): void
     {
-        $user = NumberedIdentity::create(['name' => 'Ada']);
+        $user = NumberedGrantee::create(['name' => 'Ada']);
 
         $user->assignRole(Role::create(['name' => 'editor']));
-        StubIdentity::create(['id' => (string) $user->id])->assignRole(Role::create(['name' => 'other']));
+        StubGrantee::create(['id' => (string) $user->id])->assignRole(Role::create(['name' => 'other']));
 
         $relation = $user->roles();
 
@@ -58,16 +58,16 @@ final class GrantRelationTest extends TestCase
      */
     public function testAnEagerLoadBindsEveryKeyAsAString(): void
     {
-        $first  = NumberedIdentity::create(['name' => 'Ada']);
-        $second = NumberedIdentity::create(['name' => 'Grace']);
+        $first  = NumberedGrantee::create(['name' => 'Ada']);
+        $second = NumberedGrantee::create(['name' => 'Grace']);
 
         $first->assignRole(Role::create(['name' => 'editor']));
-        StubIdentity::create(['id' => (string) $second->id])->assignRole(Role::create(['name' => 'other']));
+        StubGrantee::create(['id' => (string) $second->id])->assignRole(Role::create(['name' => 'other']));
 
         DB::flushQueryLog();
         DB::enableQueryLog();
 
-        $loaded = NumberedIdentity::query()->with('roles')->orderBy('id')->get();
+        $loaded = NumberedGrantee::query()->with('roles')->orderBy('id')->get();
 
         $bindings = \array_merge(...\array_column(DB::getQueryLog(), 'bindings'));
 
@@ -76,7 +76,7 @@ final class GrantRelationTest extends TestCase
         self::assertContains((string) $first->id, $bindings);
         self::assertContains((string) $second->id, $bindings);
         self::assertNotContains($first->id, $bindings);
-        self::assertSame([['editor'], []], $loaded->map(static fn (NumberedIdentity $user): array => $user->roles->pluck('name')->all())->all());
+        self::assertSame([['editor'], []], $loaded->map(static fn (NumberedGrantee $user): array => $user->roles->pluck('name')->all())->all());
     }
 
     /**
@@ -88,7 +88,7 @@ final class GrantRelationTest extends TestCase
      */
     public function testRowsGivenAreReadInPlaceOfTheTable(): void
     {
-        $user       = StubIdentity::create(['id' => 'user-1']);
+        $user       = StubGrantee::create(['id' => 'user-1']);
         $permission = Permission::create(['name' => 'posts:read']);
         $other      = Permission::create(['name' => 'posts:edit']);
         $columns    = ['permission_id', 'authorizable_type', 'authorizable_id', 'tenant_type', 'tenant_id', 'application', 'expires_at', 'created_at', 'updated_at'];
@@ -103,7 +103,7 @@ final class GrantRelationTest extends TestCase
         self::assertSame(1, DB::table('authorizable_permissions')->count());
         self::assertSame(['posts:read', 'posts:edit'], $relation()->orderBy('name', 'desc')->pluck('name')->all());
         self::assertSame(['posts:read'], $user->permissions()->pluck('name')->all());
-        self::assertStringContainsString('join (', $relation()->getRelationExistenceQuery(Permission::query(), StubIdentity::query())->toSql());
+        self::assertStringContainsString('join (', $relation()->getRelationExistenceQuery(Permission::query(), StubGrantee::query())->toSql());
         self::assertStringContainsString('join (', $relation()->toSql());
         self::assertStringNotContainsString('join (', $user->permissions()->toSql());
         self::assertCount(1, $relation()->getQuery()->getQuery()->joins ?? []);

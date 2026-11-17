@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Feature\Stubs\RecordingLogger;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -164,7 +164,7 @@ final class ResolutionCacheTest extends TestCase
     {
         $store    = Cache::store('array');
         $ann      = self::identity('ann');
-        $identity = StubIdentity::query()->findOrFail('ann');
+        $identity = StubGrantee::query()->findOrFail('ann');
 
         self::grants()->grantPermission($ann, self::permission('posts:read'));
         BreakGlassActivations::markIdentity($identity);

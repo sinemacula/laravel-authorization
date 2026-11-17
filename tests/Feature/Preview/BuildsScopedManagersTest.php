@@ -23,7 +23,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\ReportsEveryDecision;
-use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\TestCase;
 
 /**
@@ -192,7 +192,7 @@ final class BuildsScopedManagersTest extends TestCase
      */
     public function testTheGateBladeAndTheGuardStayTheCallers(): void
     {
-        $caller = AuthenticatableIdentity::query()->create(['id' => 'signed-in']);
+        $caller = AuthenticatableGrantee::query()->create(['id' => 'signed-in']);
         $target = self::target();
 
         $caller->givePermission(self::permission(PackagePermissions::SUBJECT_PREVIEW));

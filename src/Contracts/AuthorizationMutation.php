@@ -36,7 +36,7 @@ interface AuthorizationMutation extends AuthorizationEvent
 {
     /**
      * Return the stable identifier of the kind of change, such as
-     * `identity.role.assigned`, one per event class.
+     * `grantee.role.assigned`, one per event class.
      *
      * @return string
      */

@@ -35,9 +35,9 @@ use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\RecordingLogger;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
@@ -127,7 +127,7 @@ final class GrantScopeQueryTest extends TestCase
         $this->tree();
 
         foreach ($roots as $root => [$tenant, $isSubtree]) {
-            $identity = self::identity('identity-' . \count(StubIdentity::query()->get()));
+            $identity = self::identity('identity-' . \count(StubGrantee::query()->get()));
 
             self::grant($identity, $kind, self::tenant('acct1'));
             self::grant($identity, $kind, $tenant, $isSubtree);
@@ -209,7 +209,7 @@ final class GrantScopeQueryTest extends TestCase
 
         $identity = self::identity('identity');
         $first    = self::identity('principal-1');
-        $second   = new StubSecondIdentity(['id' => 'principal-2']);
+        $second   = new StubSecondGrantee(['id' => 'principal-2']);
         $other    = self::identity('principal-3');
 
         $second->save();
@@ -258,7 +258,7 @@ final class GrantScopeQueryTest extends TestCase
         $this->tree();
 
         $identity = self::identity('shared-key');
-        $other    = new StubSecondIdentity(['id' => 'shared-key']);
+        $other    = new StubSecondGrantee(['id' => 'shared-key']);
 
         $other->save();
 
@@ -697,7 +697,7 @@ final class GrantScopeQueryTest extends TestCase
         });
 
         $this->assertEachRefused([
-            'forIdentity'      => static fn () => self::scopes()->forIdentity(new Reference('stub_identity', 'user-1'), self::tenant('t1')),
+            'forIdentity'      => static fn () => self::scopes()->forIdentity(new Reference('stub_grantee', 'user-1'), self::tenant('t1')),
             'hasGrantIn'       => static fn () => self::scopes()->hasGrantIn($user, self::tenant('t1')),
             'granteesReaching' => static fn () => self::scopes()->granteesReaching(self::tenant('t1')),
             'granteesWithin'   => static fn () => self::scopes()->granteesWithin(self::tenant('t1')),
@@ -884,7 +884,7 @@ final class GrantScopeQueryTest extends TestCase
     {
         $this->tree();
 
-        $second  = new StubSecondIdentity(['id' => 'shared']);
+        $second  = new StubSecondGrantee(['id' => 'shared']);
         $machine = new StubMachine(['id' => 'machine']);
 
         $second->save();
@@ -1257,7 +1257,7 @@ final class GrantScopeQueryTest extends TestCase
         $this->holders('activation');
 
         $machine = new StubMachine(['id' => 'machine']);
-        $second  = new StubSecondIdentity(['id' => 'second']);
+        $second  = new StubSecondGrantee(['id' => 'second']);
         $role    = self::emergencyRole();
 
         $machine->save();
@@ -1265,7 +1265,7 @@ final class GrantScopeQueryTest extends TestCase
 
         self::grant($machine, 'activation', self::tenant('acct1'));
         self::grant($second, 'activation', self::tenant('acct1'));
-        self::grant(StubIdentity::query()->findOrFail('d-tenant-node'), 'role', self::tenant('acct1'), false);
+        self::grant(StubGrantee::query()->findOrFail('d-tenant-node'), 'role', self::tenant('acct1'), false);
         self::activate(self::identity('z-ended'), $role, ['ended_at' => Carbon::now()]);
         self::activate(self::identity('z-expired'), $role, ['expires_at' => Carbon::now()->subSecond()]);
 
@@ -1329,8 +1329,8 @@ final class GrantScopeQueryTest extends TestCase
     }
 
     /**
-     * Write a permission grant to a new stub identity naming half a tenant,
-     * past the write paths, which refuse it.
+     * Write a permission grant to a new stub grantee naming half a tenant, past
+     * the write paths, which refuse it.
      *
      * @param  string  $id
      * @param  string|null  $type
@@ -1391,14 +1391,14 @@ final class GrantScopeQueryTest extends TestCase
     }
 
     /**
-     * Return the references to the stub identities with the keys.
+     * Return the references to the stub grantees with the keys.
      *
      * @param  string  ...$ids
      * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
      */
     private static function references(string ...$ids): array
     {
-        return \array_values(\array_map(static fn (string $id): Reference => new Reference((new StubIdentity)->getMorphClass(), $id), $ids));
+        return \array_values(\array_map(static fn (string $id): Reference => new Reference((new StubGrantee)->getMorphClass(), $id), $ids));
     }
 
     /**
@@ -1428,7 +1428,7 @@ final class GrantScopeQueryTest extends TestCase
      * Grant the grantee one grant of the kind, in the tenant or platform-wide,
      * a live break-glass activation of a role among them.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity|\Tests\Feature\Stubs\StubMachine|\Tests\Feature\Stubs\StubSecondIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubGrantee|\Tests\Feature\Stubs\StubMachine|\Tests\Feature\Stubs\StubSecondGrantee  $grantee
      * @param  string  $kind
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $isSubtree
@@ -1437,7 +1437,7 @@ final class GrantScopeQueryTest extends TestCase
      * @return void
      */
     private static function grant(
-        StubIdentity|StubMachine|StubSecondIdentity $grantee,
+        StubGrantee|StubMachine|StubSecondGrantee $grantee,
         string $kind,
         ?Reference $tenant,
         bool $isSubtree = true,
@@ -1481,14 +1481,14 @@ final class GrantScopeQueryTest extends TestCase
     }
 
     /**
-     * Create a stub identity with the key.
+     * Create a stub grantee with the key.
      *
      * @param  string  $id
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function identity(string $id): StubIdentity
+    private static function identity(string $id): StubGrantee
     {
-        return StubIdentity::create(['id' => $id]);
+        return StubGrantee::create(['id' => $id]);
     }
 
     /**

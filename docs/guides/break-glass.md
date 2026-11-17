@@ -99,12 +99,12 @@ $breakGlass->revoke($activation, $actor);    // by a holder of the revoke right
   returns how many it ended: an activation already ended or expired changes nothing and returns 0, and an unknown key
   throws `ModelNotFoundException`.
 
-**Events.** Each activation dispatches `Identity\BreakGlassActivated`, carrying the role, the scope, the activation's
+**Events.** Each activation dispatches `Grantee\BreakGlassActivated`, carrying the role, the scope, the activation's
 key, the justification code and the expiry, never the note. A surrender or revocation that ended one dispatches
-`Identity\BreakGlassSurrendered` or `Identity\BreakGlassRevoked`, with when it ended; ending one already ended or
+`Grantee\BreakGlassSurrendered` or `Grantee\BreakGlassRevoked`, with when it ended; ending one already ended or
 expired dispatches nothing. The operation's actor is the granter, the grantee who surrendered or the revoker, and none
 for a trusted call. `authorization:prune` records the expiry of every activation that expired without ending, keeping
-its row, and dispatches `Identity\BreakGlassExpired` with no actor. Each is dispatched once its write commits, never for
+its row, and dispatches `Grantee\BreakGlassExpired` with no actor. Each is dispatched once its write commits, never for
 a refusal or a rollback, whether break-glass is enabled or not.
 
 **Listings, reviews and deletion.** The grant scope query's answers and its lists of grantees reaching or within a

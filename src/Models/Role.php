@@ -23,11 +23,11 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
  * Eloquent model for role rows — named buckets of permissions shared across
- * authorizable identities. Behaviour is composed from `HasRoleHierarchy`,
+ * authorizable grantees. Behaviour is composed from `HasRoleHierarchy`,
  * `ManagesPermissions`, `HasPolicies`, `HasSystemProtection`, and the
  * `RoleObserver` wired via `#[ObservedBy]`.
  *
- * A role takes policies as an identity does, through the same
+ * A role takes policies as any other grantee does, through the same
  * `authorizable_policies` table with the role as the grantee. They apply to
  * whoever holds the role, where both the role's grant and the policy's
  * attachment hold, and are inherited down the hierarchy as the role's

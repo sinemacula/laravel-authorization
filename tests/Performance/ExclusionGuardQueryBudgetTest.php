@@ -13,7 +13,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleExclusionService;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -43,11 +43,11 @@ final class ExclusionGuardQueryBudgetTest extends TestCase
     {
         $idle = Role::query()->create(['name' => 'idle']);
 
-        $before = self::queriesOf(static fn () => self::grants()->grantRole(StubIdentity::query()->create(['id' => 'first']), $idle));
+        $before = self::queriesOf(static fn () => self::grants()->grantRole(StubGrantee::query()->create(['id' => 'first']), $idle));
 
         self::exclusions()->declare(Role::query()->create(['name' => 'clerk']), Role::query()->create(['name' => 'auditor']));
 
-        $after = self::queriesOf(static fn () => self::grants()->grantRole(StubIdentity::query()->create(['id' => 'second']), $idle));
+        $after = self::queriesOf(static fn () => self::grants()->grantRole(StubGrantee::query()->create(['id' => 'second']), $idle));
 
         self::assertCount(\count($before), $after, "The grant cost other queries:\n" . \implode("\n", $after));
         self::assertCount(1, self::naming('role_exclusions', $after));
@@ -70,7 +70,7 @@ final class ExclusionGuardQueryBudgetTest extends TestCase
         self::exclusions()->declare(Role::query()->create(['name' => 'clerk']), Role::query()->create(['name' => 'auditor']));
 
         $idle = Role::query()->create(['name' => 'idle']);
-        $user = StubIdentity::query()->create(['id' => 'user']);
+        $user = StubGrantee::query()->create(['id' => 'user']);
 
         // The grant table's own queries: an insert, then, for a held row, its
         // locked read and the rewrite.
@@ -123,11 +123,11 @@ final class ExclusionGuardQueryBudgetTest extends TestCase
         self::exclusions()->declare($clerk, $auditor);
         self::holders(1, 2, $clerk);
 
-        $few = self::queriesOf(static fn () => self::grants()->grantRole(StubIdentity::query()->create(['id' => 'few']), $auditor, tenant: new Reference('stub_tenant', 't1')));
+        $few = self::queriesOf(static fn () => self::grants()->grantRole(StubGrantee::query()->create(['id' => 'few']), $auditor, tenant: new Reference('stub_tenant', 't1')));
 
         self::holders(3, 40, $clerk);
 
-        $many = self::queriesOf(static fn () => self::grants()->grantRole(StubIdentity::query()->create(['id' => 'many']), $auditor, tenant: new Reference('stub_tenant', 't1')));
+        $many = self::queriesOf(static fn () => self::grants()->grantRole(StubGrantee::query()->create(['id' => 'many']), $auditor, tenant: new Reference('stub_tenant', 't1')));
 
         self::assertCount(\count($few), $many, "The grant cost other queries:\n" . \implode("\n", $many));
     }
@@ -146,7 +146,7 @@ final class ExclusionGuardQueryBudgetTest extends TestCase
     private static function holders(int $first, int $last, Role $role): void
     {
         for ($index = $first; $index <= $last; $index++) {
-            $holder = StubIdentity::query()->create(['id' => "holder-{$index}"]);
+            $holder = StubGrantee::query()->create(['id' => "holder-{$index}"]);
             $tenant = $index % 2 === 0 ? new Reference('stub_tenant', "h{$index}") : null;
 
             self::grants()->grantRole($holder, $role, tenant: $tenant);

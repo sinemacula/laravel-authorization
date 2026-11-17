@@ -35,7 +35,7 @@ final class NonMorphRolesGrantee extends Model implements SupportsPolicies, Supp
     protected $fillable = ['id', 'name'];
 
     /** @var string|null Backing table. */
-    protected $table = 'stub_identities';
+    protected $table = 'stub_grantees';
 
     /**
      * Belongs-to-many relation onto roles, not the morph the role grants use.

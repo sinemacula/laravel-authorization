@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Evaluation\CheckBatch;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use Tests\Concerns\MeasuresTime;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
@@ -42,7 +42,7 @@ final class SingleCheckBudgetTest extends TestCase
      */
     public function testAWarmCheckCostsWhatItsDecisionCosts(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
 

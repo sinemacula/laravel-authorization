@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Concerns\MeasuresTime;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
@@ -140,11 +140,11 @@ final class MiddlewareBudgetTest extends TestCase
     /**
      * Seed the user that will pass the admit check.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function seedAdmitUser(): StubIdentity
+    private function seedAdmitUser(): StubGrantee
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('admin');
 
         return $user;

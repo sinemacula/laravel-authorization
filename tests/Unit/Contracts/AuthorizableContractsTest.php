@@ -6,7 +6,7 @@ namespace Tests\Unit\Contracts;
 
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\TestCase;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
  *
  * Consumers who only use a subset of the surface can typehint on the narrow
  * siblings (`SupportsRoles`, `SupportsPermissions`, `SupportsPolicies`). The
- * composite `AuthorizableIdentity` extends all three, so existing implementers
+ * composite `AuthorizableGrantee` extends all three, so existing implementers
  * stay satisfied and `instanceof` checks keep working against the fat and
  * narrow contracts alike.
  *
@@ -38,7 +38,7 @@ final class AuthorizableContractsTest extends TestCase
      */
     public function testCompositeExtendsEveryNarrowContract(): void
     {
-        $parents = \class_implements(AuthorizableIdentity::class);
+        $parents = \class_implements(AuthorizableGrantee::class);
 
         self::assertNotFalse($parents);
         self::assertArrayHasKey(SupportsRoles::class, $parents);

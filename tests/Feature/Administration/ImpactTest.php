@@ -26,7 +26,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\BulkChecks\FailingTenantTree;
 use Tests\TestCase;
 
@@ -315,11 +315,11 @@ final class ImpactTest extends TestCase
      * Return further checks for the actor, deciding each check through the
      * callback and recording what was asked, in the scope in place.
      *
-     * @param  \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubIdentity  $actor
+     * @param  \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubGrantee  $actor
      * @param  \Closure(string, \SineMacula\Laravel\Authorization\Support\ResourceReference|null): \SineMacula\Laravel\Authorization\Evaluation\Decision  $decide
      * @return \SineMacula\Laravel\Authorization\Administration\FurtherChecks
      */
-    private function checks(StubIdentity|Subject $actor, \Closure $decide): FurtherChecks
+    private function checks(StubGrantee|Subject $actor, \Closure $decide): FurtherChecks
     {
         $record = function (string $action, ?ResourceReference $on) use ($decide): Decision {
             $this->asked[] = [$action, TenantScope::currentTenant(), TenantScope::isBelowTenant()];
@@ -358,13 +358,13 @@ final class ImpactTest extends TestCase
      *
      * @param  string  $id
      * @param  int|null  $rank
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      *
      * @throws \Throwable
      */
-    private static function user(string $id, ?int $rank = null): StubIdentity
+    private static function user(string $id, ?int $rank = null): StubGrantee
     {
-        $user = StubIdentity::query()->firstOrCreate(['id' => $id]);
+        $user = StubGrantee::query()->firstOrCreate(['id' => $id]);
 
         if ($rank !== null) {
             self::grants()->grantRole($user, self::rank($rank));
@@ -377,14 +377,14 @@ final class ImpactTest extends TestCase
      * Grant the actor, in the tenant, a role carrying a policy that denies the
      * action.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $actor
+     * @param  \Tests\Feature\Stubs\StubGrantee  $actor
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @param  string  $action
      * @return void
      *
      * @throws \Throwable
      */
-    private static function restrictIn(StubIdentity $actor, Reference $tenant, string $action): void
+    private static function restrictIn(StubGrantee $actor, Reference $tenant, string $action): void
     {
         $restricted = Role::query()->create(['name' => 'restricted']);
         $deny       = ['effect' => 'deny', 'actions' => [$action]];

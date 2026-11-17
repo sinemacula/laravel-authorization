@@ -26,7 +26,7 @@ use Tests\TestCase;
 /**
  * Feature coverage for the `getAuthorizationGuard()` duck-typed hook.
  *
- * Identity models can declare the method to route their name-based role /
+ * Grantee models can declare the method to route their name-based role /
  * permission lookups to a specific guard — typical for multi-guard deployments
  * where a user authenticated under `api` should resolve against `api`-guard
  * rows instead of the package's default guard.

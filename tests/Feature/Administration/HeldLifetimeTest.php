@@ -16,9 +16,9 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
-use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Feature\Stubs\SuspendableGrantee;
 use Tests\Feature\Stubs\UndeclaredGrantsGrantee;
 use Tests\TestCase;
 
@@ -71,7 +71,7 @@ final class HeldLifetimeTest extends TestCase
      */
     public function testADirectGrantLastsUntilItExpires(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         self::assertNull(HeldLifetime::of(self::subject($user), 'posts:edit'));
 
@@ -100,7 +100,7 @@ final class HeldLifetimeTest extends TestCase
      */
     public function testManyPermissionsAreReadInOnePass(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $editor = Role::create(['name' => 'editor']);
 
         self::grants()->grantPermission($user, self::permission('posts:read'));
@@ -126,7 +126,7 @@ final class HeldLifetimeTest extends TestCase
         self::assertSame([], HeldLifetime::ofEach(self::subject($user), []));
         self::assertSame(['posts:read' => null], HeldLifetime::ofEach(new Subject(new \stdClass), ['posts:read']));
 
-        $writer = StubIdentity::create(['id' => 'writer-1']);
+        $writer = StubGrantee::create(['id' => 'writer-1']);
 
         self::grants()->grantPermission($writer, self::permission('posts:write'));
 
@@ -145,7 +145,7 @@ final class HeldLifetimeTest extends TestCase
      */
     public function testARolesGrantLastsUntilTheEarlierOfItsTwoGrants(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $staff  = Role::create(['name' => 'staff']);
         $editor = Role::create(['name' => 'editor', 'parent_id' => $staff->id]);
         $writer = Role::create(['name' => 'writer']);
@@ -182,7 +182,7 @@ final class HeldLifetimeTest extends TestCase
      */
     public function testAChainThatCannotBeReadCarriesNothing(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $one  = Role::create(['name' => 'one']);
         $two  = Role::create(['name' => 'two', 'parent_id' => $one->id]);
 
@@ -205,8 +205,8 @@ final class HeldLifetimeTest extends TestCase
      */
     public function testTheIdentityCountsWhenItGrantsToTheSubject(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-1']);
-        $identity  = StubIdentity::create(['id' => 'person-1']);
+        $principal = StubGrantee::create(['id' => 'principal-1']);
+        $identity  = StubGrantee::create(['id' => 'person-1']);
         $machine   = StubMachine::create(['id' => 'machine-1']);
 
         self::grants()->grantPermission($identity, self::permission('posts:edit'));
@@ -217,7 +217,7 @@ final class HeldLifetimeTest extends TestCase
         self::assertNull(HeldLifetime::of(new Subject($principal, $machine), 'posts:edit'));
         self::assertNull(HeldLifetime::of(new Subject(new \stdClass), 'posts:edit'));
 
-        $suspended = SuspendableIdentity::create(['id' => 'suspended-1']);
+        $suspended = SuspendableGrantee::create(['id' => 'suspended-1']);
 
         self::grants()->grantPermission($suspended, self::permission('posts:edit'));
 
@@ -239,7 +239,7 @@ final class HeldLifetimeTest extends TestCase
      */
     public function testOnlyTheGrantsOfTheScopeCount(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $tenant = new Reference('tenant', 'a');
 
         self::grants()->grantPermission($user, self::permission('posts:edit'), tenant: $tenant);
@@ -287,7 +287,7 @@ final class HeldLifetimeTest extends TestCase
      */
     public function testAPolicyIsHeldUntilItsLatestAttachmentLasts(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $staff  = Role::create(['name' => 'staff']);
         $editor = Role::create(['name' => 'editor', 'parent_id' => $staff->id]);
         $policy = Policy::create(['name' => 'delegates', 'document' => ['statements' => []]]);
@@ -328,7 +328,7 @@ final class HeldLifetimeTest extends TestCase
      */
     public function testARolesAttachmentCountsInItsOwnScope(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $editor = Role::create(['name' => 'editor']);
         $policy = Policy::create(['name' => 'delegates', 'document' => ['statements' => []]]);
         $tenant = new Reference('tenant', 'a');
@@ -380,11 +380,11 @@ final class HeldLifetimeTest extends TestCase
      * Count the queries reading the identity's lifetimes of the permissions
      * takes.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  list<string>  $permissions
      * @return int
      */
-    private static function queriesOf(StubIdentity $user, array $permissions): int
+    private static function queriesOf(StubGrantee $user, array $permissions): int
     {
         DB::flushQueryLog();
         DB::enableQueryLog();

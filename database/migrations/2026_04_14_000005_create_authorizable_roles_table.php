@@ -1,8 +1,7 @@
 <?php
 
 /**
- * Create the `authorizable_roles` table: roles granted to authorizable
- * identities.
+ * Create the `authorizable_roles` table: roles granted to grantees.
  *
  * Each row grants one role to one grantee within one scope: platform-wide (null
  * tenant columns) or one tenant, optionally that tenant's subtree, and

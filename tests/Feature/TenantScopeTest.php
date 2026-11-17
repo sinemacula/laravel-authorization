@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\RefusesThePackage;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -365,7 +365,7 @@ final class TenantScopeTest extends TestCase
     public function testWithinBelowATenantCountsOnlyItsGrantsThatReachBelow(): void
     {
         $tenant = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'A']);
-        $user   = StubIdentity::query()->create(['id' => 'user-1']);
+        $user   = StubGrantee::query()->create(['id' => 'user-1']);
 
         Permission::create(['name' => 'posts:read']);
         Permission::create(['name' => 'posts:edit']);
@@ -494,7 +494,7 @@ final class TenantScopeTest extends TestCase
      */
     public function testWithinLeavesNothingResolvedInsideToTheRequest(): void
     {
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
 
         Permission::create(['name' => 'admin:access']);
         $user->givePermission('admin:access', application: 'admin');
@@ -779,7 +779,7 @@ final class TenantScopeTest extends TestCase
 
         self::assertSame('platform:every', TenantScope::scopeKey());
 
-        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(StubIdentity::create(['id' => 'u1']), $tenant, 'admin'));
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(StubGrantee::create(['id' => 'u1']), $tenant, 'admin'));
         $this->app?->forgetInstance(ResolvedTenant::class);
 
         self::assertSame("{$type}:t1:app:admin", TenantScope::scopeKey());

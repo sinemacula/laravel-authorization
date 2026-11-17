@@ -11,8 +11,8 @@ use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
-use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
-use SineMacula\Laravel\Authorization\Events\Identity\BoundarySet;
+use SineMacula\Laravel\Authorization\Events\Grantee\BoundaryRemoved;
+use SineMacula\Laravel\Authorization\Events\Grantee\BoundarySet;
 use SineMacula\Laravel\Authorization\Exceptions\BoundaryException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
@@ -43,7 +43,7 @@ use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\RecordingLogger;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\VanishedPolicy;
 use Tests\TestCase;
 
@@ -102,7 +102,7 @@ final class BoundaryServiceTest extends TestCase
     {
         Event::fake([BoundarySet::class]);
 
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = self::cap('read-only');
 
         self::assertSame(GrantOutcome::GRANTED, self::service()->set($user, $policy));
@@ -142,7 +142,7 @@ final class BoundaryServiceTest extends TestCase
     public function testSettingAgainChangesTheReachOrReplacesTheBoundary(): void
     {
         $tenant = self::createTenant('tenant-a');
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $first  = self::cap('first');
         $second = self::cap('second');
 
@@ -183,11 +183,11 @@ final class BoundaryServiceTest extends TestCase
     public function testSetsOneBoundaryPerScope(): void
     {
         $tenant = self::createTenant('tenant-a');
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
 
         self::service()->set($user, self::cap('platform'), includeSubtree: false);
         self::service()->set($user, self::cap('tenant'), $tenant);
-        self::service()->set(StubIdentity::create(['id' => 'user-2']), self::cap('other'));
+        self::service()->set(StubGrantee::create(['id' => 'user-2']), self::cap('other'));
 
         self::assertSame(3, DB::table('authorizable_boundaries')->count());
         self::assertTrue((bool) DB::table('authorizable_boundaries')->whereNull('tenant_id')->where('authorizable_id', 'user-1')->value('include_subtree'));
@@ -205,7 +205,7 @@ final class BoundaryServiceTest extends TestCase
     public function testRemovesInTheScope(): void
     {
         $tenant = self::createTenant('tenant-a');
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = self::cap('tenant-cap');
 
         self::service()->set($user, $policy, $tenant, false);
@@ -246,11 +246,11 @@ final class BoundaryServiceTest extends TestCase
         $tenant = self::createTenant('tenant-a');
         $admin  = self::administrator([PackagePermissions::BOUNDARY_SET, PackagePermissions::BOUNDARY_REMOVE]);
         $nobody = self::administrator([], 'nobody');
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $cap    = self::cap('cap');
         $other  = self::policy('other', [['effect' => 'allow', 'actions' => ['posts:*']]]);
 
-        $platform = StubIdentity::create(['id' => 'user-2']);
+        $platform = StubGrantee::create(['id' => 'user-2']);
 
         self::service()->set($user, $cap, $tenant, false);
         self::service()->set($user, $cap);
@@ -284,7 +284,7 @@ final class BoundaryServiceTest extends TestCase
     {
         $setter    = self::administrator([PackagePermissions::BOUNDARY_SET, PackagePermissions::BOUNDARY_REMOVE]);
         $unbounded = self::administrator([PackagePermissions::BOUNDARY_SET, PackagePermissions::BOUNDARY_REMOVE, PackagePermissions::ADMINISTRATION_UNBOUNDED], 'unbounded');
-        $user      = StubIdentity::create(['id' => 'user-1']);
+        $user      = StubGrantee::create(['id' => 'user-1']);
         $wide      = self::policy('wide', [['effect' => 'allow', 'actions' => ['posts:read']], ['effect' => 'allow', 'actions' => ['posts:edit']]]);
         $narrow    = self::policy('narrow', [['effect' => 'allow', 'actions' => ['posts:read']]]);
 
@@ -308,7 +308,7 @@ final class BoundaryServiceTest extends TestCase
     {
         $actor  = self::administrator([PackagePermissions::BOUNDARY_REMOVE]);
         $nobody = self::administrator([], 'nobody');
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
 
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): bool => self::service()->remove($user, actor: $nobody));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->removeAll($user, $nobody));
@@ -333,7 +333,7 @@ final class BoundaryServiceTest extends TestCase
     public function testADelegatedRemovalOfABoundaryWhosePolicyIsGoneIsRefused(): void
     {
         $actor = self::administrator();
-        $user  = StubIdentity::create(['id' => 'user-1']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
 
         self::service()->set($user, self::cap('cap'));
 
@@ -373,11 +373,11 @@ final class BoundaryServiceTest extends TestCase
     public function testRemovesEveryBoundaryOfAGrantee(): void
     {
         $tenant = self::createTenant('tenant-a');
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
 
         self::service()->set($user, self::cap('platform'));
         self::service()->set($user, self::cap('tenant'), $tenant, false);
-        self::service()->set(StubIdentity::create(['id' => 'user-2']), self::cap('other'));
+        self::service()->set(StubGrantee::create(['id' => 'user-2']), self::cap('other'));
 
         Event::fake([BoundaryRemoved::class]);
 
@@ -408,11 +408,11 @@ final class BoundaryServiceTest extends TestCase
     public function testRemovesAllOfAGranteesBoundaries(): void
     {
         $tenant = self::createTenant('tenant-a');
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
 
         self::service()->set($user, self::cap('platform'));
         self::service()->set($user, self::cap('tenant'), $tenant);
-        self::service()->set(StubIdentity::create(['id' => 'user-2']), self::cap('other'));
+        self::service()->set(StubGrantee::create(['id' => 'user-2']), self::cap('other'));
 
         Event::fake([BoundaryRemoved::class]);
 
@@ -447,8 +447,8 @@ final class BoundaryServiceTest extends TestCase
     public function testRemovingAllNeedsPlatformAuthorityForABoundaryNamingHalfATenant(): void
     {
         $tenant = self::createTenant('tenant-a');
-        $user   = StubIdentity::create(['id' => 'user-1']);
-        $local  = StubIdentity::create(['id' => 'local-admin']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
+        $local  = StubGrantee::create(['id' => 'local-admin']);
         $logger = new RecordingLogger;
         $grants = GrantService::instance();
 
@@ -516,7 +516,7 @@ final class BoundaryServiceTest extends TestCase
     {
         [$tenantA, $tenantB] = \array_map(self::createTenant(...), ['tenant-a', 'tenant-b']);
 
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = self::cap('owned', ['tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => 'tenant-a']);
 
         self::service()->set($user, $policy);
@@ -540,7 +540,7 @@ final class BoundaryServiceTest extends TestCase
      */
     public function testRefusesWhatCannotBeABoundary(): void
     {
-        $user       = StubIdentity::create(['id' => 'user-1']);
+        $user       = StubGrantee::create(['id' => 'user-1']);
         $inline     = $user->createInlinePolicy('mine', ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]);
         $named      = self::policy('named', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]);
         $role       = Role::create(['name' => 'editor']);
@@ -580,7 +580,7 @@ final class BoundaryServiceTest extends TestCase
      */
     public function testRefusesAGranteeWithoutAKey(): void
     {
-        foreach ([new StubIdentity(['id' => 'unsaved']), new Reference('member', '')] as $grantee) {
+        foreach ([new StubGrantee(['id' => 'unsaved']), new Reference('member', '')] as $grantee) {
             try {
                 self::service()->set($grantee, self::cap('cap-' . \spl_object_id($grantee)));
                 self::fail('The grantee was not refused.');
@@ -604,7 +604,7 @@ final class BoundaryServiceTest extends TestCase
      */
     public function testDispatchesOnlyOnceTheWriteCommits(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = self::cap('cap');
 
         Event::fake([BoundarySet::class, BoundaryRemoved::class]);
@@ -649,7 +649,7 @@ final class BoundaryServiceTest extends TestCase
      */
     public function testAPolicyDeletedWhileItIsWrittenIsRefused(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $held   = self::cap('held');
         $policy = self::cap('deleted');
 
@@ -681,7 +681,7 @@ final class BoundaryServiceTest extends TestCase
      */
     public function testABoundaryThatIsNotWrittenIsRefused(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         self::service()->set($user, self::cap('held'));
         self::churn();
@@ -709,7 +709,7 @@ final class BoundaryServiceTest extends TestCase
      */
     public function testAGranteeDeletedTakesItsBoundaries(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = self::cap('cap');
 
         self::service()->set($user, $policy);
@@ -736,9 +736,9 @@ final class BoundaryServiceTest extends TestCase
         [$tenant, $other] = \array_map(self::createTenant(...), ['tenant', 'other']);
 
         $actor = self::administrator([]);
-        $user  = StubIdentity::query()->create(['id' => 'user']);
+        $user  = StubGrantee::query()->create(['id' => 'user']);
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $admin */
+        /** @var \Tests\Feature\Stubs\StubGrantee $admin */
         $admin = $actor->subject->subject;
 
         foreach ([PackagePermissions::BOUNDARY_REMOVE, PackagePermissions::ADMINISTRATION_UNBOUNDED] as $name) {
@@ -772,7 +772,7 @@ final class BoundaryServiceTest extends TestCase
      */
     public function testExactlyTheBoundariesDecidedAreRemoved(): void
     {
-        $user      = StubIdentity::query()->create(['id' => 'user']);
+        $user      = StubGrantee::query()->create(['id' => 'user']);
         $grantee   = Reference::of($user);
         $cap       = self::cap('cap');
         $other     = self::cap('other');
@@ -810,7 +810,7 @@ final class BoundaryServiceTest extends TestCase
      */
     public function testEveryOperationRefusesOnceThePackageRefuses(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $policy  = new Policy(['name' => 'unsaved']);
         $service = $this->container()->make(BoundaryService::class);
 

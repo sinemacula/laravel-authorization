@@ -23,7 +23,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ActsAsTenant;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -35,7 +35,7 @@ use Tests\TestCase;
  * it is to the package's comparisons in PHP.
  *
  * The keys that differ only so are never both written to the test's own tenant
- * and identity tables, whose keys MySQL compares through their case-insensitive
+ * and grantee tables, whose keys MySQL compares through their case-insensitive
  * collation; a tenant or grantee the test does not store is an unsaved model
  * with its key.
  *
@@ -89,7 +89,7 @@ final class ExactReferenceMatchingTest extends TestCase
     #[DataProvider('nearTwins')]
     public function testAGrantInATenantDoesNotReachItsNearTwin(string $twin): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         Role::create(['name' => 'editor'])->givePermission(Permission::create(['name' => 'posts:edit']));
         $user->assignRole('editor', null, self::tenant(self::KEY));
@@ -108,7 +108,7 @@ final class ExactReferenceMatchingTest extends TestCase
     #[DataProvider('nearTwins')]
     public function testAGrantToAGranteeDoesNotReachItsNearTwin(string $twin): void
     {
-        $user = StubIdentity::create(['id' => self::KEY]);
+        $user = StubGrantee::create(['id' => self::KEY]);
 
         $user->givePermission(Permission::create(['name' => 'posts:edit']));
 
@@ -126,7 +126,7 @@ final class ExactReferenceMatchingTest extends TestCase
     public function testTheGrantKeyKeepsNearTwinsApart(): void
     {
         $role = Role::create(['name' => 'editor']);
-        $user = StubIdentity::create(['id' => self::KEY]);
+        $user = StubGrantee::create(['id' => self::KEY]);
 
         foreach ([self::KEY, 'ORG', 'org '] as $key) {
             $user->assignRole($role, null, self::tenant($key));
@@ -171,7 +171,7 @@ final class ExactReferenceMatchingTest extends TestCase
     #[DataProvider('nearTwins')]
     public function testAResourcePolicyOnARecordDoesNotReachItsNearTwin(string $twin): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = self::policy('sharing', ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => [$user->getMorphClass() . ':user-1']]);
 
         self::assertSame(GrantOutcome::GRANTED, self::resourcePolicies()->attach($policy, ['posts', self::KEY]));
@@ -195,8 +195,8 @@ final class ExactReferenceMatchingTest extends TestCase
     #[DataProvider('nearTwins')]
     public function testAGuardrailOnATenantDoesNotCapItsNearTwin(string $twin): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
-        $actor = StubIdentity::create(['id' => 'guardrail-admin']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
+        $actor = StubGrantee::create(['id' => 'guardrail-admin']);
 
         $user->givePermission(Permission::create(['name' => 'posts:edit']));
         $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
@@ -223,7 +223,7 @@ final class ExactReferenceMatchingTest extends TestCase
     #[DataProvider('nearTwins')]
     public function testABoundaryDoesNotCapANearTwin(string $twin): void
     {
-        $user = StubIdentity::create(['id' => self::KEY]);
+        $user = StubGrantee::create(['id' => self::KEY]);
 
         $user->givePermission(Permission::create(['name' => 'posts:edit']));
 
@@ -276,12 +276,12 @@ final class ExactReferenceMatchingTest extends TestCase
      * Determine whether the user may perform the action with the given tenant
      * active.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  \Tests\Feature\Stubs\StubTenant  $tenant
      * @param  string  $action
      * @return bool
      */
-    private function canIn(StubIdentity $user, StubTenant $tenant, string $action): bool
+    private function canIn(StubGrantee $user, StubTenant $tenant, string $action): bool
     {
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $tenant));
         $this->app?->forgetInstance(ResolvedTenant::class);
@@ -305,11 +305,11 @@ final class ExactReferenceMatchingTest extends TestCase
      * though it had been read from the database.
      *
      * @param  string  $key
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function unsavedIdentity(string $key): StubIdentity
+    private static function unsavedIdentity(string $key): StubGrantee
     {
-        return (new StubIdentity)->newInstance(['id' => $key], true);
+        return (new StubGrantee)->newInstance(['id' => $key], true);
     }
 
     /**

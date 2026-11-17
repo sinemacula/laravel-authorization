@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use Tests\Concerns\ActivatesBreakGlass;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -75,17 +75,17 @@ final class PruneGrantsCommandTest extends TestCase
     {
         Carbon::setTestNow('2026-07-01 12:00:00');
 
-        $user = StubIdentity::create(['id' => 'user-1'])->assignRole(Role::create(['name' => 'editor']), Carbon::parse('2026-07-01 11:00:00'));
+        $user = StubGrantee::create(['id' => 'user-1'])->assignRole(Role::create(['name' => 'editor']), Carbon::parse('2026-07-01 11:00:00'));
 
         self::activate($user, self::emergencyRole(), ['expires_at' => Carbon::parse('2026-07-01 11:30:00')]);
 
-        $gone = StubIdentity::create(['id' => 'user-2'])->assignRole(Role::create(['name' => 'viewer']));
+        $gone = StubGrantee::create(['id' => 'user-2'])->assignRole(Role::create(['name' => 'viewer']));
 
         $gone->createInlinePolicy('mine', ['version' => 1, 'statements' => []]);
         ResourcePolicyService::instance()?->attach(Policy::create(['name' => 'locked', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['*']]]]]), $gone);
         BoundaryService::instance()?->set($gone, Policy::create(['name' => 'cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]));
 
-        DB::table('stub_identities')->where('id', 'user-2')->delete();
+        DB::table('stub_grantees')->where('id', 'user-2')->delete();
 
         self::assertSame(0, Artisan::call('authorization:prune', ['--pretend' => true]));
         self::assertSame('Would prune ' . \sprintf(self::SUMMARY, 'would record') . "\n", Artisan::output());

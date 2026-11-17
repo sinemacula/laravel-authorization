@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -87,7 +87,7 @@ final class AuthorizationScopeTest extends TestCase
 
         $tenant = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
 
-        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-1']), $tenant, 'admin'));
+        $this->resolve(new StubSubjectResolver(StubGrantee::create(['id' => 'user-1']), $tenant, 'admin'));
 
         $scope = AuthorizationScope::current();
 
@@ -126,7 +126,7 @@ final class AuthorizationScopeTest extends TestCase
     {
         $request = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
 
-        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-1']), $request, 'web'));
+        $this->resolve(new StubSubjectResolver(StubGrantee::create(['id' => 'user-1']), $request, 'web'));
 
         $scope = AuthorizationScope::tenant(new Reference('accounts', '7'), 'admin');
 
@@ -144,7 +144,7 @@ final class AuthorizationScopeTest extends TestCase
     {
         $request = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
 
-        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-1']), $request, 'web'));
+        $this->resolve(new StubSubjectResolver(StubGrantee::create(['id' => 'user-1']), $request, 'web'));
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('failed');
@@ -165,8 +165,8 @@ final class AuthorizationScopeTest extends TestCase
      */
     public function testTheSubjectInTheScopeKeepsItsIdentityGuardAndSession(): void
     {
-        $user     = new StubIdentity;
-        $identity = new StubIdentity;
+        $user     = new StubGrantee;
+        $identity = new StubGrantee;
         $scope    = AuthorizationScope::tenant(new Reference('accounts', '7'), 'admin');
         $subject  = $scope->subjectIn(new Subject($user, $identity, new Reference('accounts', '1'), 'web', 'api', 'session-1'));
 
@@ -191,7 +191,7 @@ final class AuthorizationScopeTest extends TestCase
      */
     public function testTheSubjectInTheScopeKeepsItsScopesAndItsMarkerOnThePlatform(): void
     {
-        $user     = new StubIdentity;
+        $user     = new StubGrantee;
         $platform = AuthorizationScope::platform('admin');
         $tenant   = AuthorizationScope::tenant(new Reference('accounts', '7'));
         $scopes   = CredentialScopes::of(['posts:read']);
@@ -233,7 +233,7 @@ final class AuthorizationScopeTest extends TestCase
     {
         $request = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
 
-        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-1']), $request, 'web'));
+        $this->resolve(new StubSubjectResolver(StubGrantee::create(['id' => 'user-1']), $request, 'web'));
 
         $held = $this->held();
 
@@ -263,7 +263,7 @@ final class AuthorizationScopeTest extends TestCase
             self::assertNotSame($held, $this->held());
         }
 
-        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-2'])));
+        $this->resolve(new StubSubjectResolver(StubGrantee::create(['id' => 'user-2'])));
 
         $held = $this->held();
 
@@ -280,7 +280,7 @@ final class AuthorizationScopeTest extends TestCase
     {
         $request = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
 
-        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-1']), $request, 'web'));
+        $this->resolve(new StubSubjectResolver(StubGrantee::create(['id' => 'user-1']), $request, 'web'));
 
         $isBelow = TenantScope::within($request, 'web', static fn (): array => [
             TenantScope::isBelowTenant(),
@@ -298,7 +298,7 @@ final class AuthorizationScopeTest extends TestCase
      */
     public function testAScopeIsAppliedOverATenantThatCannotBeRead(): void
     {
-        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-1']), new StubTenant, 'web'));
+        $this->resolve(new StubSubjectResolver(StubGrantee::create(['id' => 'user-1']), new StubTenant, 'web'));
 
         self::assertSame([null, 'admin'], AuthorizationScope::platform('admin')->within(static fn (): array => [TenantScope::currentTenant(), TenantScope::currentApplication()]));
     }
@@ -318,7 +318,7 @@ final class AuthorizationScopeTest extends TestCase
         /** @var \ArrayObject<int, string|null> $read */
         $read = new \ArrayObject;
 
-        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-1']), $request, 'web'));
+        $this->resolve(new StubSubjectResolver(StubGrantee::create(['id' => 'user-1']), $request, 'web'));
         $this->app?->instance(ResolutionCache::class, $cache);
 
         $remember = static fn (): array => $cache->rememberPermissions(new Reference('users', '1'), static function () use ($read): Resolution {

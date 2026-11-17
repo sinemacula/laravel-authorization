@@ -88,16 +88,15 @@ trait HasPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Grant the given permission directly to this identity, through the grant
+     * Grant the given permission directly to this grantee, through the grant
      * service.
      *
      * An optional `$expiresAt` makes the grant temporal — the attachment is
      * filtered out of `$user->permissions` the moment the clock passes the
      * supplied instant, without requiring a sweeper run. Passing null (the
-     * default) creates a forever grant. Granting a permission the identity
-     * holds with the same expiry and reach changes nothing and dispatches no
-     * event; a permission whose grant has expired is re-armed with the new
-     * expiry.
+     * default) creates a forever grant. Granting a permission the grantee holds
+     * with the same expiry and reach changes nothing and dispatches no event; a
+     * permission whose grant has expired is re-armed with the new expiry.
      *
      * A grant in a tenant also holds in the tenants below it in the tenant
      * tree, unless `$includeSubtree` is false.
@@ -128,13 +127,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
     /**
      * Revoke a directly granted permission, through the grant service.
      *
-     * A name is revoked from the grants the identity holds, not from the one
-     * row a lookup would pick: every held permission of that name for the
-     * identity's guard, or guard-agnostic, is detached, whether the current
-     * tenant or the platform owns it, so a tenant's permission of the same name
-     * never hides the platform grant. `IdentityPermissionRevoked` fires once
-     * for each permission really detached, and not at all when the identity
-     * held none.
+     * A name is revoked from the grants the grantee holds, not from the one row
+     * a lookup would pick: every held permission of that name for the grantee's
+     * guard, or guard-agnostic, is detached, whether the current tenant or the
+     * platform owns it, so a tenant's permission of the same name never hides
+     * the platform grant. `GranteePermissionRevoked` fires once for each
+     * permission really detached, and not at all when the grantee held none.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
@@ -152,11 +150,11 @@ trait HasPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Replace this identity's direct permissions with the supplied set, through
+     * Replace this grantee's direct permissions with the supplied set, through
      * the grant service.
      *
-     * Each net attachment fires `IdentityPermissionGranted` and each net
-     * detachment fires `IdentityPermissionRevoked`, so audit consumers receive
+     * Each net attachment fires `GranteePermissionGranted` and each net
+     * detachment fires `GranteePermissionRevoked`, so audit consumers receive
      * the same per-row signal they would for `givePermission()` /
      * `revokePermission()` calls and the cache invalidation listener wired to
      * those events keeps the resolution cache coherent without a separate
@@ -165,7 +163,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * `GrantService::syncPermissions()` with an expiry.
      *
      * A name keeps every held permission of that name, whether the current
-     * tenant or the platform owns it, and only when the identity holds none is
+     * tenant or the platform owns it, and only when the grantee holds none is
      * the permission the lookup ranks first attached, so a tenant's permission
      * of the same name never replaces a platform grant.
      *
@@ -185,12 +183,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Determine whether the identity holds the supplied permission via a direct
+     * Determine whether the grantee holds the supplied permission via a direct
      * grant or any role-inherited grant.
      *
      * A held permission name is treated as an `fnmatch` pattern against the
-     * asked name — so an identity holding `posts:*` satisfies
-     * `hasPermission('posts:create')`, and an identity holding `*` satisfies
+     * asked name — so a grantee holding `posts:*` satisfies
+     * `hasPermission('posts:create')`, and a grantee holding `*` satisfies
      * every check (the super-admin path). The reverse direction does not match:
      * holding `posts:create` does not satisfy an asked `posts:*`. Backslashes
      * are compared literally via `FNM_NOESCAPE` (see `HeldPermissions`).
@@ -222,7 +220,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * longer than the nearest grant expiry or the configured maximum. A grant,
      * revocation or change to a held role, its ancestors or a held permission
      * takes effect on the next check. A miss takes five queries however many
-     * roles the identity holds and however deep they sit.
+     * roles the grantee holds and however deep they sit.
      *
      * Only the grants that reach the current scope count: platform-wide ones,
      * those made in the current tenant, and its ancestors' that reach the

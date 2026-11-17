@@ -26,7 +26,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksAccess;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -125,7 +125,7 @@ final class AuthorizeActionTest extends TestCase
         StubTenant::create(['id' => 'post-1']);
         StubTenant::create(['id' => 'post-2']);
 
-        $identity = StubIdentity::create(['id' => 'author']);
+        $identity = StubGrantee::create(['id' => 'author']);
         self::attachStatement($identity, 'allow', [self::ACTION], ['post:post-1']);
 
         $this->actAs($identity);
@@ -169,7 +169,7 @@ final class AuthorizeActionTest extends TestCase
      */
     public function testARawParameterIsTheResourceAsGiven(): void
     {
-        $identity = StubIdentity::create(['id' => 'reader']);
+        $identity = StubGrantee::create(['id' => 'reader']);
         self::attachStatement($identity, 'allow', [self::ACTION], ['report-7']);
 
         $this->actAs($identity);
@@ -189,7 +189,7 @@ final class AuthorizeActionTest extends TestCase
     {
         Event::fake([DecisionEvaluated::class, AuthorizationFailed::class]);
 
-        $identity = StubIdentity::create(['id' => 'reader']);
+        $identity = StubGrantee::create(['id' => 'reader']);
         self::attachStatement($identity, 'allow', [self::ACTION], ['*']);
 
         $this->actAs($identity);
@@ -212,7 +212,7 @@ final class AuthorizeActionTest extends TestCase
     {
         Event::fake([DecisionEvaluated::class, AuthorizationFailed::class]);
 
-        $identity = StubIdentity::create(['id' => 'reader']);
+        $identity = StubGrantee::create(['id' => 'reader']);
         self::attachStatement($identity, 'allow', [self::ACTION], ['post:*']);
 
         $this->actAs($identity);
@@ -239,7 +239,7 @@ final class AuthorizeActionTest extends TestCase
 
         $this->app?->instance(ResourceTenantResolver::class, $resolver);
 
-        $this->actAs(StubIdentity::create(['id' => 'bystander']));
+        $this->actAs(StubGrantee::create(['id' => 'bystander']));
 
         $this->getJson('/either/post-1')->assertForbidden();
 
@@ -265,7 +265,7 @@ final class AuthorizeActionTest extends TestCase
     public function testAnUnidentifiableValueDenies(): void
     {
         $this->allowEverySubject(['posts:update', self::ACTION]);
-        $this->actAs(StubIdentity::create(['id' => 'drafter']));
+        $this->actAs(StubGrantee::create(['id' => 'drafter']));
 
         $this->assertRefusedOnce('/drafts/new');
     }
@@ -279,7 +279,7 @@ final class AuthorizeActionTest extends TestCase
     public function testAParameterTheRouteDoesNotCarryDenies(): void
     {
         $this->allowEverySubject(['posts:update', self::ACTION]);
-        $this->actAs(StubIdentity::create(['id' => 'misrouted']));
+        $this->actAs(StubGrantee::create(['id' => 'misrouted']));
 
         $this->assertRefusedOnce('/unbound/post-1');
     }
@@ -327,7 +327,7 @@ final class AuthorizeActionTest extends TestCase
         StubTenant::create(['id' => 'post-1']);
 
         $this->allowEverySubject(['posts:update']);
-        $this->actAs(StubIdentity::create(['id' => 'francophone']));
+        $this->actAs(StubGrantee::create(['id' => 'francophone']));
 
         foreach (['/posts/post-1', '/drafts/new', '/unbound/post-1'] as $uri) {
             $this->getJson($uri)->assertForbidden()->assertJson(['message' => 'Action non autorisée.']);
@@ -342,8 +342,8 @@ final class AuthorizeActionTest extends TestCase
      */
     public function testWithoutAParameterTheCheckIsResourceLess(): void
     {
-        $everything = StubIdentity::create(['id' => 'everything']);
-        $scoped     = StubIdentity::create(['id' => 'scoped']);
+        $everything = StubGrantee::create(['id' => 'everything']);
+        $scoped     = StubGrantee::create(['id' => 'scoped']);
 
         self::attachStatement($everything, 'allow', [self::ACTION]);
         self::attachStatement($scoped, 'allow', [self::ACTION], ['post:post-1']);
@@ -362,7 +362,7 @@ final class AuthorizeActionTest extends TestCase
      */
     public function testAnyAllowedActionOfAListIsEnough(): void
     {
-        $identity = StubIdentity::create(['id' => 'lister']);
+        $identity = StubGrantee::create(['id' => 'lister']);
         self::attachStatement($identity, 'allow', [self::ACTION], ['post-1']);
 
         $this->actAs($identity);
@@ -383,7 +383,7 @@ final class AuthorizeActionTest extends TestCase
     {
         Route::middleware('authorize:posts:update')->post('/drafts', static fn (): string => 'ok')->name('drafts.store');
 
-        $identity = StubIdentity::create(['id' => 'author']);
+        $identity = StubGrantee::create(['id' => 'author']);
 
         $identity->attachPolicy(Policy::create(['name' => 'from-the-office', 'document' => ['statements' => [
             ['effect' => 'allow', 'actions' => ['posts:update'], 'conditions' => [
@@ -438,7 +438,7 @@ final class AuthorizeActionTest extends TestCase
         $post      = StubTenant::create(['id' => 'post-1']);
         $held      = self::identityHolding(permissions: [self::ACTION]);
         $denied    = self::identityHolding(permissions: [self::ACTION]);
-        $elsewhere = StubIdentity::create(['id' => 'elsewhere']);
+        $elsewhere = StubGrantee::create(['id' => 'elsewhere']);
 
         self::attachStatement($denied, 'deny', ['*'], ['post:post-1']);
         self::attachStatement($elsewhere, 'allow', [self::ACTION], ['post:post-2']);
@@ -467,7 +467,7 @@ final class AuthorizeActionTest extends TestCase
         $this->app?->instance(ResourceTenantResolver::class, $resolver);
 
         $this->allowEverySubject([self::ACTION]);
-        $this->actAs(StubIdentity::create(['id' => 'outsider']));
+        $this->actAs(StubGrantee::create(['id' => 'outsider']));
 
         $this->getJson('/posts/post-1')->assertForbidden();
 

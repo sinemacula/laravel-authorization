@@ -40,8 +40,8 @@ use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ReportsEveryDecision;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\TestCase;
@@ -371,7 +371,7 @@ final class RoleExclusionServiceTest extends TestCase
         try {
             self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf(self::raced(...)));
         } finally {
-            foreach (['role_exclusions', 'authorizable_roles', 'roles', 'stub_identities'] as $table) {
+            foreach (['role_exclusions', 'authorizable_roles', 'roles', 'stub_grantees'] as $table) {
                 DB::table($table)->delete();
             }
 
@@ -395,7 +395,7 @@ final class RoleExclusionServiceTest extends TestCase
         [$clerk, $auditor] = self::roles();
         [$first, $second]  = self::ordered($clerk, $auditor);
 
-        $user = StubIdentity::query()->create(['id' => 'user']);
+        $user = StubGrantee::query()->create(['id' => 'user']);
 
         self::grants()->grantRole($user, $clerk);
         self::grants()->grantRole($user, $auditor);
@@ -459,7 +459,7 @@ final class RoleExclusionServiceTest extends TestCase
         $approver  = Role::query()->withoutGlobalScopes()->create(['name' => 'approver', ...self::ownedBy($owner)]);
         $requester = Role::query()->create(['name' => 'requester']);
         $approve   = Permission::query()->create(['name' => 'approve']);
-        $user      = StubIdentity::query()->create(['id' => 'user']);
+        $user      = StubGrantee::query()->create(['id' => 'user']);
 
         DB::table('role_permissions')->insert(['role_id' => $approver->id, 'permission_id' => $approve->id]);
 
@@ -479,7 +479,7 @@ final class RoleExclusionServiceTest extends TestCase
         foreach (['grants' => $grants, 'owner' => $owner] as $name => $tenant) {
             $this->actAsTenant($tenant);
 
-            $checked = StubIdentity::query()->findOrFail('user');
+            $checked = StubGrantee::query()->findOrFail('user');
 
             if (!$checked->hasPermission('approve') || !$checked->hasRole('requester')) {
                 continue;
@@ -631,7 +631,7 @@ final class RoleExclusionServiceTest extends TestCase
         [$clerk, $auditor] = self::roles();
 
         $payer = Role::query()->create(['name' => 'payer']);
-        $user  = StubIdentity::query()->create(['id' => 'user']);
+        $user  = StubGrantee::query()->create(['id' => 'user']);
 
         self::service()->declare($clerk, $auditor);
         self::service()->declare($payer, $auditor);
@@ -681,8 +681,8 @@ final class RoleExclusionServiceTest extends TestCase
     {
         [$clerk, $auditor] = self::roles();
 
-        $person = StubIdentity::query()->create(['id' => 'person']);
-        $member = StubSecondIdentity::query()->create(['id' => 'member']);
+        $person = StubGrantee::query()->create(['id' => 'person']);
+        $member = StubSecondGrantee::query()->create(['id' => 'member']);
 
         self::grants()->grantRole($person, $clerk);
         self::grants()->grantRole($member, $auditor);
@@ -779,7 +779,7 @@ final class RoleExclusionServiceTest extends TestCase
     {
         [$clerk, $auditor] = self::roles();
 
-        $user    = StubIdentity::query()->create(['id' => 'user']);
+        $user    = StubGrantee::query()->create(['id' => 'user']);
         $isRaced = false;
         $package = DB::connection();
 

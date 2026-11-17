@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\BulkChecks\BulkStatusAttributes;
@@ -58,7 +58,7 @@ final class PermissionsForQueryBudgetTest extends TestCase
     {
         $request = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
         $tenant  = StubTenant::query()->create(['id' => 't2', 'name' => 't2']);
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $role    = Role::create(['name' => 'editor']);
 
         $role->givePermission(Permission::create(['name' => 'module:action-1']));
@@ -101,7 +101,7 @@ final class PermissionsForQueryBudgetTest extends TestCase
      */
     public function testAResourceConditionReadsTheAttributesOnce(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $post = ScopedPost::query()->create(['title' => 'post', 'status' => 'published']);
 
         $user->attachPolicy(Policy::create(['name' => 'published', 'document' => ['statements' => [
@@ -142,7 +142,7 @@ final class PermissionsForQueryBudgetTest extends TestCase
     {
         $request = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
         $other   = StubTenant::query()->create(['id' => 't2', 'name' => 't2']);
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'module:action-1']), null, $request);
         $user->givePermission(Permission::create(['name' => 'module:action-2']), null, $other);

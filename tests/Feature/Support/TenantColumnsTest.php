@@ -124,7 +124,7 @@ final class TenantColumnsTest extends TestCase
 
         $owned = Policy::create(['name' => 'owned', 'document' => ['statements' => []]]);
 
-        $grantee = ['authorizable_type' => 'stub_identity', 'authorizable_id' => 'owned'];
+        $grantee = ['authorizable_type' => 'stub_grantee', 'authorizable_id' => 'owned'];
 
         DB::table('authorizable_policies')->insert(['policy_id' => $owned->getKey(), ...$grantee, 'tenant_type' => 'tenant', 'tenant_id' => 'o2']);
         DB::table('policies')->where('id', $owned->getKey())->update(['tenant_type' => null, 'tenant_id' => 'o2']);
@@ -207,7 +207,7 @@ final class TenantColumnsTest extends TestCase
 
         foreach (self::ROWS as $name => [$type, $id]) {
             $columns = ['policy_id' => $key, 'tenant_type' => $type, 'tenant_id' => $id];
-            $grantee = ['authorizable_type' => 'stub_identity', 'authorizable_id' => $name, 'include_subtree' => true];
+            $grantee = ['authorizable_type' => 'stub_grantee', 'authorizable_id' => $name, 'include_subtree' => true];
 
             DB::table('authorizable_boundaries')->insert([...$columns, ...$grantee]);
             DB::table('authorizable_policies')->insert([...$columns, ...$grantee]);

@@ -27,7 +27,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Concerns\ChecksAccess;
 use Tests\Concerns\RefusesThePackage;
-use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\TestCase;
 
 /**
@@ -362,11 +362,11 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
     /**
      * Create a user holding the `admin` role and the `posts:create` permission.
      *
-     * @return \Tests\Feature\Stubs\AuthenticatableIdentity
+     * @return \Tests\Feature\Stubs\AuthenticatableGrantee
      */
-    private function seedGrantedUser(): AuthenticatableIdentity
+    private function seedGrantedUser(): AuthenticatableGrantee
     {
-        $user = AuthenticatableIdentity::create(['id' => 'signed-in']);
+        $user = AuthenticatableGrantee::create(['id' => 'signed-in']);
         $user->assignRole(Role::create(['name' => 'admin', 'guard' => 'web']));
         $user->givePermission(Permission::create(['name' => 'posts:create', 'guard' => 'web']));
 

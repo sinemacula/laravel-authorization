@@ -14,7 +14,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\IdentityDirectory;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException;
@@ -33,8 +33,8 @@ use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\Fixtures\LockModeRecordingGrammar;
@@ -106,7 +106,7 @@ final class ExclusionGuardTest extends TestCase
     {
         [$clerk, $auditor] = self::declared();
 
-        $user = StubIdentity::query()->create(['id' => 'user']);
+        $user = StubGrantee::query()->create(['id' => 'user']);
 
         self::grants()->grantRole($user, $clerk);
 
@@ -156,7 +156,7 @@ final class ExclusionGuardTest extends TestCase
         ];
 
         foreach ($cases as $name => [$isRefused, $held, $granted, $role]) {
-            $user  = StubIdentity::query()->create(['id' => \str_replace(' ', '-', $name)]);
+            $user  = StubGrantee::query()->create(['id' => \str_replace(' ', '-', $name)]);
             $grant = static fn (Role $role, array $scope): GrantOutcome => self::grants()->grantRole(
                 $user,
                 $role,
@@ -188,11 +188,11 @@ final class ExclusionGuardTest extends TestCase
     {
         [$clerk, $auditor] = self::declared();
 
-        $person = StubIdentity::query()->create(['id' => 'person']);
-        $member = StubSecondIdentity::query()->create(['id' => 'member']);
-        $owner  = StubIdentity::query()->create(['id' => 'owner']);
-        $first  = StubSecondIdentity::query()->create(['id' => 'first']);
-        $second = StubSecondIdentity::query()->create(['id' => 'second']);
+        $person = StubGrantee::query()->create(['id' => 'person']);
+        $member = StubSecondGrantee::query()->create(['id' => 'member']);
+        $owner  = StubGrantee::query()->create(['id' => 'owner']);
+        $first  = StubSecondGrantee::query()->create(['id' => 'first']);
+        $second = StubSecondGrantee::query()->create(['id' => 'second']);
 
         $this->app?->instance(IdentityDirectory::class, new ListedIdentityDirectory([
             ListedIdentityDirectory::key(Reference::of($person)) => [Reference::of($member)],
@@ -228,8 +228,8 @@ final class ExclusionGuardTest extends TestCase
     {
         [$clerk, $auditor] = self::declared();
 
-        $swap = StubIdentity::query()->create(['id' => 'swap']);
-        $both = StubIdentity::query()->create(['id' => 'both']);
+        $swap = StubGrantee::query()->create(['id' => 'swap']);
+        $both = StubGrantee::query()->create(['id' => 'both']);
 
         self::grants()->grantRole($swap, $clerk, tenant: self::tenant('child'));
         self::grants()->grantRole($both, $clerk, tenant: self::tenant('child'));
@@ -243,7 +243,7 @@ final class ExclusionGuardTest extends TestCase
         self::assertInstanceOf(RoleExclusionConflictException::class, $refusal);
         self::assertSame(1, self::grantsOf($clerk));
 
-        $lapsed = StubIdentity::query()->create(['id' => 'lapsed']);
+        $lapsed = StubGrantee::query()->create(['id' => 'lapsed']);
         $other  = Role::query()->create(['name' => 'other']);
 
         self::grants()->grantRole($lapsed, $clerk);
@@ -273,11 +273,11 @@ final class ExclusionGuardTest extends TestCase
 
         [$clerk, $auditor] = self::declared();
 
-        $user  = StubIdentity::query()->create(['id' => 'user']);
-        $wide  = StubIdentity::query()->create(['id' => 'wide']);
+        $user  = StubGrantee::query()->create(['id' => 'user']);
+        $wide  = StubGrantee::query()->create(['id' => 'wide']);
         $week  = Carbon::now()->addWeek();
         $child = self::tenant('child');
-        $grant = static fn (StubIdentity $grantee, ?\DateTimeInterface $until, bool $below = false): GrantOutcome => self::grants()
+        $grant = static fn (StubGrantee $grantee, ?\DateTimeInterface $until, bool $below = false): GrantOutcome => self::grants()
             ->grantRole($grantee, $auditor, $until, tenant: $child, includeSubtree: $below);
 
         self::grants()->grantRole($user, $clerk);
@@ -292,14 +292,14 @@ final class ExclusionGuardTest extends TestCase
         self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf(static fn () => $grant($user, $week)));
         self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf(static fn () => $grant($user, Carbon::now()->addDay(), true)));
 
-        $late = StubIdentity::query()->create(['id' => 'late']);
+        $late = StubGrantee::query()->create(['id' => 'late']);
 
         self::grants()->grantRole($late, $clerk, tenant: self::tenant('grandchild'));
         self::grants()->grantRole($late, $auditor, tenant: $child, includeSubtree: false);
 
         self::assertInstanceOf(RoleExclusionConflictException::class, self::refusalOf(static fn () => $grant($late, null, true)));
 
-        $lapsed = StubIdentity::query()->create(['id' => 'lapsed']);
+        $lapsed = StubGrantee::query()->create(['id' => 'lapsed']);
 
         self::grants()->grantRole($lapsed, $clerk);
         self::insertGrant($auditor, $lapsed, $child, false, Carbon::now()->subDay());
@@ -324,7 +324,7 @@ final class ExclusionGuardTest extends TestCase
 
         $nobody = self::administrator([], 'nobody', null);
         $admin  = self::administrator();
-        $user   = StubIdentity::query()->create(['id' => 'user']);
+        $user   = StubGrantee::query()->create(['id' => 'user']);
 
         self::grants()->grantRole($user, $clerk);
 
@@ -351,7 +351,7 @@ final class ExclusionGuardTest extends TestCase
         $intern  = Role::query()->create(['name' => 'intern', 'rank' => 6]);
         $trainee = Role::query()->create(['name' => 'trainee', 'rank' => 7, 'parent_id' => $intern->id]);
         $other   = Role::query()->create(['name' => 'other', 'rank' => 5]);
-        $user    = StubIdentity::query()->create(['id' => 'user']);
+        $user    = StubGrantee::query()->create(['id' => 'user']);
 
         self::grants()->grantRole($user, $clerk);
         self::grants()->grantRole($user, $trainee);
@@ -392,7 +392,7 @@ final class ExclusionGuardTest extends TestCase
     {
         [$clerk, $auditor] = self::declared();
 
-        $user = StubIdentity::query()->create(['id' => 'user']);
+        $user = StubGrantee::query()->create(['id' => 'user']);
 
         self::grants()->grantRole($user, $clerk, tenant: self::tenant('child'));
 
@@ -418,7 +418,7 @@ final class ExclusionGuardTest extends TestCase
     {
         [$clerk, $auditor] = self::declared();
 
-        $user  = StubIdentity::query()->create(['id' => 'user']);
+        $user  = StubGrantee::query()->create(['id' => 'user']);
         $grant = static fn () => self::grants()->grantRole($user, $auditor);
 
         self::activate($clerk, $user);
@@ -451,7 +451,7 @@ final class ExclusionGuardTest extends TestCase
 
         $intern  = Role::query()->create(['name' => 'intern']);
         $trainee = Role::query()->create(['name' => 'trainee', 'parent_id' => $intern->id]);
-        $user    = StubIdentity::query()->create(['id' => 'user']);
+        $user    = StubGrantee::query()->create(['id' => 'user']);
         $below   = [$intern->id, $trainee->id];
 
         \sort($below);
@@ -487,7 +487,7 @@ final class ExclusionGuardTest extends TestCase
     public function testAGrantNoPairTouchesReadsThePairsOnce(): void
     {
         $idle = Role::query()->create(['name' => 'idle']);
-        $user = StubIdentity::query()->create(['id' => 'user']);
+        $user = StubGrantee::query()->create(['id' => 'user']);
 
         Permission::query()->create(['name' => 'posts:edit']);
 
@@ -532,8 +532,8 @@ final class ExclusionGuardTest extends TestCase
         $this->raceOrSkip(static function (): void {
             $clerk   = Role::query()->create(['name' => 'clerk']);
             $auditor = Role::query()->create(['name' => 'auditor']);
-            $first   = StubIdentity::query()->create(['id' => 'first']);
-            $second  = StubIdentity::query()->create(['id' => 'second']);
+            $first   = StubGrantee::query()->create(['id' => 'first']);
+            $second  = StubGrantee::query()->create(['id' => 'second']);
 
             self::exclusions()->declare($clerk, $auditor);
 
@@ -558,7 +558,7 @@ final class ExclusionGuardTest extends TestCase
         $this->raceOrSkip(static function (): void {
             [$first, $second, $third] = self::keyedRoles(['first', 'second', 'third']);
 
-            $user = StubIdentity::query()->create(['id' => 'user']);
+            $user = StubGrantee::query()->create(['id' => 'user']);
 
             self::exclusions()->declare($first, $second);
             self::exclusions()->declare($first, $third);
@@ -584,7 +584,7 @@ final class ExclusionGuardTest extends TestCase
         $this->raceOrSkip(static function (): void {
             [$clerk, $intern, $auditor, $approver, $trainee] = self::keyedRoles(['clerk', 'intern', 'auditor', 'approver', 'trainee']);
 
-            $user = StubIdentity::query()->create(['id' => 'user']);
+            $user = StubGrantee::query()->create(['id' => 'user']);
 
             self::exclusions()->declare($clerk, $auditor);
             self::exclusions()->declare($intern, $approver);
@@ -638,7 +638,7 @@ final class ExclusionGuardTest extends TestCase
         $this->raceOrSkip(static function (): void {
             $clerk   = Role::query()->create(['name' => 'clerk']);
             $auditor = Role::query()->create(['name' => 'auditor']);
-            $user    = StubIdentity::query()->create(['id' => 'user']);
+            $user    = StubGrantee::query()->create(['id' => 'user']);
             $pair    = [$clerk->id, $auditor->id];
 
             \sort($pair);
@@ -671,7 +671,7 @@ final class ExclusionGuardTest extends TestCase
             [$clerk, $auditor] = self::declared();
 
             $intern = Role::query()->create(['name' => 'intern']);
-            $user   = StubIdentity::query()->create(['id' => 'user']);
+            $user   = StubGrantee::query()->create(['id' => 'user']);
 
             self::grants()->grantRole($user, $auditor);
 
@@ -769,7 +769,7 @@ final class ExclusionGuardTest extends TestCase
         } finally {
             DB::table('roles')->update(['parent_id' => null]);
 
-            foreach (['role_exclusions', 'authorizable_roles', 'roles', 'stub_identities'] as $table) {
+            foreach (['role_exclusions', 'authorizable_roles', 'roles', 'stub_grantees'] as $table) {
                 DB::table($table)->delete();
             }
 
@@ -978,10 +978,10 @@ final class ExclusionGuardTest extends TestCase
      * platform.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
-     * @param  \Tests\Feature\Stubs\StubIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubGrantee  $grantee
      * @return void
      */
-    private static function activate(Role $role, StubIdentity $grantee): void
+    private static function activate(Role $role, StubGrantee $grantee): void
     {
         DB::table('break_glass_activations')->insert([
             'id'                => (string) Str::uuid(),
@@ -1010,13 +1010,13 @@ final class ExclusionGuardTest extends TestCase
      * before a pair was declared is.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
-     * @param  \Tests\Feature\Stubs\StubIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubGrantee  $grantee
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @param  bool  $includeSubtree
      * @param  \DateTimeInterface  $expiresAt
      * @return void
      */
-    private static function insertGrant(Role $role, StubIdentity $grantee, Reference $tenant, bool $includeSubtree, \DateTimeInterface $expiresAt): void
+    private static function insertGrant(Role $role, StubGrantee $grantee, Reference $tenant, bool $includeSubtree, \DateTimeInterface $expiresAt): void
     {
         DB::table('authorizable_roles')->insert([
             'role_id'           => $role->id,

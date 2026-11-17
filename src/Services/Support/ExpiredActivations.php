@@ -10,7 +10,7 @@ use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
-use SineMacula\Laravel\Authorization\Events\Identity\BreakGlassExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassExpired;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;

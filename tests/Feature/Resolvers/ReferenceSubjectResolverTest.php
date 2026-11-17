@@ -13,11 +13,11 @@ use SineMacula\Laravel\Authorization\Exceptions\UnresolvedSubjectException;
 use SineMacula\Laravel\Authorization\Resolvers\ReferenceSubjectResolver;
 use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use Tests\Feature\Stubs\FailingSubjectResolver;
-use Tests\Feature\Stubs\NumberedIdentity;
-use Tests\Feature\Stubs\PlainIdentity;
+use Tests\Feature\Stubs\NumberedGrantee;
+use Tests\Feature\Stubs\PlainGrantee;
 use Tests\Feature\Stubs\PrincipalSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -72,8 +72,8 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     public function testAModelIsItsOwnPrincipalAndIdentity(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
-        $subject = $this->resolver()->resolve(StubIdentity::class . ':user-1');
+        $user    = StubGrantee::create(['id' => 'user-1']);
+        $subject = $this->resolver()->resolve(StubGrantee::class . ':user-1');
 
         self::assertTrue($user->is(self::model($subject->subject)));
         self::assertSame($subject->subject, $subject->identity);
@@ -90,9 +90,9 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     public function testAMorphAliasNamesItsModel(): void
     {
-        Relation::morphMap(['person' => StubIdentity::class]);
+        Relation::morphMap(['person' => StubGrantee::class]);
 
-        $user    = StubIdentity::create(['id' => 'user-2']);
+        $user    = StubGrantee::create(['id' => 'user-2']);
         $subject = $this->resolver()->resolve('person:user-2');
 
         self::assertTrue($user->is(self::model($subject->subject)));
@@ -108,13 +108,13 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     public function testAPersonIsMappedToThePrincipalItActsAs(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-1']);
-        $person    = StubSecondIdentity::create(['id' => 'person-1']);
+        $principal = StubGrantee::create(['id' => 'principal-1']);
+        $person    = StubSecondGrantee::create(['id' => 'person-1']);
         $tenant    = StubTenant::query()->create(['id' => 'tenant-1', 'name' => 'tenant-1']);
 
         $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, $person, $tenant));
 
-        foreach ([StubSecondIdentity::class . ':person-1', StubIdentity::class . ':principal-1'] as $reference) {
+        foreach ([StubSecondGrantee::class . ':person-1', StubGrantee::class . ':principal-1'] as $reference) {
             $subject = $this->resolver()->resolve($reference);
 
             self::assertSame($principal, $subject->subject, $reference);
@@ -135,12 +135,12 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     public function testTheScopesAndThePlatformMarkerAreDropped(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-9']);
-        $person    = StubSecondIdentity::create(['id' => 'person-9']);
+        $principal = StubGrantee::create(['id' => 'principal-9']);
+        $person    = StubSecondGrantee::create(['id' => 'person-9']);
 
         $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, $person, null, CredentialScopes::of(['posts:read']), true));
 
-        $subject = $this->resolver()->resolve(StubSecondIdentity::class . ':person-9');
+        $subject = $this->resolver()->resolve(StubSecondGrantee::class . ':person-9');
 
         self::assertSame($principal, $subject->subject);
         self::assertNull($subject->scopes);
@@ -156,15 +156,15 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     public function testReadsTheBoundSubjectResolverOnEveryCall(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-2']);
-        $person    = StubSecondIdentity::create(['id' => 'person-2']);
+        $principal = StubGrantee::create(['id' => 'principal-2']);
+        $person    = StubSecondGrantee::create(['id' => 'person-2']);
         $resolver  = $this->resolver();
 
-        self::assertTrue($person->is(self::model($resolver->resolve(StubSecondIdentity::class . ':person-2')->subject)));
+        self::assertTrue($person->is(self::model($resolver->resolve(StubSecondGrantee::class . ':person-2')->subject)));
 
         $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, $person));
 
-        self::assertSame($principal, $resolver->resolve(StubSecondIdentity::class . ':person-2')->subject);
+        self::assertSame($principal, $resolver->resolve(StubSecondGrantee::class . ':person-2')->subject);
     }
 
     /**
@@ -211,13 +211,13 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     public function testRefusesAnUnknownSubject(): void
     {
-        $reference = StubIdentity::class . ':missing';
+        $reference = StubGrantee::class . ':missing';
 
         $this->assertRefused($reference, "No subject '{$reference}' was found.");
     }
 
     /**
-     * A model whose principal is no authorizable identity, or no saved one,
+     * A model whose principal is no authorizable grantee, or no saved one,
      * cannot be checked and is refused.
      *
      * @return void
@@ -228,20 +228,20 @@ final class ReferenceSubjectResolverTest extends TestCase
 
         $tenant = StubTenant::class . ':tenant-2';
 
-        $this->assertRefused($tenant, "The subject '{$tenant}' cannot be checked: its principal is not a saved authorizable identity.");
+        $this->assertRefused($tenant, "The subject '{$tenant}' cannot be checked: its principal is not a saved authorizable grantee.");
 
-        $person = StubSecondIdentity::create(['id' => 'person-3']);
+        $person = StubSecondGrantee::create(['id' => 'person-3']);
 
-        $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver(new StubIdentity(['id' => 'unsaved']), $person));
+        $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver(new StubGrantee(['id' => 'unsaved']), $person));
 
-        $reference = StubSecondIdentity::class . ':person-3';
+        $reference = StubSecondGrantee::class . ':person-3';
 
-        $this->assertRefused($reference, "The subject '{$reference}' cannot be checked: its principal is not a saved authorizable identity.");
+        $this->assertRefused($reference, "The subject '{$reference}' cannot be checked: its principal is not a saved authorizable grantee.");
 
-        foreach ([new PlainIdentity, new \stdClass] as $principal) {
+        foreach ([new PlainGrantee, new \stdClass] as $principal) {
             $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, $person));
 
-            $this->assertRefused($reference, "The subject '{$reference}' cannot be checked: its principal is not a saved authorizable identity.");
+            $this->assertRefused($reference, "The subject '{$reference}' cannot be checked: its principal is not a saved authorizable grantee.");
         }
     }
 
@@ -252,9 +252,9 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     public function testAKeyMayHoldAColon(): void
     {
-        $user = StubIdentity::create(['id' => 'org:7']);
+        $user = StubGrantee::create(['id' => 'org:7']);
 
-        self::assertTrue($user->is(self::model($this->resolver()->resolve(StubIdentity::class . ':org:7')->subject)));
+        self::assertTrue($user->is(self::model($this->resolver()->resolve(StubGrantee::class . ':org:7')->subject)));
     }
 
     /**
@@ -265,13 +265,13 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     public function testRefusesALookupThatFails(): void
     {
-        StubIdentity::create(['id' => 'user-2']);
+        StubGrantee::create(['id' => 'user-2']);
 
-        StubIdentity::retrieved(static function (): never {
+        StubGrantee::retrieved(static function (): never {
             throw new \RuntimeException(self::SECRET);
         });
 
-        $exception = $this->refusal(StubIdentity::class . ':user-2', 'The subject could not be resolved.');
+        $exception = $this->refusal(StubGrantee::class . ':user-2', 'The subject could not be resolved.');
 
         self::assertInstanceOf(\RuntimeException::class, $exception->getPrevious());
         self::assertSame(self::SECRET, $exception->getPrevious()->getMessage());
@@ -286,7 +286,7 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     public function testRefusesAKeyTheKeyColumnCannotHold(): void
     {
-        $reference = NumberedIdentity::class . ':abc';
+        $reference = NumberedGrantee::class . ':abc';
 
         try {
             $this->resolver()->resolve($reference);
@@ -305,12 +305,12 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     public function testRefusesASubjectResolverThatFails(): void
     {
-        StubIdentity::create(['id' => 'user-3']);
+        StubGrantee::create(['id' => 'user-3']);
 
         foreach ([new \RuntimeException(self::SECRET), new \InvalidArgumentException(self::SECRET)] as $failure) {
             $this->app?->instance(SubjectResolver::class, new FailingSubjectResolver($failure));
 
-            $exception = $this->refusal(StubIdentity::class . ':user-3', 'The subject could not be resolved.');
+            $exception = $this->refusal(StubGrantee::class . ':user-3', 'The subject could not be resolved.');
 
             self::assertSame($failure, $exception->getPrevious());
         }
@@ -324,14 +324,14 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     public function testRefusesAModelMappedToAnotherSubject(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-3']);
-        $person    = StubSecondIdentity::create(['id' => 'person-4']);
+        $principal = StubGrantee::create(['id' => 'principal-3']);
+        $person    = StubSecondGrantee::create(['id' => 'person-4']);
 
-        StubIdentity::create(['id' => 'stranger-1']);
+        StubGrantee::create(['id' => 'stranger-1']);
 
         $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, $person));
 
-        $reference = StubIdentity::class . ':stranger-1';
+        $reference = StubGrantee::class . ':stranger-1';
 
         $this->assertRefused($reference, "The subject '{$reference}' is ambiguous: the subject resolver maps it to a subject that is not about it.");
     }
@@ -343,13 +343,13 @@ final class ReferenceSubjectResolverTest extends TestCase
      */
     public function testAReloadedModelIsTheModelNamed(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-4']);
+        $principal = StubGrantee::create(['id' => 'principal-4']);
 
-        StubSecondIdentity::create(['id' => 'person-5']);
+        StubSecondGrantee::create(['id' => 'person-5']);
 
-        $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, StubSecondIdentity::query()->findOrFail('person-5')));
+        $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, StubSecondGrantee::query()->findOrFail('person-5')));
 
-        self::assertSame($principal, $this->resolver()->resolve(StubSecondIdentity::class . ':person-5')->subject);
+        self::assertSame($principal, $this->resolver()->resolve(StubSecondGrantee::class . ':person-5')->subject);
     }
 
     /**
@@ -400,11 +400,11 @@ final class ReferenceSubjectResolverTest extends TestCase
      * Return the subject's principal as the model it is.
      *
      * @param  object  $principal
-     * @return \Tests\Feature\Stubs\StubIdentity|\Tests\Feature\Stubs\StubSecondIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee|\Tests\Feature\Stubs\StubSecondGrantee
      */
-    private static function model(object $principal): StubIdentity|StubSecondIdentity
+    private static function model(object $principal): StubGrantee|StubSecondGrantee
     {
-        self::assertTrue($principal instanceof StubIdentity || $principal instanceof StubSecondIdentity);
+        self::assertTrue($principal instanceof StubGrantee || $principal instanceof StubSecondGrantee);
 
         return $principal;
     }

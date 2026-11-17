@@ -16,8 +16,8 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\WidensGrants;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
 use Tests\TestCase;
 
@@ -99,11 +99,11 @@ final class GrantHookEntryPointsTest extends TestCase
         Role::query()->create(['name' => 'author']);
 
         $hook     = $this->hook();
-        $identity = StubSecondIdentity::class . ':p1';
+        $identity = StubSecondGrantee::class . ':p1';
 
-        self::assertSame(0, Artisan::call('authorization:grant', ['identity' => $identity, 'role' => 'editor']));
-        self::assertSame(0, Artisan::call('authorization:grant', ['identity' => $identity, 'role' => 'editor']));
-        self::assertSame(0, Artisan::call('authorization:grant', ['identity' => $identity, 'role' => 'author', '--actor' => StubIdentity::class . ':admin-1']));
+        self::assertSame(0, Artisan::call('authorization:grant', ['grantee' => $identity, 'role' => 'editor']));
+        self::assertSame(0, Artisan::call('authorization:grant', ['grantee' => $identity, 'role' => 'editor']));
+        self::assertSame(0, Artisan::call('authorization:grant', ['grantee' => $identity, 'role' => 'author', '--actor' => StubGrantee::class . ':admin-1']));
 
         self::assertSame([[WideningReason::PLATFORM->value], [WideningReason::PLATFORM->value]], $hook->reasons());
         self::assertSame([true, false], [$hook->widenings[0]->isTrusted, $hook->widenings[1]->isTrusted]);
@@ -112,7 +112,7 @@ final class GrantHookEntryPointsTest extends TestCase
 
         Role::query()->create(['name' => 'refused']);
 
-        self::assertSame(1, Artisan::call('authorization:grant', ['identity' => $identity, 'role' => 'refused']));
+        self::assertSame(1, Artisan::call('authorization:grant', ['grantee' => $identity, 'role' => 'refused']));
         self::assertStringContainsString('Refused by the test hook.', Artisan::output());
         self::assertFalse($principal->fresh()?->hasRole('refused'));
     }
@@ -122,14 +122,14 @@ final class GrantHookEntryPointsTest extends TestCase
      * through the trait helper given, as the actor given or trusted.
      *
      * @param  string  $helper
-     * @param  \Tests\Feature\Stubs\StubSecondIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubSecondGrantee  $grantee
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @param  string  $name
-     * @return \Tests\Feature\Stubs\StubSecondIdentity
+     * @return \Tests\Feature\Stubs\StubSecondGrantee
      *
      * @throws \Throwable
      */
-    private static function grantThrough(string $helper, StubSecondIdentity $grantee, ?ActingContext $actor, string $name): StubSecondIdentity
+    private static function grantThrough(string $helper, StubSecondGrantee $grantee, ?ActingContext $actor, string $name): StubSecondGrantee
     {
         $tenant = self::tenant('acct1');
 

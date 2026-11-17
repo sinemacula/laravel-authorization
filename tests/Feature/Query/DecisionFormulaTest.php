@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Query\ResourceShape;
 use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Query\StatementScreen;
 use SineMacula\Laravel\Authorization\Subject;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
@@ -97,7 +97,7 @@ final class DecisionFormulaTest extends TestCase
     {
         [$screen, $subject] = $this->screen();
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $user */
+        /** @var \Tests\Feature\Stubs\StubGrantee $user */
         $user   = $subject->subject;
         $named  = new Statement(PolicyEffect::ALLOW, [self::ACTION], [self::type() . ':*'], principals: [$user->getMorphClass() . ':u1']);
         $other  = new Statement(PolicyEffect::ALLOW, [self::ACTION], principals: [$user->getMorphClass() . ':u2']);
@@ -122,7 +122,7 @@ final class DecisionFormulaTest extends TestCase
     {
         [$screen, $subject] = $this->screen();
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $user */
+        /** @var \Tests\Feature\Stubs\StubGrantee $user */
         $user   = $subject->subject;
         $theirs = (new Policy('theirs', [new Statement(PolicyEffect::ALLOW, [self::ACTION], principals: [$user->getMorphClass() . ':u2'])]))->withResource(self::type() . ':*');
         $ours   = (new Policy('ours', [new Statement(PolicyEffect::ALLOW, [self::ACTION], principals: [$user->getMorphClass() . ':u1'])]))->withResource(self::type() . ':*');
@@ -161,7 +161,7 @@ final class DecisionFormulaTest extends TestCase
     {
         [$screen, $subject] = $this->screen();
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $user */
+        /** @var \Tests\Feature\Stubs\StubGrantee $user */
         $user     = $subject->subject;
         $deny     = new Statement(PolicyEffect::DENY, [self::ACTION], ['${input.missing}']);
         $allow    = new Statement(PolicyEffect::ALLOW, [self::ACTION], ['${input.missing}']);
@@ -182,7 +182,7 @@ final class DecisionFormulaTest extends TestCase
      */
     private function screen(): array
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
 
         return [new StatementScreen(self::ACTION, ResourceShape::of(new ScopedPost, self::ACTION, new SchemaInspector), $subject), $subject];

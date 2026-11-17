@@ -26,7 +26,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\RecordsRowLocks;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
@@ -63,7 +63,7 @@ final class AuthorityRowsTest extends TestCase
      */
     public function testAGranteesAuthorityIsLockedInOrder(): void
     {
-        $user     = StubIdentity::query()->create(['id' => 'user']);
+        $user     = StubGrantee::query()->create(['id' => 'user']);
         $parent   = Role::query()->create(['name' => 'parent']);
         $child    = Role::query()->create(['name' => 'child', 'parent_id' => $parent->getKey()]);
         $read     = Permission::query()->create(['name' => 'posts:read']);
@@ -92,8 +92,8 @@ final class AuthorityRowsTest extends TestCase
         );
         $held = self::sorted([$parent->getKey(), $child->getKey(), $active->getKey()]);
 
-        self::assertSame([StubIdentity::class, 'user'], $locked[0][1]);
-        self::assertSame([StubIdentity::class, 'user'], \array_slice($locked[1][1], 0, 2));
+        self::assertSame([StubGrantee::class, 'user'], $locked[0][1]);
+        self::assertSame([StubGrantee::class, 'user'], \array_slice($locked[1][1], 0, 2));
         self::assertSame($held, $locked[5][1]);
         self::assertSame($held, $locked[6][1]);
         self::assertSame([$parent->getMorphClass(), ...$held], $locked[7][1]);
@@ -184,7 +184,7 @@ final class AuthorityRowsTest extends TestCase
         $role       = Role::query()->create(['name' => 'editor']);
         $permission = Permission::query()->create(['name' => 'posts:read']);
         $policy     = Policy::query()->create(['name' => 'shared', 'document' => ['statements' => []]]);
-        $user       = new Reference(StubIdentity::class, 'user');
+        $user       = new Reference(StubGrantee::class, 'user');
 
         self::assertSame(
             [...self::GRANTS, 'guardrails', 'permissions'],
@@ -218,7 +218,7 @@ final class AuthorityRowsTest extends TestCase
 
         $parentSet = OperationResource::definition(PackagePermissions::ROLE_PARENT_SET, $role, ['parent' => $parent->id]);
         $created   = OperationResource::definition(PackagePermissions::ROLE_CREATE, new Role(['name' => 'new']), ['name' => 'new']);
-        $foreign   = OperationResource::definition(PackagePermissions::ROLE_UPDATE, StubIdentity::query()->create(['id' => 'model']), []);
+        $foreign   = OperationResource::definition(PackagePermissions::ROLE_UPDATE, StubGrantee::query()->create(['id' => 'model']), []);
 
         self::assertSame(['guardrails', 'roles', 'role_permissions', 'authorizable_policies'], $this->tablesLockedFor($parentSet));
         self::assertSame(['guardrails'], $this->tablesLockedFor($created));
@@ -244,12 +244,12 @@ final class AuthorityRowsTest extends TestCase
     {
         $locks = $this->recordRowLocks();
 
-        $zeta  = new Reference(StubIdentity::class, 'zeta');
-        $alpha = new Reference(StubIdentity::class, 'alpha');
+        $zeta  = new Reference(StubGrantee::class, 'zeta');
+        $alpha = new Reference(StubGrantee::class, 'alpha');
 
         AuthorityRows::in(self::pins(), DependencyPhase::ACTOR)->grantees($zeta, $alpha, new Reference('other_type', 'alpha'), $zeta)->lock();
 
-        self::assertSame(['authorizable_roles', ['other_type', 'alpha', StubIdentity::class, 'zeta', StubIdentity::class, 'alpha']], $locks[0] ?? null);
+        self::assertSame(['authorizable_roles', ['other_type', 'alpha', StubGrantee::class, 'zeta', StubGrantee::class, 'alpha']], $locks[0] ?? null);
     }
 
     /**
@@ -288,7 +288,7 @@ final class AuthorityRowsTest extends TestCase
      */
     public function testAKeyReachedTwiceIsLockedOnce(): void
     {
-        $user       = StubIdentity::query()->create(['id' => 'user']);
+        $user       = StubGrantee::query()->create(['id' => 'user']);
         $role       = Role::query()->create(['name' => 'editor']);
         $permission = Permission::query()->create(['name' => 'posts:read']);
         $policy     = Policy::query()->create(['name' => 'cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
@@ -348,7 +348,7 @@ final class AuthorityRowsTest extends TestCase
      */
     private static function pins(): DependencyPins
     {
-        return new DependencyPins(new Operation('op', new Reference(StubIdentity::class, 'admin'), CarbonImmutable::now('UTC'), false));
+        return new DependencyPins(new Operation('op', new Reference(StubGrantee::class, 'admin'), CarbonImmutable::now('UTC'), false));
     }
 
     /**

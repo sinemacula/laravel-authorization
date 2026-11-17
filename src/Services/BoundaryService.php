@@ -14,8 +14,8 @@ use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
-use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
-use SineMacula\Laravel\Authorization\Events\Identity\BoundarySet;
+use SineMacula\Laravel\Authorization\Events\Grantee\BoundaryRemoved;
+use SineMacula\Laravel\Authorization\Events\Grantee\BoundarySet;
 use SineMacula\Laravel\Authorization\Exceptions\BoundaryException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
@@ -274,7 +274,7 @@ final class BoundaryService
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  list<array{string|null, \SineMacula\Laravel\Authorization\Support\GrantScope}>  $boundaries
-     * @return list<\SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved>
+     * @return list<\SineMacula\Laravel\Authorization\Events\Grantee\BoundaryRemoved>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException
      *
@@ -311,7 +311,7 @@ final class BoundaryService
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
-     * @return array{list<\SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved>, int}
+     * @return array{list<\SineMacula\Laravel\Authorization\Events\Grantee\BoundaryRemoved>, int}
      *
      * @internal
      */
@@ -523,7 +523,7 @@ final class BoundaryService
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  string  $policy
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
-     * @return \SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved
+     * @return \SineMacula\Laravel\Authorization\Events\Grantee\BoundaryRemoved
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      */

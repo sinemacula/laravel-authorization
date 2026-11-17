@@ -15,10 +15,10 @@ use SineMacula\Laravel\Authorization\Reviews\Support\ReviewOrder;
 use SineMacula\Laravel\Authorization\Reviews\Support\SubjectStates;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\NumberedIdentity;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\SuspendableIdentity;
-use Tests\Fixtures\Reviews\NamedInactiveIdentity;
+use Tests\Feature\Stubs\NumberedGrantee;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\SuspendableGrantee;
+use Tests\Fixtures\Reviews\NamedInactiveGrantee;
 use Tests\TestCase;
 
 /**
@@ -44,20 +44,20 @@ final class SubjectStatesTest extends TestCase
      */
     public function testEachSubjectIsReadByItsType(): void
     {
-        $deleted = NumberedIdentity::query()->create(['name' => 'deleted']);
-        $kept    = NumberedIdentity::query()->create(['name' => 'kept']);
+        $deleted = NumberedGrantee::query()->create(['name' => 'deleted']);
+        $kept    = NumberedGrantee::query()->create(['name' => 'kept']);
 
-        StubIdentity::query()->create(['id' => 'active']);
-        NamedInactiveIdentity::query()->create(['id' => 'inactive', 'name' => 'inactive']);
+        StubGrantee::query()->create(['id' => 'active']);
+        NamedInactiveGrantee::query()->create(['id' => 'inactive', 'name' => 'inactive']);
 
         $deleted->delete();
 
         $subjects = [
             Reference::of($deleted),
             Reference::of($kept),
-            new Reference((new StubIdentity)->getMorphClass(), 'active'),
-            new Reference((new StubIdentity)->getMorphClass(), 'gone'),
-            new Reference((new NamedInactiveIdentity)->getMorphClass(), 'inactive'),
+            new Reference((new StubGrantee)->getMorphClass(), 'active'),
+            new Reference((new StubGrantee)->getMorphClass(), 'gone'),
+            new Reference((new NamedInactiveGrantee)->getMorphClass(), 'inactive'),
             new Reference('no model', 'x'),
         ];
 
@@ -87,13 +87,13 @@ final class SubjectStatesTest extends TestCase
      */
     public function testTheRowsAreGivenTheirSubjectsStates(): void
     {
-        StubIdentity::query()->create(['id' => 'active']);
+        StubGrantee::query()->create(['id' => 'active']);
 
-        $rows = [self::row(new Reference((new StubIdentity)->getMorphClass(), 'active')), self::row(new Reference('no model', 'x'))];
+        $rows = [self::row(new Reference((new StubGrantee)->getMorphClass(), 'active')), self::row(new Reference('no model', 'x'))];
 
         self::assertSame([SubjectState::ACTIVE, SubjectState::UNKNOWN], \array_map(static fn (ReviewRow $row): SubjectState => $row->subjectState, SubjectStates::apply($rows)));
 
-        $suspended = SuspendableIdentity::query()->create(['id' => 'suspended']);
+        $suspended = SuspendableGrantee::query()->create(['id' => 'suspended']);
 
         $suspended->suspended = true;
 
@@ -102,7 +102,7 @@ final class SubjectStatesTest extends TestCase
             \array_map(static fn (ReviewRow $row): SubjectState => $row->subjectState, SubjectStates::apply($rows, new Subject($suspended, $suspended))),
         );
 
-        $active = StubIdentity::query()->findOrFail('active');
+        $active = StubGrantee::query()->findOrFail('active');
 
         self::assertSame(
             [SubjectState::ACTIVE],
@@ -122,9 +122,9 @@ final class SubjectStatesTest extends TestCase
     {
         $rows      = [self::row(new Reference('no model', 'x'))];
         $states    = static fn (Subject $subject): array => \array_map(static fn (ReviewRow $row): SubjectState => $row->subjectState, SubjectStates::apply($rows, $subject));
-        $principal = NumberedIdentity::query()->create(['name' => 'departed']);
-        $identity  = NumberedIdentity::query()->create(['name' => 'person']);
-        $kept      = StubIdentity::query()->create(['id' => 'kept']);
+        $principal = NumberedGrantee::query()->create(['name' => 'departed']);
+        $identity  = NumberedGrantee::query()->create(['name' => 'person']);
+        $kept      = StubGrantee::query()->create(['id' => 'kept']);
 
         self::assertSame([SubjectState::ACTIVE], $states(new Subject($principal, $identity)));
 

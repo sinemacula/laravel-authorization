@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\DecidesOnAttributeValues;
 use Tests\Concerns\ReadsDispatchedEvents;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -85,7 +85,7 @@ final class AuthorizationFailedTest extends TestCase
      */
     public function testARefusalNeverUsedBreakGlass(): void
     {
-        $user = StubIdentity::create(['id' => 'responder-1']);
+        $user = StubGrantee::create(['id' => 'responder-1']);
 
         self::activate($user, self::emergencyRole());
 

@@ -33,7 +33,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions as Actions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\AssertsDelegatedRefusals;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
@@ -388,7 +388,7 @@ final class DelegatedGrantsTest extends TestCase
         $holder = self::actor('holder', self::granting());
 
         app(RoleService::class)->grantPermission($editor, self::permission('posts:read'), Carbon::now()->addDays(3));
-        self::grants()->grantRole(StubIdentity::query()->findOrFail('holder'), $editor, Carbon::now()->addDays(5));
+        self::grants()->grantRole(StubGrantee::query()->findOrFail('holder'), $editor, Carbon::now()->addDays(5));
 
         self::assertGrant(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $holder, $user, 'posts:read', ['expires' => Carbon::now()->addDays(4)]);
         self::assertGrant(null, $holder, $user, 'posts:read', ['expires' => Carbon::now()->addDays(2)]);
@@ -410,7 +410,7 @@ final class DelegatedGrantsTest extends TestCase
 
         $denied = self::actor('denied', [...self::granting(), 'posts:*' => []]);
 
-        StubIdentity::query()->findOrFail('denied')->attachPolicy(self::document('conditional', [
+        StubGrantee::query()->findOrFail('denied')->attachPolicy(self::document('conditional', [
             ['effect' => 'deny', 'actions' => ['posts:edit'], 'conditions' => ['null' => ['request.ip' => false]]],
         ]));
 
@@ -420,7 +420,7 @@ final class DelegatedGrantsTest extends TestCase
 
         $bounded = self::actor('bounded', [...self::granting(), 'posts:*' => []]);
 
-        BoundaryService::instance()?->set(StubIdentity::query()->findOrFail('bounded'), self::document('bound', [
+        BoundaryService::instance()?->set(StubGrantee::query()->findOrFail('bounded'), self::document('bound', [
             ['effect' => 'allow', 'actions' => ['authorization:*', 'posts:read']],
             ['effect' => 'allow', 'actions' => ['posts:edit'], 'resources' => ['posts:mine:*']],
         ]));
@@ -481,7 +481,7 @@ final class DelegatedGrantsTest extends TestCase
         $actor = self::actor('admin', self::granting());
         $user  = self::user('user');
 
-        StubIdentity::query()->findOrFail('admin')->attachPolicy(self::document('delegates', [[
+        StubGrantee::query()->findOrFail('admin')->attachPolicy(self::document('delegates', [[
             'effect'     => 'allow',
             'actions'    => [Actions::PERMISSION_GRANTABLE],
             'resources'  => [OperationResource::TYPE . ':*'],
@@ -555,14 +555,14 @@ final class DelegatedGrantsTest extends TestCase
         foreach (['[p]osts:edit', 'p?sts:edit'] as $index => $pattern) {
             $actor = self::actor('denied-' . $index, [...self::granting(), 'posts:*' => []]);
 
-            StubIdentity::query()->findOrFail('denied-' . $index)->attachPolicy(self::document('deny-' . $index, [['effect' => 'deny', 'actions' => [$pattern]]]));
+            StubGrantee::query()->findOrFail('denied-' . $index)->attachPolicy(self::document('deny-' . $index, [['effect' => 'deny', 'actions' => [$pattern]]]));
 
             self::assertGrant(DecisionReason::ADMINISTRATION_UNPROVABLE, $actor, self::user('user'), 'posts:*');
         }
 
         $bounded = self::actor('bounded', [...self::granting(), 'posts:*' => []]);
 
-        BoundaryService::instance()?->set(StubIdentity::query()->findOrFail('bounded'), self::document('bound', [
+        BoundaryService::instance()?->set(StubGrantee::query()->findOrFail('bounded'), self::document('bound', [
             ['effect' => 'allow', 'not_actions' => ['[p]osts:edit']],
         ]));
 
@@ -614,7 +614,7 @@ final class DelegatedGrantsTest extends TestCase
     {
         $actor = self::actor('admin', [...self::granting(), 'posts:*' => []]);
 
-        StubIdentity::query()->findOrFail('admin')->attachPolicy(self::document('self', [[
+        StubGrantee::query()->findOrFail('admin')->attachPolicy(self::document('self', [[
             'effect'     => 'allow',
             'actions'    => [Actions::ADMINISTRATION_SELF],
             'resources'  => [OperationResource::TYPE . ':*'],
@@ -673,9 +673,9 @@ final class DelegatedGrantsTest extends TestCase
 
         $self = self::actor('self', ['authorization:*' => []]);
 
-        self::grants()->syncPermissions(StubIdentity::query()->findOrFail('self'), [self::permission('posts:edit')], actor: $self);
+        self::grants()->syncPermissions(StubGrantee::query()->findOrFail('self'), [self::permission('posts:edit')], actor: $self);
 
-        self::assertSame(['posts:edit'], StubIdentity::query()->findOrFail('self')->getPermissionNames());
+        self::assertSame(['posts:edit'], StubGrantee::query()->findOrFail('self')->getPermissionNames());
     }
 
     /**
@@ -720,14 +720,14 @@ final class DelegatedGrantsTest extends TestCase
      * service makes: both allowed, or both refused for the same reason.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $target
      * @param  array{tenant?: \Tests\Feature\Stubs\StubTenant, subtree?: bool, expires?: \Illuminate\Support\Carbon}  $options
      * @return void
      *
      * @throws \Throwable
      */
-    private static function assertScreenAgrees(ActingContext $actor, StubIdentity $user, Permission $target, array $options): void
+    private static function assertScreenAgrees(ActingContext $actor, StubGrantee $user, Permission $target, array $options): void
     {
         $tenant = $options['tenant'] ?? null;
         $scope  = new GrantScope($tenant === null ? null : Reference::of($tenant), null, ($options['subtree'] ?? true) || $tenant === null);
@@ -750,14 +750,14 @@ final class DelegatedGrantsTest extends TestCase
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null  $refusal
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  array{tenant?: \Tests\Feature\Stubs\StubTenant, subtree?: bool, application?: string, expires?: \Illuminate\Support\Carbon, on?: string}  $options
      * @return void
      *
      * @throws \Throwable
      */
-    private static function assertGrant(?DecisionReason $refusal, ActingContext $actor, StubIdentity $user, Permission|string $permission, array $options = []): void
+    private static function assertGrant(?DecisionReason $refusal, ActingContext $actor, StubGrantee $user, Permission|string $permission, array $options = []): void
     {
         $target = $permission instanceof Permission ? $permission : self::permission($permission);
 
@@ -790,13 +790,13 @@ final class DelegatedGrantsTest extends TestCase
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null  $refusal
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  string  $permission
      * @return void
      *
      * @throws \Throwable
      */
-    private static function assertRevoke(?DecisionReason $refusal, ActingContext $actor, StubIdentity $user, string $permission): void
+    private static function assertRevoke(?DecisionReason $refusal, ActingContext $actor, StubGrantee $user, string $permission): void
     {
         $target = self::permission($permission);
         $screen = $actor->check(OperationResource::revoke(Actions::PERMISSION_REVOKE, $user, $target, GrantScope::platform()));
@@ -818,13 +818,13 @@ final class DelegatedGrantsTest extends TestCase
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null  $refusal
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  list<string>  $permissions
      * @return void
      *
      * @throws \Throwable
      */
-    private static function assertSyncs(?DecisionReason $refusal, ActingContext $actor, StubIdentity $user, array $permissions): void
+    private static function assertSyncs(?DecisionReason $refusal, ActingContext $actor, StubGrantee $user, array $permissions): void
     {
         $targets = \array_map(self::permission(...), $permissions);
         $sync    = static fn (): mixed => self::grants()->syncPermissions($user, $targets, actor: $actor);
@@ -915,13 +915,13 @@ final class DelegatedGrantsTest extends TestCase
      *
      * @param  string  $id
      * @param  int|null  $rank
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      *
      * @throws \Throwable
      */
-    private static function user(string $id, ?int $rank = null): StubIdentity
+    private static function user(string $id, ?int $rank = null): StubGrantee
     {
-        $user = StubIdentity::query()->firstOrCreate(['id' => $id]);
+        $user = StubGrantee::query()->firstOrCreate(['id' => $id]);
 
         if ($rank !== null) {
             self::grants()->grantRole($user, Role::query()->firstOrCreate(['name' => 'rank-' . $rank], ['rank' => $rank]));

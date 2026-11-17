@@ -24,7 +24,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions as Actions;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -112,7 +112,7 @@ final class DefinitionConstraintsTest extends TestCase
             'deleting an allowing policy'   => [Actions::POLICY_DELETE, $allow, [], null],
             'deleting a denying policy'     => [Actions::POLICY_DELETE, $deny, [], DecisionReason::ADMINISTRATION_UNPROVABLE],
             'a policy action no rule names' => [Actions::POLICY_ATTACH, $allow, [], DecisionReason::ADMINISTRATION_UNPROVABLE],
-            'an unknown record'             => [Actions::ROLE_UPDATE, StubIdentity::query()->create(['id' => 'record']), [], DecisionReason::ADMINISTRATION_UNPROVABLE],
+            'an unknown record'             => [Actions::ROLE_UPDATE, StubGrantee::query()->create(['id' => 'record']), [], DecisionReason::ADMINISTRATION_UNPROVABLE],
         ];
 
         foreach ($cases as $name => [$action, $record, $change, $refusal]) {
@@ -133,8 +133,8 @@ final class DefinitionConstraintsTest extends TestCase
     {
         $role = Role::query()->create(['name' => 'editor', 'rank' => 8]);
 
-        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'holder']), $role);
-        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'senior']), Role::query()->create(['name' => 'senior', 'rank' => 1]));
+        self::grants()->grantRole(StubGrantee::query()->create(['id' => 'holder']), $role);
+        self::grants()->grantRole(StubGrantee::query()->create(['id' => 'senior']), Role::query()->create(['name' => 'senior', 'rank' => 1]));
 
         $rank = static fn (?int $rank): ?DecisionReason => self::refusal(OperationResource::definition(Actions::ROLE_UPDATE, $role, ['rank' => $rank]), null);
 
@@ -143,7 +143,7 @@ final class DefinitionConstraintsTest extends TestCase
         self::assertNull($rank(9));
         self::assertNull($rank(null));
 
-        self::grants()->grantRole(StubIdentity::query()->findOrFail('senior'), $role);
+        self::grants()->grantRole(StubGrantee::query()->findOrFail('senior'), $role);
 
         self::assertSame(DecisionReason::ADMINISTRATION_RANK, $rank(5));
         self::assertNull($rank(8));
@@ -165,7 +165,7 @@ final class DefinitionConstraintsTest extends TestCase
         $role = Role::query()->create(['name' => 'editor', 'rank' => 8]);
 
         foreach (['one', 'two'] as $id) {
-            self::grants()->grantRole(StubIdentity::query()->create(['id' => $id]), $role);
+            self::grants()->grantRole(StubGrantee::query()->create(['id' => $id]), $role);
         }
 
         config(['authorization.administration.max_impact' => 1]);
@@ -238,7 +238,7 @@ final class DefinitionConstraintsTest extends TestCase
     {
         $read = self::permission('posts:read');
         $role = Role::query()->create(['name' => 'editor']);
-        $peer = StubIdentity::query()->create(['id' => 'peer']);
+        $peer = StubGrantee::query()->create(['id' => 'peer']);
 
         self::grants()->grantRole($peer, Role::query()->create(['name' => 'peer', 'rank' => 1]));
         self::grants()->grantPermission($peer, $read);
@@ -265,8 +265,8 @@ final class DefinitionConstraintsTest extends TestCase
     {
         $write = self::permission('posts:write');
 
-        self::grants()->grantPermission(StubIdentity::query()->firstOrCreate(['id' => 'admin']), $write);
-        self::grants()->grantPermission(StubIdentity::query()->create(['id' => 'writer']), $write);
+        self::grants()->grantPermission(StubGrantee::query()->firstOrCreate(['id' => 'admin']), $write);
+        self::grants()->grantPermission(StubGrantee::query()->create(['id' => 'writer']), $write);
 
         $rename = OperationResource::definition(Actions::PERMISSION_RENAME, $write, ['name' => 'posts:publish']);
 
@@ -296,13 +296,13 @@ final class DefinitionConstraintsTest extends TestCase
         self::assertNull(self::refusal(OperationResource::definition(Actions::ROLE_PARENT_SET, $role, ['parent' => null]), null));
         self::assertNull(self::refusal($parent, null, $ungranted));
 
-        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'holder']), $role);
+        self::grants()->grantRole(StubGrantee::query()->create(['id' => 'holder']), $role);
 
         self::assertNull(self::refusal($parent, null));
         self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, self::refusal($parent, null, $ungranted));
 
-        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'peer']), Role::query()->create(['name' => 'peer', 'rank' => 1]));
-        self::grants()->grantRole(StubIdentity::query()->findOrFail('peer'), $role);
+        self::grants()->grantRole(StubGrantee::query()->create(['id' => 'peer']), Role::query()->create(['name' => 'peer', 'rank' => 1]));
+        self::grants()->grantRole(StubGrantee::query()->findOrFail('peer'), $role);
 
         self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::refusal($parent, null, $ungranted));
     }
@@ -336,7 +336,7 @@ final class DefinitionConstraintsTest extends TestCase
     public function testAChangeIsWeighedAcrossItsOwnReach(): void
     {
         $tenant = new Reference('tenant', 'a');
-        $junior = StubIdentity::query()->create(['id' => 'junior']);
+        $junior = StubGrantee::query()->create(['id' => 'junior']);
         $policy = Policy::create(['name' => 'sharing', 'document' => ['statements' => [[
             'effect'     => 'allow',
             'actions'    => ['posts:read'],
@@ -374,8 +374,8 @@ final class DefinitionConstraintsTest extends TestCase
         self::assertNull(self::refusal($grant, null));
         self::assertNull(self::refusal($attach, null));
 
-        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'peer']), Role::query()->create(['name' => 'peer', 'rank' => 1]));
-        self::grants()->grantRole(StubIdentity::query()->findOrFail('peer'), $role);
+        self::grants()->grantRole(StubGrantee::query()->create(['id' => 'peer']), Role::query()->create(['name' => 'peer', 'rank' => 1]));
+        self::grants()->grantRole(StubGrantee::query()->findOrFail('peer'), $role);
 
         self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::refusal($grant, null));
         self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::refusal($attach, null));
@@ -434,7 +434,7 @@ final class DefinitionConstraintsTest extends TestCase
      */
     private static function refusal(OperationResource $operation, ?Reference $from, ?\Closure $decide = null): ?DecisionReason
     {
-        $actor = StubIdentity::query()->firstOrCreate(['id' => 'admin']);
+        $actor = StubGrantee::query()->firstOrCreate(['id' => 'admin']);
 
         if (!$actor->hasRole('chief')) {
             self::grants()->grantRole($actor, Role::query()->create(['name' => 'chief', 'rank' => 2]));

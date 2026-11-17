@@ -15,9 +15,9 @@ use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\HeldPermission;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -31,7 +31,7 @@ use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Concerns\ChecksGrantsByName;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -74,7 +74,7 @@ final class HasPermissionsTest extends TestCase
      */
     public function testAPermissionForAnApplication(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         Permission::create(['name' => 'posts:edit']);
 
@@ -102,7 +102,7 @@ final class HasPermissionsTest extends TestCase
      */
     public function testAPermissionInATenantCanBeLimitedToIt(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $tenant = new Reference('stub_tenant', 'tenant-a');
 
         Permission::create(['name' => 'posts:edit']);
@@ -129,7 +129,7 @@ final class HasPermissionsTest extends TestCase
      */
     public function testHasPermissionReportsWhatIsGrantedWithoutDeciding(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $tenant = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'tenant-a']);
 
         $user->givePermission(Permission::create(['name' => 'posts:*']));
@@ -153,7 +153,7 @@ final class HasPermissionsTest extends TestCase
     {
         Carbon::setTestNow('2026-07-01 12:00:00');
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission(Permission::create(['name' => 'posts:edit', 'guard' => 'web']));
 
         Carbon::setTestNow('2026-07-01 12:30:00');
@@ -176,7 +176,7 @@ final class HasPermissionsTest extends TestCase
     {
         Carbon::setTestNow('2026-07-01 12:00:00');
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission(Permission::create(['name' => 'posts:edit', 'guard' => 'web']), Carbon::parse('2026-07-01 13:00:00'));
 
         $permission = $user->permissions()->sole();
@@ -258,7 +258,7 @@ final class HasPermissionsTest extends TestCase
         Carbon::setTestNow('2026-07-01 12:00:00');
         Event::fake([PermissionGranted::class, PermissionRevoked::class]);
 
-        $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user       = StubGrantee::create(['id' => (string) Str::uuid()]);
         $permission = Permission::query()->create(['name' => 'posts:edit']);
         $expires    = Carbon::parse('2026-07-02 12:00:00', 'UTC');
 
@@ -282,7 +282,7 @@ final class HasPermissionsTest extends TestCase
      */
     public function testTheBulkChecksDecideThroughTheManager(): void
     {
-        $user = StubIdentity::create(['id' => 'bulk-delegate']);
+        $user = StubGrantee::create(['id' => 'bulk-delegate']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
 
@@ -310,7 +310,7 @@ final class HasPermissionsTest extends TestCase
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         $tenant = StubTenant::query()->create(['id' => 'listing-tenant', 'name' => 'listing-tenant']);
-        $user   = StubIdentity::create(['id' => 'listing-delegate']);
+        $user   = StubGrantee::create(['id' => 'listing-delegate']);
 
         $user->givePermission(Permission::create(['name' => 'posts:create']));
         $user->givePermission(Permission::create(['name' => 'posts:delete']), null, $tenant);
@@ -342,7 +342,7 @@ final class HasPermissionsTest extends TestCase
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         $tenant = StubTenant::query()->create(['id' => 'held-tenant', 'name' => 'held-tenant']);
-        $user   = StubIdentity::create(['id' => 'held-delegate']);
+        $user   = StubGrantee::create(['id' => 'held-delegate']);
 
         $user->givePermission(Permission::create(['name' => 'posts:create']));
         $user->givePermission(Permission::create(['name' => 'posts:delete']), null, $tenant);
@@ -376,8 +376,8 @@ final class HasPermissionsTest extends TestCase
      */
     public function testTheWriteHelpersPassTheActorThrough(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-actor']);
-        $actor = ActingContext::for(StubIdentity::create(['id' => 'nobody']));
+        $user  = StubGrantee::create(['id' => 'user-actor']);
+        $actor = ActingContext::for(StubGrantee::create(['id' => 'nobody']));
 
         Permission::create(['name' => 'posts:edit']);
 
@@ -397,7 +397,7 @@ final class HasPermissionsTest extends TestCase
      */
     public function testThePermissionChecksRefuseWithAWarmCacheOnceThePackageRefuses(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         Permission::create(['name' => 'posts:read']);
 
@@ -450,12 +450,12 @@ final class HasPermissionsTest extends TestCase
     /**
      * Grant the identity the checked row until the given instant.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  \DateTimeInterface  $expiresAt
      * @return void
      */
     #[\Override]
-    protected function grantUntil(StubIdentity $identity, \DateTimeInterface $expiresAt): void
+    protected function grantUntil(StubGrantee $identity, \DateTimeInterface $expiresAt): void
     {
         $identity->givePermission(Permission::query()->firstOrCreate(['name' => 'posts:edit']), $expiresAt);
     }
@@ -463,11 +463,11 @@ final class HasPermissionsTest extends TestCase
     /**
      * Return the names of the rows the identity holds.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @return list<string>
      */
     #[\Override]
-    protected function heldNames(StubIdentity $identity): array
+    protected function heldNames(StubGrantee $identity): array
     {
         /** @var list<string> */
         return $identity->permissions->pluck('name')->all();
@@ -522,14 +522,14 @@ final class HasPermissionsTest extends TestCase
     /**
      * Grant the permission to the identity.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  \Illuminate\Database\Eloquent\Model  $row
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|null  $tenant
      * @return void
      */
     #[\Override]
-    protected function grantTo(StubIdentity $identity, Model $row, ?\DateTimeInterface $expiresAt = null, ?Model $tenant = null): void
+    protected function grantTo(StubGrantee $identity, Model $row, ?\DateTimeInterface $expiresAt = null, ?Model $tenant = null): void
     {
         \assert($row instanceof Permission);
 
@@ -539,12 +539,12 @@ final class HasPermissionsTest extends TestCase
     /**
      * Revoke the permission, or the permission name, from the identity.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  \Illuminate\Database\Eloquent\Model|string  $grant
      * @return void
      */
     #[\Override]
-    protected function revokeFrom(StubIdentity $identity, Model|string $grant): void
+    protected function revokeFrom(StubGrantee $identity, Model|string $grant): void
     {
         \assert(\is_string($grant) || $grant instanceof Permission);
 
@@ -554,12 +554,12 @@ final class HasPermissionsTest extends TestCase
     /**
      * Synchronise the identity's permissions to the given ones and names.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  list<\Illuminate\Database\Eloquent\Model|string>  $grants
      * @return void
      */
     #[\Override]
-    protected function syncTo(StubIdentity $identity, array $grants): void
+    protected function syncTo(StubGrantee $identity, array $grants): void
     {
         $typed = [];
 
@@ -604,12 +604,12 @@ final class HasPermissionsTest extends TestCase
     /**
      * Create an identity at 12:00.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function identity(): StubIdentity
+    private function identity(): StubGrantee
     {
         Carbon::setTestNow('2026-07-01 12:00:00');
 
-        return StubIdentity::create(['id' => (string) Str::uuid()]);
+        return StubGrantee::create(['id' => (string) Str::uuid()]);
     }
 }

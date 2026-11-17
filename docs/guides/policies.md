@@ -1,7 +1,7 @@
 # Policies
 
-How a check is decided, how a policy document is written, and how a policy is attached to an identity, a role or a
-resource.
+How a check is decided, how a policy document is written, and how a policy is attached to a principal, an identity, a
+role or a resource.
 
 ## How a check is decided
 
@@ -178,8 +178,8 @@ The [condition semantics note](../design/wildcard-and-condition-semantics.md) ha
 
 ## Role and inline policies
 
-A role takes policies as an identity does, through the same trait methods and `GrantService` calls, and they apply to
-whoever holds the role:
+A role takes policies as any other grantee does, through the same trait methods and `GrantService` calls, and they apply
+to whoever holds the role:
 
 ```php
 $editor->attachPolicy($noDeletesOffNetwork);                  // for every holder of editor
@@ -195,15 +195,15 @@ the hierarchy enabled (`hierarchy.enabled`, the default), a role's policies are 
 its permissions are: whoever holds `editor`, whose parent is `author`, gets the policies of both. A deny in a role's
 policy is an explicit deny like any other, and wins over every allow and every permission held.
 
-Attaching or detaching a role's policy, or changing its expiry, dispatches the same `Identity\PolicyAttached`,
-`Identity\PolicyDetached` and `Identity\PolicyExpiryChanged` events, with the role as the grantee, and takes effect on
-the next check for every holder: a change to any role's policy attachments refreshes every identity's cached policies,
-and moving a role in the hierarchy refreshes those of the identities that reach it. Deleting a role detaches its
+Attaching or detaching a role's policy, or changing its expiry, dispatches the same `Grantee\PolicyAttached`,
+`Grantee\PolicyDetached` and `Grantee\PolicyExpiryChanged` events, with the role as the grantee, and takes effect on
+the next check for every holder: a change to any role's policy attachments refreshes every grantee's cached policies,
+and moving a role in the hierarchy refreshes those of the grantees that reach it. Deleting a role detaches its
 policies, each reported as detached.
 
-An inline policy belongs to one grantee, an identity or a role. It is attached to that grantee alone and is deleted
-with it. Create one through the grantee or `PolicyService::createInline()`, which check its document as any policy's
-is checked, then attach it in the scope it should hold in:
+An inline policy belongs to one grantee, a principal, an identity or a role. It is attached to that grantee alone and is
+deleted with it. Create one through the grantee or `PolicyService::createInline()`, which check its document as any
+policy's is checked, then attach it in the scope it should hold in:
 
 ```php
 use SineMacula\Laravel\Authorization\Services\PolicyService;
@@ -243,11 +243,11 @@ deletes them, once it has revoked the grantee's grants. `authorization:policy:va
 policies with the rest.
 
 A check gathers its policies from four places: the bound policy store (`policy_store`, for policies shipped in code or
-kept elsewhere), the identity's own attachments, managed and inline, its roles' policies, and the policies attached to
+kept elsewhere), the subject's own attachments, managed and inline, its roles' policies, and the policies attached to
 the check's resource and to its type (see [Resource-based policies](#resource-based-policies)), plus those of a separate
 identity, own and role-attached alike (see [Where policies come
 from](../design/evaluation-order-and-deny-precedence.md#where-policies-come-from)). A policy attached both to the
-identity and to one of its roles counts once. The order they are gathered in never changes the decision: each stage
+subject and to one of its roles counts once. The order they are gathered in never changes the decision: each stage
 assesses them by name, then stored key, then the resource a resource policy is attached to, then document. The grantee's
 permission boundaries are read apart from them, so a custom resolver never drops them (see [Permission
 boundaries](caps.md#permission-boundaries)).
@@ -335,8 +335,8 @@ policy, so the rule is held at every write:
 
 - Attaching an inline policy to a resource, or a policy with an allow statement that names no principals, is refused
   with `ResourcePolicyException`.
-- Attaching a policy whose statements name principals to an identity or a role (the trait methods, `GrantService`, a
-  sync and a write through a grantee's `policies()` relation alike) is refused with `ResourcePolicyException`.
+- Attaching a policy whose statements name principals to a grantee (the trait methods, `GrantService`, a sync and a
+  write through a grantee's `policies()` relation alike) is refused with `ResourcePolicyException`.
 - Rewriting an attached policy's document so that it breaks the rule for where it is attached is refused with
   `ResourcePolicyException`. `getPolicyName()` and `getStatements()` (the positions, from zero) say what broke it.
 

@@ -22,7 +22,7 @@ Source: `src/Concerns/HasPermissions.php`, `src/Concerns/HasRoles.php`, and `src
 | `removeRole()`         | `revokeRole()`       | `HasRoles` trait                     |
 | `getRoleNames()`       | `getRoles()`         | `HasRoles` trait                     |
 
-An identity's aliases take the permission or role and an optional acting context alone, so a call that names a tenant,
+A grantee's aliases take the permission or role and an optional acting context alone, so a call that names a tenant,
 an application or an expiry uses the canonical method; the role's `givePermissionTo()` takes an expiry as
 `givePermission()` does.
 
@@ -151,21 +151,21 @@ its middleware.
 ## Event names
 
 The package scopes its events by namespace rather than adopting Spatie's unqualified names, so a listener names the
-scope it expects: an identity's grant, a role's permission or a catalogue row's lifecycle.
+scope it expects: a grantee's grant, a role's permission or a catalogue row's lifecycle.
 
 | Spatie event         | Our event                                                              | Why the name differs            |
 |----------------------|------------------------------------------------------------------------|---------------------------------|
-| `RoleAttached`       | `Events\Identity\RoleAssigned`                                         | Explicit identity scope         |
-| `RoleDetached`       | `Events\Identity\RoleRevoked`                                          | Explicit identity scope         |
-| `PermissionAttached` | `Events\Identity\PermissionGranted` or `Events\Role\PermissionGranted` | Identity or role grantee        |
-| `PermissionDetached` | `Events\Identity\PermissionRevoked` or `Events\Role\PermissionRevoked` | Identity or role grantee        |
+| `RoleAttached`       | `Events\Grantee\RoleAssigned`                                          | Explicit grantee scope          |
+| `RoleDetached`       | `Events\Grantee\RoleRevoked`                                           | Explicit grantee scope          |
+| `PermissionAttached` | `Events\Grantee\PermissionGranted` or `Events\Role\PermissionGranted`  | Model or role grantee           |
+| `PermissionDetached` | `Events\Grantee\PermissionRevoked` or `Events\Role\PermissionRevoked`  | Model or role grantee           |
 
 Spatie's names are those of its version 6; version 7 adds an `Event` suffix (`RoleAttachedEvent`), and either version
 dispatches them only when its `events_enabled` setting is on. The package always dispatches its own.
 
 The `Events\Role\*`, `Events\Permission\*`, and `Events\Policy\*` lifecycle events (`Created`, `Updated`, `Deleted`)
 cover the *catalogue* lifecycle (the role, permission and policy rows themselves) and are distinct from the
-identity-level events. The `Events\Role\PermissionGranted` / `Events\Role\PermissionRevoked` pair fires when
+grantee-level events. The `Events\Role\PermissionGranted` / `Events\Role\PermissionRevoked` pair fires when
 permissions are attached to or detached from a role, which Spatie does not emit as a distinct event.
 
 The package also ships `AuthorizationFailed` (hard-denial, fired from `authorize()`, and from the `permission` and
@@ -189,7 +189,7 @@ The package deliberately does **not** ship the following Spatie surface:
   relation (the roles held, whose permissions are the inherited ones) are both available when a consumer needs to
   separate the two sources.
 - **`hasDirectPermission()`**: consumers that need the direct-only view use the `permissions` relation on the
-  identity; the short-circuiting check is not a primitive of the canonical API.
+  grantee; the short-circuiting check is not a primitive of the canonical API.
 - **`hasExactRoles()`**: not shipped; compare the names `getRoles()` returns with the expected list.
 - **Role-model role helpers**: a role holds no roles, so there is no `$role->assignRole()` or `$role->hasRole()`.
   Roles nest through a parent instead (`RoleService::setParent()`), and with `authorization.hierarchy.enabled` (the
@@ -198,7 +198,7 @@ The package deliberately does **not** ship the following Spatie surface:
   `PermissionService::find()` look a name up under a guard, the current tenant's row before the platform's, and the
   services' `create()` makes a record; otherwise use the Eloquent model's `where()` and `find()`.
 - **Guard auto-detection from the HTTP auth stack**: the package resolves the guard via the
-  `getAuthorizationGuard()` opt-in hook on the identity model, not by sniffing the active web/api guard at
+  `getAuthorizationGuard()` opt-in hook on the grantee model, not by sniffing the active web/api guard at
   authorization time. Multi-guard deployments declare the guard on the model; there is no implicit request-scoped
   guard resolution.
 - **Teams / tenancy columns**: Spatie's optional `team_id` scoping column is not shipped. Roles, permissions and

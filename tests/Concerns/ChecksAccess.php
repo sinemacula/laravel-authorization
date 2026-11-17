@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 
 /**
@@ -68,11 +68,11 @@ trait ChecksAccess
      *
      * @param  list<string>  $roles
      * @param  list<string>  $permissions
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    protected static function identityHolding(array $roles = [], array $permissions = []): StubIdentity
+    protected static function identityHolding(array $roles = [], array $permissions = []): StubGrantee
     {
-        $identity = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $identity = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         foreach ($roles as $role) {
             $identity->assignRole(Role::query()->firstOrCreate(['name' => $role, 'guard' => 'web']));
@@ -88,13 +88,13 @@ trait ChecksAccess
     /**
      * Attach a policy with one statement to the identity.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  string  $effect
      * @param  list<string>  $actions
      * @param  list<string>  $resources
      * @return void
      */
-    protected static function attachStatement(StubIdentity $identity, string $effect, array $actions, array $resources = ['*']): void
+    protected static function attachStatement(StubGrantee $identity, string $effect, array $actions, array $resources = ['*']): void
     {
         $identity->attachPolicy(Policy::create([
             'name'     => (string) Str::uuid(),

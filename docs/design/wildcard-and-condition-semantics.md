@@ -653,7 +653,7 @@ document, then a summary, and exits 1 when any is invalid.
 - `WildcardPermissionTest::testColonWildcardSatisfiesOnlyColonNames` -- `*:*` satisfies only names containing `:`.
 - `WildcardPermissionTest::testStatementMatchesBackslashBearingResourceLiterally` -- backslashes in a resource pattern
   compare literally.
-- `WildcardPermissionTest::testIdentityInheritsRoleWildcard` -- role-inherited wildcard satisfies narrower ask.
+- `WildcardPermissionTest::testGranteeInheritsRoleWildcard` -- role-inherited wildcard satisfies narrower ask.
 - `HeldPermissionsTest` -- the action itself named before any pattern, the first covering pattern in byte order
   otherwise, and a name that covers nothing matching nothing.
 - `PolicyEvaluatorTest::testDenyWithFailedConditionsDecidesNothing` and `testDenyWithMissingConditionKeyApplies` -- a

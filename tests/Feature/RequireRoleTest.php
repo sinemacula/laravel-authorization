@@ -18,10 +18,10 @@ use SineMacula\Laravel\Authorization\Subject;
 use Tests\Concerns\ChecksAccess;
 use Tests\Concerns\LagsTheReadConnection;
 use Tests\Feature\Stubs\FixedSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubTenant;
-use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Feature\Stubs\SuspendableGrantee;
 use Tests\TestCase;
 
 /**
@@ -53,8 +53,8 @@ final class RequireRoleTest extends TestCase
      */
     public function testTheIdentitysRolesCountUnlessInactive(): void
     {
-        $principal = SuspendableIdentity::create(['id' => 'account-1']);
-        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $principal = SuspendableGrantee::create(['id' => 'account-1']);
+        $identity  = StubSecondGrantee::create(['id' => 'person-1']);
 
         $identity->assignRole(Role::create(['name' => 'staff']));
         $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($principal, $identity)));
@@ -155,7 +155,7 @@ final class RequireRoleTest extends TestCase
     public function testPoliciesDoNotDecideARole(): void
     {
         $holder = self::identityHolding(roles: ['admin']);
-        $other  = StubIdentity::create(['id' => 'other']);
+        $other  = StubGrantee::create(['id' => 'other']);
 
         self::attachStatement($holder, 'deny', ['*']);
         self::attachStatement($other, 'allow', ['*']);
@@ -193,7 +193,7 @@ final class RequireRoleTest extends TestCase
     {
         config(['auth.guards.api' => ['driver' => 'session', 'provider' => 'users']]);
 
-        $identity = StubIdentity::create(['id' => 'guarded']);
+        $identity = StubGrantee::create(['id' => 'guarded']);
         $identity->assignRole(Role::create(['name' => 'admin', 'guard' => 'api']));
         $identity->assignRole(Role::create(['name' => 'auditor', 'guard' => null]));
 
@@ -241,7 +241,7 @@ final class RequireRoleTest extends TestCase
         config(['auth.guards.admin' => ['driver' => 'session', 'provider' => 'users']]);
 
         $tenant   = StubTenant::create(['id' => 'tenant-a', 'name' => 'A']);
-        $identity = StubIdentity::create(['id' => 'editor']);
+        $identity = StubGrantee::create(['id' => 'editor']);
         $identity->assignRole(Role::create(['name' => 'editor', 'guard' => 'admin']));
 
         Role::create(['name' => 'admin', 'guard' => 'web', 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => 'tenant-a']);
@@ -271,14 +271,14 @@ final class RequireRoleTest extends TestCase
     {
         $tenantA  = StubTenant::create(['id' => 'tenant-a', 'name' => 'A']);
         $tenantB  = StubTenant::create(['id' => 'tenant-b', 'name' => 'B']);
-        $identity = StubIdentity::create(['id' => 'manager-1']);
+        $identity = StubGrantee::create(['id' => 'manager-1']);
 
         $this->actingAsIdentity($identity, $tenantA);
         $identity->assignRole(Role::create(['name' => 'manager', 'guard' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => 'tenant-a']));
 
         self::assertSame(200, $this->handle('manager')->getStatusCode());
 
-        $this->actingAsIdentity(StubIdentity::query()->findOrFail('manager-1'), $tenantB);
+        $this->actingAsIdentity(StubGrantee::query()->findOrFail('manager-1'), $tenantB);
         self::assertFalse($this->admits(RequireRole::class, self::request(), 'manager'));
     }
 
@@ -297,7 +297,7 @@ final class RequireRoleTest extends TestCase
         self::lagTheReadConnection();
 
         $identity->revokeRole('admin');
-        $this->actAs(StubIdentity::query()->findOrFail($identity->getKey()));
+        $this->actAs(StubGrantee::query()->findOrFail($identity->getKey()));
 
         self::assertSame(DecisionReason::NO_MATCH, self::denialOf(fn (): Response => $this->handle('admin'))->getReason());
     }

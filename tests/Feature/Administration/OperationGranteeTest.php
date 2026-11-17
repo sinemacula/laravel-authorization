@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\CustomRole;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -39,7 +39,7 @@ final class OperationGranteeTest extends TestCase
      */
     public function testOnlyAGrantOrRemovalForAnIdentityIsForASubject(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $role   = Role::create(['name' => 'editor']);
         $edit   = Permission::create(['name' => 'posts:edit']);
         $policy = Policy::create(['name' => 'share', 'document' => ['statements' => []]]);
@@ -79,8 +79,8 @@ final class OperationGranteeTest extends TestCase
      */
     public function testTheGranteeIsTheActorWhenItIsItsPrincipalOrIdentity(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
-        $other = StubIdentity::create(['id' => 'user-2']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
+        $other = StubGrantee::create(['id' => 'user-2']);
         $edit  = Permission::create(['name' => 'posts:edit']);
         $grant = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $user, $edit, GrantScope::platform());
 
@@ -109,14 +109,14 @@ final class OperationGranteeTest extends TestCase
      */
     public function testTheGranteesModelIsReadByItsMorphType(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         self::assertTrue($user->is(OperationGrantee::model(Reference::of($user))));
         self::assertNull(OperationGrantee::model(new Reference($user->getMorphClass(), 'missing')));
         self::assertNull(OperationGrantee::model(new Reference('external', '1')));
         self::assertNull(OperationGrantee::model(new Reference(\stdClass::class, '1')));
 
-        Relation::morphMap(['identity' => StubIdentity::class]);
+        Relation::morphMap(['identity' => StubGrantee::class]);
 
         try {
             self::assertTrue($user->is(OperationGrantee::model(new Reference('identity', 'user-1'))));

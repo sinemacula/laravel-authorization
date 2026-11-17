@@ -42,7 +42,7 @@ use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\RecordingLogger;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
@@ -300,7 +300,7 @@ final class GuardrailServiceTest extends TestCase
     public function testRefusesAnActorThatMayNotChangeTheScope(): void
     {
         $tenant = self::createTenant('tenant-a');
-        $actor  = StubIdentity::create(['id' => 'user-1']);
+        $actor  = StubGrantee::create(['id' => 'user-1']);
         $policy = self::rail('cap');
 
         self::service()->set($policy, $tenant, ActingContext::for(self::manager()));
@@ -345,8 +345,8 @@ final class GuardrailServiceTest extends TestCase
         $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org)));
 
         $permission = Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]);
-        $above      = StubIdentity::create(['id' => 'org-admin']);
-        $within     = StubIdentity::create(['id' => 'account-admin']);
+        $above      = StubGrantee::create(['id' => 'org-admin']);
+        $within     = StubGrantee::create(['id' => 'account-admin']);
         $policy     = self::rail('cap');
 
         $above->givePermission($permission, tenant: $org);
@@ -376,7 +376,7 @@ final class GuardrailServiceTest extends TestCase
 
         $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org))->put(Reference::of($team), Reference::of($account)));
 
-        $actor  = StubIdentity::create(['id' => 'org-admin']);
+        $actor  = StubGrantee::create(['id' => 'org-admin']);
         $role   = Role::create(['name' => 'restricted', 'rank' => 8]);
         $policy = self::rail('cap');
 
@@ -506,7 +506,7 @@ final class GuardrailServiceTest extends TestCase
     {
         $actor     = self::manager();
         $policy    = self::rail('cap');
-        $admin     = StubIdentity::query()->whereKey('admin-1')->firstOrFail();
+        $admin     = StubGrantee::query()->whereKey('admin-1')->firstOrFail();
         $revoke    = static fn (): int => GrantService::instance()?->revokePermission($admin, PackagePermissions::GUARDRAIL_MANAGE) ?? 0;
         $decisions = self::raceWith(PackagePermissions::GUARDRAIL_MANAGE, $revoke);
 
@@ -574,14 +574,14 @@ final class GuardrailServiceTest extends TestCase
         self::assertRefusedAs('administration.impersonating', static fn (): GrantOutcome => self::service()->set($other, null, $impersonated));
         self::assertRefusedAs(GuardrailException::class, static fn (): GrantOutcome => self::service()->set($other, null, ActingContext::for($actor)->capped(['posts:*'])));
 
-        $bounded = StubIdentity::query()->create(['id' => 'bounded']);
+        $bounded = StubGrantee::query()->create(['id' => 'bounded']);
 
         $bounded->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
         BoundaryService::instance()?->set($bounded, self::policy('bound', [['effect' => 'allow', 'actions' => ['posts:*']]]));
 
         self::assertRefusedAs(GuardrailException::class, static fn (): GrantOutcome => self::service()->set($other, null, ActingContext::for($bounded)));
 
-        $denied = StubIdentity::query()->create(['id' => 'denied']);
+        $denied = StubGrantee::query()->create(['id' => 'denied']);
 
         $denied->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
         $denied->attachPolicy(self::policy('deny', [['effect' => 'deny', 'actions' => [PackagePermissions::GUARDRAIL_MANAGE]]]));
@@ -604,7 +604,7 @@ final class GuardrailServiceTest extends TestCase
     {
         $actor   = self::manager();
         $policy  = self::policy('cap', [['effect' => 'allow', 'actions' => ['*']]]);
-        $admin   = StubIdentity::query()->create(['id' => 'editor', 'name' => 'editor']);
+        $admin   = StubGrantee::query()->create(['id' => 'editor', 'name' => 'editor']);
         $context = ActingContext::for($admin);
 
         foreach ([PackagePermissions::POLICY_UPDATE, PackagePermissions::POLICY_DELETE, 'posts:*'] as $action) {
@@ -819,7 +819,7 @@ final class GuardrailServiceTest extends TestCase
      */
     public function testEveryOperationRefusesOnceThePackageRefuses(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $policy  = new Policy(['name' => 'unsaved']);
         $service = $this->container()->make(GuardrailService::class);
         $actor   = ActingContext::for($user);
@@ -952,11 +952,11 @@ final class GuardrailServiceTest extends TestCase
      * Return an identity that holds the right to manage guardrails
      * platform-wide.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function manager(): StubIdentity
+    private static function manager(): StubGrantee
     {
-        $actor = StubIdentity::create(['id' => 'admin-1']);
+        $actor = StubGrantee::create(['id' => 'admin-1']);
 
         $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
 

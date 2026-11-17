@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Usage;
 
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Subject;
@@ -135,7 +135,7 @@ final class DecisionRoutes
         $isWeighed  = $identity !== null && $weighed->areIdentityPoliciesWeighed;
         $isIdentity = $isWeighed         && (SubjectGrants::grantingIdentity($subject) !== null || $decision->stage === DecisionStage::DENY);
 
-        $isSubject = $weighed->areSubjectPoliciesWeighed && $subject->subject instanceof AuthorizableIdentity;
+        $isSubject = $weighed->areSubjectPoliciesWeighed && $subject->subject instanceof AuthorizableGrantee;
 
         return \array_values(\array_filter([$isSubject ? $subject->subject : null, $isIdentity ? $identity : null], \is_object(...)));
     }

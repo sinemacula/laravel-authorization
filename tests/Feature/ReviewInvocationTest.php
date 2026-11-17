@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Reviews\Enums\ScopeSelection;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\FixedConsoleSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -191,7 +191,7 @@ final class ReviewInvocationTest extends TestCase
      */
     public function testAHoldingsReferenceIsResolvedByTheConsoleResolver(): void
     {
-        $ann      = StubIdentity::query()->create(['id' => 'ann']);
+        $ann      = StubGrantee::query()->create(['id' => 'ann']);
         $resolver = new FixedConsoleSubjectResolver(new Subject($ann, $ann));
         $query    = ReviewInvocation::of(['query' => 'holdings', 'reference' => 'user:ann'], [])->query($resolver);
 
@@ -229,7 +229,7 @@ final class ReviewInvocationTest extends TestCase
      */
     public function testAnActionNarrowsTheHoldings(): void
     {
-        $ann      = StubIdentity::query()->create(['id' => 'ann']);
+        $ann      = StubGrantee::query()->create(['id' => 'ann']);
         $resolver = new FixedConsoleSubjectResolver(new Subject($ann, $ann));
         $holdings = ['query' => 'holdings', 'reference' => 'user:ann'];
 

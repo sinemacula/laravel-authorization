@@ -27,7 +27,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Fixtures\BulkChecks\FixedBulkAttributes;
 use Tests\Fixtures\QueryScoping\InvariantRequirementChecker;
@@ -435,7 +435,7 @@ final class CheckContextFactoryTest extends TestCase
         }
 
         self::assertFalse($marked->isScopeInvariant('subject', $subject));
-        self::assertTrue($marked->isScopeInvariant('subject', new Subject(new StubIdentity)));
+        self::assertTrue($marked->isScopeInvariant('subject', new Subject(new StubGrantee)));
         self::assertFalse($marked->isRequirementCheckScopeInvariant());
         $checker   = new InvariantRequirementChecker(true);
         $invariant = new CheckContextFactory($this->authentication([], ['authentication']), $this->request([]), $this->environment([]), [], null, $checker);

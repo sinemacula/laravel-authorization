@@ -33,7 +33,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\FixedSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\BulkChecks\BulkStatusAttributes;
 use Tests\Fixtures\BulkChecks\GuardedPost;
@@ -94,8 +94,8 @@ final class ParityScenario
     /** @var list<\Illuminate\Database\Eloquent\Model> The posts created. */
     private array $posts = [];
 
-    /** @var \Tests\Feature\Stubs\StubIdentity The subject. */
-    private StubIdentity $user;
+    /** @var \Tests\Feature\Stubs\StubGrantee The subject. */
+    private StubGrantee $user;
 
     /** @var \Tests\Feature\Stubs\StubTenant|null The request's tenant. */
     private ?StubTenant $active = null;
@@ -115,7 +115,7 @@ final class ParityScenario
         private readonly Application $app,
     ) {
         $this->random  = new Randomizer(new Mt19937($seed));
-        $this->user    = StubIdentity::create(['id' => 'u1']);
+        $this->user    = StubGrantee::create(['id' => 'u1']);
         $this->manager = $app->make(AuthorizationManager::class);
     }
 
@@ -323,7 +323,7 @@ final class ParityScenario
             return;
         }
 
-        $admin  = StubIdentity::create(['id' => 'guardrail-admin']);
+        $admin  = StubGrantee::create(['id' => 'guardrail-admin']);
         $tenant = $this->pick($this->tenants);
 
         $admin->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAIL_MANAGE]));

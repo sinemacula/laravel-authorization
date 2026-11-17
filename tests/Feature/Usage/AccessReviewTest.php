@@ -26,8 +26,8 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageKey;
 use SineMacula\Laravel\Authorization\Usage\UsageBatch;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Concerns\TracksGrantUsage;
-use Tests\Feature\Stubs\CustomGrantsIdentity;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\CustomGrantsGrantee;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\Usage\CountingUsageStore;
 use Tests\TestCase;
 
@@ -193,7 +193,7 @@ final class AccessReviewTest extends TestCase
         Carbon::setTestNow('2026-11-09 08:10:00');
 
         $ann    = self::identity('ann');
-        $custom = CustomGrantsIdentity::query()->create(['id' => 'custom']);
+        $custom = CustomGrantsGrantee::query()->create(['id' => 'custom']);
         $role   = self::role('editor');
 
         $role->givePermissionTo(self::permission('posts:edit'));
@@ -276,7 +276,7 @@ final class AccessReviewTest extends TestCase
         $used    = [];
 
         for ($index = 0; $index < GrantRows::CHUNK + 4; $index++) {
-            $grantee = new Reference((new StubIdentity)->getMorphClass(), \sprintf('p%04d', $index));
+            $grantee = new Reference((new StubGrantee)->getMorphClass(), \sprintf('p%04d', $index));
             $rows[]  = [
                 'permission_id'     => $target->id,
                 'authorizable_type' => $grantee->type,

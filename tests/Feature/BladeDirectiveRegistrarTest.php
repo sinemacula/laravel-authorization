@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use Tests\Concerns\ChecksAccess;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -54,7 +54,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('admin');
 
         $this->actAs($user);
@@ -82,7 +82,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $this->actAs($user);
 
@@ -125,7 +125,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('editor');
 
         $this->actAs($user);
@@ -145,7 +145,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
         Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard' => 'web']);
         Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('editor');
 
         $this->actAs($user);
@@ -165,7 +165,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
         Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard' => 'web']);
         Role::create(['id' => (string) Str::uuid(), 'name' => 'oncall', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('admin');
 
         $this->actAs($user);
@@ -188,7 +188,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
      */
     public function testAllRolesDirectiveRejectsEmptyList(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $this->actAs($user);
 
@@ -211,7 +211,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission(self::PERMISSION);
 
         $this->actAs($user);
@@ -241,7 +241,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
         ]);
         $role->permissions()->attach($permission->getKey());
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('publisher');
 
         $this->actAs($user);
@@ -269,7 +269,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission(self::PERMISSION);
 
         $this->actAs($user);
@@ -297,7 +297,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $this->actAs($user);
 
@@ -319,7 +319,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('banned');
 
         $this->actAs($user);
@@ -343,7 +343,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $this->actAs($user);
 
@@ -368,7 +368,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
         Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard' => 'web']);
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:draft', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $closings = [
@@ -403,7 +403,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
         Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard' => 'web']);
         Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('admin');
 
         $this->actAs($user);
@@ -428,7 +428,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
         Permission::create(['id' => (string) Str::uuid(), 'name' => self::PERMISSION, 'guard' => 'web']);
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:delete', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission(self::PERMISSION);
 
         $this->actAs($user);
@@ -453,7 +453,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
     {
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:draft', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         self::assertSame('yes', $this->render('@unlesshaspermission(\'posts:draft\') yes @endunlesshaspermission'));
@@ -470,7 +470,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
      */
     public function testEmptyStringArgumentDoesNotAdmit(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $this->actAs($user);
 
@@ -535,7 +535,7 @@ final class BladeDirectiveRegistrarTest extends TestCase
     {
         config(['auth.guards.api' => ['driver' => 'session', 'provider' => 'users']]);
 
-        $identity = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $identity = StubGrantee::create(['id' => (string) Str::uuid()]);
         $identity->assignRole(Role::create(['name' => 'admin', 'guard' => 'api']));
 
         $this->actAs($identity);

@@ -27,7 +27,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ChecksAccess;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -95,7 +95,7 @@ final class RequirePermissionTest extends TestCase
         $role = Role::create(['name' => 'editor', 'guard' => 'web']);
         $role->givePermission(Permission::create(['name' => self::ACTION, 'guard' => 'web']));
 
-        $identity = StubIdentity::create(['id' => 'editor-1']);
+        $identity = StubGrantee::create(['id' => 'editor-1']);
         $identity->assignRole($role);
 
         $this->actAs($identity);
@@ -298,7 +298,7 @@ final class RequirePermissionTest extends TestCase
 
         $held   = self::identityHolding(permissions: ['posts:create']);
         $denied = self::identityHolding(permissions: ['posts:delete']);
-        $policy = StubIdentity::create(['id' => 'policy-only']);
+        $policy = StubGrantee::create(['id' => 'policy-only']);
 
         self::attachStatement($denied, 'deny', ['posts:delete']);
         self::attachStatement($policy, 'allow', ['posts:delete']);
@@ -327,8 +327,8 @@ final class RequirePermissionTest extends TestCase
     {
         [$account, $sibling] = \array_map(static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]), ['account', 'sibling']);
 
-        $identity = StubIdentity::create(['id' => 'editor-1']);
-        $actor    = StubIdentity::create(['id' => 'guardrail-admin']);
+        $identity = StubGrantee::create(['id' => 'editor-1']);
+        $actor    = StubGrantee::create(['id' => 'guardrail-admin']);
 
         foreach (['posts:create', 'posts:delete', 'posts:publish', 'posts:archive', PackagePermissions::GUARDRAIL_MANAGE] as $name) {
             Permission::create(['name' => $name]);

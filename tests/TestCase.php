@@ -183,7 +183,7 @@ abstract class TestCase extends OrchestraTestCase
     #[\Override]
     protected function defineDatabaseMigrationsAfterDatabaseRefreshed(): void
     {
-        $this->createStubIdentityTables();
+        $this->createStubGranteeTables();
         $this->createQueryScopingTables();
     }
 
@@ -193,9 +193,9 @@ abstract class TestCase extends OrchestraTestCase
      *
      * @return void
      */
-    private function createStubIdentityTables(): void
+    private function createStubGranteeTables(): void
     {
-        foreach (['stub_identities', 'stub_second_identities', 'stub_tenants', 'api_guarded_users'] as $table) {
+        foreach (['stub_grantees', 'stub_second_grantees', 'stub_tenants', 'api_guarded_users'] as $table) {
             Schema::create($table, static function (Blueprint $schema): void {
                 $schema->string('id')->primary();
                 $schema->string('name')->nullable();
@@ -204,7 +204,7 @@ abstract class TestCase extends OrchestraTestCase
         }
 
         // An integer-keyed grantee that soft-deletes.
-        Schema::create('stub_numbered_identities', static function (Blueprint $schema): void {
+        Schema::create('stub_numbered_grantees', static function (Blueprint $schema): void {
             $schema->increments('id');
             $schema->string('name')->nullable();
             $schema->timestamps();

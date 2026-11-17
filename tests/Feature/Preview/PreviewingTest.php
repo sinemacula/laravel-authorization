@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\PreviewsSubjects;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -56,7 +56,7 @@ final class PreviewingTest extends TestCase
     {
         $caller  = self::previewer();
         $target  = self::target();
-        $grantee = StubIdentity::query()->create(['id' => 'grantee']);
+        $grantee = StubGrantee::query()->create(['id' => 'grantee']);
         $preview = $this->signIn($caller)->previewFor($target);
         $grant   = static fn (): GrantOutcome => self::grants()->grantPermission($grantee, self::permission('posts:edit'));
         /** @var \ArrayObject<int, mixed> $calls */

@@ -32,7 +32,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\PlanContextSource;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\GuardedPost;
@@ -119,8 +119,8 @@ final class ParityScenario
     /** @var bool Whether the tenant tree is the closure table, rather than the flat tree. */
     private bool $isClosure = false;
 
-    /** @var \Tests\Feature\Stubs\StubIdentity The subject. */
-    private StubIdentity $user;
+    /** @var \Tests\Feature\Stubs\StubGrantee The subject. */
+    private StubGrantee $user;
 
     /** @var string The model's morph type. */
     private string $type = '';
@@ -142,7 +142,7 @@ final class ParityScenario
         $this->random  = new Randomizer(new Mt19937($seed));
         $this->model   = $this->pick(DB::connection()->getDriverName() === 'pgsql' ? [...self::MODELS, UuidScopedDocument::class] : self::MODELS);
         $this->action  = $this->model === GuardedPost::class ? GuardedPost::ACTION : $this->pick(self::ACTIONS);
-        $this->user    = StubIdentity::create(['id' => 'u1']);
+        $this->user    = StubGrantee::create(['id' => 'u1']);
         $this->manager = self::service(AuthorizationManager::class);
     }
 
@@ -162,7 +162,7 @@ final class ParityScenario
 
         $this->type = (new $this->model)->getMorphClass();
 
-        StubIdentity::create(['id' => 'u2']);
+        StubGrantee::create(['id' => 'u2']);
 
         // Enough classes for the deepest tree and every anchor admitted.
         self::service(ConfigRepository::class)->set('authorization.query_scoping.max_scopes', 64);
@@ -452,7 +452,7 @@ final class ParityScenario
      */
     private function guardrail(): void
     {
-        $admin = StubIdentity::create(['id' => 'guardrail-admin']);
+        $admin = StubGrantee::create(['id' => 'guardrail-admin']);
 
         $admin->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
 

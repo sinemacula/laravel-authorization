@@ -259,7 +259,7 @@ return [
     | Optional class implementing `PolicyStore`. When set, the manager loads
     | additional policies for the current subject from this source on every
     | check, such as policies shipped in code. Leave as null to rely solely on
-    | the policies stored in the database: those attached to the identity,
+    | the policies stored in the database: those attached to the subject,
     | inline ones included, those attached to the roles it holds, and those
     | attached to the check's resource and its type.
     |
@@ -606,13 +606,13 @@ return [
     | Resolution cache
     |---------------------------------------------------------------------------
     |
-    | Two-tier cache for what an identity's roles, permissions, policies and
+    | Two-tier cache for what a grantee's roles, permissions, policies and
     | permission boundaries come to, for the policies attached to a resource
     | and its type, and for the guardrails of a tenant. The in-memory tier is
     | always on and memoises results per request or job. The optional
     | persistent tier is used when `store` names one of the configured cache
     | stores; any store works, with or without tags. Entries are keyed by
-    | identity (or resource) and tenant, and record a version of the identity
+    | grantee (or resource) and tenant, and record a version of the grantee
     | and of every role and policy they were built from (a boundary entry
     | records one version every boundary entry shares, and a guardrail entry
     | one every guardrail entry shares, which updating or deleting any policy
@@ -664,7 +664,7 @@ return [
     |---------------------------------------------------------------------------
     |
     | Controls whether rank-based seniority checks are active. When enabled
-    | (the default), `canActOn()` on an authorizable identity compares the
+    | (the default), `canActOn()` on an authorizable grantee compares the
     | actor's most senior role (lowest numeric `rank` value) against the
     | target's, each among the roles held in the current tenant and
     | application: the actor must be strictly senior, a target holding no

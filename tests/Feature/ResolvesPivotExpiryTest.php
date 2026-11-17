@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\LagsTheReadConnection;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -63,7 +63,7 @@ final class ResolvesPivotExpiryTest extends TestCase
     {
         $tenantA = self::createTenant('tenant-a');
         $tenantB = self::createTenant('tenant-b');
-        $user    = StubIdentity::query()->create(['id' => 'user-1']);
+        $user    = StubGrantee::query()->create(['id' => 'user-1']);
 
         Role::query()->create(['name' => 'admin']);
         Role::query()->create(['name' => 'viewer']);
@@ -96,7 +96,7 @@ final class ResolvesPivotExpiryTest extends TestCase
     public function testGrantsInAnAncestorReachTheTenantsBelowIt(): void
     {
         [$account, $org, $sibling] = \array_map(self::createTenant(...), ['account', 'org', 'sibling']);
-        $user                      = StubIdentity::query()->create(['id' => 'user-1']);
+        $user                      = StubGrantee::query()->create(['id' => 'user-1']);
 
         $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org))->put(Reference::of($sibling), Reference::of($org)));
 
@@ -122,7 +122,7 @@ final class ResolvesPivotExpiryTest extends TestCase
      */
     public function testGrantsForAnApplicationCountOnlyOnIt(): void
     {
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
 
         Role::query()->create(['name' => 'staff']);
         Role::query()->create(['name' => 'member']);
@@ -158,17 +158,17 @@ final class ResolvesPivotExpiryTest extends TestCase
         $parent->permissions()->attach(Permission::query()->create(['name' => 'posts:read'])->id);
         $writer->permissions()->attach(Permission::query()->create(['name' => 'posts:write'])->id);
 
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
         $user->assignRole($writer);
         $user->assignRole($editor);
         $user->givePermission(Permission::query()->create(['name' => 'posts:publish']));
         $user->attachPolicy(Policy::query()->create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]));
 
-        StubIdentity::query()->create(['id' => 'user-2']);
+        StubGrantee::query()->create(['id' => 'user-2']);
 
         Model::preventLazyLoading();
 
-        $hydrated = StubIdentity::query()->orderBy('id')->get()->firstOrFail();
+        $hydrated = StubGrantee::query()->orderBy('id')->get()->firstOrFail();
 
         self::assertTrue($hydrated->hasPermission('posts:read'));
         self::assertEqualsCanonicalizing(['posts:publish', 'posts:read', 'posts:write'], $hydrated->getPermissions());
@@ -186,7 +186,7 @@ final class ResolvesPivotExpiryTest extends TestCase
     {
         $role = Role::query()->create(['name' => 'editor']);
 
-        StubIdentity::query()->create(['id' => 'user-1'])->assignRole($role);
+        StubGrantee::query()->create(['id' => 'user-1'])->assignRole($role);
 
         self::assertSame([$role->id], DB::table('authorizable_roles')->pluck('role_id')->all());
     }
@@ -198,7 +198,7 @@ final class ResolvesPivotExpiryTest extends TestCase
      */
     public function testRefusesAWriteWithoutTheGrantService(): void
     {
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
 
         unset($this->app[GrantService::class]);
 
@@ -216,7 +216,7 @@ final class ResolvesPivotExpiryTest extends TestCase
      */
     public function testTheRolesRelationReadsTheRowsItIsGiven(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $tenant = self::createTenant('t-1');
 
         self::activate($user, self::emergencyRole());
@@ -242,7 +242,7 @@ final class ResolvesPivotExpiryTest extends TestCase
     {
         $this->useAnAuthorizationConnection();
 
-        $user       = StubIdentity::query()->create(['id' => 'user-1']);
+        $user       = StubGrantee::query()->create(['id' => 'user-1']);
         $activation = self::activate($user, self::emergencyRole());
 
         $user->assignRole(Role::query()->create(['name' => 'editor']));
@@ -268,7 +268,7 @@ final class ResolvesPivotExpiryTest extends TestCase
     {
         $this->useAnAuthorizationConnection();
 
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
 
         $user->assignRole(Role::query()->create(['name' => 'editor']));
 
@@ -290,11 +290,11 @@ final class ResolvesPivotExpiryTest extends TestCase
     /**
      * Read the identity afresh, as a later request would.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function reread(StubIdentity $user): StubIdentity
+    private static function reread(StubGrantee $user): StubGrantee
     {
-        return StubIdentity::query()->whereKey($user->getKey())->firstOrFail();
+        return StubGrantee::query()->whereKey($user->getKey())->firstOrFail();
     }
 }

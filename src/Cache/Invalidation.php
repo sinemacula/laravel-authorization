@@ -7,7 +7,7 @@ namespace SineMacula\Laravel\Authorization\Cache;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
-use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
+use SineMacula\Laravel\Authorization\Contracts\GranteeEvent;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Events\Guardrail\GuardrailEvent;
 use SineMacula\Laravel\Authorization\Events\Permission\Deleted as PermissionDeleted;
@@ -31,12 +31,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   does a change to a break-glass activation naming it, which a write names by
  *   its grantees rather than by an event. A policy attached to, detached from
  *   or expiring on a role also bumps the version every role's policy
- *   attachments share, which every entry of an identity's policies records, so
+ *   attachments share, which every entry of a grantee's policies records, so
  *   the change reaches every holder of the role and of the roles below it.
  * - A change to a role (its permissions or their expiry, its parent, its name,
  *   its owner) or its deletion bumps the role. Entries record every role they
- *   were built from, ancestors included, so the bump reaches every identity
- *   that holds the role or a role below it.
+ *   were built from, ancestors included, so the bump reaches every grantee that
+ *   holds the role or a role below it.
  * - A change to a policy or its deletion bumps the policy, and the versions
  *   every entry of a resource's policies, every entry of a grantee's boundaries
  *   and every entry of the guardrails share, since those entries read the
@@ -93,7 +93,7 @@ final class Invalidation
     private static function keysFor(VersionedStore $store, AuthorizationEvent $event): array
     {
         return match (true) {
-            $event instanceof IdentityEvent => self::granteeKeys($store, $event->grantee), // @phpstan-ignore property.notFound, argument.type
+            $event instanceof GranteeEvent => self::granteeKeys($store, $event->grantee), // @phpstan-ignore property.notFound, argument.type
             $event instanceof RolePermissionGranted,
             $event instanceof RolePermissionRevoked,
             $event instanceof RolePermissionExpiryChanged,
@@ -114,7 +114,7 @@ final class Invalidation
     /**
      * Return the version keys a grant to the grantee bumps: the grantee's, and,
      * for a role, the version the policies attached to roles share, so the
-     * change reaches every identity holding the role or a role below it.
+     * change reaches every grantee holding the role or a role below it.
      *
      * @param  \SineMacula\Laravel\Authorization\Cache\VersionedStore  $store
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee

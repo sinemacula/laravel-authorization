@@ -27,7 +27,7 @@ use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\RequestSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
@@ -57,8 +57,8 @@ final class BuildsScopedManagersTest extends TestCase
      */
     public function testForAndForUserNameTheSubject(): void
     {
-        $user  = StubIdentity::create(['id' => 'scoped-1']);
-        $other = StubIdentity::create(['id' => 'scoped-2']);
+        $user  = StubGrantee::create(['id' => 'scoped-1']);
+        $other = StubGrantee::create(['id' => 'scoped-2']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($other, null, 'admin'));
@@ -94,7 +94,7 @@ final class BuildsScopedManagersTest extends TestCase
      */
     public function testWithPoliciesAndCappedChangeOnlyTheClone(): void
     {
-        $user = StubIdentity::create(['id' => 'scoped-3']);
+        $user = StubGrantee::create(['id' => 'scoped-3']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
 
@@ -145,7 +145,7 @@ final class BuildsScopedManagersTest extends TestCase
     {
         [$user, $first, $second] = self::heldInFirstTenant('scoped-5');
 
-        $this->resolveRequest(StubIdentity::create(['id' => 'scoped-6']), $second);
+        $this->resolveRequest(StubGrantee::create(['id' => 'scoped-6']), $second);
 
         $inFirst = new Subject($user, $user, $first);
         $named   = Authorization::for($inFirst);
@@ -175,7 +175,7 @@ final class BuildsScopedManagersTest extends TestCase
     {
         [$user, $first] = self::heldInFirstTenant('scoped-12');
 
-        $this->resolveRequest(StubIdentity::create(['id' => 'scoped-13']), $first);
+        $this->resolveRequest(StubGrantee::create(['id' => 'scoped-13']), $first);
         $user->givePermission(Permission::create(['name' => 'posts:update']));
 
         $onPlatform = Authorization::for(new Subject($user, $user, platform: true));
@@ -254,7 +254,7 @@ final class BuildsScopedManagersTest extends TestCase
     {
         [$user, $first] = self::heldInFirstTenant('scoped-16');
 
-        $previewer = StubIdentity::create(['id' => 'scoped-17']);
+        $previewer = StubGrantee::create(['id' => 'scoped-17']);
 
         $previewer->givePermission(Permission::create(['name' => PackagePermissions::SUBJECT_PREVIEW]));
 
@@ -284,7 +284,7 @@ final class BuildsScopedManagersTest extends TestCase
      */
     public function testAnUnreadableTenantAndAForActorOnAPreviewAreRefused(): void
     {
-        $user    = StubIdentity::create(['id' => 'scoped-7']);
+        $user    = StubGrantee::create(['id' => 'scoped-7']);
         $manager = self::manager()->for(new Subject($user, $user, new \stdClass));
         $calls   = [
             static fn (): mixed => $manager->check('posts:read'),
@@ -304,7 +304,7 @@ final class BuildsScopedManagersTest extends TestCase
             }
         }
 
-        $previewer = StubIdentity::create(['id' => 'scoped-8']);
+        $previewer = StubGrantee::create(['id' => 'scoped-8']);
 
         $previewer->givePermission(Permission::create(['name' => PackagePermissions::SUBJECT_PREVIEW]));
 
@@ -328,11 +328,11 @@ final class BuildsScopedManagersTest extends TestCase
     {
         [$user, $first, $second] = self::heldInFirstTenant('scoped-9');
 
-        $previewer = StubIdentity::create(['id' => 'scoped-10']);
+        $previewer = StubGrantee::create(['id' => 'scoped-10']);
 
         $previewer->givePermission(Permission::create(['name' => PackagePermissions::SUBJECT_PREVIEW]), null, $first);
 
-        $this->resolveRequest(StubIdentity::create(['id' => 'scoped-11']), $second);
+        $this->resolveRequest(StubGrantee::create(['id' => 'scoped-11']), $second);
 
         $preview = Authorization::for(new Subject($previewer, $previewer, $second))->previewFor($user, AuthorizationScope::tenant($first));
 
@@ -352,7 +352,7 @@ final class BuildsScopedManagersTest extends TestCase
      */
     public function testEveryScopedManagerRefusesOnceThePackageRefuses(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $manager  = $this->container()->make(AuthorizationManager::class);
         $subject  = new Subject($user, $user);
         $resolved = [];
@@ -422,13 +422,13 @@ final class BuildsScopedManagersTest extends TestCase
      * tenant and a second.
      *
      * @param  string  $id
-     * @return array{0: \Tests\Feature\Stubs\StubIdentity, 1: \Tests\Feature\Stubs\StubTenant, 2: \Tests\Feature\Stubs\StubTenant}
+     * @return array{0: \Tests\Feature\Stubs\StubGrantee, 1: \Tests\Feature\Stubs\StubTenant, 2: \Tests\Feature\Stubs\StubTenant}
      */
     private static function heldInFirstTenant(string $id): array
     {
         $first  = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'A']);
         $second = StubTenant::query()->create(['id' => 'tenant-b', 'name' => 'B']);
-        $user   = StubIdentity::create(['id' => $id]);
+        $user   = StubGrantee::create(['id' => $id]);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']), null, Reference::of($first));
 

@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -90,7 +90,7 @@ final class RoleParentTest extends TestCase
 
         self::assertNull(self::refusal($role, $parent->id));
 
-        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'holder']), $role);
+        self::grants()->grantRole(StubGrantee::query()->create(['id' => 'holder']), $role);
 
         self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, self::refusal($role, $parent->id));
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::refusal($role, '01a1b0c0-0000-7000-8000-00000000dead'));
@@ -123,13 +123,13 @@ final class RoleParentTest extends TestCase
     /**
      * Return the actor, holding the most senior rank, created on first use.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      *
      * @throws \Throwable
      */
-    private static function actor(): StubIdentity
+    private static function actor(): StubGrantee
     {
-        $actor = StubIdentity::query()->firstOrCreate(['id' => 'admin']);
+        $actor = StubGrantee::query()->firstOrCreate(['id' => 'admin']);
 
         if (!$actor->hasRole('chief')) {
             self::grants()->grantRole($actor, Role::query()->create(['name' => 'chief', 'rank' => 0]));

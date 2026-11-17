@@ -17,8 +17,8 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Feature\Stubs\StubMachine;
-use Tests\Feature\Stubs\StubSecondIdentity;
-use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
+use Tests\Feature\Stubs\SuspendableGrantee;
 use Tests\TestCase;
 
 /**
@@ -44,8 +44,8 @@ final class SubjectGrantsTest extends TestCase
      */
     public function testThePrincipalsAndTheIdentitysGrantsCount(): void
     {
-        $principal = SuspendableIdentity::create(['id' => 'account-1']);
-        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $principal = SuspendableGrantee::create(['id' => 'account-1']);
+        $identity  = StubSecondGrantee::create(['id' => 'person-1']);
         $subject   = new Subject($principal, $identity);
 
         $principal->assignRole(Role::create(['name' => 'editor']));
@@ -70,8 +70,8 @@ final class SubjectGrantsTest extends TestCase
      */
     public function testTheIdentitysPoliciesAreAddedOnlyWhenItIsAnotherModel(): void
     {
-        $principal = SuspendableIdentity::create(['id' => 'account-1']);
-        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $principal = SuspendableGrantee::create(['id' => 'account-1']);
+        $identity  = StubSecondGrantee::create(['id' => 'person-1']);
 
         $principal->attachPolicy(Policy::create(['name' => 'account', 'document' => ['version' => 1, 'statements' => []]]));
         $identity->attachPolicy(Policy::create(['name' => 'person', 'document' => ['version' => 1, 'statements' => []]]));
@@ -93,8 +93,8 @@ final class SubjectGrantsTest extends TestCase
      */
     public function testTheBoundariesOfThePrincipalAndItsIdentityApply(): void
     {
-        $principal = SuspendableIdentity::create(['id' => 'account-1']);
-        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $principal = SuspendableGrantee::create(['id' => 'account-1']);
+        $identity  = StubSecondGrantee::create(['id' => 'person-1']);
         $service   = BoundaryService::instance();
 
         self::assertNotNull($service);
@@ -121,8 +121,8 @@ final class SubjectGrantsTest extends TestCase
      */
     public function testThePermissionForTheActionIsNamedAsItWasGranted(): void
     {
-        $principal = SuspendableIdentity::create(['id' => 'account-1']);
-        $identity  = SuspendableIdentity::create(['id' => 'person-1']);
+        $principal = SuspendableGrantee::create(['id' => 'account-1']);
+        $identity  = SuspendableGrantee::create(['id' => 'person-1']);
         $subject   = new Subject($principal, $identity);
 
         $principal->givePermission(Permission::create(['name' => 'posts:*']));
@@ -152,8 +152,8 @@ final class SubjectGrantsTest extends TestCase
      */
     public function testAnInactivePrincipalOrIdentityHoldsNothing(): void
     {
-        $principal = SuspendableIdentity::create(['id' => 'account-1']);
-        $identity  = SuspendableIdentity::create(['id' => 'person-1']);
+        $principal = SuspendableGrantee::create(['id' => 'account-1']);
+        $identity  = SuspendableGrantee::create(['id' => 'person-1']);
         $subject   = new Subject($principal, $identity);
 
         $principal->assignRole(Role::create(['name' => 'editor']));
@@ -186,7 +186,7 @@ final class SubjectGrantsTest extends TestCase
     public function testAPersonsGrantsNeverReachAMachine(): void
     {
         $machine = StubMachine::create(['id' => 'svc-1']);
-        $person  = SuspendableIdentity::create(['id' => 'person-1']);
+        $person  = SuspendableGrantee::create(['id' => 'person-1']);
         $subject = new Subject($machine, $person);
         $service = BoundaryService::instance();
 
@@ -229,7 +229,7 @@ final class SubjectGrantsTest extends TestCase
      */
     public function testAMachinesGrantsNeverReachAPerson(): void
     {
-        $person  = SuspendableIdentity::create(['id' => 'account-1']);
+        $person  = SuspendableGrantee::create(['id' => 'account-1']);
         $machine = StubMachine::create(['id' => 'svc-1']);
         $subject = new Subject($person, $machine);
 
@@ -269,8 +269,8 @@ final class SubjectGrantsTest extends TestCase
         self::assertNull(SubjectGrants::grantingIdentity(new Subject($machine, $machine)));
         self::assertNull(SubjectGrants::grantingIdentity(new Subject($machine)));
 
-        $person   = SuspendableIdentity::create(['id' => 'account-1']);
-        $identity = StubSecondIdentity::create(['id' => 'person-1']);
+        $person   = SuspendableGrantee::create(['id' => 'account-1']);
+        $identity = StubSecondGrantee::create(['id' => 'person-1']);
 
         self::assertSame($identity, SubjectGrants::grantingIdentity(new Subject($person, $identity)));
     }
@@ -318,8 +318,8 @@ final class SubjectGrantsTest extends TestCase
      */
     public function testAnIdentitysActivationsNeverReachThePrincipal(): void
     {
-        $principal = SuspendableIdentity::create(['id' => 'account-1']);
-        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $principal = SuspendableGrantee::create(['id' => 'account-1']);
+        $identity  = StubSecondGrantee::create(['id' => 'person-1']);
         $subject   = new Subject($principal, $identity);
 
         self::activate($identity, self::emergencyRole('admin:read', 'staff'));

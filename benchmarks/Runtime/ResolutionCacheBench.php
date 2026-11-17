@@ -11,7 +11,7 @@ use Illuminate\Cache\Repository as CacheRepository;
 use PhpBench\Attributes as Bench;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -72,7 +72,7 @@ final class ResolutionCacheBench extends BenchmarkCase
     {
         $this->boot();
 
-        $this->principal = new Reference('bench_identity', 'bench-principal');
+        $this->principal = new Reference('bench_grantee', 'bench-principal');
 
         $permissions = BenchmarkFixtures::permissionNames();
         $roles       = [BenchmarkFixtures::roleName()];

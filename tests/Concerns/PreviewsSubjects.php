@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\FixedSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 
 /**
  * Sets up the two parties of a preview for tests of `previewFor()`: a caller
@@ -36,7 +36,7 @@ trait PreviewsSubjects
      * tenant and application given, with the checker bound when one is given,
      * and return the manager built afresh for the request.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $caller
+     * @param  \Tests\Feature\Stubs\StubGrantee  $caller
      * @param  string|null  $session
      * @param  object|null  $tenant
      * @param  string|null  $application
@@ -44,7 +44,7 @@ trait PreviewsSubjects
      * @return \SineMacula\Laravel\Authorization\AuthorizationManager
      */
     protected function signIn(
-        StubIdentity $caller,
+        StubGrantee $caller,
         ?string $session = 'session-1',
         ?object $tenant = null,
         ?string $application = null,
@@ -70,11 +70,11 @@ trait PreviewsSubjects
      *
      * @param  string  $id
      * @param  bool  $isAllowed
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    protected static function previewer(string $id = 'previewer', bool $isAllowed = true): StubIdentity
+    protected static function previewer(string $id = 'previewer', bool $isAllowed = true): StubGrantee
     {
-        $previewer = StubIdentity::query()->create(['id' => $id]);
+        $previewer = StubGrantee::query()->create(['id' => $id]);
 
         if ($isAllowed) {
             $previewer->givePermission(self::permission(PackagePermissions::SUBJECT_PREVIEW));
@@ -89,11 +89,11 @@ trait PreviewsSubjects
      *
      * @param  string  $id
      * @param  list<string>  $permissions
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    protected static function target(string $id = 'target', array $permissions = ['posts:read']): StubIdentity
+    protected static function target(string $id = 'target', array $permissions = ['posts:read']): StubGrantee
     {
-        $target = StubIdentity::query()->create(['id' => $id]);
+        $target = StubGrantee::query()->create(['id' => $id]);
 
         foreach ($permissions as $permission) {
             $target->givePermission(self::permission($permission));
@@ -118,14 +118,14 @@ trait PreviewsSubjects
      * Attach a stored policy of the statements given, named as given, to the
      * grantee, platform-wide.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubGrantee  $grantee
      * @param  string  $name
      * @param  list<array<string, mixed>>  $statements
      * @return void
      *
      * @throws \Throwable
      */
-    protected static function attachStatements(StubIdentity $grantee, string $name, array $statements): void
+    protected static function attachStatements(StubGrantee $grantee, string $name, array $statements): void
     {
         $policy = Policy::query()->create(['name' => $name, 'document' => ['statements' => $statements]]);
 

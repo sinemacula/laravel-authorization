@@ -33,7 +33,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\BulkChecks\StatusAttributes;
 use Tests\Fixtures\PermissionsFor\DeclaredPermissions;
@@ -97,8 +97,8 @@ final class ListingScenario
     /** @var list<string> The keys of the roles created. */
     private array $roles = [];
 
-    /** @var \Tests\Feature\Stubs\StubIdentity The subject. */
-    private readonly StubIdentity $user;
+    /** @var \Tests\Feature\Stubs\StubGrantee The subject. */
+    private readonly StubGrantee $user;
 
     /** @var string How the manager is decorated: as it is, capped or with a policy override. */
     private string $decoration = 'current';
@@ -124,7 +124,7 @@ final class ListingScenario
         private readonly Application $app,
     ) {
         $this->random = new Randomizer(new Mt19937($seed));
-        $this->user   = StubIdentity::create(['id' => 'u1']);
+        $this->user   = StubGrantee::create(['id' => 'u1']);
     }
 
     /**
@@ -196,9 +196,9 @@ final class ListingScenario
      * `forUser(null)` makes a guest's; a resolved subject with a session or
      * without one; or the request's model.
      *
-     * @return \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubIdentity|null
+     * @return \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubGrantee|null
      */
-    public function subject(): StubIdentity|Subject|null
+    public function subject(): StubGrantee|Subject|null
     {
         $subject = $this->pick(['guest', 'request', 'named', 'subject', 'subject', 'model', 'model']);
 
@@ -370,7 +370,7 @@ final class ListingScenario
             return;
         }
 
-        $admin  = StubIdentity::create(['id' => 'guardrail-admin']);
+        $admin  = StubGrantee::create(['id' => 'guardrail-admin']);
         $tenant = $this->pick($this->tenants);
 
         $admin->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAIL_MANAGE]));

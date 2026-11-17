@@ -29,10 +29,10 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\ReportsEveryDecision;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
-use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Feature\Stubs\SuspendableGrantee;
 use Tests\TestCase;
 
 /**
@@ -212,7 +212,7 @@ final class GuardrailAuthorityTest extends TestCase
     public function testTheRightIsHeldEffectively(): void
     {
         $denied   = self::actor('denied');
-        $inactive = SuspendableIdentity::create(['id' => 'suspended']);
+        $inactive = SuspendableGrantee::create(['id' => 'suspended']);
 
         $denied->givePermission(self::right());
         $denied->attachPolicy(Policy::create(['name' => 'no-guardrails', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['authorization:*']]]]]));
@@ -492,14 +492,14 @@ final class GuardrailAuthorityTest extends TestCase
      * Grant the actor, in the tenant, a new role carrying a policy that denies
      * the action.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $actor
+     * @param  \Tests\Feature\Stubs\StubGrantee  $actor
      * @param  \Tests\Feature\Stubs\StubTenant  $tenant
      * @param  string  $action
      * @return void
      *
      * @throws \Throwable
      */
-    private static function restrictIn(StubIdentity $actor, StubTenant $tenant, string $action): void
+    private static function restrictIn(StubGrantee $actor, StubTenant $tenant, string $action): void
     {
         $name   = 'restricted-' . Role::query()->count();
         $role   = Role::query()->create(['name' => $name, 'rank' => 8]);
@@ -526,11 +526,11 @@ final class GuardrailAuthorityTest extends TestCase
      * Create an identity with the key.
      *
      * @param  string  $id
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function actor(string $id): StubIdentity
+    private static function actor(string $id): StubGrantee
     {
-        return StubIdentity::create(['id' => $id]);
+        return StubGrantee::create(['id' => $id]);
     }
 
     /**

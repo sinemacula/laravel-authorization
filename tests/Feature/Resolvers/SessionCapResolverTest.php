@@ -18,10 +18,10 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ScopesQueries;
-use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\Feature\Stubs\CredentialScopesSource;
 use Tests\Feature\Stubs\RequestSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -53,8 +53,8 @@ final class SessionCapResolverTest extends TestCase
     /** @var \Tests\Feature\Stubs\CredentialScopesSource The source answering each subject's own scopes. */
     private CredentialScopesSource $source;
 
-    /** @var \Tests\Feature\Stubs\StubIdentity The user holding both actions. */
-    private StubIdentity $user;
+    /** @var \Tests\Feature\Stubs\StubGrantee The user holding both actions. */
+    private StubGrantee $user;
 
     /**
      * Bind a source answering each subject's own scopes, and grant the user
@@ -68,7 +68,7 @@ final class SessionCapResolverTest extends TestCase
         parent::setUp();
 
         $this->source = new CredentialScopesSource;
-        $this->user   = StubIdentity::create(['id' => 'user-1']);
+        $this->user   = StubGrantee::create(['id' => 'user-1']);
 
         $this->app?->instance(SessionPolicySource::class, $this->source);
         $this->user->givePermission(Permission::create(['name' => self::READ]));
@@ -108,7 +108,7 @@ final class SessionCapResolverTest extends TestCase
      */
     public function testTheRequestsScopesCapItsChecksButNotAnotherModels(): void
     {
-        $other = StubIdentity::create(['id' => 'user-2']);
+        $other = StubGrantee::create(['id' => 'user-2']);
 
         $other->givePermission(self::CREATE);
 
@@ -150,7 +150,7 @@ final class SessionCapResolverTest extends TestCase
         $tenant = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'A']);
 
         $this->user->givePermission(Permission::create(['name' => 'posts:update']), null, $tenant);
-        $this->resolveRequest(StubIdentity::create(['id' => 'request-user']), $tenant);
+        $this->resolveRequest(StubGrantee::create(['id' => 'request-user']), $tenant);
 
         /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
         $manager  = Authorization::getFacadeRoot();
@@ -215,8 +215,8 @@ final class SessionCapResolverTest extends TestCase
      */
     public function testAGuardsOwnCallerIsCappedByItsCredential(): void
     {
-        $caller = AuthenticatableIdentity::create(['id' => 'caller-1']);
-        $other  = AuthenticatableIdentity::create(['id' => 'caller-2']);
+        $caller = AuthenticatableGrantee::create(['id' => 'caller-1']);
+        $other  = AuthenticatableGrantee::create(['id' => 'caller-2']);
 
         $caller->givePermission(self::READ);
         $caller->givePermission(self::CREATE);
@@ -224,7 +224,7 @@ final class SessionCapResolverTest extends TestCase
         $this->bindSource(['guard:web' => [self::READ]]);
         $this->actingAs($caller, 'web');
 
-        $fresh = AuthenticatableIdentity::query()->findOrFail('caller-1');
+        $fresh = AuthenticatableGrantee::query()->findOrFail('caller-1');
 
         self::assertTrue(Authorization::for(new Subject($caller, $caller, guard: 'web'))->can(self::READ));
         self::assertSame(DecisionReason::SESSION_POLICY, Authorization::for(new Subject($caller, $caller, guard: 'web'))->check(self::CREATE)->reason);

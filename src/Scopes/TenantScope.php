@@ -78,7 +78,7 @@ final class TenantScope implements Scope
      * null when it limits them to the platform's.
      *
      * The resolution cache keys its entries by it, since the roles and
-     * permissions an identity resolves to depend on it.
+     * permissions a grantee resolves to depend on it.
      *
      * @return array{0: string, 1: string}|null
      *

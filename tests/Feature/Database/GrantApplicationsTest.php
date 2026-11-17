@@ -33,7 +33,7 @@ final class GrantApplicationsTest extends TestCase
         $role = Role::query()->create(['name' => 'editor']);
 
         foreach (['every' => null, 'admin' => 'admin', 'mobile' => 'mobile', 'other' => null] as $grantee => $application) {
-            DB::table('authorizable_roles')->insert(['role_id' => $role->id, 'authorizable_type' => 'stub_identity', 'authorizable_id' => $grantee, 'application' => $application]);
+            DB::table('authorizable_roles')->insert(['role_id' => $role->id, 'authorizable_type' => 'stub_grantee', 'authorizable_id' => $grantee, 'application' => $application]);
         }
 
         $query = DB::table('authorizable_roles')->where('authorizable_id', '!=', 'other');

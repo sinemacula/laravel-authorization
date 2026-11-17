@@ -23,7 +23,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\ChangingSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -110,7 +110,7 @@ final class DecisionMemoryTest extends TestCase
     {
         $first    = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'A']);
         $second   = StubTenant::query()->create(['id' => 'tenant-b', 'name' => 'B']);
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $resolver = new ChangingSubjectResolver(new Subject($user, $user, $first));
 
         $this->container()->instance(SubjectResolver::class, $resolver);

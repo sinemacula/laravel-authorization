@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Reviews\Support\TenantRelations;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ReviewsAccess;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\CountingTenantTree;
 use Tests\Fixtures\QueryScoping\SubtreeQueryTree;
@@ -350,7 +350,7 @@ final class TenantRelationsTest extends TestCase
     {
         $this->tree();
 
-        $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static fn (): Builder => (new StubIdentity)->roles()));
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static fn (): Builder => (new StubGrantee)->roles()));
 
         $this->expectException(\UnexpectedValueException::class);
         $this->expectExceptionMessage('The tenant tree\'s subtree is not a query.');

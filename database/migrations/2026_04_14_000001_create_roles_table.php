@@ -3,11 +3,11 @@
 /**
  * Create the `roles` table.
  *
- * Roles are named buckets of permissions shared across authorizable identities.
- * The `guard` column is nullable: a null value marks the role as guard-agnostic
- * (applies to every guard), a concrete string scopes the role to a single
- * guard. A role is owned by the platform (null tenant columns) or by one
- * tenant, and its name is unique within its owner and guard.
+ * Roles are named buckets of permissions shared across grantees. The `guard`
+ * column is nullable: a null value marks the role as guard-agnostic (applies to
+ * every guard), a concrete string scopes the role to a single guard. A role is
+ * owned by the platform (null tenant columns) or by one tenant, and its name is
+ * unique within its owner and guard.
  *
  * The tenant columns compare their exact bytes on every database: on MySQL they
  * are collated `utf8mb4_0900_bin`, which neither folds case nor pads trailing

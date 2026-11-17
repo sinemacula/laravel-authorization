@@ -139,7 +139,7 @@ final class TenantChainTest extends TestCase
         foreach ([[null, true], [$account, false], [$org, true], [$group, false], [$sibling, true]] as $index => [$tenant, $subtree]) {
             DB::table('authorizable_roles')->insert([
                 'role_id'           => $role->id,
-                'authorizable_type' => 'stub_identity',
+                'authorizable_type' => 'stub_grantee',
                 'authorizable_id'   => (string) $index,
                 'tenant_type'       => $tenant?->type,
                 'tenant_id'         => $tenant?->id,
@@ -190,7 +190,7 @@ final class TenantChainTest extends TestCase
             foreach ([true, false] as $subtree) {
                 DB::table('authorizable_roles')->insert([
                     'role_id'           => $role->id,
-                    'authorizable_type' => 'stub_identity',
+                    'authorizable_type' => 'stub_grantee',
                     'authorizable_id'   => $name . ($subtree ? '' : '-node'),
                     'tenant_type'       => $owner?->type,
                     'tenant_id'         => $owner?->id,

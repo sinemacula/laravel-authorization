@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\UsesAnAuthorizationConnection;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
@@ -130,7 +130,7 @@ final class NarrowingTest extends TestCase
         self::assertTrue(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $role));
 
         $grants->attachPolicy($role, self::policy('allowing', 'allow'));
-        $grants->attachPolicy(StubIdentity::create(['id' => 'user-1']), self::policy('elsewhere', 'deny'));
+        $grants->attachPolicy(StubGrantee::create(['id' => 'user-1']), self::policy('elsewhere', 'deny'));
 
         self::assertTrue(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $role));
 
@@ -260,7 +260,7 @@ final class NarrowingTest extends TestCase
     {
         Carbon::setTestNow(Carbon::parse('2026-11-07 12:00:00', 'UTC'));
 
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $grantee  = Reference::of($user);
         $tenant   = new Reference('tenant', 'a');
         $edit     = Permission::create(['name' => 'posts:edit']);
@@ -305,7 +305,7 @@ final class NarrowingTest extends TestCase
      */
     public function testABoundaryTightensOnlyWhereItCapsNoLess(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $grantee = Reference::of($user);
         $tenant  = new Reference('tenant', 'a');
         $read    = ['effect' => 'allow', 'actions' => ['posts:read']];
@@ -369,7 +369,7 @@ final class NarrowingTest extends TestCase
      */
     public function testAnActionThatGrantsNothingNeverShortens(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $edit = Permission::create(['name' => 'posts:edit']);
 
         GrantService::instance()?->grantPermission($user, $edit);

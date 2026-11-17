@@ -13,11 +13,11 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
-use Tests\Feature\Stubs\NumberedIdentity;
+use Tests\Feature\Stubs\NumberedGrantee;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\TestCase;
 
 /**
@@ -45,8 +45,8 @@ final class PrincipalSelectorsTest extends TestCase
      */
     public function testASelectorNamesThePrincipalOrItsIdentityByReference(): void
     {
-        $principal = StubSecondIdentity::create(['id' => 'p-1']);
-        $identity  = StubIdentity::create(['id' => 'user-1']);
+        $principal = StubSecondGrantee::create(['id' => 'p-1']);
+        $identity  = StubGrantee::create(['id' => 'user-1']);
         $selectors = new PrincipalSelectors(new Subject($principal, $identity));
 
         self::assertTrue($selectors->isNamedByAny([$principal->getMorphClass() . ':p-1']));
@@ -67,7 +67,7 @@ final class PrincipalSelectorsTest extends TestCase
     public function testAnIdentityOfAnotherKindIsNamedByNone(): void
     {
         $machine = StubMachine::create(['id' => 'svc-1']);
-        $person  = StubIdentity::create(['id' => 'user-1']);
+        $person  = StubGrantee::create(['id' => 'user-1']);
         $role    = Role::create(['name' => 'staff']);
 
         $person->assignRole($role);
@@ -91,7 +91,7 @@ final class PrincipalSelectorsTest extends TestCase
     public function testASubjectWithoutAReferenceIsNamedByNone(): void
     {
         self::assertFalse((new PrincipalSelectors(new Subject(new \stdClass)))->isNamedByAny([\stdClass::class . ':1']));
-        self::assertFalse((new PrincipalSelectors(new Subject(new StubIdentity)))->isNamedByAny([(new StubIdentity)->getMorphClass() . ':']));
+        self::assertFalse((new PrincipalSelectors(new Subject(new StubGrantee)))->isNamedByAny([(new StubGrantee)->getMorphClass() . ':']));
         self::assertFalse((new PrincipalSelectors(new Subject(new Reference('', '7'))))->isNamedByAny([':7']));
         self::assertFalse((new PrincipalSelectors(new Subject(new class {
             /**
@@ -129,8 +129,8 @@ final class PrincipalSelectorsTest extends TestCase
         $tenant    = self::createTenant('tenant-a');
         $editor    = Role::create(['name' => 'editor']);
         $viewer    = Role::create(['name' => 'viewer']);
-        $principal = StubSecondIdentity::create(['id' => 'p-1']);
-        $identity  = StubIdentity::create(['id' => 'user-1']);
+        $principal = StubSecondGrantee::create(['id' => 'p-1']);
+        $identity  = StubGrantee::create(['id' => 'user-1']);
 
         $identity->assignRole($editor, null, $tenant);
         $principal->assignRole($viewer, application: 'admin');
@@ -157,7 +157,7 @@ final class PrincipalSelectorsTest extends TestCase
         $author = Role::create(['name' => 'author']);
         $editor = Role::create(['name' => 'editor', 'parent_id' => $author->id]);
         $chief  = Role::create(['name' => 'chief', 'parent_id' => $editor->id]);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
 
         $user->assignRole($editor);
 
@@ -180,7 +180,7 @@ final class PrincipalSelectorsTest extends TestCase
 
         $author = Role::create(['name' => 'author']);
         $editor = Role::create(['name' => 'editor', 'parent_id' => $author->id]);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
 
         $user->assignRole($editor);
 
@@ -202,7 +202,7 @@ final class PrincipalSelectorsTest extends TestCase
     {
         $author    = Role::create(['name' => 'author']);
         $editor    = Role::create(['name' => 'editor', 'parent_id' => $author->id]);
-        $user      = StubIdentity::create(['id' => 'user-1']);
+        $user      = StubGrantee::create(['id' => 'user-1']);
         $selectors = new PrincipalSelectors(new Subject($user));
 
         $user->assignRole($editor);
@@ -235,7 +235,7 @@ final class PrincipalSelectorsTest extends TestCase
      */
     public function testASubjectIsNamedByAnIntegerKeyAlone(): void
     {
-        $numbered = NumberedIdentity::create(['name' => 'n']);
+        $numbered = NumberedGrantee::create(['name' => 'n']);
         $float    = new class {
             /**
              * Return the morph class.
@@ -272,7 +272,7 @@ final class PrincipalSelectorsTest extends TestCase
     public function testReadsTheRolesWithoutACache(): void
     {
         $editor = Role::create(['name' => 'editor']);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
 
         $user->assignRole($editor);
 
@@ -302,7 +302,7 @@ final class PrincipalSelectorsTest extends TestCase
      */
     public function testTheRolesNamingTheSubjectAreNoneOnceItIsNamedByReference(): void
     {
-        $user      = StubIdentity::create(['id' => 'user-1']);
+        $user      = StubGrantee::create(['id' => 'user-1']);
         $selectors = new PrincipalSelectors(new Subject($user));
 
         DB::enableQueryLog();

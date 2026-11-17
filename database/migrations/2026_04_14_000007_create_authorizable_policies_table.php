@@ -1,8 +1,7 @@
 <?php
 
 /**
- * Create the `authorizable_policies` table: policies attached to authorizable
- * identities.
+ * Create the `authorizable_policies` table: policies attached to grantees.
  *
  * Each row attaches one policy to one grantee within one scope: platform-wide
  * (null tenant columns) or one tenant, optionally that tenant's subtree, and

@@ -28,8 +28,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\WidensGrants;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Fixtures\GrantHooks\PrincipalSubjectResolver;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\Fixtures\GrantScope\UnreadableTenantTree;
@@ -85,7 +85,7 @@ final class WideningClassifierTest extends TestCase
 
         self::assertSame([WideningReason::IDENTITY], $widening?->reasons);
         self::assertTrue($widening->isToIdentity());
-        self::assertSame([StubIdentity::class, 'person'], [$widening->identity->type, $widening->identity->id]);
+        self::assertSame([StubGrantee::class, 'person'], [$widening->identity->type, $widening->identity->id]);
         self::assertSame([WideningReason::IDENTITY, WideningReason::NEW_TENANT], self::classify($person, self::tenant('acct2'))?->reasons);
     }
 
@@ -104,8 +104,8 @@ final class WideningClassifierTest extends TestCase
 
         self::assertSame([WideningReason::PLATFORM], $widening?->reasons);
         self::assertFalse($widening->isToIdentity());
-        self::assertSame([StubIdentity::class, 'person'], [$widening->identity->type, $widening->identity->id]);
-        self::assertSame([StubSecondIdentity::class, 'p1'], [$widening->grantee->type, $widening->grantee->id]);
+        self::assertSame([StubGrantee::class, 'person'], [$widening->identity->type, $widening->identity->id]);
+        self::assertSame([StubSecondGrantee::class, 'p1'], [$widening->grantee->type, $widening->grantee->id]);
     }
 
     /**
@@ -370,14 +370,14 @@ final class WideningClassifierTest extends TestCase
      */
     public function testAnIdentityThatCannotBeResolvedIsRefused(): void
     {
-        $orphan = StubSecondIdentity::query()->create(['id' => 'orphan']);
+        $orphan = StubSecondGrantee::query()->create(['id' => 'orphan']);
         $role   = self::role('held');
 
         self::grants()->grantRole($orphan, $role);
 
         self::assertNull(self::classify($orphan, null, true, null, $role));
         self::assertRefused(static fn (): mixed => self::classify($orphan, self::tenant('acct1')));
-        $missing = new Reference(StubSecondIdentity::class, 'missing');
+        $missing = new Reference(StubSecondGrantee::class, 'missing');
         $untyped = new Reference('no-such-type', '1');
 
         self::assertRefused(static fn (): mixed => WideningClassifier::classify(Operation::begin(), $missing, [self::proposal(self::role('other'), null)]));
@@ -413,7 +413,7 @@ final class WideningClassifierTest extends TestCase
         $refusal = self::refusalOf(static fn (): mixed => self::classify(self::principal('p1'), null));
 
         self::assertSame('The resolver failed.', $refusal->getPrevious()?->getMessage());
-        self::assertSame(StubSecondIdentity::class, $refusal->grantee->type);
+        self::assertSame(StubSecondGrantee::class, $refusal->grantee->type);
     }
 
     /**
@@ -425,9 +425,9 @@ final class WideningClassifierTest extends TestCase
     public function testAnIdentityThatIsNotTheGranteesIsRefused(): void
     {
         $principal = self::principal('p1');
-        $other     = StubSecondIdentity::query()->create(['id' => 'other']);
+        $other     = StubSecondGrantee::query()->create(['id' => 'other']);
 
-        $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver(['p1' => new StubSecondIdentity(['id' => 'unsaved'])]));
+        $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver(['p1' => new StubSecondGrantee(['id' => 'unsaved'])]));
 
         self::assertRefused(static fn (): mixed => self::classify($principal, null));
 
@@ -587,8 +587,8 @@ final class WideningClassifierTest extends TestCase
         $widening = WideningClassifier::classify(Operation::begin(), Reference::of(self::principal('p1')), [self::proposal(self::role('by-reference'), self::tenant('acct2'))]);
 
         self::assertSame([WideningReason::NEW_TENANT], $widening?->reasons);
-        self::assertSame([StubSecondIdentity::class, 'p1'], [$widening->grantee->type, $widening->grantee->id]);
-        self::assertSame([StubIdentity::class, 'person'], [$widening->identity->type, $widening->identity->id]);
+        self::assertSame([StubSecondGrantee::class, 'p1'], [$widening->grantee->type, $widening->grantee->id]);
+        self::assertSame([StubGrantee::class, 'person'], [$widening->identity->type, $widening->identity->id]);
     }
 
     /**
@@ -808,22 +808,22 @@ final class WideningClassifierTest extends TestCase
     /**
      * Return the identity.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function person(): StubIdentity
+    private static function person(): StubGrantee
     {
-        return StubIdentity::query()->findOrFail('person');
+        return StubGrantee::query()->findOrFail('person');
     }
 
     /**
      * Return the principal with the key.
      *
      * @param  string  $id
-     * @return \Tests\Feature\Stubs\StubSecondIdentity
+     * @return \Tests\Feature\Stubs\StubSecondGrantee
      */
-    private static function principal(string $id): StubSecondIdentity
+    private static function principal(string $id): StubSecondGrantee
     {
-        return StubSecondIdentity::query()->findOrFail($id);
+        return StubSecondGrantee::query()->findOrFail($id);
     }
 
     /**

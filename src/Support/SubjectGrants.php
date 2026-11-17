@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
@@ -58,7 +58,7 @@ final class SubjectGrants
     public static function isInactive(Subject $subject): bool
     {
         foreach (self::grantees($subject) as $grantee) {
-            if ($grantee instanceof AuthorizableIdentity && !$grantee->isAuthorizationActive()) {
+            if ($grantee instanceof AuthorizableGrantee && !$grantee->isAuthorizationActive()) {
                 return true;
             }
         }

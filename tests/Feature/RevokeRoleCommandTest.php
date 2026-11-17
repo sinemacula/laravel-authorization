@@ -9,12 +9,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -44,40 +44,40 @@ final class RevokeRoleCommandTest extends TestCase
     }
 
     /**
-     * Successfully revokes a role from an identity.
+     * Successfully revokes a role from a grantee.
      *
      * @return void
      */
-    public function testRevokesRoleFromIdentity(): void
+    public function testRevokesRoleFromGrantee(): void
     {
         Role::create(['id' => 'c7916105-9686-4752-8e5f-2370eb494a02', 'name' => 'editor', 'guard' => 'web']);
-        $user = StubIdentity::create(['id' => '0e4acbbb-88e6-47d4-8ed1-93b6f54a4a44']);
+        $user = StubGrantee::create(['id' => '0e4acbbb-88e6-47d4-8ed1-93b6f54a4a44']);
         $user->assignRole('editor');
 
         self::assertTrue($user->hasRole('editor'));
 
         $exitCode = Artisan::call('authorization:revoke', [
-            'identity' => StubIdentity::class . ':0e4acbbb-88e6-47d4-8ed1-93b6f54a4a44',
-            'role'     => 'editor',
+            'grantee' => StubGrantee::class . ':0e4acbbb-88e6-47d4-8ed1-93b6f54a4a44',
+            'role'    => 'editor',
         ]);
 
         self::assertSame(0, $exitCode);
         self::assertStringContainsString('revoked', Artisan::output());
-        /** @var \Tests\Feature\Stubs\StubIdentity $freshUser */
+        /** @var \Tests\Feature\Stubs\StubGrantee $freshUser */
         $freshUser = $user->fresh();
         self::assertFalse($freshUser->hasRole('editor'));
     }
 
     /**
-     * Fails on invalid identity format.
+     * Fails on invalid grantee format.
      *
      * @return void
      */
-    public function testFailsOnInvalidIdentityFormat(): void
+    public function testFailsOnInvalidGranteeFormat(): void
     {
         $exitCode = Artisan::call('authorization:revoke', [
-            'identity' => 'bad-format',
-            'role'     => 'editor',
+            'grantee' => 'bad-format',
+            'role'    => 'editor',
         ]);
 
         self::assertSame(1, $exitCode);
@@ -90,11 +90,11 @@ final class RevokeRoleCommandTest extends TestCase
      */
     public function testFailsWhenRoleDoesNotExist(): void
     {
-        StubIdentity::create(['id' => 'e8afdc3b-ab3b-4603-857e-a38b28b2f537']);
+        StubGrantee::create(['id' => 'e8afdc3b-ab3b-4603-857e-a38b28b2f537']);
 
         $exitCode = Artisan::call('authorization:revoke', [
-            'identity' => StubIdentity::class . ':e8afdc3b-ab3b-4603-857e-a38b28b2f537',
-            'role'     => 'nonexistent',
+            'grantee' => StubGrantee::class . ':e8afdc3b-ab3b-4603-857e-a38b28b2f537',
+            'role'    => 'nonexistent',
         ]);
 
         self::assertSame(1, $exitCode);
@@ -108,11 +108,11 @@ final class RevokeRoleCommandTest extends TestCase
      */
     public function testFailedRevokeOutputsErrorMessage(): void
     {
-        StubIdentity::create(['id' => 'b1b1b1b1-0000-0000-0000-000000000001']);
+        StubGrantee::create(['id' => 'b1b1b1b1-0000-0000-0000-000000000001']);
 
         $exitCode = Artisan::call('authorization:revoke', [
-            'identity' => StubIdentity::class . ':b1b1b1b1-0000-0000-0000-000000000001',
-            'role'     => 'does-not-exist',
+            'grantee' => StubGrantee::class . ':b1b1b1b1-0000-0000-0000-000000000001',
+            'role'    => 'does-not-exist',
         ]);
         $output = Artisan::output();
 
@@ -121,27 +121,27 @@ final class RevokeRoleCommandTest extends TestCase
     }
 
     /**
-     * Success message includes both the role name and identity arg. Pins the
+     * Success message includes both the role name and grantee arg. Pins the
      * ReturnRemoval on line 59.
      *
      * @return void
      */
-    public function testSuccessMessageIncludesRoleAndIdentity(): void
+    public function testSuccessMessageIncludesRoleAndGrantee(): void
     {
         Role::create(['id' => 'b2b2b2b2-0000-0000-0000-000000000001', 'name' => 'rev-role', 'guard' => 'web']);
-        $user = StubIdentity::create(['id' => 'b3b3b3b3-0000-0000-0000-000000000001']);
+        $user = StubGrantee::create(['id' => 'b3b3b3b3-0000-0000-0000-000000000001']);
         $user->assignRole('rev-role');
 
-        $identity = StubIdentity::class . ':b3b3b3b3-0000-0000-0000-000000000001';
+        $grantee  = StubGrantee::class . ':b3b3b3b3-0000-0000-0000-000000000001';
         $exitCode = Artisan::call('authorization:revoke', [
-            'identity' => $identity,
-            'role'     => 'rev-role',
+            'grantee' => $grantee,
+            'role'    => 'rev-role',
         ]);
         $output = Artisan::output();
 
         self::assertSame(0, $exitCode);
         self::assertStringContainsString('rev-role', $output);
-        self::assertStringContainsString($identity, $output);
+        self::assertStringContainsString($grantee, $output);
     }
 
     /**
@@ -159,11 +159,11 @@ final class RevokeRoleCommandTest extends TestCase
             'tenant_type' => 'tenant',
             'tenant_id'   => 't-1',
         ]);
-        StubIdentity::create(['id' => 'e4e4e4e4-0000-0000-0000-000000000001']);
+        StubGrantee::create(['id' => 'e4e4e4e4-0000-0000-0000-000000000001']);
 
         $exitCode = Artisan::call('authorization:revoke', [
-            'identity' => StubIdentity::class . ':e4e4e4e4-0000-0000-0000-000000000001',
-            'role'     => 'owned-editor',
+            'grantee' => StubGrantee::class . ':e4e4e4e4-0000-0000-0000-000000000001',
+            'role'    => 'owned-editor',
         ]);
 
         self::assertSame(1, $exitCode);
@@ -171,7 +171,7 @@ final class RevokeRoleCommandTest extends TestCase
     }
 
     /**
-     * Revoking a role the identity does not hold reports it as not held,
+     * Revoking a role the grantee does not hold reports it as not held,
      * succeeds and dispatches nothing.
      *
      * @return void
@@ -179,15 +179,15 @@ final class RevokeRoleCommandTest extends TestCase
     public function testReportsARoleThatIsNotHeld(): void
     {
         Role::query()->create(['name' => 'editor', 'guard' => 'web']);
-        StubIdentity::create(['id' => 'b1b1b1b1-0000-0000-0000-000000000002']);
+        StubGrantee::create(['id' => 'b1b1b1b1-0000-0000-0000-000000000002']);
 
         Event::fake([RoleRevoked::class]);
 
-        $identity = StubIdentity::class . ':b1b1b1b1-0000-0000-0000-000000000002';
-        $exitCode = Artisan::call('authorization:revoke', ['identity' => $identity, 'role' => 'editor']);
+        $grantee  = StubGrantee::class . ':b1b1b1b1-0000-0000-0000-000000000002';
+        $exitCode = Artisan::call('authorization:revoke', ['grantee' => $grantee, 'role' => 'editor']);
 
         self::assertSame(0, $exitCode);
-        self::assertSame("{$identity} does not hold role 'editor'.", \trim(Artisan::output()));
+        self::assertSame("{$grantee} does not hold role 'editor'.", \trim(Artisan::output()));
         Event::assertNotDispatched(RoleRevoked::class);
     }
 
@@ -195,7 +195,7 @@ final class RevokeRoleCommandTest extends TestCase
      * `--actor` names the actor making the revocation, which is then decided as
      * delegated administration: a revocation of a role no deny is attached to
      * only narrows, so an actor allowed `authorization:role.revoke`, and senior
-     * to the identity, makes it, and its event carries the actor.
+     * to the grantee, makes it, and its event carries the actor.
      *
      * @return void
      *
@@ -204,9 +204,9 @@ final class RevokeRoleCommandTest extends TestCase
     public function testReportsTheActorTheOptionNames(): void
     {
         $role = Role::create(['name' => 'editor', 'guard' => 'web']);
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
-        $admin = StubIdentity::create(['id' => 'admin-1']);
+        $admin = StubGrantee::create(['id' => 'admin-1']);
 
         $admin->givePermission(Permission::create(['name' => PackagePermissions::ROLE_REVOKE]));
         app(GrantService::class)->grantRole($admin, Role::create(['name' => 'administrator', 'guard' => 'web', 'rank' => 0]));
@@ -216,10 +216,10 @@ final class RevokeRoleCommandTest extends TestCase
 
         self::assertSame(
             0,
-            Artisan::call('authorization:revoke', ['identity' => StubIdentity::class . ':user-1', 'role' => 'editor', '--actor' => StubIdentity::class . ':admin-1']),
+            Artisan::call('authorization:revoke', ['grantee' => StubGrantee::class . ':user-1', 'role' => 'editor', '--actor' => StubGrantee::class . ':admin-1']),
         );
 
-        Event::assertDispatched(RoleRevoked::class, static fn (RoleRevoked $event): bool => $event->operation->actor?->type === StubIdentity::class
+        Event::assertDispatched(RoleRevoked::class, static fn (RoleRevoked $event): bool => $event->operation->actor?->type === StubGrantee::class
             && $event->operation->actor->id                                                                                 === 'admin-1');
     }
 
@@ -233,13 +233,13 @@ final class RevokeRoleCommandTest extends TestCase
     public function testFailsOnAnActorItCannotResolve(): void
     {
         $role = Role::create(['name' => 'editor', 'guard' => 'web']);
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         app(GrantService::class)->grantRole($user, $role);
 
         self::assertSame(
             1,
-            Artisan::call('authorization:revoke', ['identity' => StubIdentity::class . ':user-1', 'role' => 'editor', '--actor' => StubIdentity::class . ':ghost']),
+            Artisan::call('authorization:revoke', ['grantee' => StubGrantee::class . ':user-1', 'role' => 'editor', '--actor' => StubGrantee::class . ':ghost']),
         );
         self::assertSame(1, DB::table('authorizable_roles')->count());
     }

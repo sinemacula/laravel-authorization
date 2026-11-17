@@ -25,7 +25,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -210,13 +210,13 @@ final class PolicyRouteTest extends TestCase
      * actor then holding `policy.grantable` for good, or refused, as given, any
      * other check allowed, every source read empty, recording what was asked.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $actor
+     * @param  \Tests\Feature\Stubs\StubGrantee  $actor
      * @param  bool  $grantable
      * @return \SineMacula\Laravel\Authorization\Administration\FurtherChecks
      *
      * @throws \Throwable
      */
-    private function checks(StubIdentity $actor, bool $grantable): FurtherChecks
+    private function checks(StubGrantee $actor, bool $grantable): FurtherChecks
     {
         $this->asked = [];
 
@@ -252,11 +252,11 @@ final class PolicyRouteTest extends TestCase
      * Return the identity with the id, created on first use.
      *
      * @param  string  $id
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function user(string $id): StubIdentity
+    private static function user(string $id): StubGrantee
     {
-        return StubIdentity::query()->firstOrCreate(['id' => $id]);
+        return StubGrantee::query()->firstOrCreate(['id' => $id]);
     }
 
     /**

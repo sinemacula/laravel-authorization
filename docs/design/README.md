@@ -22,7 +22,7 @@ The notes are:
   caps, the allows and the implicit deny), why an explicit DENY always wins over an RBAC allow, and why an undecidable
   deny applies and a malformed, unreadable or over-limit policy denies (`invalid_policy`) instead of being skipped;
   `insufficient_authentication`, where it ranks, and how long a decision that read an authentication requirement may be
-  reused; where a check's policies come from (the policy store, the identity's own and inline policies, its roles'
+  reused; where a check's policies come from (the policy store, the subject's own and inline policies, its roles'
   policies down the hierarchy, and the policies attached to the resource and its type) and why their order never
   matters; resource policies' `principals`, their denies for everyone and why their allows come after the tenant stage
   and every deny; the cap stages (guardrails, permission boundaries and session caps) between the denies and the allows,
@@ -31,8 +31,8 @@ The notes are:
   and the caller's explicit caps), machine principals, which need their credential's scopes and never receive a
   person's grants, and the scope registry; where a permission held is weighed (the allow stage alone, after every deny
   and cap) and the resources it reaches by its grant's tenant, subtree, application and expiry.
-- `polymorphic-identity-pivots.md`: why role, permission, and policy pivots use plain `string`
-  `authorizable_type`/`authorizable_id` columns so that integer, UUID, and ULID identities all work.
+- `polymorphic-grantee-pivots.md`: why role, permission, and policy pivots use plain `string`
+  `authorizable_type`/`authorizable_id` columns so that integer, UUID, and ULID grantees all work.
 - `subject-resolver-contract.md`: the one seam with authentication (`sinemacula/laravel-authentication` or any other)
   for the subject, its tenant and its application; the shipped default (Laravel's signed-in user, no tenant), the
   Gate's translation of its user, and which binding wins when a sibling package or the configuration supplies its own

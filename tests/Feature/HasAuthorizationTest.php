@@ -11,8 +11,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use Tests\Feature\Stubs\NumberedIdentity;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\NumberedGrantee;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -35,7 +35,7 @@ final class HasAuthorizationTest extends TestCase
      */
     public function testAGranteeIsActiveByDefault(): void
     {
-        self::assertTrue(StubIdentity::create(['id' => 'user-1'])->isAuthorizationActive());
+        self::assertTrue(StubGrantee::create(['id' => 'user-1'])->isAuthorizationActive());
     }
 
     /**
@@ -45,8 +45,8 @@ final class HasAuthorizationTest extends TestCase
      */
     public function testDeletingAGranteeRemovesItsGrants(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
-        $other = StubIdentity::create(['id' => 'user-2']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
+        $other = StubGrantee::create(['id' => 'user-2']);
         $role  = Role::create(['name' => 'editor']);
 
         $user->assignRole($role);
@@ -67,7 +67,7 @@ final class HasAuthorizationTest extends TestCase
      */
     public function testASoftDeleteKeepsTheGrantsUntilAForceDelete(): void
     {
-        $user = NumberedIdentity::create(['name' => 'Ada']);
+        $user = NumberedGrantee::create(['name' => 'Ada']);
 
         $user->assignRole(Role::create(['name' => 'editor']));
         $user->delete();
@@ -91,8 +91,8 @@ final class HasAuthorizationTest extends TestCase
      */
     public function testAnIntegerKeyedGranteeResolvesItsGrants(): void
     {
-        $first  = NumberedIdentity::create(['name' => 'Ada']);
-        $second = NumberedIdentity::create(['name' => 'Grace']);
+        $first  = NumberedGrantee::create(['name' => 'Ada']);
+        $second = NumberedGrantee::create(['name' => 'Grace']);
         $role   = Role::create(['name' => 'editor']);
 
         $role->givePermission(Permission::create(['name' => 'posts:edit']));
@@ -105,10 +105,10 @@ final class HasAuthorizationTest extends TestCase
         self::assertSame(['posts:read'], $second->getPermissions());
         self::assertSame(['readers'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $second->getPolicies()));
 
-        $loaded = NumberedIdentity::query()->with(['roles', 'permissions', 'policies'])->orderBy('id')->get();
+        $loaded = NumberedGrantee::query()->with(['roles', 'permissions', 'policies'])->orderBy('id')->get();
 
-        self::assertSame([['editor'], []], $loaded->map(static fn (NumberedIdentity $user): array => $user->roles->pluck('name')->all())->all());
-        self::assertSame([[], ['posts:read']], $loaded->map(static fn (NumberedIdentity $user): array => $user->permissions->pluck('name')->all())->all());
-        self::assertSame([[], ['readers']], $loaded->map(static fn (NumberedIdentity $user): array => $user->policies->pluck('name')->all())->all());
+        self::assertSame([['editor'], []], $loaded->map(static fn (NumberedGrantee $user): array => $user->roles->pluck('name')->all())->all());
+        self::assertSame([[], ['posts:read']], $loaded->map(static fn (NumberedGrantee $user): array => $user->permissions->pluck('name')->all())->all());
+        self::assertSame([[], ['readers']], $loaded->map(static fn (NumberedGrantee $user): array => $user->policies->pluck('name')->all())->all());
     }
 }

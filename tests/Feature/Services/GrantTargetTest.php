@@ -11,18 +11,18 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpired;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpired;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleExpired;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -37,7 +37,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\CustomRole;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -269,7 +269,7 @@ final class GrantTargetTest extends TestCase
     public static function refusedTargets(): iterable
     {
         yield 'a role for a permission grant' => [GrantTarget::PERMISSION, static fn (): mixed => Role::query()->create(['name' => 'editor'])];
-        yield 'an identity for a policy grant' => [GrantTarget::POLICY, static fn (): mixed => StubIdentity::query()->create(['id' => 'user-1'])];
+        yield 'an identity for a policy grant' => [GrantTarget::POLICY, static fn (): mixed => StubGrantee::query()->create(['id' => 'user-1'])];
         yield 'an unsaved role' => [GrantTarget::ROLE, static fn (): mixed => new Role(['name' => 'editor'])];
         yield 'an integer' => [GrantTarget::ROLE, static fn (): mixed => 42];
     }
@@ -363,7 +363,7 @@ final class GrantTargetTest extends TestCase
     {
         $model     = $target();
         $operation = Operation::begin(new Reference('user', 'admin-1'));
-        $grantee   = new Reference('stub_identity', 'user-1');
+        $grantee   = new Reference('stub_grantee', 'user-1');
         $previous  = Carbon::parse('2026-07-01 14:00:00', 'Europe/Paris');
         $next      = Carbon::parse('2026-08-01 12:00:00', 'UTC');
         $target    = Reference::of($model);
@@ -398,7 +398,7 @@ final class GrantTargetTest extends TestCase
     public function testBuildsTheExpiredEventOfEachKind(): void
     {
         $operation = Operation::begin();
-        $grantee   = new Reference('stub_identity', 'user-1');
+        $grantee   = new Reference('stub_grantee', 'user-1');
         $scope     = GrantScope::platform();
         $expiredAt = Carbon::parse('2026-07-01 14:00:00', 'Europe/Paris');
         $targets   = [
@@ -429,7 +429,7 @@ final class GrantTargetTest extends TestCase
     {
         $role      = Role::query()->create(['name' => 'editor']);
         $operation = Operation::begin();
-        $grantee   = new Reference('stub_identity', 'user-1');
+        $grantee   = new Reference('stub_grantee', 'user-1');
         $scope     = GrantScope::platform();
         $previous  = Carbon::parse('2026-07-01 12:00:00', 'UTC');
         $classes   = static fn (GrantOutcome $outcome): array => \array_map(

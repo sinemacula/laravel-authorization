@@ -23,7 +23,7 @@ use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -256,11 +256,11 @@ final class WildcardPermissionTest extends TestCase
 
     /**
      * Wildcard matching is inherited through roles — a role holding `posts:*`
-     * flows through to the identity.
+     * flows through to the grantee.
      *
      * @return void
      */
-    public function testIdentityInheritsRoleWildcard(): void
+    public function testGranteeInheritsRoleWildcard(): void
     {
         Permission::create([
             'id'    => (string) Str::uuid(),
@@ -274,7 +274,7 @@ final class WildcardPermissionTest extends TestCase
         ]);
         $role->givePermission('posts:*');
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('editor');
 
         self::assertTrue($user->fresh()?->hasPermission(self::ASKED_ACTION));
@@ -414,9 +414,9 @@ final class WildcardPermissionTest extends TestCase
      * and return the identity.
      *
      * @param  string  $name
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function userHolding(string $name): StubIdentity
+    private function userHolding(string $name): StubGrantee
     {
         Permission::create([
             'id'    => (string) Str::uuid(),
@@ -424,7 +424,7 @@ final class WildcardPermissionTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission($name);
 
         return $user;

@@ -30,7 +30,7 @@ use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Fixtures\BulkChecks\FailingTenantTree;
@@ -189,8 +189,8 @@ final class PossessionLimitsTest extends TestCase
      */
     public function testTheStoredPoliciesOfTheSubjectAndItsRolesLimit(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-1']);
-        $identity  = StubIdentity::create(['id' => 'person-1']);
+        $principal = StubGrantee::create(['id' => 'principal-1']);
+        $identity  = StubGrantee::create(['id' => 'person-1']);
         $staff     = Role::create(['name' => 'staff']);
         $editor    = Role::create(['name' => 'editor', 'parent_id' => $staff->id]);
         $subject   = new Subject($principal, $identity);
@@ -234,8 +234,8 @@ final class PossessionLimitsTest extends TestCase
 
         $this->app?->instance(TenantTree::class, (new StubTenantTree)->put($child, $parent));
 
-        $user    = StubIdentity::create(['id' => 'user-1']);
-        $manager = StubIdentity::create(['id' => 'manager']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
+        $manager = StubGrantee::create(['id' => 'manager']);
         $narrow  = self::allowing('narrow', 'posts:read');
 
         self::grants()->grantPermission($manager, Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
@@ -269,7 +269,7 @@ final class PossessionLimitsTest extends TestCase
      */
     public function testWhatRestrictsNamingHalfATenantLimitsInEveryReach(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($user, $user);
         $scope   = new GrantScope(new Reference('tenant', 'parent'));
         $grantee = ['authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1', 'include_subtree' => true];
@@ -317,7 +317,7 @@ final class PossessionLimitsTest extends TestCase
      */
     public function testTheAttachmentsAndGuardrailsOfTheReachAreBoundedAndPinned(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($user, $user);
         $allow   = self::allowing('open', 'posts:read');
 
@@ -378,7 +378,7 @@ final class PossessionLimitsTest extends TestCase
      */
     public function testAnUnreadableStoredPolicyLimits(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = self::allowing('broken', 'posts:read');
 
         self::grants()->attachPolicy($user, $policy);
@@ -399,8 +399,8 @@ final class PossessionLimitsTest extends TestCase
      */
     public function testAnotherGranteesRowsNeverLimit(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
-        $other = StubIdentity::create(['id' => 'other']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
+        $other = StubGrantee::create(['id' => 'other']);
         $role  = Role::create(['name' => 'theirs']);
 
         self::grants()->grantRole($other, $role);
@@ -426,7 +426,7 @@ final class PossessionLimitsTest extends TestCase
      */
     public function testARoleHeldOutsideTheReachNeverLimits(): void
     {
-        $user = StubIdentity::create(['id' => 'user-9']);
+        $user = StubGrantee::create(['id' => 'user-9']);
         $role = Role::create(['name' => 'away']);
 
         self::grants()->grantRole($user, $role, tenant: new Reference('tenant', 'other'));
@@ -448,8 +448,8 @@ final class PossessionLimitsTest extends TestCase
      */
     public function testARoleHeldThroughAnActivationLimits(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-bg']);
-        $person  = StubIdentity::create(['id' => 'person-bg']);
+        $user    = StubGrantee::create(['id' => 'user-bg']);
+        $person  = StubGrantee::create(['id' => 'person-bg']);
         $machine = StubMachine::create(['id' => 'machine-bg']);
         $role    = self::emergencyRole('posts:edit');
         $tenant  = ['tenant_type' => 'tenant', 'tenant_id' => 'other'];
@@ -492,7 +492,7 @@ final class PossessionLimitsTest extends TestCase
      */
     public function testManyPermissionsAreWeighedInOnePass(): void
     {
-        $user    = StubIdentity::query()->create(['id' => 'user-1']);
+        $user    = StubGrantee::query()->create(['id' => 'user-1']);
         $subject = new Subject($user, $user);
         $sources = static fn (array $policies): CheckSources => new CheckSources($policies, null, [], new CheckContext, static fn (): ?string => null, new SessionCaps);
         $denying = self::policy([['effect' => 'deny', 'actions' => ['posts:read']]]);
@@ -541,7 +541,7 @@ final class PossessionLimitsTest extends TestCase
      */
     public function testTheIdentitysPoliciesAndTheConfiguredTablesAreRead(): void
     {
-        $user    = StubIdentity::query()->create(['id' => 'user-1']);
+        $user    = StubGrantee::query()->create(['id' => 'user-1']);
         $sources = new CheckSources([], null, [], new CheckContext, static fn (): ?string => null, new SessionCaps);
 
         self::grants()->attachPolicy($user, self::denying('no-edit', 'posts:edit'));

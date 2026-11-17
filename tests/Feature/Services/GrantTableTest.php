@@ -85,7 +85,7 @@ final class GrantTableTest extends TestCase
         self::assertNull($change->previousExpiresAt);
         self::assertSame([[
             'role_id'           => $role->id,
-            'authorizable_type' => 'stub_identity',
+            'authorizable_type' => 'stub_grantee',
             'authorizable_id'   => 'user-1',
             'tenant_type'       => null,
             'tenant_id'         => null,
@@ -107,7 +107,7 @@ final class GrantTableTest extends TestCase
         $role  = self::role();
         $other = self::role('viewer');
 
-        (new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', 'user-1', null, self::tenant()))->grant($role->id, null);
+        (new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_grantee', 'user-1', null, self::tenant()))->grant($role->id, null);
         self::table(tenant: self::tenant(), includeSubtree: false)->grant($other->id, null);
 
         self::assertEquals([$role->id => true, $other->id => false], self::reaches());
@@ -123,7 +123,7 @@ final class GrantTableTest extends TestCase
     public function testAnotherReachOnAHeldGrantChangesTheReach(): void
     {
         $role  = self::role();
-        $actor = new Reference('stub_identity', 'admin');
+        $actor = new Reference('stub_grantee', 'admin');
 
         self::table(tenant: self::tenant())->grant($role->id, Carbon::parse('2026-07-02 12:00:00'));
 
@@ -136,7 +136,7 @@ final class GrantTableTest extends TestCase
         self::assertEquals([$role->id => false], self::reaches());
         self::assertSame(['2026-07-02 12:00:00'], self::expiries());
         self::assertSame('2026-07-01 12:30:00', self::rows()[0]['updated_at']);
-        self::assertSame([[$role->id, 'stub_identity', 'admin']], self::grantors());
+        self::assertSame([[$role->id, 'stub_grantee', 'admin']], self::grantors());
         self::assertSame(GrantOutcome::UNCHANGED, self::table(tenant: self::tenant(), includeSubtree: false)->grant($role->id, Carbon::parse('2026-07-02 12:00:00'))->outcome);
     }
 
@@ -218,9 +218,9 @@ final class GrantTableTest extends TestCase
     public function testAGrantForAnApplicationIsAGrantApart(): void
     {
         $role   = self::role();
-        $admin  = new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', 'user-1', null, null, true, 'admin');
+        $admin  = new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_grantee', 'user-1', null, null, true, 'admin');
         $every  = self::table();
-        $mobile = new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', 'user-1', null, null, true, 'mobile');
+        $mobile = new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_grantee', 'user-1', null, null, true, 'mobile');
 
         self::assertSame(GrantOutcome::GRANTED, $admin->grant($role->id, null)->outcome);
         self::assertSame(GrantOutcome::GRANTED, $every->grant($role->id, null)->outcome);
@@ -426,7 +426,7 @@ final class GrantTableTest extends TestCase
         self::insertRow($role->id, ['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a', 'application' => 'web']);
         self::table()->grant($role->id, null);
 
-        DB::table('authorizable_roles')->insert(['role_id' => $role->id, 'authorizable_type' => 'stub_identity', 'authorizable_id' => 'user-2', 'tenant_id' => 'tenant-a']);
+        DB::table('authorizable_roles')->insert(['role_id' => $role->id, 'authorizable_type' => 'stub_grantee', 'authorizable_id' => 'user-2', 'tenant_id' => 'tenant-a']);
 
         [$grants, $malformed] = self::table()->grantsInEveryScope();
 
@@ -517,7 +517,7 @@ final class GrantTableTest extends TestCase
         $locks = $this->recordRowLocks();
 
         self::assertSame(GrantOutcome::UNCHANGED, $table->grant($role->id, null)->outcome);
-        self::assertSame([['authorizable_roles', ['stub_identity', 'user-1', $role->id]]], $locks->getArrayCopy());
+        self::assertSame([['authorizable_roles', ['stub_grantee', 'user-1', $role->id]]], $locks->getArrayCopy());
     }
 
     /**
@@ -548,7 +548,7 @@ final class GrantTableTest extends TestCase
     {
         $role = self::role();
 
-        (new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_second_identity', 'user-1'))->grant($role->id, null);
+        (new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_second_grantee', 'user-1'))->grant($role->id, null);
 
         self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)->outcome);
         self::assertSame([], self::table()->held([]));
@@ -959,15 +959,15 @@ final class GrantTableTest extends TestCase
     {
         $role  = self::role();
         $other = self::role('viewer');
-        $actor = new Reference('stub_identity', 'admin');
-        $below = new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', 'user-1', $actor, self::tenant(), true, 'admin');
+        $actor = new Reference('stub_grantee', 'admin');
+        $below = new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_grantee', 'user-1', $actor, self::tenant(), true, 'admin');
         $node  = $below->reaching(false);
 
         $node->grant($role->id, null);
         $below->grant($other->id, null);
 
         self::assertEquals([$role->id => false, $other->id => true], self::reaches());
-        self::assertEqualsCanonicalizing([[$role->id, 'stub_identity', 'admin'], [$other->id, 'stub_identity', 'admin']], self::grantors());
+        self::assertEqualsCanonicalizing([[$role->id, 'stub_grantee', 'admin'], [$other->id, 'stub_grantee', 'admin']], self::grantors());
         $scopes = DB::table('authorizable_roles')->distinct()->get(['tenant_type', 'tenant_id', 'application']);
 
         self::assertSame([['stub_tenant', 'tenant-a', 'admin']], $scopes->map(static fn (object $row): array => \array_values((array) $row))->all());
@@ -1009,7 +1009,7 @@ final class GrantTableTest extends TestCase
     {
         $held    = self::role();
         $fresh   = self::role('viewer');
-        $actor   = new Reference('stub_identity', 'admin');
+        $actor   = new Reference('stub_grantee', 'admin');
         $expiry  = Carbon::parse('2026-07-02 12:00:00');
         $another = Carbon::parse('2026-07-09 12:00:00');
 
@@ -1025,7 +1025,7 @@ final class GrantTableTest extends TestCase
         self::assertEquals([$held->id => false], self::reaches());
         self::assertSame(['2026-07-02 12:00:00'], self::expiries());
         self::assertSame([self::NOW, '2026-07-01 12:30:00'], [self::rows()[0]['created_at'], self::rows()[0]['updated_at']]);
-        self::assertSame([[$held->id, 'stub_identity', 'admin']], self::grantors());
+        self::assertSame([[$held->id, 'stub_grantee', 'admin']], self::grantors());
         self::assertSame(GrantOutcome::UNCHANGED, $node->rearmWithReach($held->id, $another)->outcome);
         self::assertSame(GrantOutcome::GRANTED, $node->rearmWithReach($fresh->id, null)->outcome);
         self::assertEquals([$held->id => false, $fresh->id => false], self::reaches());
@@ -1038,7 +1038,7 @@ final class GrantTableTest extends TestCase
     }
 
     /**
-     * Return a grant table writer for a stub identity's roles, recording the
+     * Return a grant table writer for a stub grantee's roles, recording the
      * given actor on the rows it writes.
      *
      * @param  string  $granteeId
@@ -1049,7 +1049,7 @@ final class GrantTableTest extends TestCase
      */
     private static function table(string $granteeId = 'user-1', ?Reference $grantedBy = null, ?Reference $tenant = null, bool $includeSubtree = true): GrantTable
     {
-        return new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', $granteeId, $grantedBy, $tenant, $includeSubtree);
+        return new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_grantee', $granteeId, $grantedBy, $tenant, $includeSubtree);
     }
 
     /**
@@ -1110,7 +1110,7 @@ final class GrantTableTest extends TestCase
     }
 
     /**
-     * Insert a role grant row for the stub identity directly, as another writer
+     * Insert a role grant row for the stub grantee directly, as another writer
      * would, with the given columns.
      *
      * @param  string  $roleId
@@ -1121,7 +1121,7 @@ final class GrantTableTest extends TestCase
     {
         DB::table('authorizable_roles')->insert([
             'role_id'           => $roleId,
-            'authorizable_type' => 'stub_identity',
+            'authorizable_type' => 'stub_grantee',
             'authorizable_id'   => 'user-1',
             ...$columns,
         ]);
@@ -1153,7 +1153,7 @@ final class GrantTableTest extends TestCase
     }
 
     /**
-     * Return the grants of every scope the stub identity holds, those for every
+     * Return the grants of every scope the stub grantee holds, those for every
      * application first.
      *
      * @return list<array{0: string, 1: \SineMacula\Laravel\Authorization\Support\GrantScope}>

@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions as Actions;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -105,7 +105,7 @@ final class ExcludedRolesTest extends TestCase
     {
         $junior       = Role::query()->create(['name' => 'junior', 'rank' => 9]);
         $other        = Role::query()->create(['name' => 'other', 'rank' => 8]);
-        $impersonator = new Reference('stub_identity', 'operator');
+        $impersonator = new Reference('stub_grantee', 'operator');
         $refusing     = static fn (string $asked): Decision => $asked === Actions::ADMINISTRATION_IMPERSONATED ? self::denied() : Decision::allow(DecisionStage::ALLOW);
 
         self::assertSame(DecisionReason::ADMINISTRATION_IMPERSONATING, self::refusal(Actions::ROLE_EXCLUSION_REMOVE, $junior, $other, $refusing, $impersonator));
@@ -130,7 +130,7 @@ final class ExcludedRolesTest extends TestCase
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, ExcludedRoles::refusal($operation, $role, null, $operation->toResourceReference(), self::checks()));
         self::assertSame(
             DecisionReason::ADMINISTRATION_UNPROVABLE,
-            ExcludedRoles::refusal($operation, $role, StubIdentity::query()->create(['id' => 'record']), $operation->toResourceReference(), self::checks()),
+            ExcludedRoles::refusal($operation, $role, StubGrantee::query()->create(['id' => 'record']), $operation->toResourceReference(), self::checks()),
         );
     }
 
@@ -166,7 +166,7 @@ final class ExcludedRolesTest extends TestCase
      */
     private static function checks(?\Closure $decide = null): FurtherChecks
     {
-        $actor = StubIdentity::query()->firstOrCreate(['id' => 'admin']);
+        $actor = StubGrantee::query()->firstOrCreate(['id' => 'admin']);
 
         if (!$actor->hasRole('chief')) {
             app(GrantService::class)->grantRole($actor, Role::query()->create(['name' => 'chief', 'rank' => 2]));

@@ -14,8 +14,8 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -34,7 +34,7 @@ use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ReportsEveryDecision;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -155,7 +155,7 @@ final class DelegatedAdministrationTest extends TestCase
 
         $deny = Policy::create(['name' => 'no-' . $actions[0], 'document' => ['statements' => [['effect' => 'deny', 'actions' => [$actions[0]]]]]]);
 
-        self::grants()->attachPolicy(StubIdentity::query()->findOrFail('admin-1'), $deny);
+        self::grants()->attachPolicy(StubGrantee::query()->findOrFail('admin-1'), $deny);
 
         self::assertRefusedWithNothingWritten($call, $actor, DecisionReason::EXPLICIT_DENY, $actions[0]);
     }
@@ -625,7 +625,7 @@ final class DelegatedAdministrationTest extends TestCase
     public function testAnImpersonatedChangeNeedsTheImpersonatedRight(): void
     {
         $actor   = self::administrator([Actions::PERMISSION_REVOKE])->impersonatedBy(new Reference('support', '9'));
-        $holder  = StubIdentity::query()->findOrFail('admin-1');
+        $holder  = StubGrantee::query()->findOrFail('admin-1');
         $granted = static fn (): mixed => self::grants()->grantPermission(self::user(), self::permission('posts:edit'));
 
         $granted();
@@ -839,11 +839,11 @@ final class DelegatedAdministrationTest extends TestCase
     /**
      * Return the grantee the calls change, created on first use.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function user(): StubIdentity
+    private static function user(): StubGrantee
     {
-        return StubIdentity::query()->firstOrCreate(['id' => 'user-1']);
+        return StubGrantee::query()->firstOrCreate(['id' => 'user-1']);
     }
 
     /**

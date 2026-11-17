@@ -25,14 +25,14 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
-use Tests\Feature\Stubs\CustomGrantsIdentity;
+use Tests\Feature\Stubs\CustomGrantsGrantee;
 use Tests\Feature\Stubs\HiddenPolicy;
 use Tests\Feature\Stubs\OwnPoliciesGrantee;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubTenant;
-use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Feature\Stubs\SuspendableGrantee;
 use Tests\Feature\Stubs\UndeclaredRolesGrantee;
 use Tests\TestCase;
 
@@ -66,7 +66,7 @@ final class GrantProvenanceResolverTest extends TestCase
     public function testADirectGrantIsHeldWithItsRow(): void
     {
         $tenant = StubTenant::query()->create(['id' => 'tenant-1', 'name' => 'tenant-1']);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:*']));
         $user->givePermission(Permission::create(['name' => 'posts:read']), null, $tenant, true, 'web');
@@ -101,7 +101,7 @@ final class GrantProvenanceResolverTest extends TestCase
         $author = Role::create(['name' => 'author']);
         $editor = Role::create(['name' => 'editor', 'parent_id' => $author->id]);
         $writer = Role::create(['name' => 'writer']);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $read   = Permission::create(['name' => 'posts:read']);
 
         $author->givePermissionTo($read);
@@ -133,8 +133,8 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testTheIdentityGrantsOnlyWhenItGrantsToTheSubject(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-1']);
-        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $principal = StubGrantee::create(['id' => 'principal-1']);
+        $identity  = StubSecondGrantee::create(['id' => 'person-1']);
         $machine   = StubMachine::create(['id' => 'machine-1']);
         $read      = Permission::create(['name' => 'posts:read']);
 
@@ -146,7 +146,7 @@ final class GrantProvenanceResolverTest extends TestCase
         self::assertEquals([new GrantProvenance(GrantSource::PERMISSION, 'posts:read', Reference::of($identity), true, [], true)], $grants);
         self::assertSame([null, []], GrantProvenanceResolver::permissionFor(new Subject($principal, $machine), 'posts:read'));
 
-        $suspended = SuspendableIdentity::create(['id' => 'person-2']);
+        $suspended = SuspendableGrantee::create(['id' => 'person-2']);
 
         $suspended->givePermission($read);
         $suspended->suspended = true;
@@ -162,7 +162,7 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testACustomGranteeIsUnavailable(): void
     {
-        $user = CustomGrantsIdentity::create(['id' => 'custom-1']);
+        $user = CustomGrantsGrantee::create(['id' => 'custom-1']);
 
         $own = GrantProvenanceResolver::permissionFor(new Subject($user, $user), 'reports:read');
 
@@ -170,7 +170,7 @@ final class GrantProvenanceResolverTest extends TestCase
         self::assertSame([null, []], GrantProvenanceResolver::permissionFor(new Subject($user, $user), 'reports:write'));
         self::assertEquals(
             ['reports:read', [GrantProvenance::unavailable('reports:read', null, true)]],
-            GrantProvenanceResolver::permissionFor(new Subject(StubIdentity::create(['id' => 'principal-1']), new CustomGrantsIdentity(['id' => 'unsaved'])), 'reports:read'),
+            GrantProvenanceResolver::permissionFor(new Subject(StubGrantee::create(['id' => 'principal-1']), new CustomGrantsGrantee(['id' => 'unsaved'])), 'reports:read'),
         );
     }
 
@@ -188,7 +188,7 @@ final class GrantProvenanceResolverTest extends TestCase
         $tenant = StubTenant::query()->create(['id' => 'tenant-1', 'name' => 'tenant-1']);
         $author = Role::create(['name' => 'author']);
         $editor = Role::create(['name' => 'editor', 'parent_id' => $author->id]);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $own    = self::policy('own');
         $shared = self::policy('shared');
 
@@ -229,7 +229,7 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testAnAttachmentNamingHalfATenantIsExplainedForItsDeniesAlone(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
         $role  = Role::create(['name' => 'editor']);
         $names = ['whole', 'keyless', 'mixed', 'owned', 'role half', 'role owned', 'role both', 'own and role half'];
         $made  = [];
@@ -302,7 +302,7 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testAnAttachmentNamingHalfATenantIsNeverWhereAnAllowCameFrom(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $whole  = Role::create(['name' => 'whole']);
         $half   = Role::create(['name' => 'half']);
         $policy = Policy::create(['name' => 'p', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
@@ -344,7 +344,7 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testTheRolesAreReadOnlyWhenOneHoldsAPolicy(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->assignRole(Role::create(['name' => 'editor']));
 
@@ -371,7 +371,7 @@ final class GrantProvenanceResolverTest extends TestCase
     {
         $author = Role::create(['name' => 'author']);
         $editor = Role::create(['name' => 'editor', 'parent_id' => $author->id]);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
 
         $author->givePermissionTo(Permission::create(['name' => 'posts:read']));
         $author->attachPolicy(self::policy('shared'));
@@ -415,8 +415,8 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testTheIdentityPolicies(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-1']);
-        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $principal = StubGrantee::create(['id' => 'principal-1']);
+        $identity  = StubSecondGrantee::create(['id' => 'person-1']);
         $machine   = StubMachine::create(['id' => 'machine-1']);
         $mixed     = Policy::create(['name' => 'mixed', 'document' => ['statements' => [
             ['effect' => 'allow', 'actions' => ['posts:read']],
@@ -440,7 +440,7 @@ final class GrantProvenanceResolverTest extends TestCase
             $recorder->evidenceFor(Decision::allow(DecisionStage::ALLOW, [new StatementReference('mixed', 0, $mixed->id)]))->grants,
         );
 
-        $coded = GrantProvenanceResolver::policiesOf($user = CustomGrantsIdentity::create(['id' => 'custom-1']), $custom, true);
+        $coded = GrantProvenanceResolver::policiesOf($user = CustomGrantsGrantee::create(['id' => 'custom-1']), $custom, true);
 
         self::assertSame(['coded'], self::names($coded));
         self::assertEquals(
@@ -520,7 +520,7 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testAPolicyTheModelHidesIsLeftOut(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $role   = Role::create(['name' => 'editor']);
         $hidden = self::policy('hidden');
         $shown  = self::policy('shown');
@@ -553,8 +553,8 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testAWarmCacheDecidesAndAStaleGrantIsUnavailable(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
-        $bare = StubIdentity::create(['id' => 'user-2']);
+        $user = StubGrantee::create(['id' => 'user-1']);
+        $bare = StubGrantee::create(['id' => 'user-2']);
         $own  = self::policy('own');
         $read = Permission::create(['name' => 'posts:read']);
 
@@ -616,7 +616,7 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testWithoutACacheTheRowsDecide(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $own  = self::policy('own');
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
@@ -649,7 +649,7 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testAColdCacheKeepsNothing(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
         $user->attachPolicy(self::policy('own'));
@@ -680,7 +680,7 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testAnUnreadablePolicyThrows(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $broken = self::policy('broken');
 
         $user->attachPolicy($broken);
@@ -703,7 +703,7 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testARoleHeldThroughAnActivationIsNamedAsBreakGlass(): void
     {
-        $user       = StubIdentity::create(['id' => 'user-1']);
+        $user       = StubGrantee::create(['id' => 'user-1']);
         $role       = self::emergencyRole('posts:edit');
         $shared     = self::policy('shared');
         $activation = self::activate($user, $role);
@@ -722,7 +722,7 @@ final class GrantProvenanceResolverTest extends TestCase
 
         $recorder = new EvidenceRecorder;
 
-        GrantProvenanceResolver::policiesOf(StubIdentity::query()->findOrFail('user-1'), $recorder);
+        GrantProvenanceResolver::policiesOf(StubGrantee::query()->findOrFail('user-1'), $recorder);
 
         $routes = $recorder->evidenceFor(Decision::allow(DecisionStage::ALLOW, [new StatementReference('shared', 0, $shared->id)]))->grants;
 
@@ -747,7 +747,7 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testAColdCacheKeepsTheActivationsBehindWhatItRead(): void
     {
-        $user       = StubIdentity::create(['id' => 'user-1']);
+        $user       = StubGrantee::create(['id' => 'user-1']);
         $role       = self::emergencyRole('posts:edit');
         $shared     = self::policy('shared');
         $own        = self::policy('own');
@@ -775,7 +775,7 @@ final class GrantProvenanceResolverTest extends TestCase
      */
     public function testAPermissionHeldBothWaysKeepsItsActivationAsAList(): void
     {
-        $user       = StubIdentity::create(['id' => 'user-1']);
+        $user       = StubGrantee::create(['id' => 'user-1']);
         $activation = self::activate($user, self::emergencyRole('posts:edit'));
 
         $user->givePermission(Permission::query()->where('name', 'posts:edit')->firstOrFail());

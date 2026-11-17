@@ -10,14 +10,14 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
-use SineMacula\Laravel\Authorization\Events\Identity\BreakGlassExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassExpired;
 use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use SineMacula\Laravel\Authorization\Services\Support\ExpiredActivations;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ReadsDispatchedEvents;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -71,7 +71,7 @@ final class ExpiredActivationsTest extends TestCase
      */
     public function testRecordsTheExpiryOfEachUnendedActivation(): void
     {
-        $user    = StubIdentity::query()->create(['id' => 'user-1']);
+        $user    = StubGrantee::query()->create(['id' => 'user-1']);
         $role    = self::emergencyRole();
         $tenant  = new Reference('tenant', 'acct1');
         $expired = self::activate($user, $role, [
@@ -120,7 +120,7 @@ final class ExpiredActivationsTest extends TestCase
      */
     public function testPretendingCountsWithoutWriting(): void
     {
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
         $role = self::emergencyRole();
 
         self::activate($user, $role, ['expires_at' => Carbon::parse('2026-07-01 11:30:00')]);
@@ -144,7 +144,7 @@ final class ExpiredActivationsTest extends TestCase
      */
     public function testEachChunkIsOneOperation(): void
     {
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
         $role = self::emergencyRole();
 
         foreach (['11:00', '11:10', '11:20'] as $at) {
@@ -172,7 +172,7 @@ final class ExpiredActivationsTest extends TestCase
      */
     public function testAnActivationEndedMeanwhileIsLeft(): void
     {
-        $user       = StubIdentity::query()->create(['id' => 'user-1']);
+        $user       = StubGrantee::query()->create(['id' => 'user-1']);
         $activation = self::activate($user, self::emergencyRole(), ['expires_at' => Carbon::parse('2026-07-01 11:30:00')]);
         $ended      = ['ended_at' => '2026-07-01 11:29:00', 'ended_by_type' => 'user', 'ended_by_id' => 'user-1', 'end_reason' => 'surrendered'];
 
@@ -206,7 +206,7 @@ final class ExpiredActivationsTest extends TestCase
      */
     public function testTheRestOfAChunkIsRecordedPastOneEndedMeanwhile(): void
     {
-        $user       = StubIdentity::query()->create(['id' => 'user-1']);
+        $user       = StubGrantee::query()->create(['id' => 'user-1']);
         $role       = self::emergencyRole();
         $ids        = \array_map(static fn (string $at): string => self::activate($user, $role, ['expires_at' => Carbon::parse('2026-07-01 ' . $at)])->id, ['11:30', '11:40']);
         $connection = AuthorizationConnection::connection();
@@ -247,7 +247,7 @@ final class ExpiredActivationsTest extends TestCase
      */
     public function testAHalfTenantIsRecordedWithNoEvent(): void
     {
-        $user     = StubIdentity::query()->create(['id' => 'user-1']);
+        $user     = StubGrantee::query()->create(['id' => 'user-1']);
         $role     = self::emergencyRole();
         $half     = self::activate($user, $role, ['tenant_type' => 'tenant', 'tenant_id' => null, 'expires_at' => Carbon::parse('2026-07-01 11:30:00')]);
         $platform = self::activate($user, $role, ['expires_at' => Carbon::parse('2026-07-01 11:40:00')]);

@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardUserIdentityDirectory;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
@@ -36,7 +36,7 @@ final class GuardUserIdentityDirectoryTest extends TestCase
     {
         self::assertInstanceOf(AuthGuardSubjectResolver::class, $this->app?->make(SubjectResolver::class));
 
-        foreach ([Reference::of(StubIdentity::create(['id' => 'user'])), new Reference('anything', 'missing')] as $identity) {
+        foreach ([Reference::of(StubGrantee::create(['id' => 'user'])), new Reference('anything', 'missing')] as $identity) {
             $principals = self::directory()->principalsOf($identity);
 
             self::assertSame([], $principals->principals);
@@ -57,7 +57,7 @@ final class GuardUserIdentityDirectoryTest extends TestCase
 
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver);
 
-        $principals = $directory->principalsOf(Reference::of(StubIdentity::create(['id' => 'user'])));
+        $principals = $directory->principalsOf(Reference::of(StubGrantee::create(['id' => 'user'])));
 
         self::assertSame([], $principals->principals);
         self::assertFalse($principals->isComplete);

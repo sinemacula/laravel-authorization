@@ -470,7 +470,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * Bind the policy resolver — the internal policy-gathering seam the manager
      * consults on every evaluation. The default implementation unions an
      * optional `PolicyStore`, asked on every check, with the principal's own
-     * attached policies, which the identity reads through the resolution cache.
+     * attached policies, which the grantee reads through the resolution cache.
      * Bound as the default, scoped to the request or job.
      *
      * @return void

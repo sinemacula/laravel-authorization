@@ -26,7 +26,7 @@ use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use Tests\Concerns\UsesAnAuthorizationConnection;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -151,7 +151,7 @@ final class ConflictRetriesTest extends TestCase
     {
         config(['authorization.administration.retries' => 0]);
 
-        $actor     = ActingContext::for(StubIdentity::query()->create(['id' => 'admin']));
+        $actor     = ActingContext::for(StubGrantee::query()->create(['id' => 'admin']));
         $operation = Operation::begin($actor, [PackagePermissions::ROLE_GRANT, PackagePermissions::ROLE_REVOKE]);
         $tries     = new \ArrayObject;
 

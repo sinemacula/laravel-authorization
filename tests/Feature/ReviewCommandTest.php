@@ -21,7 +21,7 @@ use Symfony\Component\Console\Input\ArgvInput;
 use Symfony\Component\Console\Output\BufferedOutput;
 use Symfony\Component\Console\Tester\CommandTester;
 use Tests\Concerns\ReviewsAccess;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -123,7 +123,7 @@ final class ReviewCommandTest extends TestCase
 
         $role  = self::role('reviewed');
         $child = self::role('child', $role);
-        $ann   = StubIdentity::query()->create(['id' => 'ann']);
+        $ann   = StubGrantee::query()->create(['id' => 'ann']);
         $soon  = now()->addWeek();
 
         self::grants()->grantRole($ann, $role, $soon, tenant: self::tenant('acct1'), application: 'web');
@@ -148,7 +148,7 @@ final class ReviewCommandTest extends TestCase
                 ReviewQuery::holders($role, ReviewScope::appliesIn(null, ApplicationSelector::none())),
             ],
             [
-                ['query' => 'holdings', 'reference' => StubIdentity::class . ':ann', '--rooted-within' => 'tenant:org1'],
+                ['query' => 'holdings', 'reference' => StubGrantee::class . ':ann', '--rooted-within' => 'tenant:org1'],
                 ReviewQuery::holdings(self::subjectOf($ann), ReviewScope::rootedWithin(self::tenant('org1'))),
             ],
             [
@@ -190,7 +190,7 @@ final class ReviewCommandTest extends TestCase
     {
         Carbon::setTestNow('2026-11-08 12:00:00');
 
-        $ann  = StubIdentity::query()->create(['id' => 'ann']);
+        $ann  = StubGrantee::query()->create(['id' => 'ann']);
         $role = self::role('auditor');
 
         self::grants()->grantPermission($ann, self::permission('audit:read'));
@@ -198,7 +198,7 @@ final class ReviewCommandTest extends TestCase
         self::grants()->grantRole($ann, $role);
         $role->givePermissionTo(self::permission('audit:*'));
 
-        $parameters = ['query' => 'holdings', 'reference' => StubIdentity::class . ':ann', '--everywhere' => true];
+        $parameters = ['query' => 'holdings', 'reference' => StubGrantee::class . ':ann', '--everywhere' => true];
         $query      = ReviewQuery::holdings(self::subjectOf($ann), ReviewScope::everywhere());
 
         [$code, $output, $errors] = $this->review([...$parameters, '--action' => 'audit:read']);
@@ -274,7 +274,7 @@ final class ReviewCommandTest extends TestCase
      */
     public function testAnInvalidInvocationExitsTwo(): void
     {
-        StubIdentity::query()->create(['id' => 'ann']);
+        StubGrantee::query()->create(['id' => 'ann']);
 
         $refusals = [
             [['query' => 'holders', '--secret' => 'sentinel-value'], 'The "--secret" option does not exist.'],
@@ -291,12 +291,12 @@ final class ReviewCommandTest extends TestCase
             ],
             [['query' => 'holdings', 'reference' => 'sentinel-value'], 'The reference must be in the format {morphType}:{key} (e.g. user:1).'],
             [['query' => 'holdings', 'reference' => 'sentinel-value:1'], 'The reference\'s type is not an Eloquent model.'],
-            [['query' => 'holdings', 'reference' => StubIdentity::class . ':sentinel-value'], 'The reference names no saved row.'],
-            [['query' => 'holders', 'reference' => 'role:x', '--tenant' => StubIdentity::class . ':sentinel-value'], 'The --tenant option names no saved row.'],
-            [['query' => 'holders', 'reference' => 'role:x', '--rooted-within' => StubIdentity::class . ':sentinel-value'], 'The --rooted-within option names no saved row.'],
+            [['query' => 'holdings', 'reference' => StubGrantee::class . ':sentinel-value'], 'The reference names no saved row.'],
+            [['query' => 'holders', 'reference' => 'role:x', '--tenant' => StubGrantee::class . ':sentinel-value'], 'The --tenant option names no saved row.'],
+            [['query' => 'holders', 'reference' => 'role:x', '--rooted-within' => StubGrantee::class . ':sentinel-value'], 'The --rooted-within option names no saved row.'],
             [['query' => 'holders', 'reference' => 'role:x', '--action' => 'sentinel-value'], 'The --action option is taken by the holdings query alone.'],
             [
-                ['query' => 'holdings', 'reference' => StubIdentity::class . ':ann', '--action' => 'sentinel-value:*'],
+                ['query' => 'holdings', 'reference' => StubGrantee::class . ':ann', '--action' => 'sentinel-value:*'],
                 'The --action option must be one action\'s name, with no wildcard (e.g. audit:read).',
             ],
         ];
@@ -320,7 +320,7 @@ final class ReviewCommandTest extends TestCase
 
         $out = new BufferedOutput;
 
-        self::assertSame(2, $kernel->handle(new ArgvInput(['artisan', 'authorization:review', 'holdings', StubIdentity::class . ':ann', '--action']), $out));
+        self::assertSame(2, $kernel->handle(new ArgvInput(['artisan', 'authorization:review', 'holdings', StubGrantee::class . ':ann', '--action']), $out));
         self::assertStringContainsString('The --action option must be given a value.', $out->fetch());
 
         foreach ([['holders', 'role:x'], ['unused', '--everywhere']] as $arguments) {
@@ -435,15 +435,15 @@ final class ReviewCommandTest extends TestCase
     /**
      * Return the subject the console resolves the identity to.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @return \SineMacula\Laravel\Authorization\Subject
      */
-    private static function subjectOf(StubIdentity $identity): Subject
+    private static function subjectOf(StubGrantee $identity): Subject
     {
         /** @var \SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver $resolver */
         $resolver = app(ConsoleSubjectResolver::class);
 
-        return $resolver->resolve(StubIdentity::class . ':' . Reference::of($identity)->id);
+        return $resolver->resolve(StubGrantee::class . ':' . Reference::of($identity)->id);
     }
 
     /**

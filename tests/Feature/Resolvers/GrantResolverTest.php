@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Feature\Stubs\RecordingLogger;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -73,7 +73,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testRolesResolveInGrantOrderAndPinEachRole(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $zeta   = Role::create(['name' => 'zeta']);
         $alpha  = Role::create(['name' => 'alpha']);
         $expiry = Carbon::parse('2026-07-01 12:10:00');
@@ -98,7 +98,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testNoGrantsResolveToNothing(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         self::assertSame([], GrantResolver::roles($user->roles(), new ResolutionPins)->value);
         self::assertNull(GrantResolver::roles($user->roles(), new ResolutionPins)->expiresIn);
@@ -119,7 +119,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testAPermissionHeldTwiceIsListedOnce(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $role = Role::create(['name' => 'writer']);
 
         $role->givePermission(Permission::create(['name' => 'posts:read']));
@@ -141,7 +141,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testARoleDeletedWhileResolvingIsLeftOut(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
         $first = Role::create(['name' => 'first']);
 
         $user->assignRole($first);
@@ -161,7 +161,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testPermissionsComeDirectlyAndThroughTheHierarchy(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $parent = Role::create(['name' => 'reader']);
         $role   = Role::create(['name' => 'writer', 'parent_id' => $parent->id]);
 
@@ -192,7 +192,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testAHierarchyThatMovesWhileResolvingIsUnstable(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $parent = Role::create(['name' => 'publisher']);
         $role   = Role::create(['name' => 'editor']);
 
@@ -218,8 +218,8 @@ final class GrantResolverTest extends TestCase
      */
     public function testAnActivatedRoleNamesItsActivationBehindWhatItGives(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
-        $other  = StubIdentity::create(['id' => 'user-2']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
+        $other  = StubGrantee::create(['id' => 'user-2']);
         $parent = Role::create(['name' => 'publisher']);
         $role   = Role::create(['name' => 'responder', 'parent_id' => $parent->id]);
         $policy = Policy::create(['name' => 'publishers', 'document' => ['version' => 1, 'statements' => []]]);
@@ -258,7 +258,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testAMovedHierarchyStillNamesTheActivation(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $parent = Role::create(['name' => 'publisher']);
         $role   = Role::create(['name' => 'responder']);
 
@@ -284,7 +284,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testARolesPermissionThatExpiresSoonerBoundsTheResolution(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $role = Role::create(['name' => 'writer']);
 
         $role->givePermission(Permission::create(['name' => 'posts:write']), Carbon::parse('2026-07-01 12:02:00'));
@@ -307,7 +307,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testRoleKeysComeThroughTheHierarchyAndPinEachRole(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $parent = Role::create(['name' => 'reader']);
         $role   = Role::create(['name' => 'writer', 'parent_id' => $parent->id]);
 
@@ -347,7 +347,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testRoleKeysWhoseHierarchyMovesWhileResolvingAreUnstable(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $parent = Role::create(['name' => 'publisher']);
         $role   = Role::create(['name' => 'editor']);
 
@@ -370,7 +370,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testAnActivatedRoleNamesItsActivationBehindItsKeys(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $parent  = Role::create(['name' => 'publisher']);
         $role    = Role::create(['name' => 'responder', 'parent_id' => $parent->id]);
         $granted = Role::create(['name' => 'editor']);
@@ -404,7 +404,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testARoutedResolutionSaysTheRoutesBehindEachPermission(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $role = Role::create(['name' => 'editor']);
 
         $role->givePermission(Permission::create(['name' => 'posts:edit']));
@@ -424,7 +424,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testPoliciesResolveInAttachmentOrderAndPinEachPolicy(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $writers = Policy::create(['name' => 'writers', 'document' => ['version' => 1, 'statements' => []]]);
         $readers = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
 
@@ -449,7 +449,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testPoliciesComeDirectlyAndThroughTheRoles(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $role   = Role::create(['name' => 'editor']);
         $own    = Policy::create(['name' => 'own', 'document' => ['version' => 1, 'statements' => []]]);
         $shared = Policy::create(['name' => 'shared', 'document' => ['version' => 1, 'statements' => []]]);
@@ -488,7 +488,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testAnAttachmentNamingHalfATenantResolvesToItsDeniesAlone(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
         $role  = Role::create(['name' => 'editor']);
         $names = ['whole', 'keyless', 'mixed', 'owned', 'role half', 'role owned'];
         $made  = [];
@@ -553,7 +553,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testAnAttachmentNamingHalfATenantCountsInItsApplicationAlone(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = Policy::create(['name' => 'mobile only', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:write']]]]]);
 
         DB::table('authorizable_policies')->insert([
@@ -586,7 +586,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testWithoutTheRolesOnlyTheGranteesOwnPoliciesResolve(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $role = Role::create(['name' => 'editor']);
         $own  = Policy::create(['name' => 'own', 'document' => ['version' => 1, 'statements' => []]]);
 
@@ -611,7 +611,7 @@ final class GrantResolverTest extends TestCase
      */
     public function testResolvingLeavesTheRelationAsItWas(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $relation = $user->policies();
 
         $user->attachPolicy(Policy::create(['name' => 'writers', 'document' => ['version' => 1, 'statements' => []]]));
@@ -630,8 +630,8 @@ final class GrantResolverTest extends TestCase
      */
     public function testAnotherGranteesInlinePolicyNeverResolves(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
-        $other  = StubIdentity::create(['id' => 'user-2']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
+        $other  = StubGrantee::create(['id' => 'user-2']);
         $theirs = $other->createInlinePolicy('theirs', ['version' => 1, 'statements' => []]);
 
         $user->attachPolicy($user->createInlinePolicy('mine', ['version' => 1, 'statements' => []]));
@@ -653,7 +653,7 @@ final class GrantResolverTest extends TestCase
         $logger = new RecordingLogger;
         $this->app?->instance('log', $logger);
 
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = Policy::create(['name' => 'broken', 'document' => ['version' => 1, 'statements' => []]]);
 
         $user->attachPolicy($policy);

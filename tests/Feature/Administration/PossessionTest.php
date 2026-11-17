@@ -28,7 +28,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -224,7 +224,7 @@ final class PossessionTest extends TestCase
         self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, Possession::refusal(...$this->grant($actor, GrantScope::platform(), grantable: true)));
         self::assertTrue($this->isPolicyGrantable($actor, $policy, GrantScope::platform()));
 
-        GrantService::instance()?->revokeRole(StubIdentity::query()->findOrFail('admin'), $restricted, tenant: new Reference('tenant', 't0'));
+        GrantService::instance()?->revokeRole(StubGrantee::query()->findOrFail('admin'), $restricted, tenant: new Reference('tenant', 't0'));
         self::restrictIn(new Reference('tenant', 't1'), [PackagePermissions::POLICY_GRANTABLE]);
 
         self::assertNull(Possession::refusal(...$this->grant($actor, GrantScope::platform(), grantable: true)));
@@ -255,7 +255,7 @@ final class PossessionTest extends TestCase
 
         $policy = Policy::create(['name' => 'delegates', 'document' => ['statements' => [['effect' => 'allow', 'actions' => [PackagePermissions::PERMISSION_GRANTABLE]]]]]);
 
-        GrantService::instance()?->attachPolicy(StubIdentity::query()->findOrFail('admin'), $policy, Carbon::now()->addDays(3));
+        GrantService::instance()?->attachPolicy(StubGrantee::query()->findOrFail('admin'), $policy, Carbon::now()->addDays(3));
 
         $stored   = self::allowedBy(new StatementReference('delegates', 0, $policy->id));
         $resource = self::allowedBy(new StatementReference('operations', 0, 'resource-policy', resource: OperationResource::TYPE . ':*'));
@@ -427,7 +427,7 @@ final class PossessionTest extends TestCase
         $deny = ['effect' => 'deny', 'actions' => $actions];
 
         GrantService::instance()?->attachPolicy($role, Policy::create(['name' => 'restricting-' . $tenant->id, 'document' => ['statements' => [$deny]]]));
-        GrantService::instance()?->grantRole(StubIdentity::query()->findOrFail('admin'), $role, tenant: $tenant);
+        GrantService::instance()?->grantRole(StubGrantee::query()->findOrFail('admin'), $role, tenant: $tenant);
 
         return $role;
     }
@@ -445,7 +445,7 @@ final class PossessionTest extends TestCase
      */
     private static function holder(array $options = [], string $permission = 'posts:edit'): Subject
     {
-        $actor = StubIdentity::query()->firstOrCreate(['id' => 'admin']);
+        $actor = StubGrantee::query()->firstOrCreate(['id' => 'admin']);
 
         $edit = Permission::query()->firstOrCreate(['name' => $permission]);
 
@@ -482,7 +482,7 @@ final class PossessionTest extends TestCase
         bool|CheckSources $sources = true,
         bool|Decision $grantable = false,
     ): array {
-        $grantee   = StubIdentity::query()->firstOrCreate(['id' => 'grantee']);
+        $grantee   = StubGrantee::query()->firstOrCreate(['id' => 'grantee']);
         $operation = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $grantee, Permission::query()->firstOrCreate(['name' => 'posts:edit']), $scope, $expiresAt);
         $decide    = function (string $action, ?ResourceReference $on) use ($allowed, $grantable): Decision {
             $this->asked[] = [$action, $on, TenantScope::currentTenant(), TenantScope::currentApplication(), TenantScope::isBelowTenant()];

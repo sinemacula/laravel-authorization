@@ -32,7 +32,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\ScopesQueries;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -99,13 +99,13 @@ final class PolicyRewriteTest extends TestCase
         $policy  = self::policy([self::READ, self::DENY]);
         $archive = ['effect' => 'allow', 'actions' => ['posts:archive']];
 
-        self::grants()->attachPolicy(StubIdentity::query()->create(['id' => 'holder']), $policy);
+        self::grants()->attachPolicy(StubGrantee::query()->create(['id' => 'holder']), $policy);
         self::grants()->grantPermission(self::actor(), Permission::query()->create(['name' => 'posts:edit']));
 
         self::assertNull($this->refusal($policy, [self::READ, self::EDIT, self::DENY]));
         self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $this->refusal($policy, [self::READ, $archive, self::DENY]));
 
-        BoundaryService::instance()?->set(StubIdentity::query()->create(['id' => 'bounded']), $policy);
+        BoundaryService::instance()?->set(StubGrantee::query()->create(['id' => 'bounded']), $policy);
 
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $this->refusal($policy, [self::READ, self::EDIT, self::DENY]));
         self::assertNotContains('posts:edit', $this->asked);
@@ -131,7 +131,7 @@ final class PolicyRewriteTest extends TestCase
         $role   = Role::query()->create(['name' => 'restricted']);
 
         self::grants()->grantPermission(self::actor(), Permission::query()->create(['name' => 'posts:edit']));
-        BoundaryService::instance()?->set(StubIdentity::query()->create(['id' => 'bounded']), $policy);
+        BoundaryService::instance()?->set(StubGrantee::query()->create(['id' => 'bounded']), $policy);
 
         self::assertNull($this->refusal($policy, [self::READ, self::EDIT, self::DENY], true));
 
@@ -154,7 +154,7 @@ final class PolicyRewriteTest extends TestCase
      */
     public function testTheHoldersOfBothDocumentsAreWeighed(): void
     {
-        $peer = StubIdentity::query()->create(['id' => 'peer']);
+        $peer = StubGrantee::query()->create(['id' => 'peer']);
 
         self::grants()->grantRole($peer, Role::query()->create(['name' => 'peer', 'rank' => 0]));
 
@@ -189,8 +189,8 @@ final class PolicyRewriteTest extends TestCase
 
         $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent)));
 
-        $user  = StubIdentity::query()->create(['id' => 'user-1']);
-        $admin = StubIdentity::query()->create(['id' => 'tenant-admin']);
+        $user  = StubGrantee::query()->create(['id' => 'user-1']);
+        $admin = StubGrantee::query()->create(['id' => 'tenant-admin']);
         $type  = (new StubTenant)->getMorphClass();
 
         foreach (['posts:read', 'posts:delete'] as $name) {
@@ -273,13 +273,13 @@ final class PolicyRewriteTest extends TestCase
     /**
      * Return the actor, holding the most senior rank, created on first use.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      *
      * @throws \Throwable
      */
-    private static function actor(): StubIdentity
+    private static function actor(): StubGrantee
     {
-        $actor = StubIdentity::query()->firstOrCreate(['id' => 'admin']);
+        $actor = StubGrantee::query()->firstOrCreate(['id' => 'admin']);
 
         if (!$actor->hasRole('chief')) {
             self::grants()->grantRole($actor, Role::query()->create(['name' => 'chief', 'rank' => 0]));

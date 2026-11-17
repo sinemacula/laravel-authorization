@@ -377,7 +377,7 @@ administration never grants anything it cannot justify.
   whether to show the administration area at all, decides the action alone; the administration stage never runs, and the
   service's own decision is still made on the operation.
 - **Console.** `authorization:grant` and `authorization:revoke` with `--actor` make the change as that actor, delegated,
-  with no session, so a role grant passes only when the actor outranks the identity and may hand out everything the
+  with no session, so a role grant passes only when the actor outranks the grantee and may hand out everything the
   role carries; without it they are trusted.
   `authorization:sync`'s `--actor` is recorded on its trusted operation alone.
 - **Attribute keys.** An application attribute provider declaring one of the operation resource's keys must declare it

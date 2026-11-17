@@ -37,7 +37,7 @@ use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\FixedSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSessionPolicySource;
 use Tests\Feature\Stubs\StubTenant;
@@ -83,7 +83,7 @@ final class ActingContextTest extends TestCase
      */
     public function testTheCurrentContextKeepsTheRequestsSubjectAndSession(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($user, $user, null, 'admin', 'web', 'session-1');
 
         $this->resolving($subject);
@@ -108,8 +108,8 @@ final class ActingContextTest extends TestCase
      */
     public function testAModelIsNamedWithoutASessionAndASubjectAsItIs(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
-        $admin   = StubIdentity::create(['id' => 'admin-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
+        $admin   = StubGrantee::create(['id' => 'admin-1']);
         $subject = new Subject($admin, $user, null, null, 'web', 'session-1');
 
         $this->resolving(new Subject($user, $user, null, 'admin', 'web', 'session-1'));
@@ -139,7 +139,7 @@ final class ActingContextTest extends TestCase
 
         $resolutions = [
             static fn (): ActingContext => ActingContext::current(),
-            static fn (): ActingContext => ActingContext::for(new StubIdentity(['id' => 'ghost'])),
+            static fn (): ActingContext => ActingContext::for(new StubGrantee(['id' => 'ghost'])),
             static fn (): ActingContext => ActingContext::for(new Subject(new \stdClass)),
             static fn (): ActingContext => ActingContext::for(new Subject(self::keyless())),
         ];
@@ -153,10 +153,10 @@ final class ActingContextTest extends TestCase
             self::assertSame('This action is unauthorized.', $refusal->getMessage());
         }
 
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         self::assertNull(ActingContext::for(new Subject($user, new \stdClass))->identity());
-        self::assertNull(ActingContext::for(new Subject($user, new StubIdentity(['id' => 'ghost'])))->identity());
+        self::assertNull(ActingContext::for(new Subject($user, new StubGrantee(['id' => 'ghost'])))->identity());
     }
 
     /**
@@ -172,8 +172,8 @@ final class ActingContextTest extends TestCase
      */
     public function testAContextBuiltWhileOrFromAPreviewIsRefused(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
-        $target = StubIdentity::create(['id' => 'user-2']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
+        $target = StubGrantee::create(['id' => 'user-2']);
         $named  = Previewing::current()->track(new Subject($target, $target));
 
         $this->resolving(new Subject($user, $user));
@@ -206,7 +206,7 @@ final class ActingContextTest extends TestCase
      */
     public function testWithoutAManagerNothingIsDecided(): void
     {
-        $user      = StubIdentity::create(['id' => 'user-1']);
+        $user      = StubGrantee::create(['id' => 'user-1']);
         $actor     = ActingContext::for(new Subject($user, $user));
         $container = Container::getInstance();
 
@@ -231,7 +231,7 @@ final class ActingContextTest extends TestCase
      */
     public function testTheCallsCapsCapEveryDecision(): void
     {
-        $admin = StubIdentity::create(['id' => 'admin-1']);
+        $admin = StubGrantee::create(['id' => 'admin-1']);
 
         $admin->givePermission(Permission::create(['name' => 'posts:*']));
 
@@ -254,7 +254,7 @@ final class ActingContextTest extends TestCase
      */
     public function testTheFurtherChecksAreTheActorsWithTheCallsCaps(): void
     {
-        $admin = StubIdentity::create(['id' => 'admin-1']);
+        $admin = StubGrantee::create(['id' => 'admin-1']);
 
         $admin->givePermission(Permission::create(['name' => 'posts:*']));
 
@@ -281,7 +281,7 @@ final class ActingContextTest extends TestCase
     {
         Event::fake();
 
-        $admin    = StubIdentity::create(['id' => 'admin-1']);
+        $admin    = StubGrantee::create(['id' => 'admin-1']);
         $actor    = ActingContext::for($admin);
         $decision = Decision::deny(DecisionReason::ADMINISTRATION_CONFLICT, DecisionStage::ADMINISTRATION);
         $named    = Operation::begin($actor, [PackagePermissions::ROLE_GRANT, PackagePermissions::ROLE_REVOKE]);
@@ -341,8 +341,8 @@ final class ActingContextTest extends TestCase
      */
     public function testAnImpersonatedContextNamesItsImpersonator(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
-        $support = StubIdentity::create(['id' => 'support-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
+        $support = StubGrantee::create(['id' => 'support-1']);
         $actor   = ActingContext::for($user)->capped(['posts:*']);
 
         self::assertTrue($actor->impersonatedBy($support)->isImpersonating());
@@ -369,7 +369,7 @@ final class ActingContextTest extends TestCase
     {
         Event::fake([AuthorizationFailed::class]);
 
-        $admin = StubIdentity::create(['id' => 'admin-1']);
+        $admin = StubGrantee::create(['id' => 'admin-1']);
 
         $admin->givePermission(Permission::create(['name' => 'authorization:*']));
 
@@ -408,7 +408,7 @@ final class ActingContextTest extends TestCase
     {
         Event::fake([DecisionEvaluated::class]);
 
-        $admin = StubIdentity::create(['id' => 'admin-1']);
+        $admin = StubGrantee::create(['id' => 'admin-1']);
 
         $admin->givePermission(Permission::create(['name' => PackagePermissions::ROLE_REVOKE]));
 
@@ -441,7 +441,7 @@ final class ActingContextTest extends TestCase
      */
     public function testTheChangesOfADelegatedOperationAreLockedAndValidated(): void
     {
-        $admin = StubIdentity::create(['id' => 'admin-1']);
+        $admin = StubGrantee::create(['id' => 'admin-1']);
 
         $admin->givePermission(Permission::create(['name' => PackagePermissions::ROLE_REVOKE]));
 
@@ -486,7 +486,7 @@ final class ActingContextTest extends TestCase
      */
     public function testABatchIsDecidedInAStableOrder(): void
     {
-        $admin = StubIdentity::create(['id' => 'admin-1']);
+        $admin = StubGrantee::create(['id' => 'admin-1']);
 
         $statement = static fn (string $effect, string $key, string $value): array => [
             'effect'     => $effect,
@@ -539,7 +539,7 @@ final class ActingContextTest extends TestCase
      */
     public function testABatchIsDecidedTenantByTenant(): void
     {
-        $admin = StubIdentity::create(['id' => 'admin-1']);
+        $admin = StubGrantee::create(['id' => 'admin-1']);
 
         $admin->attachPolicy(Policy::create(['name' => 'denier', 'document' => ['statements' => [[
             'effect'    => 'deny',
@@ -586,7 +586,7 @@ final class ActingContextTest extends TestCase
     {
         Event::fake([DecisionEvaluated::class]);
 
-        $admin = StubIdentity::create(['id' => 'admin-1']);
+        $admin = StubGrantee::create(['id' => 'admin-1']);
 
         $admin->givePermission(Permission::create(['name' => PackagePermissions::ROLE_REVOKE]));
 
@@ -642,11 +642,11 @@ final class ActingContextTest extends TestCase
     {
         $first  = self::createTenant('acting-a');
         $second = self::createTenant('acting-b');
-        $admin  = StubIdentity::create(['id' => 'admin-1']);
+        $admin  = StubGrantee::create(['id' => 'admin-1']);
 
         $admin->givePermission(Permission::create(['name' => 'posts:read']), null, $second);
 
-        $this->resolving(new Subject(StubIdentity::create(['id' => 'user-1']), null, $first));
+        $this->resolving(new Subject(StubGrantee::create(['id' => 'user-1']), null, $first));
 
         $actor  = ActingContext::for(new Subject($admin, $admin, $first));
         $decide = static fn (): bool => $actor->decide('posts:read')->isAllowed();
@@ -714,11 +714,11 @@ final class ActingContextTest extends TestCase
     /**
      * Return a saved identity whose key is empty.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function keyless(): StubIdentity
+    private static function keyless(): StubGrantee
     {
-        $identity = new StubIdentity(['id' => '']);
+        $identity = new StubGrantee(['id' => '']);
 
         $identity->exists = true;
 

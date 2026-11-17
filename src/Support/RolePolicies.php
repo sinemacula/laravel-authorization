@@ -18,22 +18,22 @@ use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
- * Reads the policies an identity gets through its roles.
+ * Reads the policies a grantee gets through its roles.
  *
  * A policy attached to a role, through the `authorizable_policies` table with
  * the role as the grantee, applies to whoever holds the role, and to whoever
  * holds a role below it when the hierarchy is enabled, as the role's
  * permissions do: the roles are read through `RoleGraph`, the same reach the
- * permissions take. It applies only where both grants hold: the identity's
- * grant of the role and the role's attachment of the policy each hold in the
- * current tenant (and through a tenant above it only when that grant reaches
- * its subtree) and application, and neither has expired, so a policy attached
- * to a role in one tenant applies only where the role is held there too. An
+ * permissions take. It applies only where both grants hold: the grantee's grant
+ * of the role and the role's attachment of the policy each hold in the current
+ * tenant (and through a tenant above it only when that grant reaches its
+ * subtree) and application, and neither has expired, so a policy attached to a
+ * role in one tenant applies only where the role is held there too. An
  * attachment naming half a tenant, and any attachment of a policy naming half a
  * tenant, counts for its denies alone wherever the role is held (see
  * `TenantColumns::attachments()`).
  *
- * The resolution first asks, in the query that reads the identity's own
+ * The resolution first asks, in the query that reads the grantee's own
  * attachments, whether any role holds a policy in the current scope, having
  * pinned the version every role's policy attachments share; only then are the
  * roles read. The roles are pinned before their hierarchy is read again, so a
@@ -105,7 +105,7 @@ final class RolePolicies
      * them when the hierarchy is enabled, within the current scope, pinning
      * every role reached before its hierarchy is read again.
      *
-     * The nearest expiry counts the identity's grants of the roles as well as
+     * The nearest expiry counts the grantee's grants of the roles as well as
      * the roles' attachments, since a policy stops applying when either lapses.
      *
      * A resolution tracking grant usage (see `ResolutionPins::isRouting()`), or

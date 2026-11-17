@@ -4,7 +4,7 @@ The events the package dispatches, reading a change for an audit log, and choosi
 
 Every event the package dispatches implements `SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent`, so one
 listener, or one audit mapper registration, covers them all. The grant, boundary and break-glass events, those under
-`Events\Identity`, also implement `IdentityEvent` and name their `grantee`; no other event does:
+`Events\Grantee`, also implement `GranteeEvent` and name their `grantee`; no other event does:
 
 ```php
 use Illuminate\Support\Facades\Event;
@@ -30,7 +30,7 @@ The change events (roles, permissions and policies created, updated and deleted;
 re-dated on and expired on a role; roles, permissions and policies granted to, revoked from, re-dated on and expired on
 a grantee; break-glass activations activated, surrendered, revoked and expired; policies attached to and detached from
 a resource, `Resource\PolicyAttached` and `Resource\PolicyDetached`; permission boundaries set and removed,
-`Identity\BoundarySet` and `Identity\BoundaryRemoved`; guardrails set and removed, `Guardrail\GuardrailSet` and
+`Grantee\BoundarySet` and `Grantee\BoundaryRemoved`; guardrails set and removed, `Guardrail\GuardrailSet` and
 `Guardrail\GuardrailRemoved`; pairs of mutually exclusive roles declared and removed, `Role\ExclusionDeclared` and
 `Role\ExclusionRemoved`) and `SystemOverrideUsed` are `final readonly` snapshots of plain values: a record is a
 `Reference`, its morph class under your morph map and its key as a string, never a model, alongside names, the scope,
@@ -57,7 +57,7 @@ use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
 
 Event::listen(static function (AuthorizationMutation $event): void {
-    $event->operation();       // 'identity.role.assigned': the kind of change, stable and unique per event class
+    $event->operation();       // 'grantee.role.assigned': the kind of change, stable and unique per event class
     $event->subject();         // Reference to the record the change is about, or null
     $event->tenant();          // Reference to the tenant it holds in, or that owns the record; null for the platform
     $event->application();     // the application it holds in, or null for every application
@@ -84,45 +84,45 @@ the grantees, the tenant and the scope's tenant and application are left out, si
 The IP address and the user agent the call came from are deliberately absent: they are personal data, carried to the
 grant hook alone, so no accessor returns them and `auditProperties()` never holds them.
 
-| Event                              | `operation()`                        | `subject()`                          | `grantees()`                                          |
-|------------------------------------|--------------------------------------|--------------------------------------|-------------------------------------------------------|
-| `Identity\RoleAssigned`            | `identity.role.assigned`             | the grantee                          | the grantee                                           |
-| `Identity\RoleRevoked`             | `identity.role.revoked`              | the grantee                          | the grantee                                           |
-| `Identity\RoleExpiryChanged`       | `identity.role.expiry_changed`       | the grantee                          | the grantee                                           |
-| `Identity\RoleExpired`             | `identity.role.expired`              | the grantee                          | the grantee                                           |
-| `Identity\PermissionGranted`       | `identity.permission.granted`        | the grantee                          | the grantee                                           |
-| `Identity\PermissionRevoked`       | `identity.permission.revoked`        | the grantee                          | the grantee                                           |
-| `Identity\PermissionExpiryChanged` | `identity.permission.expiry_changed` | the grantee                          | the grantee                                           |
-| `Identity\PermissionExpired`       | `identity.permission.expired`        | the grantee                          | the grantee                                           |
-| `Identity\PolicyAttached`          | `identity.policy.attached`           | the grantee                          | the grantee                                           |
-| `Identity\PolicyDetached`          | `identity.policy.detached`           | the grantee                          | the grantee                                           |
-| `Identity\PolicyExpiryChanged`     | `identity.policy.expiry_changed`     | the grantee                          | the grantee                                           |
-| `Identity\PolicyExpired`           | `identity.policy.expired`            | the grantee                          | the grantee                                           |
-| `Identity\BoundarySet`             | `identity.boundary.set`              | the grantee                          | the grantee                                           |
-| `Identity\BoundaryRemoved`         | `identity.boundary.removed`          | the grantee                          | the grantee                                           |
-| `Identity\BreakGlassActivated`     | `identity.break_glass.activated`     | the grantee                          | the grantee                                           |
-| `Identity\BreakGlassSurrendered`   | `identity.break_glass.surrendered`   | the grantee                          | the grantee                                           |
-| `Identity\BreakGlassRevoked`       | `identity.break_glass.revoked`       | the grantee                          | the grantee                                           |
-| `Identity\BreakGlassExpired`       | `identity.break_glass.expired`       | the grantee                          | the grantee                                           |
-| `Role\Created`                     | `role.created`                       | the role                             | none                                                  |
-| `Role\Updated`                     | `role.updated`                       | the role                             | none                                                  |
-| `Role\Deleted`                     | `role.deleted`                       | the role                             | every grantee that held it or a live activation of it |
-| `Role\PermissionGranted`           | `role.permission.granted`            | the role                             | the role                                              |
-| `Role\PermissionRevoked`           | `role.permission.revoked`            | the role                             | the role                                              |
-| `Role\PermissionExpiryChanged`     | `role.permission.expiry_changed`     | the role                             | the role                                              |
-| `Role\PermissionExpired`           | `role.permission.expired`            | the role                             | the role                                              |
-| `Permission\Created`               | `permission.created`                 | the permission                       | none                                                  |
-| `Permission\Updated`               | `permission.updated`                 | the permission                       | none                                                  |
-| `Permission\Deleted`               | `permission.deleted`                 | the permission                       | every grantee, then every role                        |
-| `Policy\Created`                   | `policy.created`                     | the policy                           | none                                                  |
-| `Policy\Updated`                   | `policy.updated`                     | the policy                           | none                                                  |
-| `Policy\Deleted`                   | `policy.deleted`                     | the policy                           | every grantee it was attached to                      |
-| `Resource\PolicyAttached`          | `resource.policy.attached`           | the record, or null for a whole type | none                                                  |
-| `Resource\PolicyDetached`          | `resource.policy.detached`           | the record, or null for a whole type | none                                                  |
-| `Guardrail\GuardrailSet`           | `guardrail.set`                      | the tenant, or null for the platform | none                                                  |
-| `Guardrail\GuardrailRemoved`       | `guardrail.removed`                  | the tenant, or null for the platform | none                                                  |
-| `Role\ExclusionDeclared`           | `role.exclusion.declared`            | the pair's first role                | none                                                  |
-| `Role\ExclusionRemoved`            | `role.exclusion.removed`             | the pair's first role                | none                                                  |
+| Event                             | `operation()`                       | `subject()`                          | `grantees()`                                          |
+|-----------------------------------|-------------------------------------|--------------------------------------|-------------------------------------------------------|
+| `Grantee\RoleAssigned`            | `grantee.role.assigned`             | the grantee                          | the grantee                                           |
+| `Grantee\RoleRevoked`             | `grantee.role.revoked`              | the grantee                          | the grantee                                           |
+| `Grantee\RoleExpiryChanged`       | `grantee.role.expiry_changed`       | the grantee                          | the grantee                                           |
+| `Grantee\RoleExpired`             | `grantee.role.expired`              | the grantee                          | the grantee                                           |
+| `Grantee\PermissionGranted`       | `grantee.permission.granted`        | the grantee                          | the grantee                                           |
+| `Grantee\PermissionRevoked`       | `grantee.permission.revoked`        | the grantee                          | the grantee                                           |
+| `Grantee\PermissionExpiryChanged` | `grantee.permission.expiry_changed` | the grantee                          | the grantee                                           |
+| `Grantee\PermissionExpired`       | `grantee.permission.expired`        | the grantee                          | the grantee                                           |
+| `Grantee\PolicyAttached`          | `grantee.policy.attached`           | the grantee                          | the grantee                                           |
+| `Grantee\PolicyDetached`          | `grantee.policy.detached`           | the grantee                          | the grantee                                           |
+| `Grantee\PolicyExpiryChanged`     | `grantee.policy.expiry_changed`     | the grantee                          | the grantee                                           |
+| `Grantee\PolicyExpired`           | `grantee.policy.expired`            | the grantee                          | the grantee                                           |
+| `Grantee\BoundarySet`             | `grantee.boundary.set`              | the grantee                          | the grantee                                           |
+| `Grantee\BoundaryRemoved`         | `grantee.boundary.removed`          | the grantee                          | the grantee                                           |
+| `Grantee\BreakGlassActivated`     | `grantee.break_glass.activated`     | the grantee                          | the grantee                                           |
+| `Grantee\BreakGlassSurrendered`   | `grantee.break_glass.surrendered`   | the grantee                          | the grantee                                           |
+| `Grantee\BreakGlassRevoked`       | `grantee.break_glass.revoked`       | the grantee                          | the grantee                                           |
+| `Grantee\BreakGlassExpired`       | `grantee.break_glass.expired`       | the grantee                          | the grantee                                           |
+| `Role\Created`                    | `role.created`                      | the role                             | none                                                  |
+| `Role\Updated`                    | `role.updated`                      | the role                             | none                                                  |
+| `Role\Deleted`                    | `role.deleted`                      | the role                             | every grantee that held it or a live activation of it |
+| `Role\PermissionGranted`          | `role.permission.granted`           | the role                             | the role                                              |
+| `Role\PermissionRevoked`          | `role.permission.revoked`           | the role                             | the role                                              |
+| `Role\PermissionExpiryChanged`    | `role.permission.expiry_changed`    | the role                             | the role                                              |
+| `Role\PermissionExpired`          | `role.permission.expired`           | the role                             | the role                                              |
+| `Permission\Created`              | `permission.created`                | the permission                       | none                                                  |
+| `Permission\Updated`              | `permission.updated`                | the permission                       | none                                                  |
+| `Permission\Deleted`              | `permission.deleted`                | the permission                       | every grantee, then every role                        |
+| `Policy\Created`                  | `policy.created`                    | the policy                           | none                                                  |
+| `Policy\Updated`                  | `policy.updated`                    | the policy                           | none                                                  |
+| `Policy\Deleted`                  | `policy.deleted`                    | the policy                           | every grantee it was attached to                      |
+| `Resource\PolicyAttached`         | `resource.policy.attached`          | the record, or null for a whole type | none                                                  |
+| `Resource\PolicyDetached`         | `resource.policy.detached`          | the record, or null for a whole type | none                                                  |
+| `Guardrail\GuardrailSet`          | `guardrail.set`                     | the tenant, or null for the platform | none                                                  |
+| `Guardrail\GuardrailRemoved`      | `guardrail.removed`                 | the tenant, or null for the platform | none                                                  |
+| `Role\ExclusionDeclared`          | `role.exclusion.declared`           | the pair's first role                | none                                                  |
+| `Role\ExclusionRemoved`           | `role.exclusion.removed`            | the pair's first role                | none                                                  |
 
 The table's `operation()` values are the cases of `SineMacula\Laravel\Authorization\Enums\MutationOperation`, so a
 mapper can match on the enum, as in `MutationOperation::tryFrom($event->operation())`.

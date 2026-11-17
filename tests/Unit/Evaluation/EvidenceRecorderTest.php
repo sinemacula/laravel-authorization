@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Evaluation\GrantProvenance;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -71,7 +71,7 @@ final class EvidenceRecorderTest extends TestCase
      */
     public function testAStatementAllowIsEvidencedByItsPolicies(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $recorder = new EvidenceRecorder;
         $own      = Policy::fromArray(['name' => 'own', 'statements' => [['effect' => 'allow', 'actions' => ['a']]]])->withId('k1');
         $coded    = Policy::fromArray(['name' => 'coded', 'statements' => [['effect' => 'allow', 'actions' => ['a']]]]);
@@ -106,7 +106,7 @@ final class EvidenceRecorderTest extends TestCase
      */
     public function testPoliciesAreToldApartByKeyThenName(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $recorder = new EvidenceRecorder;
         $document = ['statements' => [['effect' => 'allow', 'actions' => ['a']]]];
         $first    = new GrantProvenance(GrantSource::POLICY, 'k1', Reference::of($user), false, [], true);
@@ -134,7 +134,7 @@ final class EvidenceRecorderTest extends TestCase
         $recorder = new EvidenceRecorder;
         $coded    = Policy::fromArray(['name' => 'coded', 'statements' => [['effect' => 'allow', 'actions' => ['a']]]]);
 
-        $recorder->notePolicies([$coded], null, new StubIdentity(['id' => 'unsaved']));
+        $recorder->notePolicies([$coded], null, new StubGrantee(['id' => 'unsaved']));
         $recorder->notePolicies([$coded], null, new \stdClass);
 
         self::assertEquals(

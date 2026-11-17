@@ -13,7 +13,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Models\Role;
-use Tests\Fixtures\BenchmarkIdentity;
+use Tests\Fixtures\BenchmarkGrantee;
 
 /**
  * PHPBench micro-benchmark for the full `AuthorizationManager` pipeline.
@@ -42,8 +42,8 @@ final class AuthorizationManagerBench extends BenchmarkCase
     /** @var \SineMacula\Laravel\Authorization\AuthorizationManager|null Container-resolved manager under test; populated by `setUp()`. */
     private ?AuthorizationManager $manager = null;
 
-    /** @var \Tests\Fixtures\BenchmarkIdentity|null Seeded principal with a role + policy; populated by `setUp()`. */
-    private ?BenchmarkIdentity $user = null;
+    /** @var \Tests\Fixtures\BenchmarkGrantee|null Seeded principal with a role + policy; populated by `setUp()`. */
+    private ?BenchmarkGrantee $user = null;
 
     /**
      * Bench setUp — boot the application, declare the fixture permissions, seed
@@ -87,9 +87,9 @@ final class AuthorizationManagerBench extends BenchmarkCase
     /**
      * Return the principal seeded by `setUp()`.
      *
-     * @return \Tests\Fixtures\BenchmarkIdentity
+     * @return \Tests\Fixtures\BenchmarkGrantee
      */
-    public function getUser(): BenchmarkIdentity
+    public function getUser(): BenchmarkGrantee
     {
         \assert($this->user !== null, 'setUp() must populate $user before a subject method runs.');
 
@@ -159,16 +159,16 @@ final class AuthorizationManagerBench extends BenchmarkCase
         Role::query()->delete();
         Permission::query()->delete();
         PolicyModel::query()->delete();
-        BenchmarkIdentity::query()->delete();
+        BenchmarkGrantee::query()->delete();
     }
 
     /**
      * Seed a role carrying the fixture permissions, create the principal, and
      * assign the role.
      *
-     * @return \Tests\Fixtures\BenchmarkIdentity
+     * @return \Tests\Fixtures\BenchmarkGrantee
      */
-    private function seedRoleAndPrincipal(): BenchmarkIdentity
+    private function seedRoleAndPrincipal(): BenchmarkGrantee
     {
         $role = Role::create([
             'id'    => (string) Str::uuid(),
@@ -186,7 +186,7 @@ final class AuthorizationManagerBench extends BenchmarkCase
             $role->permissions()->attach($permission->getKey());
         }
 
-        $user = BenchmarkIdentity::create(['id' => (string) Str::uuid()]);
+        $user = BenchmarkGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole(BenchmarkFixtures::roleName());
 
         return $user;
@@ -195,10 +195,10 @@ final class AuthorizationManagerBench extends BenchmarkCase
     /**
      * Attach the allow-and-deny benchmark policy to the given principal.
      *
-     * @param  \Tests\Fixtures\BenchmarkIdentity  $user
+     * @param  \Tests\Fixtures\BenchmarkGrantee  $user
      * @return void
      */
-    private function attachBenchmarkPolicy(BenchmarkIdentity $user): void
+    private function attachBenchmarkPolicy(BenchmarkGrantee $user): void
     {
         $user->attachPolicy(PolicyModel::create([
             'id'       => (string) Str::uuid(),

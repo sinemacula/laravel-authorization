@@ -27,7 +27,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\ChangingRequirementChecker;
 use Tests\Feature\Stubs\ChangingSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\BulkChecks\StatusAttributes;
 use Tests\Fixtures\QueryScoping\ScopedPost;
@@ -81,7 +81,7 @@ final class CheckBatchTest extends TestCase
      */
     public function testACallBetweenChunksHasTheNextChunkReadAheadAgain(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $resolver = $this->resolveAs(new Subject($user, $user));
         $posts    = [ScopedPost::query()->create(['title' => 'shared', 'status' => 'published']), ScopedPost::query()->create(['title' => 'other', 'status' => 'draft'])];
         $shared   = ResourceReference::record((new ScopedPost)->getMorphClass(), self::key($posts[0]), null, $posts[0]);
@@ -115,7 +115,7 @@ final class CheckBatchTest extends TestCase
     {
         $first    = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'A']);
         $second   = StubTenant::query()->create(['id' => 'tenant-b', 'name' => 'B']);
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $resolver = $this->resolveAs(new Subject($user, $user, $first));
         $tenants  = [];
 
@@ -143,7 +143,7 @@ final class CheckBatchTest extends TestCase
      */
     public function testABatchAboutTheRequestsSubjectAsksForItAgain(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $checker = new ChangingRequirementChecker(RequirementResult::met());
 
         $this->container()->instance(AuthenticationRequirementChecker::class, $checker);
@@ -173,9 +173,9 @@ final class CheckBatchTest extends TestCase
     {
         $first    = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'A']);
         $second   = StubTenant::query()->create(['id' => 'tenant-b', 'name' => 'B']);
-        $user     = StubIdentity::create(['id' => 'user-1']);
-        $other    = StubIdentity::create(['id' => 'user-2']);
-        $scoped   = StubIdentity::create(['id' => 'user-3']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
+        $other    = StubGrantee::create(['id' => 'user-2']);
+        $scoped   = StubGrantee::create(['id' => 'user-3']);
         $resolver = $this->resolveAs(new Subject($user, $user, $first));
         $reported = [];
 
