@@ -19,10 +19,10 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Concerns\TracksGrantUsage;
-use Tests\Feature\Stubs\FailingPermissionsIdentity;
+use Tests\Feature\Stubs\FailingPermissionsGrantee;
 use Tests\Feature\Stubs\RecordingLogger;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\TestCase;
 
 /**
@@ -56,7 +56,7 @@ final class DecisionPipelineTest extends TestCase
         $context = self::administrator([PackagePermissions::PERMISSION_GRANT, 'posts:*'], 'admin');
         $admin   = $context->subject->subject;
 
-        self::assertInstanceOf(StubIdentity::class, $admin);
+        self::assertInstanceOf(StubGrantee::class, $admin);
 
         $this->actAs($admin);
 
@@ -176,8 +176,8 @@ final class DecisionPipelineTest extends TestCase
     #[DataProvider('sabotages')]
     public function testTrackingNeverChangesOrBreaksACheck(\Closure $sabotage, array $logged): void
     {
-        $ann      = StubSecondIdentity::query()->create(['id' => 'ann']);
-        $identity = FailingPermissionsIdentity::query()->create(['id' => 'person']);
+        $ann      = StubSecondGrantee::query()->create(['id' => 'ann']);
+        $identity = FailingPermissionsGrantee::query()->create(['id' => 'person']);
 
         self::grants()->grantPermission($ann, self::permission('posts:read'));
         self::grants()->attachPolicy($ann, self::policy('no-delete'));

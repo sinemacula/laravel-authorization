@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Testing\Concerns\TenantTreeContract;
 use SineMacula\Laravel\Authorization\Testing\FakeTenantTree;
 use Tests\Concerns\ScopesQueries;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\TenantScopedPost;
@@ -135,7 +135,7 @@ final class FakeTenantTreeTest extends TestCase
 
         $this->app?->instance(TenantTree::class, $tree);
 
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:view']), tenant: $org);
 
@@ -277,7 +277,7 @@ final class FakeTenantTreeTest extends TestCase
 
         $this->app?->instance(TenantTree::class, $tree);
 
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:view']), tenant: $org);
 
@@ -308,7 +308,7 @@ final class FakeTenantTreeTest extends TestCase
             ->add(Reference::of($account), Reference::of($org))
             ->add(Reference::of($sibling), Reference::of($top)));
 
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:view']), tenant: $org);
 
@@ -338,7 +338,7 @@ final class FakeTenantTreeTest extends TestCase
         [$org, $account, $sibling] = self::tenants('org', 'account', 'sibling');
 
         $tree = FakeTenantTree::of([[Reference::of($org), null], [Reference::of($account), Reference::of($org)], [Reference::of($sibling), null]]);
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $this->app?->instance(TenantTree::class, $tree);
 
@@ -396,11 +396,11 @@ final class FakeTenantTreeTest extends TestCase
      * Determine whether the user is allowed to view posts in the tenant, as the
      * request's subject there.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  \Tests\Feature\Stubs\StubTenant  $tenant
      * @return bool
      */
-    private function canIn(StubIdentity $user, StubTenant $tenant): bool
+    private function canIn(StubGrantee $user, StubTenant $tenant): bool
     {
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $tenant));
         $this->app?->forgetInstance(ResolvedTenant::class);

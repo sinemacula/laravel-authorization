@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
-use Tests\Fixtures\BenchmarkIdentity;
+use Tests\Fixtures\BenchmarkGrantee;
 
 /**
  * PHPBench micro-benchmark for the Blade runtime helpers.
@@ -60,7 +60,7 @@ final class BladeHelpersBench extends BenchmarkCase
 
         Role::query()->delete();
         Permission::query()->delete();
-        BenchmarkIdentity::query()->delete();
+        BenchmarkGrantee::query()->delete();
 
         $this->roleName        = BenchmarkFixtures::roleName();
         $this->permissionNames = BenchmarkFixtures::permissionNames();
@@ -81,7 +81,7 @@ final class BladeHelpersBench extends BenchmarkCase
             $role->permissions()->attach($permission->getKey());
         }
 
-        $user = BenchmarkIdentity::create(['id' => (string) Str::uuid()]);
+        $user = BenchmarkGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole($this->roleName);
 
         $app->instance(SubjectResolver::class, new BenchmarkSubjectResolver($user));

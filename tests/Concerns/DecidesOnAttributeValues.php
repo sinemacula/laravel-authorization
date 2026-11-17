@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -51,11 +51,11 @@ trait DecidesOnAttributeValues
      * posts' status and the subject's department readable as attributes, and
      * return it.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    protected function valueReadingSubject(): StubIdentity
+    protected function valueReadingSubject(): StubGrantee
     {
-        $user   = StubIdentity::create(['id' => 'user-1', 'name' => self::SECRET_NAME]);
+        $user   = StubGrantee::create(['id' => 'user-1', 'name' => self::SECRET_NAME]);
         $tenant = StubTenant::query()->create(['id' => 'tenant-1', 'name' => 'tenant-1']);
 
         config([

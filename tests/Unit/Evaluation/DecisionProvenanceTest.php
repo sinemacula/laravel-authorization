@@ -13,8 +13,8 @@ use SineMacula\Laravel\Authorization\Evaluation\DecisionProvenance;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\ScopedPost;
@@ -75,8 +75,8 @@ final class DecisionProvenanceTest extends TestCase
      */
     public function testNamesTheSubjectByReference(): void
     {
-        $principal = self::identity(StubIdentity::class, 'user-1');
-        $identity  = self::identity(StubSecondIdentity::class, 'person-1');
+        $principal = self::identity(StubGrantee::class, 'user-1');
+        $identity  = self::identity(StubSecondGrantee::class, 'person-1');
         $tenant    = (new StubTenant)->forceFill(['id' => 'tenant-1']);
         $subject   = new Subject($principal, $identity, $tenant, 'admin', 'web', 'session-1');
 
@@ -107,7 +107,7 @@ final class DecisionProvenanceTest extends TestCase
     {
         $this->container();
 
-        $principal = self::identity(StubIdentity::class, 'user-1');
+        $principal = self::identity(StubGrantee::class, 'user-1');
         $subject   = new Subject($principal, null, (new StubTenant)->forceFill(['id' => 'tenant-1']), 'web');
         $scope     = (new StubTenant)->forceFill(['id' => 'tenant-2']);
         $where     = new Reference($scope->getMorphClass(), 'tenant-2');
@@ -177,12 +177,12 @@ final class DecisionProvenanceTest extends TestCase
      */
     public function testNamesNoRecordWithoutAKey(): void
     {
-        $unsaved    = new StubIdentity;
-        $provenance = DecisionProvenance::of(new Subject($unsaved, new \stdClass, self::identity(StubIdentity::class, '')));
+        $unsaved    = new StubGrantee;
+        $provenance = DecisionProvenance::of(new Subject($unsaved, new \stdClass, self::identity(StubGrantee::class, '')));
 
         self::assertNull($provenance->subject);
         self::assertNull($provenance->identity);
-        self::assertNull(DecisionProvenance::of(new Subject(self::identity(StubIdentity::class, ''), $unsaved))->subject);
+        self::assertNull(DecisionProvenance::of(new Subject(self::identity(StubGrantee::class, ''), $unsaved))->subject);
     }
 
     /**

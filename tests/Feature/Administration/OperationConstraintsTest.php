@@ -37,7 +37,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\PreviewsSubjects;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -412,7 +412,7 @@ final class OperationConstraintsTest extends TestCase
 
         $checks = $this->checks(self::senior('admin'), self::unexpected(...));
         $edit   = Permission::query()->create(['name' => 'posts:edit']);
-        $rank   = static fn (StubIdentity $user, GrantScope $scope): ?DecisionReason => self::weigh(
+        $rank   = static fn (StubGrantee $user, GrantScope $scope): ?DecisionReason => self::weigh(
             PackagePermissions::PERMISSION_REVOKE,
             OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $user, $edit, $scope)->toResourceReference(),
             $checks,
@@ -838,11 +838,11 @@ final class OperationConstraintsTest extends TestCase
      * Return further checks for the actor, deciding each check through the
      * callback and recording what was asked, in the scope in place.
      *
-     * @param  \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubIdentity  $actor
+     * @param  \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubGrantee  $actor
      * @param  \Closure(string, \SineMacula\Laravel\Authorization\Support\ResourceReference|null): \SineMacula\Laravel\Authorization\Evaluation\Decision  $decide
      * @return \SineMacula\Laravel\Authorization\Administration\FurtherChecks
      */
-    private function checks(StubIdentity|Subject $actor, \Closure $decide): FurtherChecks
+    private function checks(StubGrantee|Subject $actor, \Closure $decide): FurtherChecks
     {
         $record = function (string $action, ?ResourceReference $on) use ($decide): Decision {
             $this->asked[] = [$action, TenantScope::currentApplication(), TenantScope::isBelowTenant(), TenantScope::currentTenant()];
@@ -858,7 +858,7 @@ final class OperationConstraintsTest extends TestCase
      * platform, and a callback deciding an operation as it.
      *
      * @return array{
-     *     \Tests\Feature\Stubs\StubIdentity,
+     *     \Tests\Feature\Stubs\StubGrantee,
      *     \Closure(\SineMacula\Laravel\Authorization\Administration\OperationResource): \SineMacula\Laravel\Authorization\Evaluation\Decision
      * }
      *
@@ -878,14 +878,14 @@ final class OperationConstraintsTest extends TestCase
      * Grant the actor, in a new tenant with the id, a role carrying a policy
      * that denies the action.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $actor
+     * @param  \Tests\Feature\Stubs\StubGrantee  $actor
      * @param  string  $tenant
      * @param  string  $action
      * @return void
      *
      * @throws \Throwable
      */
-    private static function restrictIn(StubIdentity $actor, string $tenant, string $action): void
+    private static function restrictIn(StubGrantee $actor, string $tenant, string $action): void
     {
         $denied = StubTenant::query()->create(['id' => $tenant, 'name' => $tenant]);
         $role   = Role::query()->create(['name' => 'restricted', 'rank' => 8]);
@@ -899,22 +899,22 @@ final class OperationConstraintsTest extends TestCase
      * Return the identity with the id, created on first use.
      *
      * @param  string  $id
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function user(string $id): StubIdentity
+    private static function user(string $id): StubGrantee
     {
-        return StubIdentity::query()->firstOrCreate(['id' => $id]);
+        return StubGrantee::query()->firstOrCreate(['id' => $id]);
     }
 
     /**
      * Return the identity with the id, holding the most senior rank.
      *
      * @param  string  $id
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      *
      * @throws \Throwable
      */
-    private static function senior(string $id): StubIdentity
+    private static function senior(string $id): StubGrantee
     {
         $user = self::user($id);
 
@@ -928,11 +928,11 @@ final class OperationConstraintsTest extends TestCase
      *
      * @param  string  $id
      * @param  int  $rank
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      *
      * @throws \Throwable
      */
-    private static function rankedUser(string $id, int $rank): StubIdentity
+    private static function rankedUser(string $id, int $rank): StubGrantee
     {
         $user = self::user($id);
 
@@ -958,10 +958,10 @@ final class OperationConstraintsTest extends TestCase
     /**
      * Return a proposed detach of a denying policy from the grantee.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubGrantee  $grantee
      * @return \SineMacula\Laravel\Authorization\Administration\OperationResource
      */
-    private static function detach(StubIdentity $grantee): OperationResource
+    private static function detach(StubGrantee $grantee): OperationResource
     {
         return OperationResource::revoke(PackagePermissions::POLICY_DETACH, $grantee, self::denying(), GrantScope::platform());
     }
@@ -981,10 +981,10 @@ final class OperationConstraintsTest extends TestCase
     /**
      * Return a proposed direct grant of a permission to the grantee.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubGrantee  $grantee
      * @return \SineMacula\Laravel\Authorization\Administration\OperationResource
      */
-    private static function permissionGrant(StubIdentity $grantee): OperationResource
+    private static function permissionGrant(StubGrantee $grantee): OperationResource
     {
         return OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $grantee, Permission::query()->firstOrCreate(['name' => 'posts:edit']), GrantScope::platform());
     }

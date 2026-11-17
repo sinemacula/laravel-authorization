@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
@@ -35,7 +35,7 @@ use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\CustomRole;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -342,7 +342,7 @@ final class RoleObserverTest extends TestCase
         $clerk   = Role::query()->create(['name' => 'clerk']);
         $auditor = Role::query()->create(['name' => 'auditor']);
         $intern  = Role::query()->create(['name' => 'intern']);
-        $user    = StubIdentity::query()->create(['id' => 'user']);
+        $user    = StubGrantee::query()->create(['id' => 'user']);
 
         GrantService::instance()?->grantRole($user, $clerk);
         GrantService::instance()?->grantRole($user, $intern);

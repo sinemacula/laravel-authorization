@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Reviews\Support;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 use SineMacula\Laravel\Authorization\Reviews\Enums\SubjectState;
 use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 use SineMacula\Laravel\Authorization\Subject;
@@ -139,7 +139,7 @@ final class SubjectStates
     {
         $isTrashed = \method_exists($model, 'trashed') && $model->trashed() === true;
 
-        return $isTrashed || ($model instanceof AuthorizableIdentity && !$model->isAuthorizationActive());
+        return $isTrashed || ($model instanceof AuthorizableGrantee && !$model->isAuthorizationActive());
     }
 
     /**

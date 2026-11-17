@@ -11,12 +11,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
-use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
-use SineMacula\Laravel\Authorization\Events\Identity\BreakGlassExpired;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpired;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpired;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleExpired;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\BoundaryRemoved;
+use SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached as ResourcePolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
@@ -35,9 +35,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
-use Tests\Feature\Stubs\NumberedIdentity;
+use Tests\Feature\Stubs\NumberedGrantee;
 use Tests\Feature\Stubs\RecordingLogger;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -95,7 +95,7 @@ final class GrantPrunerTest extends TestCase
      */
     public function testRemovesExpiredGrantsOfEveryKind(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $role   = Role::create(['name' => 'editor']);
         $tenant = new Reference('stub_tenant', 'tenant-a');
 
@@ -150,7 +150,7 @@ final class GrantPrunerTest extends TestCase
      */
     public function testAnExpiredGrantNamingHalfATenantIsRemovedAndLoggedAsMalformed(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $logger = new RecordingLogger;
         $edit   = Permission::create(['name' => 'posts:edit']);
         $row    = ['permission_id' => $edit->id, 'authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1', 'expires_at' => '2026-07-01 11:00:00'];
@@ -197,7 +197,7 @@ final class GrantPrunerTest extends TestCase
     public function testRemovesExpiredGrantsInChunks(): void
     {
         for ($i = 0; $i < 5; $i++) {
-            StubIdentity::create(['id' => "user-{$i}"])->assignRole(Role::create(['name' => "role-{$i}"]), Carbon::parse('2026-07-01 11:00:00'));
+            StubGrantee::create(['id' => "user-{$i}"])->assignRole(Role::create(['name' => "role-{$i}"]), Carbon::parse('2026-07-01 11:00:00'));
         }
 
         Event::fake();
@@ -221,7 +221,7 @@ final class GrantPrunerTest extends TestCase
      */
     public function testRemovesEachExpiredGrantInItsOwnScope(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
         $role  = Role::create(['name' => 'editor']);
         $until = Carbon::parse('2026-07-01 11:00:00');
 
@@ -265,7 +265,7 @@ final class GrantPrunerTest extends TestCase
     {
         $role = Role::create(['name' => 'editor']);
 
-        StubIdentity::create(['id' => 'user-1'])->assignRole($role, Carbon::parse('2026-07-01 11:00:00'));
+        StubGrantee::create(['id' => 'user-1'])->assignRole($role, Carbon::parse('2026-07-01 11:00:00'));
         $role->givePermission(Permission::create(['name' => 'posts:edit']), Carbon::parse('2026-07-01 11:00:00'));
 
         $rearmed = [];
@@ -300,15 +300,15 @@ final class GrantPrunerTest extends TestCase
      */
     public function testPretendingCountsWithoutRemoving(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
-        $gone = StubIdentity::create(['id' => 'user-2']);
+        $user = StubGrantee::create(['id' => 'user-1']);
+        $gone = StubGrantee::create(['id' => 'user-2']);
 
         $user->assignRole(Role::create(['name' => 'editor']), Carbon::parse('2026-07-01 11:00:00'));
         $gone->assignRole(Role::create(['name' => 'viewer']));
         Role::create(['name' => 'author'])->givePermission(Permission::create(['name' => 'posts:edit']), Carbon::parse('2026-07-01 11:00:00'));
         $gone->givePermission(Permission::create(['name' => 'posts:read']));
 
-        DB::table('stub_identities')->where('id', 'user-2')->delete();
+        DB::table('stub_grantees')->where('id', 'user-2')->delete();
 
         Event::fake();
 
@@ -334,21 +334,21 @@ final class GrantPrunerTest extends TestCase
      */
     public function testRevokesTheGrantsOfGranteesThatAreGone(): void
     {
-        Relation::morphMap(['stub_identity' => StubIdentity::class]);
+        Relation::morphMap(['stub_grantee' => StubGrantee::class]);
 
         $role  = Role::create(['name' => 'editor']);
-        $gone  = StubIdentity::create(['id' => 'user-gone']);
-        $kept  = StubIdentity::create(['id' => 'user-kept']);
-        $soft  = NumberedIdentity::create(['name' => 'Ada']);
-        $other = NumberedIdentity::create(['name' => 'Grace']);
+        $gone  = StubGrantee::create(['id' => 'user-gone']);
+        $kept  = StubGrantee::create(['id' => 'user-kept']);
+        $soft  = NumberedGrantee::create(['name' => 'Ada']);
+        $other = NumberedGrantee::create(['name' => 'Grace']);
 
         $gone->assignRole($role);
         $kept->assignRole($role);
         $soft->assignRole($role);
         $other->assignRole($role);
 
-        DB::table('stub_identities')->where('id', 'user-gone')->delete();
-        DB::table('stub_numbered_identities')->where('id', $other->id)->delete();
+        DB::table('stub_grantees')->where('id', 'user-gone')->delete();
+        DB::table('stub_numbered_grantees')->where('id', $other->id)->delete();
         $soft->delete();
 
         DB::table('authorizable_roles')->insert(['role_id' => $role->id, 'authorizable_type' => 'ghost_type', 'authorizable_id' => '1']);
@@ -363,7 +363,7 @@ final class GrantPrunerTest extends TestCase
         Event::assertDispatchedTimes(RoleRevoked::class, 2);
         Event::assertDispatched(
             RoleRevoked::class,
-            static fn (RoleRevoked $event): bool => $event->grantee->id === 'user-gone' && $event->grantee->type === 'stub_identity' && $event->operation->actor === null,
+            static fn (RoleRevoked $event): bool => $event->grantee->id === 'user-gone' && $event->grantee->type === 'stub_grantee' && $event->operation->actor === null,
         );
     }
 
@@ -379,10 +379,10 @@ final class GrantPrunerTest extends TestCase
      */
     public function testDeletesTheInlinePoliciesOfGranteesThatAreGone(): void
     {
-        $gone    = StubIdentity::create(['id' => 'user-gone']);
-        $goneToo = StubIdentity::create(['id' => 'user-gone-too']);
-        $kept    = StubIdentity::create(['id' => 'user-kept']);
-        $soft    = NumberedIdentity::create(['name' => 'Ada']);
+        $gone    = StubGrantee::create(['id' => 'user-gone']);
+        $goneToo = StubGrantee::create(['id' => 'user-gone-too']);
+        $kept    = StubGrantee::create(['id' => 'user-kept']);
+        $soft    = NumberedGrantee::create(['name' => 'Ada']);
         $role    = Role::create(['name' => 'editor']);
 
         $gone->attachPolicy($gone->createInlinePolicy('gone-first', ['version' => 1, 'statements' => []]));
@@ -394,7 +394,7 @@ final class GrantPrunerTest extends TestCase
         Policy::create(['name' => 'ghost', 'document' => ['version' => 1, 'statements' => []], 'owner_type' => 'ghost_owner', 'owner_id' => '1']);
         Policy::create(['name' => 'managed', 'document' => ['version' => 1, 'statements' => []]]);
 
-        DB::table('stub_identities')->whereIn('id', ['user-gone', 'user-gone-too'])->delete();
+        DB::table('stub_grantees')->whereIn('id', ['user-gone', 'user-gone-too'])->delete();
         $soft->delete();
 
         Event::fake([PolicyDeleted::class]);
@@ -428,13 +428,13 @@ final class GrantPrunerTest extends TestCase
      */
     public function testPretendingCountsWhatARealRunRemoves(): void
     {
-        $gone = StubIdentity::create(['id' => 'user-gone']);
+        $gone = StubGrantee::create(['id' => 'user-gone']);
 
         $gone->assignRole(Role::create(['name' => 'editor']), Carbon::parse('2026-07-01 11:00:00'));
         $gone->givePermission(Permission::create(['name' => 'posts:read']));
         $gone->attachPolicy($gone->createInlinePolicy('mine', ['version' => 1, 'statements' => []]));
 
-        DB::table('stub_identities')->where('id', 'user-gone')->delete();
+        DB::table('stub_grantees')->where('id', 'user-gone')->delete();
 
         Event::fake();
 
@@ -457,7 +457,7 @@ final class GrantPrunerTest extends TestCase
      */
     public function testAnInlinePolicyThatCannotBeDeletedLeavesTheOrphanedGrantsRevoked(): void
     {
-        $gone = StubIdentity::create(['id' => 'user-gone']);
+        $gone = StubGrantee::create(['id' => 'user-gone']);
 
         $gone->givePermission(Permission::create(['name' => 'posts:read']));
 
@@ -471,7 +471,7 @@ final class GrantPrunerTest extends TestCase
             'owner_id'   => 'user-gone',
         ]);
 
-        DB::table('stub_identities')->where('id', 'user-gone')->delete();
+        DB::table('stub_grantees')->where('id', 'user-gone')->delete();
 
         try {
             self::pruner()->prune(1000);
@@ -495,24 +495,24 @@ final class GrantPrunerTest extends TestCase
      */
     public function testDetachesTheResourcePoliciesOfRecordsThatAreGone(): void
     {
-        Relation::morphMap(['stub_identity' => StubIdentity::class]);
+        Relation::morphMap(['stub_grantee' => StubGrantee::class]);
 
         $tenant  = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'tenant-a']);
         $policy  = Policy::create(['name' => 'sharing', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]]]);
-        $gone    = StubIdentity::create(['id' => 'record-gone']);
-        $kept    = StubIdentity::create(['id' => 'record-kept']);
-        $soft    = NumberedIdentity::create(['name' => 'Ada']);
+        $gone    = StubGrantee::create(['id' => 'record-gone']);
+        $kept    = StubGrantee::create(['id' => 'record-kept']);
+        $soft    = NumberedGrantee::create(['name' => 'Ada']);
         $service = ResourcePolicyService::instance();
 
         self::assertInstanceOf(ResourcePolicyService::class, $service);
 
-        foreach ([$gone, $kept, $soft, StubIdentity::class, ['posts', 7]] as $resource) {
+        foreach ([$gone, $kept, $soft, StubGrantee::class, ['posts', 7]] as $resource) {
             $service->attach($policy, $resource);
         }
 
         $service->attach($policy, $gone, $tenant);
 
-        DB::table('stub_identities')->where('id', 'record-gone')->delete();
+        DB::table('stub_grantees')->where('id', 'record-gone')->delete();
         $soft->delete();
 
         Event::fake([ResourcePolicyDetached::class]);
@@ -531,7 +531,7 @@ final class GrantPrunerTest extends TestCase
         Event::assertDispatchedTimes(ResourcePolicyDetached::class, 2);
         Event::assertDispatched(
             ResourcePolicyDetached::class,
-            static fn (ResourcePolicyDetached $event): bool => [$event->resourceType, $event->resourceId, $event->operation->actor] === ['stub_identity', 'record-gone', null],
+            static fn (ResourcePolicyDetached $event): bool => [$event->resourceType, $event->resourceId, $event->operation->actor] === ['stub_grantee', 'record-gone', null],
         );
     }
 
@@ -552,8 +552,8 @@ final class GrantPrunerTest extends TestCase
         $tenant     = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'tenant-a']);
         $policy     = Policy::create(['name' => 'read-only', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
         $kept       = Policy::create(['name' => 'kept-cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
-        $gone       = StubIdentity::create(['id' => 'user-gone']);
-        $alive      = StubIdentity::create(['id' => 'user-kept']);
+        $gone       = StubGrantee::create(['id' => 'user-gone']);
+        $alive      = StubGrantee::create(['id' => 'user-kept']);
         $boundaries = BoundaryService::instance();
 
         self::assertInstanceOf(BoundaryService::class, $boundaries);
@@ -564,7 +564,7 @@ final class GrantPrunerTest extends TestCase
         $boundaries->set(new Reference('unmapped_type', '1'), $kept);
         $gone->assignRole(Role::create(['name' => 'editor']));
 
-        DB::table('stub_identities')->where('id', 'user-gone')->delete();
+        DB::table('stub_grantees')->where('id', 'user-gone')->delete();
 
         Event::fake([BoundaryRemoved::class]);
 
@@ -599,7 +599,7 @@ final class GrantPrunerTest extends TestCase
      */
     public function testRecordsTheExpiryOfBreakGlassActivations(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $role    = self::emergencyRole();
         $service = BreakGlassService::instance();
 
@@ -651,14 +651,14 @@ final class GrantPrunerTest extends TestCase
     public function testKeepsTheActivationsOfGranteesThatAreGone(): void
     {
         $role = self::emergencyRole();
-        $gone = StubIdentity::create(['id' => 'user-gone']);
+        $gone = StubGrantee::create(['id' => 'user-gone']);
 
         $gone->assignRole($role);
 
         $live    = self::activate($gone, $role);
         $expired = self::activate($gone, $role, ['expires_at' => Carbon::now()->subMinute()]);
 
-        DB::table('stub_identities')->where('id', 'user-gone')->delete();
+        DB::table('stub_grantees')->where('id', 'user-gone')->delete();
 
         Event::fake();
 

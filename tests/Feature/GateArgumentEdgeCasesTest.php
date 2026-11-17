@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
@@ -77,7 +77,7 @@ final class GateArgumentEdgeCasesTest extends TestCase
      */
     public function testGateTreatsNestedAssociativeArrayAtIndexZeroAsContext(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -107,7 +107,7 @@ final class GateArgumentEdgeCasesTest extends TestCase
      */
     public function testGateDeniesAResourceHoldingANulByte(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -138,7 +138,7 @@ final class GateArgumentEdgeCasesTest extends TestCase
     {
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission('posts:create');
         $this->actAs($user);
 
@@ -176,10 +176,10 @@ final class GateArgumentEdgeCasesTest extends TestCase
      * Swap the subject resolver for one that returns the supplied authorizable
      * and refresh the manager so the next facade call picks it up.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @return void
      */
-    private function actAs(StubIdentity $user): void
+    private function actAs(StubGrantee $user): void
     {
         $resolver = new StubSubjectResolver($user);
 

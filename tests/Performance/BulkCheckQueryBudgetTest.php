@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\BulkChecks\BulkStatusAttributes;
@@ -62,7 +62,7 @@ final class BulkCheckQueryBudgetTest extends TestCase
     public function testAHundredResourcesCostTheQueriesOneCosts(): void
     {
         $tenant = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $posts  = [];
 
         for ($index = 0; $index < 100; $index++) {
@@ -109,7 +109,7 @@ final class BulkCheckQueryBudgetTest extends TestCase
 
         $org      = StubTenant::query()->create(['id' => 'o1', 'name' => 'o1']);
         $accounts = \array_map(static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]), ['a1', 'a2', 'a3', 'a4']);
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $posts    = [];
 
         ClosureTenantTree::add(Reference::of($org));
@@ -212,7 +212,7 @@ final class BulkCheckQueryBudgetTest extends TestCase
         $published = ['eq' => ['resource.status' => 'published']];
         $statement = $effect === 'deny'
             ? ['effect' => 'deny', 'actions' => [self::ACTION]]
-            : ['effect' => 'allow', 'actions' => [self::ACTION], 'principals' => [(new StubIdentity)->getMorphClass() . ':user-1'], 'conditions' => $published];
+            : ['effect' => 'allow', 'actions' => [self::ACTION], 'principals' => [(new StubGrantee)->getMorphClass() . ':user-1'], 'conditions' => $published];
         $policy = Policy::create(['name' => "{$effect}-published", 'document' => ['statements' => [$statement]]]);
 
         /** @var \SineMacula\Laravel\Authorization\Services\ResourcePolicyService $service */
@@ -224,11 +224,11 @@ final class BulkCheckQueryBudgetTest extends TestCase
      * Resolve the request about the user in the tenant, with the posts'
      * attributes read in bulk.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  \Tests\Feature\Stubs\StubTenant  $tenant
      * @return void
      */
-    private function resolve(StubIdentity $user, StubTenant $tenant): void
+    private function resolve(StubGrantee $user, StubTenant $tenant): void
     {
         $provider = new BulkStatusAttributes;
 

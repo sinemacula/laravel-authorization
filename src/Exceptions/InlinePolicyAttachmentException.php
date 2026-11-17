@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * An inline policy belongs to one grantee, named by its `owner_type` and
  * `owner_id` columns, and is attached to that grantee alone. Every write path
- * refuses another grantee: the identity traits, the grant service, and a write
+ * refuses another grantee: the grantee traits, the grant service, and a write
  * through the `policies()` relation. To give another grantee the same
  * statements, create a managed policy, or an inline policy of its own.
  *

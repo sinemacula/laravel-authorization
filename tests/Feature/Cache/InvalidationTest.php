@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Cache\Invalidation;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyAttached as ResourcePolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached as ResourcePolicyDetached;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -31,7 +31,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -70,7 +70,7 @@ final class InvalidationTest extends TestCase
      */
     public function testGrantsBumpTheGrantee(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $role = Role::create(['name' => 'editor']);
 
         self::assertSame([$this->versions()->granteeKey($user)], $this->bumpedBy(static fn () => $user->assignRole($role), $user, $role));
@@ -88,7 +88,7 @@ final class InvalidationTest extends TestCase
      */
     public function testRolePolicyChangesBumpTheSharedVersion(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $role   = Role::create(['name' => 'editor']);
         $policy = Policy::create(['name' => 'editors', 'document' => ['version' => 1, 'statements' => []]]);
         $both   = [$this->versions()->granteeKey($role), $this->versions()->rolePoliciesKey()];
@@ -128,7 +128,7 @@ final class InvalidationTest extends TestCase
      */
     public function testRoleChangesBumpTheRole(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $roles  = $this->app?->make(RoleService::class);
         $parent = Role::create(['name' => 'reader']);
         $role   = Role::create(['name' => 'editor']);
@@ -155,7 +155,7 @@ final class InvalidationTest extends TestCase
      */
     public function testPolicyChangesBumpThePolicy(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $role     = Role::create(['name' => 'editor']);
         $policies = $this->app?->make(PolicyService::class);
         $policy   = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
@@ -176,7 +176,7 @@ final class InvalidationTest extends TestCase
      */
     public function testPermissionChangesBumpItsHolders(): void
     {
-        $user        = StubIdentity::create(['id' => 'user-1']);
+        $user        = StubGrantee::create(['id' => 'user-1']);
         $role        = Role::create(['name' => 'editor']);
         $permissions = $this->app?->make(PermissionService::class);
         $permission  = Permission::create(['name' => 'posts:edit']);
@@ -202,7 +202,7 @@ final class InvalidationTest extends TestCase
     {
         $publisher = Role::create(['name' => 'publisher']);
         $editor    = Role::create(['name' => 'editor']);
-        $user      = StubIdentity::create(['id' => 'user-1']);
+        $user      = StubGrantee::create(['id' => 'user-1']);
 
         $publisher->givePermission(Permission::create(['name' => 'posts:publish']));
         $user->assignRole($editor);
@@ -226,7 +226,7 @@ final class InvalidationTest extends TestCase
     {
         $staff  = Role::create(['name' => 'staff']);
         $editor = Role::create(['name' => 'editor', 'parent_id' => $staff->id]);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = Policy::create(['name' => 'staff', 'document' => ['version' => 1, 'statements' => []]]);
 
         $user->assignRole($editor);
@@ -256,7 +256,7 @@ final class InvalidationTest extends TestCase
     {
         $publisher = Role::create(['name' => 'publisher']);
         $editor    = Role::create(['name' => 'editor']);
-        $user      = StubIdentity::create(['id' => 'user-1']);
+        $user      = StubGrantee::create(['id' => 'user-1']);
 
         $publisher->attachPolicy(Policy::create(['name' => 'publishers', 'document' => ['version' => 1, 'statements' => []]]));
         $user->assignRole($editor);
@@ -284,7 +284,7 @@ final class InvalidationTest extends TestCase
      */
     public function testAnEditedPolicyTakesEffectOnTheNextRequest(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => [['effect' => 'allow', 'actions' => ['invoices:read']]]]]);
 
         $user->attachPolicy($policy);
@@ -307,7 +307,7 @@ final class InvalidationTest extends TestCase
     public function testRenamesAndDeletesTakeEffectOnTheNextRequest(): void
     {
         $role = Role::create(['name' => 'editor']);
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $role->givePermission(Permission::create(['name' => 'posts:edit']));
         $user->assignRole($role);
@@ -356,7 +356,7 @@ final class InvalidationTest extends TestCase
      */
     public function testBoundaryChangesBumpTheGrantee(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $role    = Role::create(['name' => 'editor']);
         $first   = Policy::create(['name' => 'first-cap', 'document' => ['version' => 1, 'statements' => []]]);
         $second  = Policy::create(['name' => 'second-cap', 'document' => ['version' => 1, 'statements' => []]]);
@@ -380,7 +380,7 @@ final class InvalidationTest extends TestCase
      */
     public function testABoundaryChangeTakesEffectOnTheNextRequest(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $policy   = Policy::create(['name' => 'cap', 'document' => ['version' => 1, 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
         $service  = $this->app?->make(BoundaryService::class);
         $policies = $this->app?->make(PolicyService::class);
@@ -419,7 +419,7 @@ final class InvalidationTest extends TestCase
      */
     public function testGuardrailChangesBumpTheGuardrails(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $role    = Role::create(['name' => 'editor']);
         $policy  = Policy::create(['name' => 'rail', 'document' => ['version' => 1, 'statements' => [['effect' => 'allow', 'actions' => ['authorization:*']]]]]);
         $service = $this->app?->make(GuardrailService::class);
@@ -490,11 +490,11 @@ final class InvalidationTest extends TestCase
      * Return an identity that holds the right to manage guardrails
      * platform-wide.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function guardrailManager(): StubIdentity
+    private static function guardrailManager(): StubGrantee
     {
-        $actor = StubIdentity::create(['id' => 'admin-1']);
+        $actor = StubGrantee::create(['id' => 'admin-1']);
 
         $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
 
@@ -507,13 +507,13 @@ final class InvalidationTest extends TestCase
      * role policies share, whose tokens the write changed.
      *
      * @param  \Closure(): mixed  $write
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Policy|null  $policy
      * @param  bool  $asGrantee
      * @return list<string>
      */
-    private function bumpedBy(\Closure $write, StubIdentity $user, Role $role, ?Policy $policy = null, bool $asGrantee = false): array
+    private function bumpedBy(\Closure $write, StubGrantee $user, Role $role, ?Policy $policy = null, bool $asGrantee = false): array
     {
         $keys = [$this->versions()->roleKey($role->id), $this->versions()->granteeKey($user)];
 
@@ -571,11 +571,11 @@ final class InvalidationTest extends TestCase
     /**
      * Read the identity afresh, as the next request does.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function fresh(StubIdentity $user): StubIdentity
+    private function fresh(StubGrantee $user): StubGrantee
     {
-        return StubIdentity::query()->whereKey($user->getKey())->firstOrFail();
+        return StubGrantee::query()->whereKey($user->getKey())->firstOrFail();
     }
 }

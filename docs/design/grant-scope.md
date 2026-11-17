@@ -12,7 +12,7 @@ which grants widen an identity's scope, the hook contract and its binding, and w
 
 1. **The identity directory.** `Contracts\IdentityDirectory::principalsOf($identity)` returns an `IdentityPrincipals`:
    the references to the principals the identity owns, the identity left out, and `isComplete`. Principals and
-   identities are the application's, so the package never infers them, from `AuthorizableIdentity` or from anything
+   identities are the application's, so the package never infers them, from `AuthorizableGrantee` or from anything
    else. The default, `Resolvers\GuardUserIdentityDirectory`, is complete and empty under the shipped
    `AuthGuardSubjectResolver`, where every user is its own identity, and incomplete under any other resolver; it reads
    the bound resolver on every call. The class is named by `authorization.identity_directory`, validated at boot (a

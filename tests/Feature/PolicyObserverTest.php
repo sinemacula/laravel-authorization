@@ -30,7 +30,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -256,7 +256,7 @@ final class PolicyObserverTest extends TestCase
         $policy     = Policy::query()->create(['name' => 'rail', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['authorization:*']]]]]);
         $guardrails = $this->app?->make(GuardrailService::class);
         $policies   = $this->app?->make(PolicyService::class);
-        $actor      = StubIdentity::create(['id' => 'admin-1']);
+        $actor      = StubGrantee::create(['id' => 'admin-1']);
 
         self::assertNotNull($guardrails);
         self::assertNotNull($policies);

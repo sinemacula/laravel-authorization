@@ -24,7 +24,7 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;

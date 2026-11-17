@@ -43,7 +43,7 @@ use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\RecordingLogger;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
@@ -137,11 +137,11 @@ final class ResourcePolicyServiceTest extends TestCase
     public function testTakesEveryFormOfResource(): void
     {
         $policy = self::sharing();
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
 
         self::service()->attach($policy, $user);
         self::service()->attach($policy, ResourceReference::record('docs', 'd-1'));
-        self::service()->attach($policy, StubIdentity::class);
+        self::service()->attach($policy, StubGrantee::class);
         self::service()->attach($policy, ResourceReference::type('docs'));
 
         $rows = \array_map(self::identifierOf(...), DB::table('resource_policies')->get(['resource_type', 'resource_id'])->all());
@@ -270,7 +270,7 @@ final class ResourcePolicyServiceTest extends TestCase
      */
     public function testRefusesAnInlinePolicy(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $inline = $user->createInlinePolicy('mine', ['statements' => [['effect' => 'deny', 'actions' => ['posts:delete']]]]);
 
         try {
@@ -353,7 +353,7 @@ final class ResourcePolicyServiceTest extends TestCase
     {
         $policy = self::sharing();
 
-        $refused = [new StubIdentity, '', "po\0sts", ['posts', ''], new ResourceReference('opaque'), new ResourceReference('posts:', 'posts', '')];
+        $refused = [new StubGrantee, '', "po\0sts", ['posts', ''], new ResourceReference('opaque'), new ResourceReference('posts:', 'posts', '')];
         $refused = [...$refused, ['posts', \str_repeat('a', 192)], [\str_repeat('p', 192), '7'], \str_repeat('p', 192), null, 7];
         $refused = [...$refused, ['posts', '*'], ResourceReference::record('posts', '*')];
 
@@ -536,8 +536,8 @@ final class ResourcePolicyServiceTest extends TestCase
         $tenant = self::createTenant('tenant-a');
         $policy = self::sharing();
         $detach = Permission::query()->create(['name' => PackagePermissions::RESOURCE_POLICY_DETACH]);
-        $local  = StubIdentity::create(['id' => 'tenant-admin']);
-        $wide   = StubIdentity::create(['id' => 'platform-admin']);
+        $local  = StubGrantee::create(['id' => 'tenant-admin']);
+        $wide   = StubGrantee::create(['id' => 'platform-admin']);
 
         self::service()->attach($policy, ['posts', 7]);
         GrantService::instance()?->grantPermission($local, $detach, tenant: $tenant, includeSubtree: false);
@@ -705,7 +705,7 @@ final class ResourcePolicyServiceTest extends TestCase
     {
         $tenant = self::createTenant('tenant-a');
         $logger = new RecordingLogger;
-        $local  = StubIdentity::create(['id' => 'local-admin']);
+        $local  = StubGrantee::create(['id' => 'local-admin']);
         $grants = GrantService::instance();
 
         self::assertInstanceOf(GrantService::class, $grants);
@@ -871,7 +871,7 @@ final class ResourcePolicyServiceTest extends TestCase
      */
     public function testEveryOperationRefusesOnceThePackageRefuses(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $policy  = new Policy(['name' => 'unsaved']);
         $service = $this->container()->make(ResourcePolicyService::class);
 

@@ -29,7 +29,7 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\BulkChecks\FailingTenantTree;
 use Tests\TestCase;
 
@@ -150,8 +150,8 @@ final class RoleAuthorityTest extends TestCase
     public function testTheFirstRouteThatRefusesRefusesTheAuthority(): void
     {
         $role   = Role::query()->create(['name' => 'editor']);
-        $user   = StubIdentity::query()->create(['id' => 'user']);
-        $actor  = StubIdentity::query()->create(['id' => 'admin']);
+        $user   = StubGrantee::query()->create(['id' => 'user']);
+        $actor  = StubGrantee::query()->create(['id' => 'admin']);
         $denied = static fn (): Decision => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
         $checks = new FurtherChecks(new Subject($actor, $actor), $denied, static fn (): null => null);
         $grant  = OperationResource::grant(PackagePermissions::ROLE_GRANT, $user, $role, GrantScope::platform());
@@ -335,8 +335,8 @@ final class RoleAuthorityTest extends TestCase
     public function testAResourcePolicysAllowsAreWeighedByThePolicyRoute(): void
     {
         $role   = Role::query()->create(['name' => 'editor']);
-        $user   = StubIdentity::query()->create(['id' => 'user']);
-        $actor  = StubIdentity::query()->create(['id' => 'admin']);
+        $user   = StubGrantee::query()->create(['id' => 'user']);
+        $actor  = StubGrantee::query()->create(['id' => 'admin']);
         $denied = static fn (): Decision => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
         $checks = new FurtherChecks(new Subject($actor, $actor), $denied, static fn (): null => null);
         $grant  = OperationResource::grant(PackagePermissions::ROLE_GRANT, $user, $role, GrantScope::platform());

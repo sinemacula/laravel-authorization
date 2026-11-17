@@ -24,10 +24,10 @@ use SineMacula\Laravel\Authorization\Support\RolePolicies;
 /**
  * Policy attachment trait for authorizable models and roles.
  *
- * Manages the polymorphic pivot between a grantee, an identity or a role, and
- * one or more policy rows. The `getPolicies()` helper hydrates each attached
- * row into an evaluation-ready value object; an identity that holds roles also
- * gets the policies attached to those roles and to the roles above them.
+ * Manages the polymorphic pivot between a grantee, a model or a role, and one
+ * or more policy rows. The `getPolicies()` helper hydrates each attached row
+ * into an evaluation-ready value object; a grantee that holds roles also gets
+ * the policies attached to those roles and to the roles above them.
  *
  *
  * A grantee may own inline policies (`createInlinePolicy()`), attached to it
@@ -127,7 +127,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
 
     /**
      * Detach the given policy from this grantee, through the grant service.
-     * `IdentityPolicyDetached` fires only when the policy was attached.
+     * `GranteePolicyDetached` fires only when the policy was attached.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
@@ -150,12 +150,12 @@ trait HasPolicies // @phpstan-ignore trait.unused
      *
      * Each entry must be a saved policy model; anything else is refused with
      * `InvalidGrantTargetException` before anything is written. Each net
-     * attachment fires `IdentityPolicyAttached` and each net detachment fires
-     * `IdentityPolicyDetached`, mirroring the per-row signal of
-     * `attachPolicy()` / `detachPolicy()`. The cache invalidation listener
-     * wired to those events keeps the resolution cache coherent without a
-     * separate forget call in this method. A listed policy whose attachment has
-     * expired is re-armed with no expiry; to re-arm it for a limited time, call
+     * attachment fires `GranteePolicyAttached` and each net detachment fires
+     * `GranteePolicyDetached`, mirroring the per-row signal of `attachPolicy()`
+     * / `detachPolicy()`. The cache invalidation listener wired to those events
+     * keeps the resolution cache coherent without a separate forget call in
+     * this method. A listed policy whose attachment has expired is re-armed
+     * with no expiry; to re-arm it for a limited time, call
      * `GrantService::syncPolicies()` with an expiry.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy>  $policies
@@ -195,9 +195,9 @@ trait HasPolicies // @phpstan-ignore trait.unused
     }
 
     /**
-     * Return the evaluation-ready policies attached to this grantee, and, for
-     * an identity that holds roles, those attached to its roles and to the
-     * roles above them, each within both grants' scopes.
+     * Return the evaluation-ready policies attached to this grantee, and, for a
+     * grantee that holds roles, those attached to its roles and to the roles
+     * above them, each within both grants' scopes.
      *
      * The policies are read through the resolution cache: memoised for the
      * request or job, and kept in the persistent store when one is configured,

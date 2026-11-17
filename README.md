@@ -27,7 +27,7 @@ assertions.
 
 | Concept         | What it is                                                                                                   |
 |-----------------|--------------------------------------------------------------------------------------------------------------|
-| **Principal**   | Who a decision is about: any Eloquent model that implements `AuthorizableIdentity`, usually your user model. |
+| **Principal**   | Who a decision is about: any Eloquent model that implements `AuthorizableGrantee`, usually your user model.  |
 | **Role**        | A named set of permissions, granted as one. Roles can inherit from a parent role.                            |
 | **Permission**  | A named action, such as `posts:update` or `posts.update`, or a wildcard pattern of them, such as `posts:*`.  |
 | **Policy**      | A JSON document of statements, each allowing or denying actions on resources, optionally under conditions.   |
@@ -83,9 +83,9 @@ namespace App\Models;
 
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use SineMacula\Laravel\Authorization\Concerns\HasAuthorization;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 
-class User extends Authenticatable implements AuthorizableIdentity
+class User extends Authenticatable implements AuthorizableGrantee
 {
     use HasAuthorization;
 }

@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -109,14 +109,14 @@ final class AdministrationImpactQueryBudgetTest extends TestCase
      *
      * @param  string  $batch
      * @param  int  $count
-     * @return list<\Tests\Feature\Stubs\StubIdentity>
+     * @return list<\Tests\Feature\Stubs\StubGrantee>
      */
     private static function users(string $batch, int $count): array
     {
         $users = [];
 
         for ($index = 0; $index < $count; $index++) {
-            $users[] = StubIdentity::create(['id' => \md5($batch) . '-' . $index]);
+            $users[] = StubGrantee::create(['id' => \md5($batch) . '-' . $index]);
         }
 
         return $users;
@@ -153,7 +153,7 @@ final class AdministrationImpactQueryBudgetTest extends TestCase
      */
     private static function administrator(): ActingContext
     {
-        $admin = StubIdentity::create(['id' => 'admin']);
+        $admin = StubGrantee::create(['id' => 'admin']);
 
         self::grants()->grantRole($admin, Role::create(['name' => 'chief', 'rank' => 0]));
 

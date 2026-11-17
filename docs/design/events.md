@@ -14,31 +14,31 @@ carry references, names and ids, never a value the decision read, and are dispat
   `Policy\`.
 - **Role permission events.** `Role\PermissionGranted` (with the grant's expiry), `Role\PermissionRevoked` and
   `Role\PermissionExpiryChanged`, and `Role\PermissionExpired` when `authorization:prune` removes an expired grant.
-- **Grant events.** Under `Identity\`: `RoleAssigned`, `RoleRevoked`, `RoleExpiryChanged`, `PermissionGranted`,
+- **Grant events.** Under `Grantee\`: `RoleAssigned`, `RoleRevoked`, `RoleExpiryChanged`, `PermissionGranted`,
   `PermissionRevoked`, `PermissionExpiryChanged`, `PolicyAttached`, `PolicyDetached` and `PolicyExpiryChanged`. Each
-  also implements `Contracts\IdentityEvent` and names its `grantee`, which for a policy attached to a role is the role.
+  also implements `Contracts\GranteeEvent` and names its `grantee`, which for a policy attached to a role is the role.
 - **Resource policy events.** Under `Resource\`: `PolicyAttached` and `PolicyDetached`, when a policy is attached to
   or detached from a resource or a whole resource type, each with the resource's type, its key (null for the whole
   type), the policy, its name and the scope. A re-attachment with another reach dispatches `PolicyAttached` again,
   carrying the new reach, and `authorization:prune` dispatches `PolicyDetached` for each attachment of a record that no
   longer exists, with an operation that names no actor. Both extend `Resource\ResourcePolicyEvent`, the abstract,
   readonly shape they share, which is never dispatched itself. They name no grantee, so they implement
-  `AuthorizationMutation` but not `IdentityEvent`.
-- **Boundary events.** Under `Identity\`: `BoundarySet` and `BoundaryRemoved`, when a policy is set as a principal's or
+  `AuthorizationMutation` but not `GranteeEvent`.
+- **Boundary events.** Under `Grantee\`: `BoundarySet` and `BoundaryRemoved`, when a policy is set as a principal's or
   an identity's permission boundary in a scope, or the boundary there is removed, each with the grantee, the policy,
   its name and the scope. `BoundarySet` also carries `previous`, the policy the boundary replaced, or null for a
   new boundary or one whose reach alone changed; there is no separate replaced event. `BoundarySet` is dispatched only
   once the boundary's row is read back, never for an insert that wrote none. A grantee's boundaries removed with its
   other grants, once it is deleted, are each reported as `BoundaryRemoved` in that operation, and those of a grantee
-  pruned as gone in an operation of their own, before its grants are revoked. Both extend `Identity\BoundaryEvent`,
-  the abstract, readonly shape they share, which is never dispatched itself, and implement `IdentityEvent`, so the
+  pruned as gone in an operation of their own, before its grants are revoked. Both extend `Grantee\BoundaryEvent`,
+  the abstract, readonly shape they share, which is never dispatched itself, and implement `GranteeEvent`, so the
   grantee's cached resolutions are refreshed as a grant's are.
 - **Guardrail events.** Under `Guardrail\`: `GuardrailSet` and `GuardrailRemoved`, when a policy is set as a guardrail
   on a tenant or on the platform, or that guardrail is removed, each with the policy, its name and the scope, and the
   actor in `operation`. Setting a policy where it is already a guardrail, or removing one that is not
   there, dispatches nothing, and `GuardrailSet` is dispatched only once the guardrail's row is read back. Both extend
   `Guardrail\GuardrailEvent`, the abstract, readonly shape they share, which is never dispatched itself. They name no
-  grantee, so they implement `AuthorizationMutation` but not `IdentityEvent`; the cached guardrails are refreshed
+  grantee, so they implement `AuthorizationMutation` but not `GranteeEvent`; the cached guardrails are refreshed
   through the version every guardrail entry shares.
 - **Role exclusion events.** Under `Role\`: `ExclusionDeclared` and `ExclusionRemoved`, when two roles are declared
   mutually exclusive or that pair is removed, each with the pair's two roles and their names, the lower key first,
@@ -46,22 +46,22 @@ carry references, names and ids, never a value the decision read, and are dispat
   removing one that is not, dispatches nothing, and a role deleted takes its pairs with it unreported, its deletion
   reported as `Deleted`. Both extend `Role\ExclusionEvent`, the abstract, readonly shape they share, and name no
   grantee: a pair hands out nothing, and nothing cached reads it.
-- **Expiry events.** Under `Identity\`: `RoleExpired`, `PermissionExpired` and `PolicyExpired`, dispatched when
+- **Expiry events.** Under `Grantee\`: `RoleExpired`, `PermissionExpired` and `PolicyExpired`, dispatched when
   `authorization:prune` removes an expired grant, with its expiry and an operation that names no actor (the sweep is
   system work).
-- **Break-glass events.** Under `Identity\`: `BreakGlassActivated`, with the role, the scope, the activation's key, the
+- **Break-glass events.** Under `Grantee\`: `BreakGlassActivated`, with the role, the scope, the activation's key, the
   justification code and the expiry, never the note; `BreakGlassSurrendered` and `BreakGlassRevoked`, with when it
   ended, only for an end that ended one; and `BreakGlassExpired`, when `authorization:prune` records the expiry of one
   that expired without ending, keeping its row, with an operation that names no actor. The actor is the granter, the
-  grantee who surrendered or the revoker. Surrendered and revoked extend `Identity\BreakGlassEnded`, the abstract,
-  readonly shape they share, which is never dispatched itself. Each implements `IdentityEvent`, naming the grantee
+  grantee who surrendered or the revoker. Surrendered and revoked extend `Grantee\BreakGlassEnded`, the abstract,
+  readonly shape they share, which is never dispatched itself. Each implements `GranteeEvent`, naming the grantee
   (see [Break-glass](break-glass.md)).
 - **`SystemOverrideUsed`.** A change to a system role, permission or policy that `forceSystem()` unlocked.
 
 ## Invariants
 
 1. **One marker.** Every event class implements `AuthorizationEvent`; `AuthorizationMutation` extends it for every
-   change event (all but the decision events and `SystemOverrideUsed`), and `IdentityEvent` extends that for the grant,
+   change event (all but the decision events and `SystemOverrideUsed`), and `GranteeEvent` extends that for the grant,
    boundary and break-glass events.
 
 2. **Snapshots of plain values.** Every event is a `final readonly` class whose constructor takes only scalars, backed
@@ -105,7 +105,7 @@ carry references, names and ids, never a value the decision read, and are dispat
    grantee that held the permission directly and every role that carried it; `Policy\Deleted` every grantee it was
    attached to. Each list is read before the row goes, inside the delete's transaction, in every scope and whether or
    not the grant had expired; the grantees are ordered by type and key. A deleted role's own policy attachments are each
-   reported as `Identity\PolicyDetached`, as a deleted identity's grants are, and a deleted grantee's inline policies
+   reported as `Grantee\PolicyDetached`, as a deleted grantee's grants are, and a deleted grantee's inline policies
    each as `Policy\Deleted`, in an operation of their own with no actor. A deleted policy's attachments to resources go
    with its row, through the foreign key, and are not reported one by one: `Policy\Deleted` stands for them. A policy in
    use as a permission boundary is never deleted: the delete is refused with `BoundaryException` before anything is read
@@ -148,7 +148,7 @@ carry references, names and ids, never a value the decision read, and are dispat
 
 13. **Audit accessors.** Every change event implements `Contracts\AuthorizationMutation`, so an audit mapper reads it
     through accessors rather than its properties: `operation()`, a stable identifier unique to the event class (such as
-    `identity.role.assigned`, `role.permission.granted`, `policy.deleted`, `resource.policy.attached` or
+    `grantee.role.assigned`, `role.permission.granted`, `policy.deleted`, `resource.policy.attached` or
     `guardrail.set`, the cases of `Enums\MutationOperation`); `subject()`, the record the change is about (the grantee
     of a grant, boundary or break-glass event, the role, permission or policy written, the role of a role permission
     event, the pair's first role of a role exclusion event, the resource record of a resource policy event and the
@@ -191,7 +191,7 @@ carry references, names and ids, never a value the decision read, and are dispat
 ```php
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 
 Event::listen(static function (AuthorizationEvent $event): void {
@@ -244,7 +244,7 @@ app(GrantService::class)->grantRole($user, 'editor'); // trusted work
 
 ## Implementation Anchors
 
-- `Contracts\AuthorizationEvent`, `Contracts\AuthorizationMutation`, `Contracts\IdentityEvent` and the classes under
+- `Contracts\AuthorizationEvent`, `Contracts\AuthorizationMutation`, `Contracts\GranteeEvent` and the classes under
   `Events\`.
 - `Enums\MutationOperation`: every change event's `operation()` value.
 - `Events\Concerns\DescribesGrantChange`, `Events\Concerns\DescribesRecordChange`, `Events\Concerns\DescribesOperation`

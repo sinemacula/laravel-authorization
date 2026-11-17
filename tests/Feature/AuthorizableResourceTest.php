@@ -25,7 +25,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 use SineMacula\Laravel\Authorization\Support\ResourceScope;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -75,7 +75,7 @@ final class AuthorizableResourceTest extends TestCase
      */
     public function testAuthorizableResourceIsUsedByGate(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -110,7 +110,7 @@ final class AuthorizableResourceTest extends TestCase
      */
     public function testAuthorizableResourceTakesPrecedenceOverToString(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -155,7 +155,7 @@ final class AuthorizableResourceTest extends TestCase
      */
     public function testNonMatchingAuthorizableResourceIsDenied(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -191,7 +191,7 @@ final class AuthorizableResourceTest extends TestCase
      */
     public function testAuthorizableResourceWinsOverTheModelAndItsResolver(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
         $this->bindResourceTenant(new Reference(StubTenant::class, 'tenant-b'));
         $this->allowEveryResource($user, 'model-precedence');
@@ -226,7 +226,7 @@ final class AuthorizableResourceTest extends TestCase
      */
     public function testTheContractsTenantIsKept(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
         $this->allowEveryResource($user, 'out-of-scope');
 
@@ -248,7 +248,7 @@ final class AuthorizableResourceTest extends TestCase
     public function testTheContractsTenantIsDecidedInTheActiveTenant(): void
     {
         $tenant = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'Tenant A']);
-        $user   = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user   = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user, $tenant);
         $this->allowEveryResource($user, 'in-scope');
 
@@ -260,11 +260,11 @@ final class AuthorizableResourceTest extends TestCase
      * Swap the subject resolver for the supplied identity, in the given tenant
      * or none.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  object|null  $tenant
      * @return void
      */
-    private function actAs(StubIdentity $user, ?object $tenant = null): void
+    private function actAs(StubGrantee $user, ?object $tenant = null): void
     {
         $resolver = new StubSubjectResolver($user, $tenant);
 
@@ -322,11 +322,11 @@ final class AuthorizableResourceTest extends TestCase
     /**
      * Attach a platform-wide policy allowing `posts:create` on every resource.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  string  $name
      * @return void
      */
-    private function allowEveryResource(StubIdentity $user, string $name): void
+    private function allowEveryResource(StubGrantee $user, string $name): void
     {
         $user->attachPolicy(Policy::create([
             'id'       => (string) Str::uuid(),

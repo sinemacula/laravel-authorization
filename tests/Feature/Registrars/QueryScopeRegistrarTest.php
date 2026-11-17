@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Registrars\QueryScopeRegistrar;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ScopesQueries;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\PostOwner;
 use Tests\Fixtures\QueryScoping\ScopedDocument;
@@ -56,8 +56,8 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testTheMacroKeepsTheRowsTheCurrentSubjectMayActOn(): void
     {
-        $user  = StubIdentity::create(['id' => 'u1']);
-        $other = StubIdentity::create(['id' => 'u2']);
+        $user  = StubGrantee::create(['id' => 'u1']);
+        $other = StubGrantee::create(['id' => 'u2']);
 
         $user->givePermission(Permission::create(['name' => 'posts:view']));
 
@@ -79,7 +79,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testTheManagersOverrideCapsAndContextCount(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
         $flagged = ['effect' => 'allow', 'actions' => ['posts:view'], 'conditions' => ['eq' => ['input.flag' => 'on']]];
         $allow   = EvaluationPolicy::fromArray(['name' => 'override', 'statements' => [$flagged]]);
@@ -101,7 +101,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testARefusalLeavesTheBuilderUnchanged(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         $user->attachPolicy(self::storedPolicy('record', [['effect' => 'deny', 'actions' => ['posts:view'], 'resources' => [(new ScopedPost)->getMorphClass() . ':?']]]));
 
@@ -129,7 +129,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testTheConditionJoinsTheApplicationsConstraintsWithAnd(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:view']));
 
@@ -159,7 +159,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testAQueryThatWouldEscapeTheConditionIsRefused(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
         $scoped  = static fn (): Builder => self::authorized(ScopedPost::query(), 'posts:view', $manager);
 
@@ -186,7 +186,7 @@ final class QueryScopeRegistrarTest extends TestCase
     public function testPaginationAndCountsAgreeWithCheck(): void
     {
         [$t1, $t2] = [StubTenant::query()->create(['id' => 't1']), StubTenant::query()->create(['id' => 't2'])];
-        $user      = StubIdentity::create(['id' => 'u1']);
+        $user      = StubGrantee::create(['id' => 'u1']);
         $manager   = $this->resolveRequest($user, $t1);
 
         $user->givePermission(Permission::create(['name' => 'posts:view']), null, $t1);
@@ -241,7 +241,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testEachExecutionIsDecidedFromTheStateThen(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
         $view    = Permission::create(['name' => 'posts:view']);
 
@@ -274,7 +274,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testUpdatesAndDeletionsAreScoped(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:edit']));
 
@@ -300,7 +300,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testTheLeaksOfABroaderScopeAreClosed(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
         $type    = (new ScopedPost)->getMorphClass();
 
@@ -335,7 +335,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testTheMacroInsideAWhereGroupRefuses(): void
     {
-        $manager = $this->resolveRequest(StubIdentity::create(['id' => 'u1']));
+        $manager = $this->resolveRequest(StubGrantee::create(['id' => 'u1']));
         $scoped  = static fn (Builder $nested): Builder => self::authorized($nested, 'posts:view', $manager);
 
         self::createPosts(2);
@@ -361,7 +361,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testARelationScopedInItsDefinitionRefusesWhereItsScopeIsDropped(): void
     {
-        $user  = StubIdentity::create(['id' => 'u1']);
+        $user  = StubGrantee::create(['id' => 'u1']);
         $owner = PostOwner::query()->create(['title' => 'post 0']);
 
         self::createPosts(1);
@@ -397,7 +397,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testAScopedSubqueryIsDecidedWhenItsSqlIsWritten(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
         $view    = Permission::create(['name' => 'posts:view']);
 
@@ -426,7 +426,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testARawConditionHoldingOrIsGrouped(): void
     {
-        $manager = $this->resolveRequest(StubIdentity::create(['id' => 'u1']));
+        $manager = $this->resolveRequest(StubGrantee::create(['id' => 'u1']));
 
         foreach (['live', 'live', 'draft'] as $status) {
             ScopedPost::query()->create(['title' => 'post', 'status' => $status]);
@@ -454,7 +454,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testACommentInARawConditionCannotSwallowTheCondition(): void
     {
-        $manager = $this->resolveRequest(StubIdentity::create(['id' => 'u1']));
+        $manager = $this->resolveRequest(StubGrantee::create(['id' => 'u1']));
 
         ScopedPost::query()->create(['title' => 'post', 'status' => 'live']);
 
@@ -473,7 +473,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testABeforeQueryCallbackAfterTheMacroCannotEscapeTheCondition(): void
     {
-        $manager = $this->resolveRequest(StubIdentity::create(['id' => 'u1']));
+        $manager = $this->resolveRequest(StubGrantee::create(['id' => 'u1']));
 
         self::createPosts(2);
 
@@ -510,7 +510,7 @@ final class QueryScopeRegistrarTest extends TestCase
      */
     public function testABaseQueryIsDecidedEachTimeItRuns(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
         $view    = Permission::create(['name' => 'posts:view']);
 
@@ -562,8 +562,8 @@ final class QueryScopeRegistrarTest extends TestCase
         $this->refuseThePackage();
 
         $this->assertEachRefused([
-            'scope through the macro' => static fn () => StubIdentity::query()->whereAuthorized('posts:read'),
-            'scope'                   => static fn () => QueryScopeRegistrar::scope(StubIdentity::query(), 'posts:read'),
+            'scope through the macro' => static fn () => StubGrantee::query()->whereAuthorized('posts:read'),
+            'scope'                   => static fn () => QueryScopeRegistrar::scope(StubGrantee::query(), 'posts:read'),
         ]);
     }
 

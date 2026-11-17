@@ -23,7 +23,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions as Actions;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\PermissionsFor\DeclaredPermissions;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
@@ -80,11 +80,11 @@ final class EscalationScenario
     /** @var list<\SineMacula\Laravel\Authorization\Models\Policy> The managed policies. */
     public array $policies = [];
 
-    /** @var list<\Tests\Feature\Stubs\StubIdentity> The subjects, the actor last. */
+    /** @var list<\Tests\Feature\Stubs\StubGrantee> The subjects, the actor last. */
     public array $subjects = [];
 
-    /** @var \Tests\Feature\Stubs\StubIdentity The actor's identity. */
-    public readonly StubIdentity $actorModel;
+    /** @var \Tests\Feature\Stubs\StubGrantee The actor's identity. */
+    public readonly StubGrantee $actorModel;
 
     /** @var \SineMacula\Laravel\Authorization\Administration\ActingContext The actor. */
     public readonly ActingContext $actor;
@@ -146,7 +146,7 @@ final class EscalationScenario
         $this->boundaryService = $app->make(BoundaryService::class);
 
         $this->resourcePolicyService = $app->make(ResourcePolicyService::class);
-        $this->actorModel            = StubIdentity::query()->create(['id' => 'actor']);
+        $this->actorModel            = StubGrantee::query()->create(['id' => 'actor']);
         $this->actor                 = ActingContext::for($this->actorModel);
     }
 
@@ -319,7 +319,7 @@ final class EscalationScenario
      * Return where a grant goes: a random subject, the actor now and then, a
      * random scope, whether it reaches below, and its description.
      *
-     * @return array{\Tests\Feature\Stubs\StubIdentity, \Tests\Feature\Stubs\StubTenant|null, bool, string}
+     * @return array{\Tests\Feature\Stubs\StubGrantee, \Tests\Feature\Stubs\StubTenant|null, bool, string}
      */
     private function place(): array
     {
@@ -415,7 +415,7 @@ final class EscalationScenario
     private function subjectsAndActor(): void
     {
         for ($index = 0, $count = $this->random->between(3, 4); $index < $count; $index++) {
-            $subject = StubIdentity::query()->create(['id' => 'u' . $index]);
+            $subject = StubGrantee::query()->create(['id' => 'u' . $index]);
 
             $this->subjects[] = $subject;
             $this->log[]      = 'subject ' . self::key($subject);
@@ -462,13 +462,13 @@ final class EscalationScenario
      * Give the subject random roles, permissions and policies, each in a random
      * scope.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $subject
+     * @param  \Tests\Feature\Stubs\StubGrantee  $subject
      * @param  int  $most
      * @return void
      *
      * @throws \Throwable
      */
-    private function hold(StubIdentity $subject, int $most): void
+    private function hold(StubGrantee $subject, int $most): void
     {
         foreach ($this->random->some($this->roles, $most) as $role) {
             $tenant = $this->scope();
@@ -550,7 +550,7 @@ final class EscalationScenario
 
         for ($index = 0, $count = $this->random->between(1, 2); $index < $count; $index++) {
             $named    = $this->random->isOneIn(2) ? $this->random->pick($this->roles) : $this->random->pick($this->subjects);
-            $selector = ($named instanceof Role ? 'role' : StubIdentity::class) . ':' . self::key($named);
+            $selector = ($named instanceof Role ? 'role' : StubGrantee::class) . ':' . self::key($named);
             $actions  = $this->random->some(self::HELD, 2);
             $document = ['statements' => [['effect' => 'allow', 'actions' => $actions === [] ? ['posts:delete'] : $actions, 'principals' => [$selector]]]];
 

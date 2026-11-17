@@ -7,7 +7,7 @@ namespace SineMacula\Laravel\Authorization\Resolvers;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 use SineMacula\Laravel\Authorization\Contracts\ConsoleSubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\UnresolvedSubjectException;
@@ -26,7 +26,7 @@ use SineMacula\Laravel\Authorization\Subject;
  * to the principal it acts as, with itself as the identity. The subject
  * returned must be about the model named, as its principal or its identity, or
  * the reference is ambiguous, and its principal must be a saved model that is
- * an authorizable identity, or the model cannot be checked; either is refused.
+ * an authorizable grantee, or the model cannot be checked; either is refused.
  * So is a reference whose lookup or mapping fails, a database error or a key
  * the key column cannot hold included, without naming the failure.
  *
@@ -74,7 +74,7 @@ final readonly class ReferenceSubjectResolver implements ConsoleSubjectResolver
             throw UnresolvedSubjectException::ambiguous($reference);
         }
 
-        if (!$principal instanceof AuthorizableIdentity || !$principal instanceof Model || !$principal->exists) {
+        if (!$principal instanceof AuthorizableGrantee || !$principal instanceof Model || !$principal->exists) {
             throw UnresolvedSubjectException::unsupported($reference);
         }
 

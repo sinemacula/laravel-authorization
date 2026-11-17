@@ -37,11 +37,11 @@ use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\FixedSubjectResolver;
-use Tests\Feature\Stubs\NumberedIdentity;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\NumberedGrantee;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
-use Tests\Fixtures\Reviews\NamedInactiveIdentity;
+use Tests\Fixtures\Reviews\NamedInactiveGrantee;
 use Tests\Fixtures\Reviews\SwitchableSessionPolicySource;
 use Tests\TestCase;
 
@@ -82,7 +82,7 @@ final class AccessReviewTest extends TestCase
 
         self::grants()->grantRole(self::identity('ann'), $role);
 
-        $reviewer = StubIdentity::query()->create(['id' => 'reviewer']);
+        $reviewer = StubGrantee::query()->create(['id' => 'reviewer']);
 
         self::grants()->grantPermission($reviewer, self::permission(PackagePermissions::REVIEW_READ));
 
@@ -350,7 +350,7 @@ final class AccessReviewTest extends TestCase
 
         self::grants()->attachPolicy($role, $policy);
 
-        $subject = StubIdentity::query()->create(['id' => 'subject', 'name' => 'SENTINEL-SUBJECT']);
+        $subject = StubGrantee::query()->create(['id' => 'subject', 'name' => 'SENTINEL-SUBJECT']);
 
         self::grants()->grantRole($subject, $role);
 
@@ -372,12 +372,12 @@ final class AccessReviewTest extends TestCase
     public function testEachRowSaysWhatIsKnownOfItsSubject(): void
     {
         $role    = self::role('reviewed');
-        $deleted = NumberedIdentity::query()->create(['name' => 'deleted']);
+        $deleted = NumberedGrantee::query()->create(['name' => 'deleted']);
 
         self::grants()->grantRole($deleted, $role);
-        self::grants()->grantRole(NamedInactiveIdentity::query()->create(['id' => 'inactive', 'name' => 'inactive']), $role);
+        self::grants()->grantRole(NamedInactiveGrantee::query()->create(['id' => 'inactive', 'name' => 'inactive']), $role);
         self::grants()->grantRole(self::identity('active'), $role);
-        self::grants()->grantRole(new Reference((new StubIdentity)->getMorphClass(), 'gone'), $role);
+        self::grants()->grantRole(new Reference((new StubGrantee)->getMorphClass(), 'gone'), $role);
 
         $deleted->delete();
 
@@ -816,7 +816,7 @@ final class AccessReviewTest extends TestCase
 
         self::grants()->attachPolicy($role, $policy);
 
-        $subject = StubIdentity::query()->create(['id' => 'subject', 'name' => 'SENTINEL-SUBJECT sentinel@example.com']);
+        $subject = StubGrantee::query()->create(['id' => 'subject', 'name' => 'SENTINEL-SUBJECT sentinel@example.com']);
 
         self::grants()->grantRole($subject, $role, now()->addMonth());
 
@@ -858,7 +858,7 @@ final class AccessReviewTest extends TestCase
 
         Carbon::setTestNow($start);
 
-        $stepped = StubIdentity::query()->create(['id' => 'stepped']);
+        $stepped = StubGrantee::query()->create(['id' => 'stepped']);
 
         self::attachStatements($stepped, 'stepped-up-export', [self::requiring(PackagePermissions::REVIEW_READ), self::requiring(PackagePermissions::REVIEW_EXPORT)]);
 
@@ -1112,7 +1112,7 @@ final class AccessReviewTest extends TestCase
      */
     public function testEveryReviewRefusesOnceThePackageRefuses(): void
     {
-        $reviewer = ActingContext::for(StubIdentity::create(['id' => 'user-1']));
+        $reviewer = ActingContext::for(StubGrantee::create(['id' => 'user-1']));
         $query    = ReviewQuery::holders(self::role('reviewed'), ReviewScope::everywhere());
         $review   = $this->container()->make(AccessReview::class);
         $sink     = static fn (): null => null;
@@ -1156,13 +1156,13 @@ final class AccessReviewTest extends TestCase
      *
      * @param  string  $id
      * @param  string  ...$rights
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      *
      * @throws \Throwable
      */
-    private static function reviewerWith(string $id, string ...$rights): StubIdentity
+    private static function reviewerWith(string $id, string ...$rights): StubGrantee
     {
-        $reviewer = StubIdentity::query()->create(['id' => $id]);
+        $reviewer = StubGrantee::query()->create(['id' => $id]);
 
         foreach ($rights as $right) {
             self::grants()->grantPermission($reviewer, Permission::query()->firstOrCreate(['name' => $right]));

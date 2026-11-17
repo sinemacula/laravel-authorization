@@ -31,7 +31,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
@@ -131,7 +131,7 @@ final class BreakGlassActivationsTest extends TestCase
     {
         $tenants = $this->tree();
         $posts   = self::posts($tenants);
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
 
         $type = $tenant === null ? null : (new StubTenant)->getMorphClass();
 
@@ -154,7 +154,7 @@ final class BreakGlassActivationsTest extends TestCase
      */
     public function testAnExpiredOrEndedActivationGrantsNothing(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
         $role  = self::emergencyRole();
         $ended = self::activate($user, $role, ['ended_at' => Carbon::now()->subMinute(), 'end_reason' => 'surrendered']);
 
@@ -166,7 +166,7 @@ final class BreakGlassActivationsTest extends TestCase
         $ended->update(['ended_at' => null, 'end_reason' => null]);
 
         self::assertTrue($this->manager(new Subject($user, $user))->can(self::ACTION));
-        self::assertSame(['responder'], StubIdentity::query()->findOrFail('user-1')->getRoles());
+        self::assertSame(['responder'], StubGrantee::query()->findOrFail('user-1')->getRoles());
 
         Carbon::setTestNow(Carbon::now()->addMinutes(30));
 
@@ -182,7 +182,7 @@ final class BreakGlassActivationsTest extends TestCase
      */
     public function testANormalGrantAndAnActivationOfTheSameRoleCoexist(): void
     {
-        $user       = StubIdentity::create(['id' => 'user-1']);
+        $user       = StubGrantee::create(['id' => 'user-1']);
         $role       = self::emergencyRole();
         $activation = self::activate($user, $role);
 
@@ -212,15 +212,15 @@ final class BreakGlassActivationsTest extends TestCase
     public function testDeniesBoundariesAndGuardrailsStillApply(): void
     {
         $limits = [
-            'deny'      => fn (StubIdentity $user) => $user->attachPolicy(self::policy('deny', self::ACTION)),
-            'boundary'  => fn (StubIdentity $user) => BoundaryService::instance()?->set($user, self::policy('allow', 'other:*')),
+            'deny'      => fn (StubGrantee $user) => $user->attachPolicy(self::policy('deny', self::ACTION)),
+            'boundary'  => fn (StubGrantee $user) => BoundaryService::instance()?->set($user, self::policy('allow', 'other:*')),
             'guardrail' => fn () => DB::table('guardrails')->insert(['policy_id' => self::policy('allow', 'other:*')->getKey()]),
         ];
 
         foreach ($limits as $kind => $limit) {
             DB::table('guardrails')->delete();
 
-            $user = StubIdentity::create(['id' => 'user-' . $kind]);
+            $user = StubGrantee::create(['id' => 'user-' . $kind]);
 
             self::activate($user, self::emergencyRole());
 
@@ -244,7 +244,7 @@ final class BreakGlassActivationsTest extends TestCase
      */
     public function testTheCacheEntryLapsesAtTheActivationsExpiry(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         self::activate($user, self::emergencyRole(), ['expires_at' => Carbon::now()->addMinutes(5)]);
 
@@ -274,7 +274,7 @@ final class BreakGlassActivationsTest extends TestCase
      */
     public function testAChangeThroughTheModelIsSeenOnTheNextCheck(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $role = self::emergencyRole();
 
         self::assertFalse($this->manager(new Subject($user, $user))->can(self::ACTION));
@@ -305,7 +305,7 @@ final class BreakGlassActivationsTest extends TestCase
      */
     public function testSwitchingBreakGlassOffStopsEveryActivation(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($user, $user);
 
         self::activate($user, self::emergencyRole());
@@ -318,7 +318,7 @@ final class BreakGlassActivationsTest extends TestCase
         self::switchBreakGlass(false);
 
         self::assertFalse($this->manager($subject)->can(self::ACTION));
-        self::assertFalse(StubIdentity::query()->findOrFail('user-1')->hasRole('responder'));
+        self::assertFalse(StubGrantee::query()->findOrFail('user-1')->hasRole('responder'));
         self::assertSame(1, DB::table('break_glass_activations')->count());
 
         self::switchBreakGlass(true);
@@ -340,7 +340,7 @@ final class BreakGlassActivationsTest extends TestCase
      */
     public function testTheUnexpiredActivationsIgnoreTheSwitch(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $role = self::emergencyRole();
         $kept = self::activate($user, $role)->getKey();
 
@@ -367,7 +367,7 @@ final class BreakGlassActivationsTest extends TestCase
      */
     public function testTheSwitchIsReadOnceARequest(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
         $table = 'break_glass_activations';
 
         self::activate($user, self::emergencyRole());
@@ -400,9 +400,9 @@ final class BreakGlassActivationsTest extends TestCase
     {
         $role      = self::emergencyRole();
         $machine   = StubMachine::create(['id' => 'machine-1']);
-        $identity  = StubIdentity::create(['id' => 'person-1']);
-        $principal = StubIdentity::create(['id' => 'account-1']);
-        $half      = StubIdentity::create(['id' => 'half-1']);
+        $identity  = StubGrantee::create(['id' => 'person-1']);
+        $principal = StubGrantee::create(['id' => 'account-1']);
+        $half      = StubGrantee::create(['id' => 'half-1']);
         $tenant    = StubTenant::query()->create(['id' => 'o1', 'name' => 'o1']);
 
         self::activate($machine, $role);
@@ -439,7 +439,7 @@ final class BreakGlassActivationsTest extends TestCase
      */
     public function testAnExplanationNamesTheBreakGlassRouteWithoutTheNote(): void
     {
-        $user       = StubIdentity::create(['id' => 'user-1']);
+        $user       = StubGrantee::create(['id' => 'user-1']);
         $role       = self::emergencyRole();
         $activation = self::activate($user, $role);
 
@@ -461,7 +461,7 @@ final class BreakGlassActivationsTest extends TestCase
 
         $user->assignRole($role);
 
-        $both = Authorization::for(StubIdentity::query()->findOrFail('user-1'))->explain(self::ACTION);
+        $both = Authorization::for(StubGrantee::query()->findOrFail('user-1'))->explain(self::ACTION);
 
         self::assertSame(
             [GrantSource::ROLE_PERMISSION, GrantSource::BREAK_GLASS_PERMISSION],
@@ -478,7 +478,7 @@ final class BreakGlassActivationsTest extends TestCase
      */
     public function testWhatAnActivatedRoleCarriesNamesItsActivation(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $role   = self::emergencyRole();
         $editor = Role::create(['name' => 'editor']);
 
@@ -514,7 +514,7 @@ final class BreakGlassActivationsTest extends TestCase
      */
     public function testTheRoleGrantRowsHoldEveryGrantAndEveryLiveActivation(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $machine = StubMachine::create(['id' => 'machine-1']);
         $role    = self::emergencyRole();
         $live    = self::activate($user, $role);
@@ -542,8 +542,8 @@ final class BreakGlassActivationsTest extends TestCase
      */
     public function testWhatCountsAndWhereItIsKept(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
-        $identity = StubIdentity::create(['id' => 'person-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
+        $identity = StubGrantee::create(['id' => 'person-1']);
         $machine  = new StubMachine;
         $live     = self::activate($user, self::emergencyRole());
         $marks    = BreakGlassActivations::instance();
@@ -583,7 +583,7 @@ final class BreakGlassActivationsTest extends TestCase
      */
     public function testNothingIsMarkedOrCountedWithoutTheRecordBound(): void
     {
-        $identity = StubIdentity::create(['id' => 'person-1']);
+        $identity = StubGrantee::create(['id' => 'person-1']);
 
         $this->app?->offsetUnset(BreakGlassActivations::class);
 

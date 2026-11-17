@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\NarrowContractsGrantee;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
@@ -51,7 +51,7 @@ final class BoundaryResolverTest extends TestCase
      */
     public function testAGranteeWithoutABoundaryHasNone(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         self::assertSame([], BoundaryResolver::boundariesFor($user));
 
@@ -60,7 +60,7 @@ final class BoundaryResolverTest extends TestCase
 
         self::assertSame([], BoundaryResolver::boundariesFor(null));
         self::assertSame([], BoundaryResolver::boundariesFor(new \stdClass));
-        self::assertSame([], BoundaryResolver::boundariesFor(new StubIdentity(['id' => 'unsaved'])));
+        self::assertSame([], BoundaryResolver::boundariesFor(new StubGrantee(['id' => 'unsaved'])));
         self::assertSame([], BoundaryResolver::boundariesFor(new NarrowContractsGrantee(['id' => 'unsaved'])));
         self::assertSame([], BoundaryResolver::boundariesFor(new Reference('user', 'user-1')));
         self::assertSame([], DB::getQueryLog());
@@ -71,7 +71,7 @@ final class BoundaryResolverTest extends TestCase
     /**
      * The boundaries of a saved model are read whichever contracts it
      * implements: one holding grants through the narrow contracts alone, not an
-     * authorizable identity, has the boundary set on it.
+     * authorizable grantee, has the boundary set on it.
      *
      * @return void
      *
@@ -103,7 +103,7 @@ final class BoundaryResolverTest extends TestCase
 
         $this->app?->instance(TenantTree::class, $tree->put(Reference::of($closed), Reference::of($account)));
 
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         self::service()->set($user, self::cap('platform'));
         self::service()->set($user, self::cap('in-org'), $org);
@@ -133,7 +133,7 @@ final class BoundaryResolverTest extends TestCase
 
         $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org))->put(Reference::of($sibling), Reference::of($org)));
 
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         self::service()->set($user, self::cap('in-account'), $account);
 
@@ -162,8 +162,8 @@ final class BoundaryResolverTest extends TestCase
      */
     public function testAnotherGranteesBoundariesDoNotApply(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
-        $other = StubIdentity::create(['id' => 'user-2']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
+        $other = StubGrantee::create(['id' => 'user-2']);
 
         self::service()->set($other, self::cap('theirs'));
 
@@ -182,7 +182,7 @@ final class BoundaryResolverTest extends TestCase
     public function testAPolicySetInTwoScopesIsReadOnce(): void
     {
         $tenant = self::createTenant('tenant-a');
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $cap    = self::cap('both');
 
         self::service()->set($user, $cap);
@@ -205,7 +205,7 @@ final class BoundaryResolverTest extends TestCase
      */
     public function testReadsInOneQueryThenFromTheCache(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         self::service()->set($user, self::cap('cap'));
 
@@ -233,7 +233,7 @@ final class BoundaryResolverTest extends TestCase
      */
     public function testReadsFromTheDatabaseWithoutACache(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         self::service()->set($user, self::cap('cap'));
 
@@ -254,7 +254,7 @@ final class BoundaryResolverTest extends TestCase
     public function testAPersistentEntryHoldsUntilAWriteChangesIt(): void
     {
         $store = new Repository(new ArrayStore);
-        $user  = StubIdentity::create(['id' => 'user-1']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
         $cap   = self::cap('cap');
 
         self::request($store);
@@ -295,7 +295,7 @@ final class BoundaryResolverTest extends TestCase
     {
         $versions = new VersionedStore(new Repository(new ArrayStore), 'authz');
         $pins     = new ResolutionPins($versions);
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
 
         self::service()->set($user, self::cap('cap'));
 
@@ -317,7 +317,7 @@ final class BoundaryResolverTest extends TestCase
      */
     public function testAnUnreadableBoundaryIsThrown(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $cap  = self::cap('cap');
 
         self::service()->set($user, $cap);

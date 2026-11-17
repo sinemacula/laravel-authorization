@@ -67,7 +67,7 @@ use SineMacula\Laravel\Authorization\Support\RoleReach;
  * expired re-arms it with the new expiry, and a different expiry on a live
  * grant is reported as a change.
  *
- * The identity events (`RoleAssigned`, `PermissionGranted`, `PolicyAttached`,
+ * The grantee events (`RoleAssigned`, `PermissionGranted`, `PolicyAttached`,
  * their revoked and detached counterparts, and the expiry-changed events) are
  * dispatched once the write commits, on the package's connection, and only for
  * a write that changed something; a write that rolls back, alone or with an
@@ -160,10 +160,10 @@ use SineMacula\Laravel\Authorization\Support\RoleReach;
  * before it is weighed, so an actor not allowed it is refused as such, and the
  * grant hook, which runs before any lock, has been called by then.
  *
- * A grantee is an identity or a role: a policy attached to a role applies to
- * whoever holds the role, within both grants' scopes, and to whoever holds a
- * role below it. An inline policy is attached only to the grantee it belongs
- * to; attaching or syncing it to any other throws
+ * A grantee is a principal, an identity or a role: a policy attached to a role
+ * applies to whoever holds the role, within both grants' scopes, and to whoever
+ * holds a role below it. An inline policy is attached only to the grantee it
+ * belongs to; attaching or syncing it to any other throws
  * `InlinePolicyAttachmentException` before anything is written. A policy whose
  * statements name `principals` is refused for any grantee with
  * `ResourcePolicyException` (see `PolicyPrincipals`).
@@ -406,9 +406,9 @@ final class GrantService
     }
 
     /**
-     * Attach a policy to the grantee, an identity or a role, until the given
-     * expiry or forever. An inline policy is attached only to the grantee it
-     * belongs to.
+     * Attach a policy to the grantee, a principal, an identity or a role, until
+     * the given expiry or forever. An inline policy is attached only to the
+     * grantee it belongs to.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy

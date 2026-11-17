@@ -44,10 +44,10 @@ use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubTenant;
-use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Feature\Stubs\SuspendableGrantee;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\NumberedTenantPost;
 use Tests\Fixtures\QueryScoping\ScopedDocument;
@@ -81,7 +81,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testAGuestOrAnInactiveSubjectKeepsNoRow(): void
     {
-        $inactive = SuspendableIdentity::create(['id' => 'inactive']);
+        $inactive = SuspendableGrantee::create(['id' => 'inactive']);
 
         $inactive->suspended = true;
 
@@ -97,7 +97,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testATenantlessModelKeepsEveryIdentifiedRowWhenAllowed(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
         $key     = DB::connection()->getQueryGrammar()->wrap('scoped_posts.id');
 
@@ -120,7 +120,7 @@ final class QueryAuthorizerTest extends TestCase
     {
         [$t1, $t2] = [StubTenant::query()->create(['id' => 't1']), StubTenant::query()->create(['id' => 't2'])];
         $type      = $t1->getMorphClass();
-        $user      = StubIdentity::create(['id' => 'u1']);
+        $user      = StubGrantee::create(['id' => 'u1']);
         $manager   = $this->resolveRequest($user, $t1);
 
         $user->givePermission(Permission::create(['name' => 'posts:view']), null, $t1);
@@ -163,7 +163,7 @@ final class QueryAuthorizerTest extends TestCase
     public function testWithNoActiveTenantOnlyRowsOfNoTenantAreKept(): void
     {
         $tenant = StubTenant::query()->create(['id' => 't1']);
-        $user   = StubIdentity::create(['id' => 'u1']);
+        $user   = StubGrantee::create(['id' => 'u1']);
 
         $user->attachPolicy(self::storedPolicy('allow', [['effect' => 'allow', 'actions' => ['posts:view']]]));
 
@@ -184,7 +184,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testAFixedTenantTypeComparesTheKeyAlone(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         $user->attachPolicy(self::storedPolicy('allow', [['effect' => 'allow', 'actions' => ['posts:view']]]));
 
@@ -221,7 +221,7 @@ final class QueryAuthorizerTest extends TestCase
             self::markTestSkipped('Only SQLite keeps a real number in an integer column.');
         }
 
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         $user->attachPolicy(self::storedPolicy('allow', [['effect' => 'allow', 'actions' => ['posts:view']]]));
 
@@ -253,7 +253,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testARowOfTheActiveTenantIsMatchedThroughAnIndex(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $tenant  = new Reference('teams', '5');
         $model   = new NumberedTenantPost;
         $grammar = DB::connection()->getQueryGrammar();
@@ -301,7 +301,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testARowTooLongForAPatternIsLeftOutWhenAPatternIsMatched(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
         $type    = (new ScopedDocument)->getMorphClass();
         $limit   = \PHP_MAXPATHLEN - \strlen($type) - 1;
@@ -332,7 +332,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testAMorphTypeWithANulByteKeepsNoRow(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:view']));
 
@@ -372,7 +372,7 @@ final class QueryAuthorizerTest extends TestCase
     {
         $t1      = StubTenant::query()->create(['id' => 't1']);
         $type    = $t1->getMorphClass();
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
 
         StubTenant::query()->create(['id' => 't2']);
@@ -429,7 +429,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testARecordAttachmentIsWeighedOnItsRecord(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
         $subject = $manager->currentSubject();
 
@@ -466,7 +466,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testAScopePastItsAttachmentLimitIsRefused(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $subject = $this->resolveRequest($user)->currentSubject();
         $config  = app(ConfigRepository::class);
         $compile = static fn (): string => self::authorizer()->compile($subject, new ScopedPost, 'posts:view');
@@ -518,7 +518,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testAnAttachedAllowGrantsOnlyThePrincipalsItNames(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
 
         foreach ([4, 5] as $id) {
@@ -547,7 +547,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testATenantOfAnyBytesDecidesAsCheckDoes(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
         $ids  = ['a??b', 'a?b', 'a\'b', 'a\\', 'a\\\'b', ...(DB::connection()->getDriverName() === 'pgsql' ? [] : ["a\0b"])];
 
         foreach ($ids as $index => $id) {
@@ -588,7 +588,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testAnUnreadableDocumentIsRefused(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
         $id      = self::unreadablePolicy();
 
@@ -615,7 +615,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testAnInvalidMaterialStatementIsRefused(): void
     {
-        $user      = StubIdentity::create(['id' => 'u1']);
+        $user      = StubGrantee::create(['id' => 'u1']);
         $subject   = new Subject($user, $user);
         $broken    = ['no_such_operator' => ['input.x' => 1]];
         $invalid   = static fn (string $action): EvaluationPolicy => new EvaluationPolicy('broken', [new Statement(PolicyEffect::ALLOW, [$action], null, $broken)]);
@@ -639,7 +639,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testStatementsTheScopeCannotCompileAreRefusedTogether(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
         $type    = (new ScopedPost)->getMorphClass();
 
@@ -677,7 +677,7 @@ final class QueryAuthorizerTest extends TestCase
         ClosureTenantTree::add(new Reference('teams', '5'));
         ClosureTenantTree::add(new Reference('teams', '7'), new Reference('teams', '5'));
 
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user, new Reference('teams', '5'));
         $counts  = [];
 
@@ -726,7 +726,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testSpecialKeysAreNamedAsCheckNamesThem(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
         $type    = (new ScopedDocument)->getMorphClass();
 
@@ -760,7 +760,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testABoundaryLimitedToOneRecordKeepsItAlone(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
 
         foreach ([4, 5, 6] as $id) {
@@ -786,7 +786,7 @@ final class QueryAuthorizerTest extends TestCase
      */
     public function testAStatementReadingAnUnmarkedSourceIsRefused(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
         $config  = $this->app?->make(ConfigRepository::class);
 

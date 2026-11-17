@@ -26,7 +26,7 @@ use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ScopesQueries;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\CountingTenantTree;
@@ -64,7 +64,7 @@ final class ScopeClassesTest extends TestCase
      */
     public function testTheRequestsClassesUnderTheFlatTree(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         self::assertSame([[QueryAuthorizer::EVERY_ROW, null, false, false]], self::described(self::classes($this->resolveRequest($user), new ScopedPost)));
         self::assertCount(1, self::classes($this->resolveRequest($user), new TenantScopedPost));
@@ -142,7 +142,7 @@ final class ScopeClassesTest extends TestCase
      */
     public function testAnInexactAuthorizationTableIsRefusedWhenTheClassesNeedIt(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         $this->app?->make(ConfigRepository::class)->set('authorization.tables.resource_policies', 'scoped_folded_resource_policies');
 
@@ -164,7 +164,7 @@ final class ScopeClassesTest extends TestCase
      */
     public function testAnInexactActivationTableIsRefused(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         $this->app?->make(ConfigRepository::class)->set('authorization.tables.break_glass', 'scoped_folded_break_glass');
 
@@ -212,7 +212,7 @@ final class ScopeClassesTest extends TestCase
     public function testAPlatformWideGrantAdmitsEveryTenantUnderItsGuardrails(): void
     {
         [$user, $tenants] = $this->tree();
-        $admin            = StubIdentity::create(['id' => 'admin']);
+        $admin            = StubGrantee::create(['id' => 'admin']);
 
         $admin->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
         $user->givePermission(Permission::create(['name' => 'posts:view']));
@@ -429,7 +429,7 @@ final class ScopeClassesTest extends TestCase
      */
     public function testTheFlatTreesClassesAreCountedOneForEachAnchor(): void
     {
-        $user   = StubIdentity::create(['id' => 'u1']);
+        $user   = StubGrantee::create(['id' => 'u1']);
         $config = config();
         $active = $this->resolveRequest($user, new Reference(self::tenantType(), 'o1'));
 
@@ -516,7 +516,7 @@ final class ScopeClassesTest extends TestCase
      * Build the tree, one post in each tenant and one of no tenant, and the
      * subject; return the subject and the tenants by id.
      *
-     * @return array{\Tests\Feature\Stubs\StubIdentity, array<string, \Illuminate\Database\Eloquent\Model>}
+     * @return array{\Tests\Feature\Stubs\StubGrantee, array<string, \Illuminate\Database\Eloquent\Model>}
      */
     private function tree(): array
     {
@@ -537,7 +537,7 @@ final class ScopeClassesTest extends TestCase
 
         TenantScopedPost::query()->create(['title' => 'none']);
 
-        return [StubIdentity::create(['id' => 'u1']), $tenants];
+        return [StubGrantee::create(['id' => 'u1']), $tenants];
     }
 
     /**

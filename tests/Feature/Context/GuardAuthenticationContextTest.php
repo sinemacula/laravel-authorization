@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy;
-use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\Feature\Stubs\SiblingAuthenticationContext;
 use Tests\TestCase;
 
@@ -98,12 +98,12 @@ final class GuardAuthenticationContextTest extends TestCase
      */
     public function testASignedInUserSuppliesItsKeyAndType(): void
     {
-        $this->actingAs(AuthenticatableIdentity::create(['id' => self::USER_ID]));
+        $this->actingAs(AuthenticatableGrantee::create(['id' => self::USER_ID]));
 
         self::assertSame(['authentication' => [
             'guard'     => 'web',
             'user_id'   => self::USER_ID,
-            'user_type' => AuthenticatableIdentity::class,
+            'user_type' => AuthenticatableGrantee::class,
         ]], $this->context()->values());
     }
 
@@ -114,9 +114,9 @@ final class GuardAuthenticationContextTest extends TestCase
      */
     public function testAnEloquentUsersTypeIsItsMorphAlias(): void
     {
-        Relation::morphMap(['identity' => AuthenticatableIdentity::class]);
+        Relation::morphMap(['identity' => AuthenticatableGrantee::class]);
 
-        $this->actingAs(AuthenticatableIdentity::create(['id' => self::USER_ID]));
+        $this->actingAs(AuthenticatableGrantee::create(['id' => self::USER_ID]));
 
         self::assertSame('identity', $this->context()->values()['authentication']['user_type'] ?? null);
     }
@@ -224,7 +224,7 @@ final class GuardAuthenticationContextTest extends TestCase
      */
     public function testDeclaresTheKeysItSupplies(): void
     {
-        $this->actingAs(AuthenticatableIdentity::create(['id' => self::USER_ID]));
+        $this->actingAs(AuthenticatableGrantee::create(['id' => self::USER_ID]));
 
         $supplied = \array_map(static fn (string $key): string => "authentication.{$key}", \array_keys($this->context()->values()['authentication'] ?? []));
 
@@ -242,13 +242,13 @@ final class GuardAuthenticationContextTest extends TestCase
     {
         $this->bindDeclaredCatalogue();
 
-        $user = AuthenticatableIdentity::create(['id' => self::USER_ID]);
+        $user = AuthenticatableGrantee::create(['id' => self::USER_ID]);
 
         $user->attachPolicy(Policy::create(['name' => 'guarded', 'document' => ['statements' => [
             ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => [
                 'authentication.guard'     => 'web',
                 'authentication.user_id'   => self::USER_ID,
-                'authentication.user_type' => AuthenticatableIdentity::class,
+                'authentication.user_type' => AuthenticatableGrantee::class,
             ]]],
         ]]]));
 
@@ -285,7 +285,7 @@ final class GuardAuthenticationContextTest extends TestCase
         $this->app?->instance(AuthenticationContext::class, new SiblingAuthenticationContext);
         $this->bindDeclaredCatalogue()->register('authentication', SiblingAuthenticationContext::KEYS);
 
-        $user = AuthenticatableIdentity::create(['id' => self::USER_ID]);
+        $user = AuthenticatableGrantee::create(['id' => self::USER_ID]);
 
         $user->attachPolicy(Policy::create(['name' => 'sibling', 'document' => ['statements' => [
             ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['authentication.identity_id' => 'identity-1']]],

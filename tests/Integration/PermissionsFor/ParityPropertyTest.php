@@ -29,7 +29,7 @@ use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\FixedSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -227,7 +227,7 @@ final class ParityPropertyTest extends TestCase
      * records anything, and return how many listings were compared.
      *
      * @param  \Tests\Integration\PermissionsFor\ListingScenario  $scenario
-     * @param  \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubIdentity|null  $named
+     * @param  \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubGrantee|null  $named
      * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
      * @param  array<string, mixed>  $context
      * @param  list<array{string, list<string>}>|\Throwable  $single
@@ -236,7 +236,7 @@ final class ParityPropertyTest extends TestCase
      */
     private function assertParity(
         ListingScenario $scenario,
-        StubIdentity|Subject|null $named,
+        StubGrantee|Subject|null $named,
         AuthorizationScope $scope,
         array $context,
         array|\Throwable $single,
@@ -309,11 +309,11 @@ final class ParityPropertyTest extends TestCase
      * names, or a guest's on `forUser(null)`.
      *
      * @param  \Tests\Integration\PermissionsFor\ListingScenario  $scenario
-     * @param  \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubIdentity|null  $named
+     * @param  \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubGrantee|null  $named
      * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
      * @return \SineMacula\Laravel\Authorization\Subject|null
      */
-    private static function checkedSubject(ListingScenario $scenario, StubIdentity|Subject|null $named, AuthorizationScope $scope): ?Subject
+    private static function checkedSubject(ListingScenario $scenario, StubGrantee|Subject|null $named, AuthorizationScope $scope): ?Subject
     {
         if ($named instanceof Subject) {
             return new Subject($named->subject, $named->identity, $scope->tenant, $scope->application, $named->guard, $named->session);

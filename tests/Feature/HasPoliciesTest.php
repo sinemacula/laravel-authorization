@@ -15,9 +15,9 @@ use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
@@ -32,8 +32,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Feature\Stubs\NonMorphRolesGrantee;
-use Tests\Feature\Stubs\NumberedIdentity;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\NumberedGrantee;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\UndeclaredRolesGrantee;
 use Tests\TestCase;
 
@@ -82,7 +82,7 @@ final class HasPoliciesTest extends TestCase
      */
     public function testAPolicyForAnApplication(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $policy = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
 
@@ -110,7 +110,7 @@ final class HasPoliciesTest extends TestCase
      */
     public function testAPolicyInATenantCanBeLimitedToIt(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $tenant = new Reference('stub_tenant', 'tenant-a');
 
         $policy = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
@@ -134,7 +134,7 @@ final class HasPoliciesTest extends TestCase
     {
         Carbon::setTestNow('2026-07-01 12:00:00');
 
-        $user   = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user   = StubGrantee::create(['id' => (string) Str::uuid()]);
         $policy = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
 
         $user->attachPolicy($policy);
@@ -159,7 +159,7 @@ final class HasPoliciesTest extends TestCase
     {
         Carbon::setTestNow('2026-07-01 12:00:00');
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->attachPolicy(Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]), Carbon::parse('2026-07-01 13:00:00'));
 
         $policy = $user->policies()->sole();
@@ -176,7 +176,7 @@ final class HasPoliciesTest extends TestCase
      */
     public function testGetPoliciesHydratesEveryAttachedRow(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         foreach (['first', 'second'] as $name) {
             $user->attachPolicy(Policy::create([
@@ -199,7 +199,7 @@ final class HasPoliciesTest extends TestCase
      */
     public function testGetPoliciesReturnsEmptyListWithoutAttachedRows(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         self::assertSame([], $user->getPolicies());
     }
@@ -215,7 +215,7 @@ final class HasPoliciesTest extends TestCase
         $logger = self::recordingLogger();
         $this->container()->instance('log', $logger);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $user->attachPolicy(Policy::create([
             'id'       => (string) Str::uuid(),
@@ -402,7 +402,7 @@ final class HasPoliciesTest extends TestCase
     public function testAGranteesInlinePoliciesAreDeletedWithIt(): void
     {
         $user     = $this->identity();
-        $numbered = NumberedIdentity::create(['name' => 'numbered']);
+        $numbered = NumberedGrantee::create(['name' => 'numbered']);
         $managed  = $this->policy('shared');
 
         $user->attachPolicy($user->createInlinePolicy('mine', ['version' => 1, 'statements' => []]));
@@ -485,8 +485,8 @@ final class HasPoliciesTest extends TestCase
      */
     public function testTheWriteHelpersPassTheActorThrough(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-actor']);
-        $actor  = ActingContext::for(StubIdentity::create(['id' => 'nobody']));
+        $user   = StubGrantee::create(['id' => 'user-actor']);
+        $actor  = ActingContext::for(StubGrantee::create(['id' => 'nobody']));
         $policy = Policy::create(['name' => 'readers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
 
         self::assertRefusedAsNothingAllowed(static fn () => $user->attachPolicy($policy, actor: $actor));
@@ -508,8 +508,8 @@ final class HasPoliciesTest extends TestCase
      */
     public function testAnInlinePolicyCreatedWithAnActorIsDecidedAsTheActor(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-actor']);
-        $admin = StubIdentity::create(['id' => 'admin']);
+        $user  = StubGrantee::create(['id' => 'user-actor']);
+        $admin = StubGrantee::create(['id' => 'admin']);
 
         $admin->givePermission(Permission::create(['name' => PackagePermissions::POLICY_CREATE]));
 
@@ -532,7 +532,7 @@ final class HasPoliciesTest extends TestCase
      */
     public function testThePoliciesRefuseWithAWarmCacheOnceThePackageRefuses(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->getPolicies();
 
@@ -579,12 +579,12 @@ final class HasPoliciesTest extends TestCase
     /**
      * Grant the identity the checked row until the given instant.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  \DateTimeInterface  $expiresAt
      * @return void
      */
     #[\Override]
-    protected function grantUntil(StubIdentity $identity, \DateTimeInterface $expiresAt): void
+    protected function grantUntil(StubGrantee $identity, \DateTimeInterface $expiresAt): void
     {
         $identity->attachPolicy(Policy::query()->firstOrCreate(['name' => 'readers'], ['document' => ['version' => 1, 'statements' => []]]), $expiresAt);
     }
@@ -592,11 +592,11 @@ final class HasPoliciesTest extends TestCase
     /**
      * Return the names of the rows the identity holds.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @return list<string>
      */
     #[\Override]
-    protected function heldNames(StubIdentity $identity): array
+    protected function heldNames(StubGrantee $identity): array
     {
         /** @var list<string> */
         return $identity->policies->pluck('name')->all();
@@ -622,13 +622,13 @@ final class HasPoliciesTest extends TestCase
     /**
      * Create an identity at 12:00.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function identity(): StubIdentity
+    private function identity(): StubGrantee
     {
         Carbon::setTestNow('2026-07-01 12:00:00');
 
-        return StubIdentity::create(['id' => (string) Str::uuid()]);
+        return StubGrantee::create(['id' => (string) Str::uuid()]);
     }
 
     /**

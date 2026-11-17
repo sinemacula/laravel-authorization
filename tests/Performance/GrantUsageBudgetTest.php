@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Usage\RecordGrantUsage;
 use Tests\Concerns\MeasuresTime;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Concerns\TracksGrantUsage;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\TestCase;
 
 /**
@@ -101,7 +101,7 @@ final class GrantUsageBudgetTest extends TestCase
     public function testATrackedColdCheckNeverResolvesWhatTheCheckDidNot(): void
     {
         $person = self::identity('person');
-        $ann    = StubSecondIdentity::query()->create(['id' => 'ann']);
+        $ann    = StubSecondGrantee::query()->create(['id' => 'ann']);
         $admin  = self::role('admin');
 
         $admin->givePermissionTo(self::permission('posts:write'));

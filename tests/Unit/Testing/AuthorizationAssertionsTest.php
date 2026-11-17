@@ -29,9 +29,9 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
-use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -61,7 +61,7 @@ final class AuthorizationAssertionsTest extends TestCase
     {
         Permission::create(['id' => 'c2d9b0b4-d6db-4c09-8e1c-3cc9a9afff14', 'name' => 'docs:view', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => 'c04bbc1e-a3f1-4a00-8a37-5b6ca2de6a88']);
+        $user = StubGrantee::create(['id' => 'c04bbc1e-a3f1-4a00-8a37-5b6ca2de6a88']);
         $user->givePermission('docs:view');
 
         $this->assertCan($user, 'docs:view');
@@ -75,7 +75,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertCanFailsWithTraceOnDeny(): void
     {
-        $user = StubIdentity::create(['id' => '9c92e0cb-686f-4347-8ca8-9033eed62375']);
+        $user = StubGrantee::create(['id' => '9c92e0cb-686f-4347-8ca8-9033eed62375']);
 
         $this->expectException(AssertionFailedError::class);
         $this->expectExceptionMessage(
@@ -94,7 +94,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertCannotPassesWhenDenied(): void
     {
-        $user = StubIdentity::create(['id' => '10e3747c-3a23-4c42-8245-4f1f6ce2183d']);
+        $user = StubGrantee::create(['id' => '10e3747c-3a23-4c42-8245-4f1f6ce2183d']);
 
         $this->assertCannot($user, 'docs:delete');
     }
@@ -109,7 +109,7 @@ final class AuthorizationAssertionsTest extends TestCase
     {
         Permission::create(['id' => 'bf869580-a8d2-4a40-87c7-de6a9d559418', 'name' => 'docs:delete', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => '34f13826-645d-4917-81b2-44e93dbf1863']);
+        $user = StubGrantee::create(['id' => '34f13826-645d-4917-81b2-44e93dbf1863']);
         $user->givePermission('docs:delete');
 
         $this->expectException(AssertionFailedError::class);
@@ -129,7 +129,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertCannotPassesWhenDeniedForTheReason(): void
     {
-        $user = StubIdentity::create(['id' => '7b2e4d6f-8a1c-4e3b-9d5f-1a3c5e7b9d2f']);
+        $user = StubGrantee::create(['id' => '7b2e4d6f-8a1c-4e3b-9d5f-1a3c5e7b9d2f']);
 
         $this->assertCannot($user, 'docs:delete', reason: DecisionReason::NO_MATCH);
     }
@@ -141,7 +141,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertCannotFailsWhenDeniedForAnotherReason(): void
     {
-        $user = StubIdentity::create(['id' => '3d5f7b9e-1c2a-4b6d-8f0e-2a4c6e8b0d1f']);
+        $user = StubGrantee::create(['id' => '3d5f7b9e-1c2a-4b6d-8f0e-2a4c6e8b0d1f']);
 
         $this->expectException(AssertionFailedError::class);
         $this->expectExceptionMessage(
@@ -159,7 +159,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertCannotIsCallableFromOutsideTheTestCase(): void
     {
-        $user = StubIdentity::create(['id' => '5c7e9a1b-3d5f-4a7c-9e1b-3d5f7a9c1e3b']);
+        $user = StubGrantee::create(['id' => '5c7e9a1b-3d5f-4a7c-9e1b-3d5f7a9c1e3b']);
 
         $outside = \Closure::bind(static fn (AuthorizationAssertionsTest $test) => $test->assertCannot($user, 'docs:delete', reason: DecisionReason::NO_MATCH), null, null);
 
@@ -175,7 +175,7 @@ final class AuthorizationAssertionsTest extends TestCase
     {
         Role::create(['id' => 'db35d033-4ec2-49d6-86f2-2e35abb79258', 'name' => 'editor', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => '273e3845-88e8-4f96-8c2c-1da012769254']);
+        $user = StubGrantee::create(['id' => '273e3845-88e8-4f96-8c2c-1da012769254']);
         $user->assignRole('editor');
 
         $this->assertHasRole($user, 'editor');
@@ -188,7 +188,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertHasRoleFailsWhenMissing(): void
     {
-        $user = StubIdentity::create(['id' => '76018d54-4b6b-4111-8f36-0211bbf0809a']);
+        $user = StubGrantee::create(['id' => '76018d54-4b6b-4111-8f36-0211bbf0809a']);
 
         $this->expectException(AssertionFailedError::class);
         $this->expectExceptionMessageMatches('/Failed asserting that the principal has role \'admin\'/');
@@ -205,7 +205,7 @@ final class AuthorizationAssertionsTest extends TestCase
     {
         Permission::create(['id' => '6d4b70d0-3fed-4b56-8f2e-ee0d7dd8c9cc', 'name' => 'docs:edit', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => '6160c26b-9f8d-437b-8e39-bc3fcef72076']);
+        $user = StubGrantee::create(['id' => '6160c26b-9f8d-437b-8e39-bc3fcef72076']);
         $user->givePermission('docs:edit');
 
         $this->assertHasPermission($user, 'docs:edit');
@@ -218,7 +218,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertHasPermissionFailsWhenMissing(): void
     {
-        $user = StubIdentity::create(['id' => 'f67a151d-b31d-4c6c-8d79-097b54709b8d']);
+        $user = StubGrantee::create(['id' => 'f67a151d-b31d-4c6c-8d79-097b54709b8d']);
 
         $this->expectException(AssertionFailedError::class);
         $this->expectExceptionMessageMatches('/Failed asserting that the principal has permission \'docs:edit\'/');
@@ -236,7 +236,7 @@ final class AuthorizationAssertionsTest extends TestCase
     {
         Permission::create(['id' => 'f663ff0d-9a15-49bd-8234-d30ac5b91f73', 'name' => 'docs:publish', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => '5f5924a2-a361-4d9a-8ea6-f24ecbc25de1']);
+        $user = StubGrantee::create(['id' => '5f5924a2-a361-4d9a-8ea6-f24ecbc25de1']);
         $user->givePermission('docs:publish');
 
         // Before swap, anonymous principal is denied.
@@ -257,7 +257,7 @@ final class AuthorizationAssertionsTest extends TestCase
     public function testActingAsIdentityCarriesTheTenant(): void
     {
         $tenant = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
-        $user   = StubIdentity::create(['id' => '0b7d3e1c-4f2a-4c8e-9a6b-1d2e3f4a5b6c']);
+        $user   = StubGrantee::create(['id' => '0b7d3e1c-4f2a-4c8e-9a6b-1d2e3f4a5b6c']);
 
         Role::create(['name' => 'platform', 'guard' => 'web']);
         Role::create(['name' => 'owned', 'guard' => 'web', 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => 'tenant-a']);
@@ -287,7 +287,7 @@ final class AuthorizationAssertionsTest extends TestCase
     public function testActingAsSubjectTranslatesTheGatesUserIntoItsRequest(): void
     {
         $tenant  = new \stdClass;
-        $user    = StubIdentity::create(['id' => '6c5b4a3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d']);
+        $user    = StubGrantee::create(['id' => '6c5b4a3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d']);
         $subject = new Subject($user, null, $tenant, 'admin', 'web');
 
         $this->actingAsSubject($subject);
@@ -315,7 +315,7 @@ final class AuthorizationAssertionsTest extends TestCase
     public function testActingAsASubjectOnThePlatformDecidesThere(): void
     {
         $tenant = StubTenant::create(['id' => 'tenant-p', 'name' => 'Tenant P']);
-        $user   = StubIdentity::create(['id' => '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a']);
+        $user   = StubGrantee::create(['id' => '9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a']);
         $scope  = AuthorizationScope::tenant($tenant);
 
         /** @var \Illuminate\Config\Repository $config */
@@ -355,8 +355,8 @@ final class AuthorizationAssertionsTest extends TestCase
 
         Permission::create(['name' => 'posts:create', 'guard' => 'web']);
 
-        $principal = StubIdentity::create(['id' => '3a8f1c2e-5b7d-4e9a-8c6f-2d1b0a9e8f7c']);
-        $identity  = AuthenticatableIdentity::create(['id' => '7e2d4c6b-9a1f-4b3e-8d5c-1f0e9a8b7c6d']);
+        $principal = StubGrantee::create(['id' => '3a8f1c2e-5b7d-4e9a-8c6f-2d1b0a9e8f7c']);
+        $identity  = AuthenticatableGrantee::create(['id' => '7e2d4c6b-9a1f-4b3e-8d5c-1f0e9a8b7c6d']);
         $subject   = new Subject($principal, $identity, null, 'admin', 'web');
 
         $principal->givePermission('posts:create');
@@ -385,8 +385,8 @@ final class AuthorizationAssertionsTest extends TestCase
 
         Permission::create(['name' => 'posts:create', 'guard' => 'web']);
 
-        $principal = StubIdentity::create(['id' => '1d3f5b7a-9c2e-4a6b-8d0f-3e5a7c9b1d2f']);
-        $identity  = AuthenticatableIdentity::create(['id' => '2e4a6c8b-0d3f-4b7c-9e1a-4f6b8d0c2e3a']);
+        $principal = StubGrantee::create(['id' => '1d3f5b7a-9c2e-4a6b-8d0f-3e5a7c9b1d2f']);
+        $identity  = AuthenticatableGrantee::create(['id' => '2e4a6c8b-0d3f-4b7c-9e1a-4f6b8d0c2e3a']);
 
         $principal->attachPolicy(Policy::create([
             'id'       => '3f5b7d9c-1e4a-4c8d-8f2b-5a7c9e1d3f4b',
@@ -418,7 +418,7 @@ final class AuthorizationAssertionsTest extends TestCase
     {
         $this->bootWithPermissionEnum();
 
-        $user = StubIdentity::create(['id' => '8b1d3f5a-7c9e-4b2d-a4f6-0e2c4a6b8d1f']);
+        $user = StubGrantee::create(['id' => '8b1d3f5a-7c9e-4b2d-a4f6-0e2c4a6b8d1f']);
         $user->givePermission('posts:create');
 
         $this->actingAsIdentity($user);
@@ -441,8 +441,8 @@ final class AuthorizationAssertionsTest extends TestCase
     {
         $this->bootWithPermissionEnum();
 
-        $principal = StubIdentity::create(['id' => '9c2e4a6b-8d0f-4c3e-b5a7-1f3d5b7c9e2a']);
-        $identity  = AuthenticatableIdentity::create(['id' => '0d3f5b7c-9e1a-4d4f-86b8-2a4c6e8d0f3b']);
+        $principal = StubGrantee::create(['id' => '9c2e4a6b-8d0f-4c3e-b5a7-1f3d5b7c9e2a']);
+        $identity  = AuthenticatableGrantee::create(['id' => '0d3f5b7c-9e1a-4d4f-86b8-2a4c6e8d0f3b']);
 
         $principal->givePermission('posts:create');
 
@@ -468,7 +468,7 @@ final class AuthorizationAssertionsTest extends TestCase
     {
         $this->bootWithPermissionEnum();
 
-        $principal = StubIdentity::create(['id' => '1e4a6c8d-0f2b-4e5a-97c9-3b5d7f9e1a4c']);
+        $principal = StubGrantee::create(['id' => '1e4a6c8d-0f2b-4e5a-97c9-3b5d7f9e1a4c']);
         $principal->givePermission('posts:create');
 
         Gate::define('reports:inspect', static fn (object $user): bool => $user === $principal);
@@ -490,8 +490,8 @@ final class AuthorizationAssertionsTest extends TestCase
     {
         $this->bootWithPermissionEnum();
 
-        $first  = StubIdentity::create(['id' => '2f5b7d9e-1a3c-4f6b-a8d0-4c6e8a0f2b5d']);
-        $second = StubIdentity::create(['id' => '3a6c8e0f-2b4d-4a7c-b9e1-5d7f9b1c3e6a']);
+        $first  = StubGrantee::create(['id' => '2f5b7d9e-1a3c-4f6b-a8d0-4c6e8a0f2b5d']);
+        $second = StubGrantee::create(['id' => '3a6c8e0f-2b4d-4a7c-b9e1-5d7f9b1c3e6a']);
 
         Gate::define('reports:export', static fn (object $user): bool => $user === $second);
 
@@ -516,7 +516,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertCanIncludesResourceInFailureMessage(): void
     {
-        $user = StubIdentity::create(['id' => '53e9833c-b3d7-4ecf-845e-616b486a1677']);
+        $user = StubGrantee::create(['id' => '53e9833c-b3d7-4ecf-845e-616b486a1677']);
 
         $this->expectException(AssertionFailedError::class);
         $this->expectExceptionMessageMatches('/on resource \'post:42\'/');
@@ -532,7 +532,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertCanPassesWithResourceAndContext(): void
     {
-        $user = StubIdentity::create(['id' => 'e95a40aa-3f8b-4137-8d8a-71879a3c0dcb']);
+        $user = StubGrantee::create(['id' => 'e95a40aa-3f8b-4137-8d8a-71879a3c0dcb']);
 
         $user->attachPolicy(Policy::create([
             'id'       => 'd9b1e409-7edc-4807-879c-6301100ecd3f',
@@ -560,7 +560,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertionsTakeATypeAndIdPair(): void
     {
-        $user = StubIdentity::create(['id' => '0d6f2b8a-41c7-4e3b-9a5d-6c8e1f2a3b4d']);
+        $user = StubGrantee::create(['id' => '0d6f2b8a-41c7-4e3b-9a5d-6c8e1f2a3b4d']);
 
         $user->attachPolicy(Policy::create([
             'id'       => '5a1c9e7b-3d2f-4b6a-8e0c-9f1d2a3b4c5e',
@@ -584,7 +584,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertCanDescribesAModelByItsReference(): void
     {
-        $user   = StubIdentity::create(['id' => '8b3e1d5f-7a2c-4f9e-b6d4-2c1a0e9f8d7b']);
+        $user   = StubGrantee::create(['id' => '8b3e1d5f-7a2c-4f9e-b6d4-2c1a0e9f8d7b']);
         $target = StubTenant::create(['id' => 'tenant-described', 'name' => 'Described']);
 
         $this->expectException(AssertionFailedError::class);
@@ -604,7 +604,7 @@ final class AuthorizationAssertionsTest extends TestCase
     {
         Permission::create(['id' => '2e4c6a8b-0d1f-4a3c-9e5b-7d9f1b3d5f7a', 'name' => 'docs:view', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => '4f6a8c0e-2b4d-4f6a-8c0e-2b4d6f8a0c2e']);
+        $user = StubGrantee::create(['id' => '4f6a8c0e-2b4d-4f6a-8c0e-2b4d6f8a0c2e']);
         $user->givePermission('docs:view');
 
         $this->assertCannot($user, 'docs:view', 42);
@@ -615,7 +615,7 @@ final class AuthorizationAssertionsTest extends TestCase
             . 'DENY (resource_unresolved: the resource cannot be identified) at the resource stage.',
         );
 
-        $this->assertCan($user, 'docs:view', new StubIdentity);
+        $this->assertCan($user, 'docs:view', new StubGrantee);
     }
 
     /**

@@ -34,7 +34,7 @@ final class UndeclaredRolesGrantee extends Model implements SupportsPolicies // 
     protected $fillable = ['id', 'name'];
 
     /** @var string|null Backing table. */
-    protected $table = 'stub_identities';
+    protected $table = 'stub_grantees';
 
     /**
      * Morph-to-many relation onto the roles granted to this grantee.

@@ -15,9 +15,9 @@ use SineMacula\Laravel\Authorization\Administration\RankComparison;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -27,7 +27,7 @@ use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Concerns\ChecksGrantsByName;
 use Tests\Concerns\RefusesThePackage;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -70,8 +70,8 @@ final class HasRolesTest extends TestCase
      */
     public function testCanActOnReturnsTheRankComparisonAlone(): void
     {
-        $senior = StubIdentity::query()->create(['id' => 'senior']);
-        $junior = StubIdentity::query()->create(['id' => 'junior']);
+        $senior = StubGrantee::query()->create(['id' => 'senior']);
+        $junior = StubGrantee::query()->create(['id' => 'junior']);
 
         $senior->assignRole(Role::query()->create(['name' => 'lead', 'rank' => 1]));
         $junior->assignRole(Role::query()->create(['name' => 'member', 'rank' => 1]));
@@ -81,7 +81,7 @@ final class HasRolesTest extends TestCase
 
         $senior->assignRole(Role::query()->create(['name' => 'head', 'rank' => 0]));
 
-        self::assertTrue(StubIdentity::query()->findOrFail('senior')->canActOn($junior));
+        self::assertTrue(StubGrantee::query()->findOrFail('senior')->canActOn($junior));
         self::assertFalse($junior->canActOn(new \stdClass));
     }
 
@@ -95,7 +95,7 @@ final class HasRolesTest extends TestCase
      */
     public function testARoleForAnApplication(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         Role::create(['name' => 'editor']);
 
@@ -126,7 +126,7 @@ final class HasRolesTest extends TestCase
      */
     public function testASyncGivesEachRoleItsOwnReach(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $tenant = new Reference('stub_tenant', 'tenant-a');
 
         foreach (['billing', 'editor', 'viewer', 'gone'] as $name) {
@@ -162,7 +162,7 @@ final class HasRolesTest extends TestCase
      */
     public function testARoleInATenantCanBeLimitedToIt(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $tenant = new Reference('stub_tenant', 'tenant-a');
 
         Role::create(['name' => 'editor']);
@@ -263,7 +263,7 @@ final class HasRolesTest extends TestCase
         $tenant   = self::createTenant('tenant-a');
         $platform = Role::create(['name' => 'manager', 'guard' => 'web']);
         $owned    = Role::create(['name' => 'manager', 'guard' => 'web'] + self::ownedBy($tenant));
-        $user     = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user     = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $this->actAsTenant($tenant);
 
@@ -285,7 +285,7 @@ final class HasRolesTest extends TestCase
     {
         $api  = Role::create(['name' => 'admin', 'guard' => 'api']);
         $any  = Role::create(['name' => 'auditor', 'guard' => null]);
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $user->assignRole($api);
         $user->assignRole($any);
@@ -311,7 +311,7 @@ final class HasRolesTest extends TestCase
         Carbon::setTestNow('2026-07-01 12:00:00');
         Event::fake([RoleAssigned::class, RoleRevoked::class]);
 
-        $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user    = StubGrantee::create(['id' => (string) Str::uuid()]);
         $role    = Role::query()->create(['name' => 'editor']);
         $expires = Carbon::parse('2026-07-02 12:00:00', 'UTC');
 
@@ -338,8 +338,8 @@ final class HasRolesTest extends TestCase
      */
     public function testTheWriteHelpersPassTheActorThrough(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-actor']);
-        $actor = ActingContext::for(StubIdentity::create(['id' => 'nobody']));
+        $user  = StubGrantee::create(['id' => 'user-actor']);
+        $actor = ActingContext::for(StubGrantee::create(['id' => 'nobody']));
 
         Role::create(['name' => 'editor']);
 
@@ -358,7 +358,7 @@ final class HasRolesTest extends TestCase
      */
     public function testTheRoleChecksRefuseWithAWarmCacheOnceThePackageRefuses(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $editor = Role::create(['name' => 'editor', 'rank' => 1]);
         $viewer = Role::create(['name' => 'viewer', 'rank' => 2]);
 
@@ -387,7 +387,7 @@ final class HasRolesTest extends TestCase
      */
     public function testAnActivationIsReadAsARoleGrantByAPrincipalAlone(): void
     {
-        $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user       = StubGrantee::create(['id' => (string) Str::uuid()]);
         $role       = self::emergencyRole();
         $activation = self::activate($user, $role);
 
@@ -405,7 +405,7 @@ final class HasRolesTest extends TestCase
         self::assertTrue($user->hasRole('editor'));
         self::assertSame(['editor'], $user->getRoles());
 
-        $fresh = StubIdentity::query()->whereKey($user->getKey())->firstOrFail();
+        $fresh = StubGrantee::query()->whereKey($user->getKey())->firstOrFail();
 
         BreakGlassActivations::markIdentity($fresh);
 
@@ -449,12 +449,12 @@ final class HasRolesTest extends TestCase
     /**
      * Grant the identity the checked row until the given instant.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  \DateTimeInterface  $expiresAt
      * @return void
      */
     #[\Override]
-    protected function grantUntil(StubIdentity $identity, \DateTimeInterface $expiresAt): void
+    protected function grantUntil(StubGrantee $identity, \DateTimeInterface $expiresAt): void
     {
         $identity->assignRole(Role::query()->firstOrCreate(['name' => 'on-call']), $expiresAt);
     }
@@ -462,11 +462,11 @@ final class HasRolesTest extends TestCase
     /**
      * Return the names of the rows the identity holds.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @return list<string>
      */
     #[\Override]
-    protected function heldNames(StubIdentity $identity): array
+    protected function heldNames(StubGrantee $identity): array
     {
         /** @var list<string> */
         return $identity->roles->pluck('name')->all();
@@ -521,14 +521,14 @@ final class HasRolesTest extends TestCase
     /**
      * Grant the role to the identity.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  \Illuminate\Database\Eloquent\Model  $row
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|null  $tenant
      * @return void
      */
     #[\Override]
-    protected function grantTo(StubIdentity $identity, Model $row, ?\DateTimeInterface $expiresAt = null, ?Model $tenant = null): void
+    protected function grantTo(StubGrantee $identity, Model $row, ?\DateTimeInterface $expiresAt = null, ?Model $tenant = null): void
     {
         \assert($row instanceof Role);
 
@@ -538,12 +538,12 @@ final class HasRolesTest extends TestCase
     /**
      * Revoke the role, or the role name, from the identity.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  \Illuminate\Database\Eloquent\Model|string  $grant
      * @return void
      */
     #[\Override]
-    protected function revokeFrom(StubIdentity $identity, Model|string $grant): void
+    protected function revokeFrom(StubGrantee $identity, Model|string $grant): void
     {
         \assert(\is_string($grant) || $grant instanceof Role);
 
@@ -553,12 +553,12 @@ final class HasRolesTest extends TestCase
     /**
      * Synchronise the identity's roles to the given roles and names.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  list<\Illuminate\Database\Eloquent\Model|string>  $grants
      * @return void
      */
     #[\Override]
-    protected function syncTo(StubIdentity $identity, array $grants): void
+    protected function syncTo(StubGrantee $identity, array $grants): void
     {
         $typed = [];
 
@@ -604,13 +604,13 @@ final class HasRolesTest extends TestCase
      * Create an identity, at 12:00, holding a role until the given instant.
      *
      * @param  string  $expiresAt
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function identityWithRoleUntil(string $expiresAt): StubIdentity
+    private function identityWithRoleUntil(string $expiresAt): StubGrantee
     {
         Carbon::setTestNow('2026-07-01 12:00:00');
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole(Role::create(['name' => 'on-call', 'guard' => 'web']), Carbon::parse($expiresAt));
 
         return $user;

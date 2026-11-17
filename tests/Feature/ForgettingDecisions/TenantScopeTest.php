@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\ChangingSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -159,7 +159,7 @@ final class TenantScopeTest extends TestCase
      */
     private function resolveIn(string $tenant): ChangingSubjectResolver
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $resolver = new ChangingSubjectResolver(new Subject($user, $user, StubTenant::query()->create(['id' => $tenant, 'name' => $tenant])));
 
         $this->container()->instance(SubjectResolver::class, $resolver);

@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -73,7 +73,7 @@ final class NoResourceTenantTest extends TestCase
      */
     public function testAPairIsDecidedWhereTheRequestIs(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $user->attachPolicy(Policy::create([
             'id'       => (string) Str::uuid(),
@@ -118,7 +118,7 @@ final class NoResourceTenantTest extends TestCase
      */
     public function testAModelIsDecidedWhereTheRequestIs(): void
     {
-        $user  = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user  = StubGrantee::create(['id' => (string) Str::uuid()]);
         $model = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         $user->attachPolicy(Policy::create([
@@ -148,7 +148,7 @@ final class NoResourceTenantTest extends TestCase
     public function testNoResourceHasATenantInBulk(): void
     {
         $resolver = new NoResourceTenant;
-        $models   = ['a' => new StubTenant(['id' => 't1']), 4 => new StubIdentity(['id' => 'u1'])];
+        $models   = ['a' => new StubTenant(['id' => 't1']), 4 => new StubGrantee(['id' => 'u1'])];
 
         self::assertSame(['a' => null, 4 => null], $resolver->tenantsOf($models));
         self::assertSame(['x' => null, 2 => null], $resolver->tenantsOfRecords('posts', ['x' => '1', 2 => '9']));

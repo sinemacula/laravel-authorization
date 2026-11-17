@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -178,12 +178,12 @@ final class RoleHierarchyTest extends TestCase
     }
 
     /**
-     * An identity holding a child role can `hasPermission()` for an
+     * A grantee holding a child role can `hasPermission()` for an
      * ancestor-inherited permission.
      *
      * @return void
      */
-    public function testIdentityWithChildRoleInheritsAncestorPermission(): void
+    public function testGranteeWithChildRoleInheritsAncestorPermission(): void
     {
         $parent = $this->makeRole('admin');
         $this->makeRole('editor', parentId: $parent->id);
@@ -191,7 +191,7 @@ final class RoleHierarchyTest extends TestCase
         $this->makePermission('posts:delete');
         $parent->givePermission('posts:delete');
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('editor');
 
         self::assertTrue($user->hasPermission('posts:delete'));

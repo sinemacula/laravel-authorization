@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
 use Tests\Feature\Stubs\StandaloneAssertions;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -34,7 +34,7 @@ final class AuthorizationAssertionsFallbackTest extends TestCase
      */
     public function testAppHelperFallbackSwapsResolver(): void
     {
-        $user   = StubIdentity::create(['id' => '4356ef82-867e-4edb-8906-e7457c1e23e9']);
+        $user   = StubGrantee::create(['id' => '4356ef82-867e-4edb-8906-e7457c1e23e9']);
         $helper = new StandaloneAssertions;
 
         $helper->swap($user);

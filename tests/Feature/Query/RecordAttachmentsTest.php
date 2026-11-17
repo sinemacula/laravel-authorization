@@ -26,7 +26,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ReshapesResources;
 use Tests\Concerns\ScopesQueries;
 use Tests\Concerns\UsesAnAuthorizationConnection;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\QueryScoping\LooseKeyedPost;
 use Tests\Fixtures\QueryScoping\OtherConnectionPost;
 use Tests\Fixtures\QueryScoping\ReplicatedPost;
@@ -144,7 +144,7 @@ final class RecordAttachmentsTest extends TestCase
             $keys[$title] = (string) ScopedPost::query()->create(['title' => $title])->getKey(); // @phpstan-ignore cast.string
         }
 
-        $both    = [['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => ['stub_identity:reader']], ['effect' => 'deny', 'actions' => ['posts:view']]];
+        $both    = [['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => ['stub_grantee:reader']], ['effect' => 'deny', 'actions' => ['posts:view']]];
         $mixed   = self::attachToResource([ScopedPost::class, $keys['platform']], $both);
         $denying = self::attachToResource([ScopedPost::class, $keys['deny platform']], [$both[1]]);
         $other   = self::attachToResource([ScopedPost::class, $keys['other deny']], [$both[0], ['effect' => 'deny', 'actions' => ['posts:delete']]]);
@@ -210,7 +210,7 @@ final class RecordAttachmentsTest extends TestCase
     {
         $key    = (string) ScopedPost::query()->create(['title' => 'record'])->getKey(); // @phpstan-ignore cast.string
         $policy = self::attachToResource([ScopedPost::class, $key], [
-            ['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => ['stub_identity:reader']],
+            ['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => ['stub_grantee:reader']],
             ['effect' => 'deny', 'actions' => ['posts:delete']],
         ]);
 
@@ -314,7 +314,7 @@ final class RecordAttachmentsTest extends TestCase
     {
         $this->app?->make(ConfigRepository::class)->set('authorization.tables.resource_policies', 'scoped_folded_resource_policies');
 
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $manager = $this->resolveRequest($user);
         $policy  = self::storedPolicy('folded', [['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => [$user->getMorphClass() . ':u1']]]);
 
@@ -621,7 +621,7 @@ final class RecordAttachmentsTest extends TestCase
      */
     private function readerOf(ResourceShape $shape, int $limit = 64): array
     {
-        $user = StubIdentity::query()->firstOrCreate(['id' => 'reader']);
+        $user = StubGrantee::query()->firstOrCreate(['id' => 'reader']);
 
         return [new RecordAttachments(new ResourcePolicyResolver, $shape, new SchemaInspector, $limit), new StatementScreen('posts:view', $shape, new Subject($user, $user))];
     }

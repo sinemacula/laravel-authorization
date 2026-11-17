@@ -133,7 +133,7 @@ the named subject under the given scope and console context, without their brows
    Eloquent class) and maps the model through the bound `SubjectResolver::forUser()`, the package's one translation of a
    model into a subject, read on every call. A malformed reference, a type that names no model and a key no row
    has are refused; so is a mapping about neither the model's principal nor its identity (ambiguous), one whose
-   principal is not a saved `AuthorizableIdentity` model (unsupported), and a lookup or mapping that fails, such as a
+   principal is not a saved `AuthorizableGrantee` model (unsupported), and a lookup or mapping that fails, such as a
    key a PostgreSQL key column cannot hold (unresolvable, naming neither the reference nor the failure). The default
    keeps the subject's principal, identity and guard and nothing else. Whatever a resolver gives, the command drops its
    tenant, application, session and anything said of its credential's scopes, keeping its principal, identity, guard

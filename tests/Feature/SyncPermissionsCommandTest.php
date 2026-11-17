@@ -31,7 +31,7 @@ use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\InvalidGuardsPermission;
 use Tests\Feature\Stubs\Enums\InvalidNamePermission;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -564,11 +564,11 @@ final class SyncPermissionsCommandTest extends TestCase
      */
     public function testASyncIsOneOperationForTheActorTheOptionNames(): void
     {
-        StubIdentity::query()->create(['id' => 'admin-1']);
+        StubGrantee::query()->create(['id' => 'admin-1']);
 
         Event::fake([PermissionCreated::class, PermissionDeleted::class]);
 
-        self::assertSame(0, Artisan::call(self::COMMAND, ['--actor' => StubIdentity::class . ':admin-1']));
+        self::assertSame(0, Artisan::call(self::COMMAND, ['--actor' => StubGrantee::class . ':admin-1']));
 
         $created = self::dispatchedEvents(PermissionCreated::class);
 
@@ -576,7 +576,7 @@ final class SyncPermissionsCommandTest extends TestCase
         self::assertCount(1, \array_unique(\array_map(static fn (PermissionCreated $event): string => $event->operation->id, $created)));
 
         foreach ($created as $event) {
-            self::assertTrue(self::refersTo($event->operation->actor, new Reference(StubIdentity::class, 'admin-1')));
+            self::assertTrue(self::refersTo($event->operation->actor, new Reference(StubGrantee::class, 'admin-1')));
             self::assertTrue($event->operation->isTrusted);
         }
 
@@ -598,7 +598,7 @@ final class SyncPermissionsCommandTest extends TestCase
      */
     public function testFailsOnAnActorItCannotResolve(): void
     {
-        self::assertSame(2, Artisan::call(self::COMMAND, ['--actor' => StubIdentity::class . ':ghost']));
+        self::assertSame(2, Artisan::call(self::COMMAND, ['--actor' => StubGrantee::class . ':ghost']));
         self::assertStringContainsString('Nothing was synced: No actor', Artisan::output());
         self::assertSame([], self::platformRows());
     }

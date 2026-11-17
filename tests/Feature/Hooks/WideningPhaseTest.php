@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Enums\WideningReason;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantHookRecursionException;
@@ -42,7 +42,7 @@ use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Concerns\WidensGrants;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Fixtures\GrantHooks\RecordingGrantHook;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
 use Tests\Fixtures\GrantHooks\SecondGrantHook;
@@ -806,12 +806,12 @@ final class WideningPhaseTest extends TestCase
      * locks finds it gone (see `RacesDelegatedCalls::raceOnQuery()`); return
      * the SQL of the read it landed after.
      *
-     * @param  \Tests\Feature\Stubs\StubSecondIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubSecondGrantee  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $evidence
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @return \ArrayObject<int, string>
      */
-    private static function revokeAfterTheHookPhase(StubSecondIdentity $grantee, Role $evidence, Reference $tenant): \ArrayObject
+    private static function revokeAfterTheHookPhase(StubSecondGrantee $grantee, Role $evidence, Reference $tenant): \ArrayObject
     {
         return self::raceOnQuery('/ as grant_roots\b/', static function () use ($grantee, $evidence, $tenant): void {
             GrantChanges::table(GrantTarget::ROLE, Reference::of($grantee), null, new GrantScope($tenant, null, true))->revoke([GrantChanges::key($evidence)]);
@@ -822,11 +822,11 @@ final class WideningPhaseTest extends TestCase
      * Return the keys of the roles the grantee holds, in every scope, on the
      * connection given, else the default one.
      *
-     * @param  \Tests\Feature\Stubs\StubSecondIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubSecondGrantee  $grantee
      * @param  string|null  $connection
      * @return list<string>
      */
-    private static function rolesOf(StubSecondIdentity $grantee, ?string $connection = null): array
+    private static function rolesOf(StubSecondGrantee $grantee, ?string $connection = null): array
     {
         $keys = DB::connection($connection)->table('authorizable_roles')
             ->where('authorizable_type', $grantee->getMorphClass())
@@ -851,12 +851,12 @@ final class WideningPhaseTest extends TestCase
     /**
      * Return the first principal, created when there is none.
      *
-     * @return \Tests\Feature\Stubs\StubSecondIdentity
+     * @return \Tests\Feature\Stubs\StubSecondGrantee
      */
-    private static function principal(): StubSecondIdentity
+    private static function principal(): StubSecondGrantee
     {
-        /** @var \Tests\Feature\Stubs\StubSecondIdentity */
-        return StubSecondIdentity::query()->firstOrCreate(['id' => 'p1']);
+        /** @var \Tests\Feature\Stubs\StubSecondGrantee */
+        return StubSecondGrantee::query()->firstOrCreate(['id' => 'p1']);
     }
 
     /**

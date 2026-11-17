@@ -16,7 +16,7 @@ use Tests\Concerns\ReadsRefusedSettings;
 use Tests\Feature\Stubs\ConflictingResourceAttributes;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -103,9 +103,9 @@ final class AttributeConfigValidatorTest extends TestCase
             'expected the name of a class implementing ' . ResourceAttributeProvider::class . ', got \'App\Missing\'.',
         ];
         yield 'a class that is not a provider' => [
-            ['subjects' => ['user' => StubIdentity::class]],
+            ['subjects' => ['user' => StubGrantee::class]],
             self::ATTRIBUTES . '.subjects.user',
-            'expected the name of a class implementing ' . SubjectAttributeProvider::class . ', got \'' . StubIdentity::class . '\'.',
+            'expected the name of a class implementing ' . SubjectAttributeProvider::class . ', got \'' . StubGrantee::class . '\'.',
         ];
         yield 'a resource provider registered for subjects' => [
             ['subjects' => ['user' => RecordingResourceAttributes::class]],

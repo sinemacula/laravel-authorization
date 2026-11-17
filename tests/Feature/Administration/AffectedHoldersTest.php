@@ -27,7 +27,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\RecordsRowLocks;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -616,10 +616,10 @@ final class AffectedHoldersTest extends TestCase
     /**
      * Return the principal selector naming the identity.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @return string
      */
-    private static function selector(StubIdentity $identity): string
+    private static function selector(StubGrantee $identity): string
     {
         $reference = Reference::of($identity);
 
@@ -630,11 +630,11 @@ final class AffectedHoldersTest extends TestCase
      * Return the identity with the id, created on first use.
      *
      * @param  string  $id
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function user(string $id): StubIdentity
+    private static function user(string $id): StubGrantee
     {
-        return StubIdentity::query()->firstOrCreate(['id' => $id]);
+        return StubGrantee::query()->firstOrCreate(['id' => $id]);
     }
 
     /**

@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 
 /**
@@ -59,7 +59,7 @@ final class PolicyTest extends StringCastsTestCase
      */
     public function testOwnerRelationResolvesTheGranteeOfAnInlinePolicy(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $document = ['version' => 1, 'statements' => []];
         $inline   = Policy::query()->create(['name' => 'mine', 'document' => $document, 'owner_type' => $user->getMorphClass(), 'owner_id' => 'user-1']);
         $managed  = Policy::query()->create(['name' => 'shared', 'document' => $document]);

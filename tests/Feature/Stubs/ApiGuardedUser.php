@@ -6,7 +6,7 @@ namespace Tests\Feature\Stubs;
 
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Concerns\HasAuthorization;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 
 /**
  * Test stub - identity declaring `api` as its authorization guard via the
@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
  *
  * @internal
  */
-final class ApiGuardedUser extends Model implements AuthorizableIdentity // @phpstan-ignore-line
+final class ApiGuardedUser extends Model implements AuthorizableGrantee // @phpstan-ignore-line
 {
     use HasAuthorization;
 

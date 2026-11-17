@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use Tests\Concerns\MeasuresTime;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
@@ -55,7 +55,7 @@ final class BladeHelpersBudgetTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('admin');
 
         $this->actAs($user);
@@ -97,7 +97,7 @@ final class BladeHelpersBudgetTest extends TestCase
         ]);
         $role->permissions()->attach($permission->getKey());
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('editor');
 
         $this->actAs($user);

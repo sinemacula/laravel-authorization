@@ -37,7 +37,7 @@ use SineMacula\Laravel\Authorization\Support\DeclaredAbilities;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\RecordingPermissionProvider;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Fixtures\Diagnostics\ExplodingGrantHook;
@@ -151,7 +151,7 @@ final class RefusedBootTest extends TestCase
      */
     public function testThePackageAbilitiesAreDeniedUnlessTheApplicationAllows(): void
     {
-        $user = new StubIdentity(['id' => 'user-1']);
+        $user = new StubGrantee(['id' => 'user-1']);
 
         self::assertFalse(Gate::forUser($user)->allows('reports:export'));
         self::assertSame(0, RecordingPermissionProvider::$reads);

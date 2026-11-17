@@ -31,8 +31,8 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
 use SineMacula\Laravel\Authorization\Usage\RouteSources;
 
 /**
- * Resolves what an identity's grants come to: the names of its roles, the keys
- * of the roles it reaches, the names of its permissions, and its policies.
+ * Resolves what a grantee's grants come to: the names of its roles, the keys of
+ * the roles it reaches, the names of its permissions, and its policies.
  *
  * Every read is on the write connection, so a read replica that has not caught
  * up never serves a grant already revoked. Each resolution pins the version of
@@ -44,7 +44,7 @@ use SineMacula\Laravel\Authorization\Usage\RouteSources;
  *
  * Each kind takes a fixed number of queries: two for roles, three for the keys
  * of the roles reached, two for policies, and five for permissions however many
- * roles the identity holds and however deep they sit. Policies take four more,
+ * roles the grantee holds and however deep they sit. Policies take four more,
  * however many roles and however deep, only when a role holds a policy in the
  * current scope.
  *

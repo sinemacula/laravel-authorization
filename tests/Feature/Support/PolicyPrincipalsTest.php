@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\PolicyPrincipals;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -56,7 +56,7 @@ final class PolicyPrincipalsTest extends TestCase
 
         self::assertRefused(static fn () => PolicyPrincipals::assertAttachableToResource($mixed), 'mixed', [0, 3], $reason);
 
-        $inline = StubIdentity::create(['id' => 'user-1'])->createInlinePolicy('mine', ['statements' => [self::NAMED]]);
+        $inline = StubGrantee::create(['id' => 'user-1'])->createInlinePolicy('mine', ['statements' => [self::NAMED]]);
 
         self::assertRefused(static fn () => PolicyPrincipals::assertAttachableToResource($inline), 'mine', [], 'cannot be attached to a resource');
     }
@@ -97,7 +97,7 @@ final class PolicyPrincipalsTest extends TestCase
         self::assertNotNull($resources);
 
         $resources->attach($sharing, 'posts');
-        StubIdentity::create(['id' => 'user-1'])->attachPolicy($own);
+        StubGrantee::create(['id' => 'user-1'])->attachPolicy($own);
 
         self::assertRefused(static fn () => $sharing->update(['document' => ['statements' => [self::UNNAMED]]]), 'sharing', [0], 'statement #0 name none');
         self::assertRefused(static fn () => $own->update(['document' => ['statements' => [self::NAMED]]]), 'own', [0], 'statement #0 name some');
@@ -133,7 +133,7 @@ final class PolicyPrincipalsTest extends TestCase
 
         self::assertNotNull($boundaries);
 
-        $boundaries->set(StubIdentity::create(['id' => 'user-1']), $cap);
+        $boundaries->set(StubGrantee::create(['id' => 'user-1']), $cap);
 
         self::assertRefused(static fn () => $cap->update(['document' => ['statements' => [self::DENY, self::NAMED]]]), 'cap', [1], 'statement #1 name some');
         self::assertSame([self::UNNAMED], self::stored($cap));

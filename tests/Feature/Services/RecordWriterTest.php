@@ -35,7 +35,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\UsesAnAuthorizationConnection;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -210,9 +210,9 @@ final class RecordWriterTest extends TestCase
         $role  = Role::query()->create(['name' => 'editor']);
         $level = null;
 
-        self::grants()?->grantRole(StubIdentity::query()->create(['id' => 'holder']), $role);
+        self::grants()?->grantRole(StubGrantee::query()->create(['id' => 'holder']), $role);
 
-        self::grants()?->attachPolicy(StubIdentity::query()->findOrFail('admin-1'), Policy::query()->create(['name' => 'renamer', 'document' => ['statements' => [[
+        self::grants()?->attachPolicy(StubGrantee::query()->findOrFail('admin-1'), Policy::query()->create(['name' => 'renamer', 'document' => ['statements' => [[
             'effect'     => 'allow',
             'actions'    => [PackagePermissions::ROLE_RENAME],
             'resources'  => [OperationResource::TYPE . ':*'],

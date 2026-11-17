@@ -13,7 +13,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -159,10 +159,10 @@ final class GrantScopeColumnsTest extends TestCase
 
         DB::table($table)->insert([
             [$target => $id] + self::scope(null, null, null) + self::grantee(),
-            [$target => $id] + self::scope(null, null, null) + self::grantee('stub_second_identity'),
+            [$target => $id] + self::scope(null, null, null) + self::grantee('stub_second_grantee'),
         ]);
 
-        self::assertSame(['stub_identity', 'stub_second_identity'], DB::table($table)->orderBy('authorizable_type')->pluck('authorizable_type')->all());
+        self::assertSame(['stub_grantee', 'stub_second_grantee'], DB::table($table)->orderBy('authorizable_type')->pluck('authorizable_type')->all());
     }
 
     /**
@@ -206,7 +206,7 @@ final class GrantScopeColumnsTest extends TestCase
         Carbon::setTestNow('2026-07-01 12:00:00');
 
         try {
-            $identity = StubIdentity::query()->create(['id' => self::GRANTEE]);
+            $identity = StubGrantee::query()->create(['id' => self::GRANTEE]);
             $identity->assignRole(Role::query()->create(['name' => 'editor']));
         } finally {
             Carbon::setTestNow();
@@ -226,7 +226,7 @@ final class GrantScopeColumnsTest extends TestCase
      * @param  string  $type
      * @return array{authorizable_type: string, authorizable_id: string}
      */
-    private static function grantee(string $type = 'stub_identity'): array
+    private static function grantee(string $type = 'stub_grantee'): array
     {
         return ['authorizable_type' => $type, 'authorizable_id' => self::GRANTEE];
     }

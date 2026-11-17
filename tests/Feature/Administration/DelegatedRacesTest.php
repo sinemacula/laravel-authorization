@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionGranted;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -33,7 +33,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReportsEveryDecision;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -469,11 +469,11 @@ final class DelegatedRacesTest extends TestCase
      * Return the identity behind the acting context.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function model(ActingContext $actor): StubIdentity
+    private static function model(ActingContext $actor): StubGrantee
     {
-        /** @var \Tests\Feature\Stubs\StubIdentity */
+        /** @var \Tests\Feature\Stubs\StubGrantee */
         return $actor->subject->subject;
     }
 
@@ -483,13 +483,13 @@ final class DelegatedRacesTest extends TestCase
      *
      * @param  string  $id
      * @param  int|null  $rank
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      *
      * @throws \Throwable
      */
-    private static function user(string $id, ?int $rank = null): StubIdentity
+    private static function user(string $id, ?int $rank = null): StubGrantee
     {
-        $user = StubIdentity::query()->create(['id' => $id]);
+        $user = StubGrantee::query()->create(['id' => $id]);
 
         if ($rank !== null) {
             self::grants()->grantRole($user, Role::query()->firstOrCreate(['name' => 'rank-' . $rank], ['rank' => $rank]));
@@ -501,11 +501,11 @@ final class DelegatedRacesTest extends TestCase
     /**
      * Determine whether the identity holds the permission directly, as stored.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  string  $permission
      * @return bool
      */
-    private static function holds(StubIdentity $user, string $permission): bool
+    private static function holds(StubGrantee $user, string $permission): bool
     {
         return DB::table('authorizable_permissions')
             ->join('permissions', 'permissions.id', '=', 'authorizable_permissions.permission_id')

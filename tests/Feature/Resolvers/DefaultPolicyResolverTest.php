@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -42,7 +42,7 @@ final class DefaultPolicyResolverTest extends TestCase
      */
     public function testTheExplainedPoliciesAreTheResolvedOnesWithTheirProvenance(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $own      = Policy::create(['name' => 'own', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
         $coded    = EvaluationPolicy::fromArray(['name' => 'coded', 'statements' => [['effect' => 'allow', 'actions' => ['posts:edit']]]]);
         $resolver = new DefaultPolicyResolver(self::store($coded));
@@ -74,7 +74,7 @@ final class DefaultPolicyResolverTest extends TestCase
         $coded = EvaluationPolicy::fromArray(['name' => 'coded', 'statements' => [['effect' => 'allow', 'actions' => ['posts:edit']]]]);
 
         self::assertSame([$coded], (new DefaultPolicyResolver(self::store($coded)))->explainedPoliciesFor(new \stdClass, new EvidenceRecorder));
-        self::assertSame([], (new DefaultPolicyResolver)->explainedPoliciesFor(StubIdentity::create(['id' => 'user-1']), new EvidenceRecorder));
+        self::assertSame([], (new DefaultPolicyResolver)->explainedPoliciesFor(StubGrantee::create(['id' => 'user-1']), new EvidenceRecorder));
     }
 
     /**

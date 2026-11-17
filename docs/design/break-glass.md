@@ -109,8 +109,8 @@ This note records the invariants they fix.
     an activation while break-glass is disabled. Each returns how many it ended, as a revocation does: one already
     ended or expired changes nothing and returns 0. A surrender's operation is begun with the grantee's acting
     context, so it is delegated and names the grantee as its actor, though it decides no right. An activation
-    dispatches `Identity\BreakGlassActivated` (the role, scope, key, justification code and expiry, never the note), and
-    an end that ended one `Identity\BreakGlassSurrendered` or `Identity\BreakGlassRevoked` (with `endedAt`), through
+    dispatches `Grantee\BreakGlassActivated` (the role, scope, key, justification code and expiry, never the note), and
+    an end that ended one `Grantee\BreakGlassSurrendered` or `Grantee\BreakGlassRevoked` (with `endedAt`), through
     `OperationScope::dispatch()` inside the operation, so each fires once the write commits and never for a refusal, an
     end that changed nothing or a rollback, whether break-glass is enabled or not. The operation's actor is the granter,
     the grantee who surrendered or the revoker, none for a trusted call.
@@ -144,7 +144,7 @@ This note records the invariants they fix.
 15. **An expiry is recorded, never pruned.** `authorization:prune` (`Services\GrantPruner`, through
     `Services\Support\ExpiredActivations`) sets `ended_at` to `expires_at`, `end_reason` to `expired` and `ended_by`
     to null on every activation that expired without ending, whether break-glass is enabled or not, keeps the row, and
-    dispatches one `Identity\BreakGlassExpired` for each, with no actor, a chunk at a time, each chunk one operation. It
+    dispatches one `Grantee\BreakGlassExpired` for each, with no actor, a chunk at a time, each chunk one operation. It
     writes through a query, and each event's dispatch bumps the grantee's versions as any grant event's does. It writes
     only where `ended_at` is still null, so an activation a surrender or revocation ended meanwhile is neither
     overwritten nor reported. One naming half a tenant is recorded and counted with no event. `--pretend` counts
@@ -239,7 +239,7 @@ This note records the invariants they fix.
   `Administration\AuthorityRows` -- delegated administration weighing an activation.
 - `Resolvers\GrantProvenanceResolver`, `Evaluation\GrantProvenance`, `Evaluation\Enums\GrantSource` -- the route named.
 - `Usage\RouteSources` -- no route from an activation.
-- `Events\Identity\BreakGlassActivated`, `BreakGlassSurrendered` and `BreakGlassRevoked` (sharing `BreakGlassEnded`),
+- `Events\Grantee\BreakGlassActivated`, `BreakGlassSurrendered` and `BreakGlassRevoked` (sharing `BreakGlassEnded`),
   `BreakGlassExpired` -- the lifecycle events.
 - `Services\GrantPruner`, `Services\Support\ExpiredActivations`, `Services\PruneResult` -- the recorded expiry.
 - `Support\GrantRoots`, `Services\GrantScopeQuery`, `Hooks\WideningClassifier` -- the listings and the widening.
@@ -280,7 +280,7 @@ This note records the invariants they fix.
   the pair.
 - `Services\BreakGlassServiceTest` (Feature) -- each lifecycle event once, with its fields and actor, a surrender's
   actor the grantee; none for a refusal, a rollback, an end that changed nothing; a revocation reported while
-  disabled. `Events\Identity\BreakGlass{Activated,Ended,Surrendered,Revoked,Expired}Test` (Unit) -- the identifiers,
+  disabled. `Events\Grantee\BreakGlass{Activated,Ended,Surrendered,Revoked,Expired}Test` (Unit) -- the identifiers,
   the shared shape and the audit properties, with no note.
 - `Services\ExpiredActivationsTest`, `Services\GrantPrunerTest`, `PruneGrantsCommandTest` (Feature) -- the expiry
   recorded and reported once, the row kept, a live, an ended and a surrendered one left, one ended meanwhile left,

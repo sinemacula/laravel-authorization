@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\ChangingRequirementChecker;
 use Tests\Feature\Stubs\ChangingSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -83,7 +83,7 @@ final class AuthorizationManagerTest extends TestCase
     #[DataProvider('batches')]
     public function testABatchFollowsTheRequestsSubjectUnlessItNamesOne(bool $isNamed, array $expected): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $subject  = new Subject($user, $user, null, null, 'web', 'session-1');
         $resolver = $this->signIn($subject);
         $reported = 0;

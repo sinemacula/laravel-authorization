@@ -8,9 +8,9 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -271,7 +271,7 @@ final class SyncPlanTest extends TestCase
     }
 
     /**
-     * Return the grant table writer for the stub identity's roles in the scope.
+     * Return the grant table writer for the stub grantee's roles in the scope.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @return \SineMacula\Laravel\Authorization\Services\Support\GrantTable
@@ -307,7 +307,7 @@ final class SyncPlanTest extends TestCase
      */
     private static function grantee(): Reference
     {
-        return new Reference('stub_identity', 'user-1');
+        return new Reference('stub_grantee', 'user-1');
     }
 
     /**

@@ -12,16 +12,16 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged as IdentityPermissionExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted as IdentityPermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached as IdentityPolicyAttached;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged as IdentityPolicyExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned as IdentityRoleAssigned;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged as IdentityRoleExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionExpiryChanged as GranteePermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionGranted as GranteePermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyAttached as GranteePolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyExpiryChanged as GranteePolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned as GranteeRoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleExpiryChanged as GranteeRoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -41,9 +41,9 @@ use Tests\TestCase;
  *
  * @SuppressWarnings("php:S1192")
  */
-#[CoversClass(IdentityRoleExpiryChanged::class)]
-#[CoversClass(IdentityPermissionExpiryChanged::class)]
-#[CoversClass(IdentityPolicyExpiryChanged::class)]
+#[CoversClass(GranteeRoleExpiryChanged::class)]
+#[CoversClass(GranteePermissionExpiryChanged::class)]
+#[CoversClass(GranteePolicyExpiryChanged::class)]
 #[CoversTrait(HasRoles::class)]
 #[CoversTrait(HasPermissions::class)]
 #[CoversTrait(HasPolicies::class)]
@@ -74,7 +74,7 @@ final class ExpiryChangedEventsTest extends TestCase
 
     /**
      * Re-assigning a forever role grant with an expiry shortens it and fires
-     * `IdentityRoleExpiryChanged` alongside the usual `IdentityRoleAssigned`.
+     * `GranteeRoleExpiryChanged` alongside the usual `GranteeRoleAssigned`.
      *
      * @return void
      */
@@ -86,18 +86,18 @@ final class ExpiryChangedEventsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('oncall');
 
-        Event::fake([IdentityRoleAssigned::class, IdentityRoleExpiryChanged::class]);
+        Event::fake([GranteeRoleAssigned::class, GranteeRoleExpiryChanged::class]);
 
         $expires = Carbon::parse(self::EXPIRY_INSTANT);
         $user->assignRole('oncall', expiresAt: $expires);
 
-        Event::assertDispatched(IdentityRoleAssigned::class);
+        Event::assertDispatched(GranteeRoleAssigned::class);
         Event::assertDispatched(
-            IdentityRoleExpiryChanged::class,
-            static fn (IdentityRoleExpiryChanged $e): bool => $e->previousExpiresAt === null
+            GranteeRoleExpiryChanged::class,
+            static fn (GranteeRoleExpiryChanged $e): bool => $e->previousExpiresAt === null
                 && $e->expiresAt instanceof \DateTimeInterface
                 && $e->expiresAt->getTimestamp() === $expires->getTimestamp(),
         );
@@ -117,17 +117,17 @@ final class ExpiryChangedEventsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user    = StubGrantee::create(['id' => (string) Str::uuid()]);
         $expires = Carbon::parse(self::EXPIRY_INSTANT);
         $user->assignRole('oncall', expiresAt: $expires);
 
-        Event::fake([IdentityRoleExpiryChanged::class]);
+        Event::fake([GranteeRoleExpiryChanged::class]);
 
         $user->assignRole('oncall');
 
         Event::assertDispatched(
-            IdentityRoleExpiryChanged::class,
-            static fn (IdentityRoleExpiryChanged $e): bool => $e->previousExpiresAt instanceof \DateTimeInterface
+            GranteeRoleExpiryChanged::class,
+            static fn (GranteeRoleExpiryChanged $e): bool => $e->previousExpiresAt instanceof \DateTimeInterface
                 && $e->previousExpiresAt->getTimestamp() === $expires->getTimestamp()
                 && $e->expiresAt                         === null,
         );
@@ -147,19 +147,19 @@ final class ExpiryChangedEventsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user    = StubGrantee::create(['id' => (string) Str::uuid()]);
         $expires = Carbon::parse(self::EXPIRY_INSTANT);
         $user->assignRole('oncall', expiresAt: $expires);
 
-        Event::fake([IdentityRoleExpiryChanged::class]);
+        Event::fake([GranteeRoleExpiryChanged::class]);
 
         $user->assignRole('oncall', expiresAt: $expires);
 
-        Event::assertNotDispatched(IdentityRoleExpiryChanged::class);
+        Event::assertNotDispatched(GranteeRoleExpiryChanged::class);
     }
 
     /**
-     * A fresh role grant fires only `IdentityRoleAssigned` — the expiry-changed
+     * A fresh role grant fires only `GranteeRoleAssigned` — the expiry-changed
      * event is reserved for mutations of an existing pivot row.
      *
      * @return void
@@ -172,19 +172,19 @@ final class ExpiryChangedEventsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
-        Event::fake([IdentityRoleAssigned::class, IdentityRoleExpiryChanged::class]);
+        Event::fake([GranteeRoleAssigned::class, GranteeRoleExpiryChanged::class]);
 
         $user->assignRole('oncall', expiresAt: Carbon::parse(self::EXPIRY_INSTANT));
 
-        Event::assertDispatched(IdentityRoleAssigned::class);
-        Event::assertNotDispatched(IdentityRoleExpiryChanged::class);
+        Event::assertDispatched(GranteeRoleAssigned::class);
+        Event::assertNotDispatched(GranteeRoleExpiryChanged::class);
     }
 
     /**
      * Re-granting a forever permission with an expiry shortens it and fires
-     * `IdentityPermissionExpiryChanged`.
+     * `GranteePermissionExpiryChanged`.
      *
      * @return void
      */
@@ -196,18 +196,18 @@ final class ExpiryChangedEventsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission(self::PERMISSION_NAME);
 
-        Event::fake([IdentityPermissionGranted::class, IdentityPermissionExpiryChanged::class]);
+        Event::fake([GranteePermissionGranted::class, GranteePermissionExpiryChanged::class]);
 
         $expires = Carbon::parse(self::EXPIRY_INSTANT);
         $user->givePermission(self::PERMISSION_NAME, expiresAt: $expires);
 
-        Event::assertDispatched(IdentityPermissionGranted::class);
+        Event::assertDispatched(GranteePermissionGranted::class);
         Event::assertDispatched(
-            IdentityPermissionExpiryChanged::class,
-            static fn (IdentityPermissionExpiryChanged $e): bool => $e->previousExpiresAt === null
+            GranteePermissionExpiryChanged::class,
+            static fn (GranteePermissionExpiryChanged $e): bool => $e->previousExpiresAt === null
                 && $e->expiresAt instanceof \DateTimeInterface
                 && $e->expiresAt->getTimestamp() === $expires->getTimestamp(),
         );
@@ -227,17 +227,17 @@ final class ExpiryChangedEventsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user    = StubGrantee::create(['id' => (string) Str::uuid()]);
         $expires = Carbon::parse(self::EXPIRY_INSTANT);
         $user->givePermission(self::PERMISSION_NAME, expiresAt: $expires);
 
-        Event::fake([IdentityPermissionExpiryChanged::class]);
+        Event::fake([GranteePermissionExpiryChanged::class]);
 
         $user->givePermission(self::PERMISSION_NAME);
 
         Event::assertDispatched(
-            IdentityPermissionExpiryChanged::class,
-            static fn (IdentityPermissionExpiryChanged $e): bool => $e->previousExpiresAt instanceof \DateTimeInterface
+            GranteePermissionExpiryChanged::class,
+            static fn (GranteePermissionExpiryChanged $e): bool => $e->previousExpiresAt instanceof \DateTimeInterface
                 && $e->previousExpiresAt->getTimestamp() === $expires->getTimestamp()
                 && $e->expiresAt                         === null,
         );
@@ -257,20 +257,20 @@ final class ExpiryChangedEventsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user    = StubGrantee::create(['id' => (string) Str::uuid()]);
         $expires = Carbon::parse(self::EXPIRY_INSTANT);
         $user->givePermission(self::PERMISSION_NAME, expiresAt: $expires);
 
-        Event::fake([IdentityPermissionExpiryChanged::class]);
+        Event::fake([GranteePermissionExpiryChanged::class]);
 
         $user->givePermission(self::PERMISSION_NAME, expiresAt: $expires);
 
-        Event::assertNotDispatched(IdentityPermissionExpiryChanged::class);
+        Event::assertNotDispatched(GranteePermissionExpiryChanged::class);
     }
 
     /**
      * Re-attaching a forever policy with an expiry shortens it and fires
-     * `IdentityPolicyExpiryChanged`.
+     * `GranteePolicyExpiryChanged`.
      *
      * @return void
      */
@@ -282,18 +282,18 @@ final class ExpiryChangedEventsTest extends TestCase
             'document' => ['statements' => [['effect' => 'allow', 'actions' => [self::POLICY_ACTION]]]],
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->attachPolicy($policy);
 
-        Event::fake([IdentityPolicyAttached::class, IdentityPolicyExpiryChanged::class]);
+        Event::fake([GranteePolicyAttached::class, GranteePolicyExpiryChanged::class]);
 
         $expires = Carbon::parse(self::EXPIRY_INSTANT);
         $user->attachPolicy($policy, expiresAt: $expires);
 
-        Event::assertDispatched(IdentityPolicyAttached::class);
+        Event::assertDispatched(GranteePolicyAttached::class);
         Event::assertDispatched(
-            IdentityPolicyExpiryChanged::class,
-            static fn (IdentityPolicyExpiryChanged $e): bool => $e->previousExpiresAt === null
+            GranteePolicyExpiryChanged::class,
+            static fn (GranteePolicyExpiryChanged $e): bool => $e->previousExpiresAt === null
                 && $e->expiresAt instanceof \DateTimeInterface
                 && $e->expiresAt->getTimestamp() === $expires->getTimestamp(),
         );
@@ -313,17 +313,17 @@ final class ExpiryChangedEventsTest extends TestCase
             'document' => ['statements' => [['effect' => 'allow', 'actions' => [self::POLICY_ACTION]]]],
         ]);
 
-        $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user    = StubGrantee::create(['id' => (string) Str::uuid()]);
         $expires = Carbon::parse(self::EXPIRY_INSTANT);
         $user->attachPolicy($policy, expiresAt: $expires);
 
-        Event::fake([IdentityPolicyExpiryChanged::class]);
+        Event::fake([GranteePolicyExpiryChanged::class]);
 
         $user->attachPolicy($policy);
 
         Event::assertDispatched(
-            IdentityPolicyExpiryChanged::class,
-            static fn (IdentityPolicyExpiryChanged $e): bool => $e->previousExpiresAt instanceof \DateTimeInterface
+            GranteePolicyExpiryChanged::class,
+            static fn (GranteePolicyExpiryChanged $e): bool => $e->previousExpiresAt instanceof \DateTimeInterface
                 && $e->previousExpiresAt->getTimestamp() === $expires->getTimestamp()
                 && $e->expiresAt                         === null,
         );
@@ -343,19 +343,19 @@ final class ExpiryChangedEventsTest extends TestCase
             'document' => ['statements' => [['effect' => 'allow', 'actions' => [self::POLICY_ACTION]]]],
         ]);
 
-        $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user    = StubGrantee::create(['id' => (string) Str::uuid()]);
         $expires = Carbon::parse(self::EXPIRY_INSTANT);
         $user->attachPolicy($policy, expiresAt: $expires);
 
-        Event::fake([IdentityPolicyExpiryChanged::class]);
+        Event::fake([GranteePolicyExpiryChanged::class]);
 
         $user->attachPolicy($policy, expiresAt: $expires);
 
-        Event::assertNotDispatched(IdentityPolicyExpiryChanged::class);
+        Event::assertNotDispatched(GranteePolicyExpiryChanged::class);
     }
 
     /**
-     * A fresh policy attachment fires only `IdentityPolicyAttached` — the
+     * A fresh policy attachment fires only `GranteePolicyAttached` — the
      * expiry-changed event is reserved for mutations of an existing pivot row.
      *
      * @return void
@@ -368,13 +368,13 @@ final class ExpiryChangedEventsTest extends TestCase
             'document' => ['statements' => [['effect' => 'allow', 'actions' => [self::POLICY_ACTION]]]],
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
-        Event::fake([IdentityPolicyAttached::class, IdentityPolicyExpiryChanged::class]);
+        Event::fake([GranteePolicyAttached::class, GranteePolicyExpiryChanged::class]);
 
         $user->attachPolicy($policy, expiresAt: Carbon::parse(self::EXPIRY_INSTANT));
 
-        Event::assertDispatched(IdentityPolicyAttached::class);
-        Event::assertNotDispatched(IdentityPolicyExpiryChanged::class);
+        Event::assertDispatched(GranteePolicyAttached::class);
+        Event::assertNotDispatched(GranteePolicyExpiryChanged::class);
     }
 }

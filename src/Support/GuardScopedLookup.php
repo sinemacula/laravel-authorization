@@ -62,10 +62,10 @@ final class GuardScopedLookup
      * Return every row that answers the name under the given guard, in the
      * order `findForGuard()` ranks them.
      *
-     * A revocation or synchronisation by name works from these, since an
-     * identity may hold the platform's row while the current tenant owns one of
-     * the same name that `findForGuard()` would pick. Given a tenant, the rows
-     * visible in that tenant are read in place of the current tenant's.
+     * A revocation or synchronisation by name works from these, since a grantee
+     * may hold the platform's row while the current tenant owns one of the same
+     * name that `findForGuard()` would pick. Given a tenant, the rows visible
+     * in that tenant are read in place of the current tenant's.
      *
      * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
      * @param  string  $name

@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * never read as a complete one.
  *
  * The package never infers the principals of an identity, from
- * `AuthorizableIdentity` or from anything else: that contract says a model may
+ * `AuthorizableGrantee` or from anything else: that contract says a model may
  * hold grants, not which principals an identity owns. The shipped default,
  * `GuardUserIdentityDirectory`, knows the answer only under the shipped subject
  * resolver, where every user is its own identity and owns no other principal;

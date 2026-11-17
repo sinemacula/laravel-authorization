@@ -26,7 +26,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\CredentialScopesSource;
 use Tests\Feature\Stubs\FailingContextSource;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -328,7 +328,7 @@ final class WhyInvocationTest extends TestCase
     {
         $ambient = self::createTenant('tenant-2');
         $tenant  = self::createTenant('tenant-3');
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $checker = new StubRequirementChecker(RequirementResult::met());
 
         $user->givePermission(Permission::create(['name' => 'posts:read']), null, $tenant, true, 'web');
@@ -376,7 +376,7 @@ final class WhyInvocationTest extends TestCase
     {
         $ambient = self::createTenant('tenant-5');
         $tenant  = self::createTenant('tenant-6');
-        $user    = StubIdentity::create(['id' => 'user-3']);
+        $user    = StubGrantee::create(['id' => 'user-3']);
         $source  = new CredentialScopesSource;
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
@@ -416,7 +416,7 @@ final class WhyInvocationTest extends TestCase
     public function testRestoresTheScopeWhenTheCheckThrows(): void
     {
         $ambient = self::createTenant('tenant-4');
-        $user    = StubIdentity::create(['id' => 'user-2']);
+        $user    = StubGrantee::create(['id' => 'user-2']);
 
         $this->actAsTenant($ambient);
 

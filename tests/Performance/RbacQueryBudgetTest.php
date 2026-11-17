@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -243,12 +243,12 @@ final class RbacQueryBudgetTest extends TestCase
      *
      * @param  int  $roles
      * @param  int  $depth
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function identityHolding(int $roles, int $depth): StubIdentity
+    private static function identityHolding(int $roles, int $depth): StubGrantee
     {
         $id   = (string) Str::uuid();
-        $user = StubIdentity::create(['id' => $id]);
+        $user = StubGrantee::create(['id' => $id]);
 
         for ($r = 0; $r < $roles; $r++) {
             $parent = null;
@@ -272,12 +272,12 @@ final class RbacQueryBudgetTest extends TestCase
      * Count the queries resolving a fresh copy of the identity's permissions
      * runs.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @return int
      */
-    private static function resolutionQueries(StubIdentity $user): int
+    private static function resolutionQueries(StubGrantee $user): int
     {
-        $fresh = StubIdentity::query()->whereKey($user->getKey())->firstOrFail();
+        $fresh = StubGrantee::query()->whereKey($user->getKey())->firstOrFail();
 
         DB::enableQueryLog();
         DB::flushQueryLog();
@@ -293,11 +293,11 @@ final class RbacQueryBudgetTest extends TestCase
 
     /**
      * Seed the `editor` role with five attached permissions and return a
-     * `StubIdentity` assigned to that role.
+     * `StubGrantee` assigned to that role.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function makeEditorWithFivePermissions(): StubIdentity
+    private function makeEditorWithFivePermissions(): StubGrantee
     {
         $role = Role::create([
             'id'    => (string) Str::uuid(),
@@ -314,7 +314,7 @@ final class RbacQueryBudgetTest extends TestCase
             $role->permissions()->attach($permission->getKey());
         }
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('editor');
 
         return $user;

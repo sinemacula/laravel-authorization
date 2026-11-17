@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
@@ -61,7 +61,7 @@ final class GateArgumentForwardingTest extends TestCase
         // Register a morph alias so `$stub->getMorphClass()` returns a clean
         // string; the default FQN contains backslashes that trigger PHP's
         // fnmatch escape handling in the evaluator.
-        Relation::morphMap(['stub' => StubIdentity::class]);
+        Relation::morphMap(['stub' => StubGrantee::class]);
 
         (new AuthorizationServiceProvider($this->container()))->boot();
     }
@@ -87,7 +87,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateForwardsStringResource(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -112,8 +112,8 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateForwardsEloquentModelAsMorphClassKey(): void
     {
-        $user   = StubIdentity::create(['id' => (string) Str::uuid()]);
-        $target = StubIdentity::create(['id' => 'target-1']);
+        $user   = StubGrantee::create(['id' => (string) Str::uuid()]);
+        $target = StubGrantee::create(['id' => 'target-1']);
         $this->actAs($user);
 
         $resourceIdentifier = $target->getMorphClass() . ':target-1';
@@ -138,7 +138,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateForwardsStringableObject(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -173,7 +173,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateForwardsAssociativeArrayAsContext(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -201,7 +201,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateArgumentsLandUnderInputAndNeverInAnotherNamespace(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -230,7 +230,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateForwardsResourceAndContextCombination(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -259,7 +259,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateWithoutExtraArgumentsMatchesPolicyOnAction(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -285,7 +285,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateNamesThePairTwoPositionalArgumentsSpell(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -306,10 +306,10 @@ final class GateArgumentForwardingTest extends TestCase
      * Swap the subject resolver for one that returns the supplied authorizable
      * and refresh the manager so the next facade call picks it up.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @return void
      */
-    private function actAs(StubIdentity $user): void
+    private function actAs(StubGrantee $user): void
     {
         $resolver = new StubSubjectResolver($user);
 

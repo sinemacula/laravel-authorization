@@ -7,10 +7,10 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 use SineMacula\Laravel\Authorization\Models\Permission as PermissionModel;
 
 /**
- * Narrow contract for identities that carry direct permission grants and
- * resolve permissions (direct + role-inherited).
+ * Narrow contract for grantees that carry direct permission grants and resolve
+ * permissions (direct + role-inherited).
  *
- * Split from the composite `AuthorizableIdentity` so a pure-RBAC consumer that
+ * Split from the composite `AuthorizableGrantee` so a pure-RBAC consumer that
  * only wires permissions can typehint on the minimum surface they actually
  * implement.
  *
@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Permission as PermissionModel;
 interface SupportsPermissions
 {
     /**
-     * Grant the given permission directly to this identity.
+     * Grant the given permission directly to this grantee.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return static
@@ -28,7 +28,7 @@ interface SupportsPermissions
     public function givePermission(PermissionModel|string $permission): static;
 
     /**
-     * Revoke the given direct permission from this identity.
+     * Revoke the given direct permission from this grantee.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return static
@@ -36,7 +36,7 @@ interface SupportsPermissions
     public function revokePermission(PermissionModel|string $permission): static;
 
     /**
-     * Replace this identity's direct permissions with the supplied set.
+     * Replace this grantee's direct permissions with the supplied set.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
      * @return static
@@ -44,7 +44,7 @@ interface SupportsPermissions
     public function syncPermissions(array $permissions): static;
 
     /**
-     * Determine whether this identity has the given permission either directly
+     * Determine whether this grantee has the given permission either directly
      * or through any assigned role.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
@@ -53,7 +53,7 @@ interface SupportsPermissions
     public function hasPermission(PermissionModel|string $permission): bool;
 
     /**
-     * Return the names of every permission the identity holds, either directly
+     * Return the names of every permission the grantee holds, either directly
      * or through its assigned roles.
      *
      * The decision reads these names, those of the grants that reach the scope

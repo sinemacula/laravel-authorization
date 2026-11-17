@@ -12,9 +12,9 @@ namespace App\Models;
 
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use SineMacula\Laravel\Authorization\Concerns\HasAuthorization;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 
-class User extends Authenticatable implements AuthorizableIdentity
+class User extends Authenticatable implements AuthorizableGrantee
 {
     use HasAuthorization;
 }
@@ -156,7 +156,7 @@ grant that has expired re-arms it with the new expiry (`REARMED`), and a new exp
 none, and leaves a live one as it is, unless it is a role listed with a reach of its own and held with the other (see
 below). A role's permissions work the same way: `RoleService::grantPermission()` and `syncPermissions()`, and the
 role's `givePermission()` and `syncPermissions()`, each take an optional expiry. The
-identity traits' sync methods take no expiry, so a lapsed temporary grant they list comes back permanent; to re-arm it
+grantee traits' sync methods take no expiry, so a lapsed temporary grant they list comes back permanent; to re-arm it
 for a limited time, call `GrantService::syncRoles()` (or `syncPermissions()`, `syncPolicies()`) with an expiry. Setting
 a role's parent locks the roles involved and refuses a cycle. A role with children cannot be deleted
 (`RoleHasChildrenException`), so no one holding a child loses what it inherited by surprise: move the children to

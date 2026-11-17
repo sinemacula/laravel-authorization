@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleExclusionService;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\TestCase;
@@ -166,7 +166,7 @@ final class RoleExclusionQueryBudgetTest extends TestCase
     private function holders(int $from, int $to, Role $first, Role $second): void
     {
         foreach (\range($from, $to) as $number) {
-            $holder = StubIdentity::query()->create(['id' => 'holder-' . $number]);
+            $holder = StubGrantee::query()->create(['id' => 'holder-' . $number]);
 
             app(GrantService::class)->grantRole($holder, $first, tenant: new Reference('org', 'parent'));
             app(GrantService::class)->grantRole($holder, $second, tenant: new Reference('org', 'child'));
@@ -188,7 +188,7 @@ final class RoleExclusionQueryBudgetTest extends TestCase
     private static function stored(int $from, int $to, Role $first, Role $second): void
     {
         foreach (\range($from, $to) as $number) {
-            $holder = StubIdentity::query()->create(['id' => 'holder-' . $number]);
+            $holder = StubGrantee::query()->create(['id' => 'holder-' . $number]);
 
             foreach ([[$first, 'parent'], [$second, 'child']] as [$role, $tenant]) {
                 DB::table('authorizable_roles')->insert([
@@ -224,7 +224,7 @@ final class RoleExclusionQueryBudgetTest extends TestCase
             ClosureTenantTree::add($parent);
             ClosureTenantTree::add($child, $parent);
 
-            $holder = StubIdentity::query()->create(['id' => 'holder-' . $number]);
+            $holder = StubGrantee::query()->create(['id' => 'holder-' . $number]);
 
             app(GrantService::class)->grantRole($holder, $first, tenant: $parent);
             app(GrantService::class)->grantRole($holder, $second, tenant: $child);

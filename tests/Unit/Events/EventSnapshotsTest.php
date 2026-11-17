@@ -9,7 +9,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationMutation;
-use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
+use SineMacula\Laravel\Authorization\Contracts\GranteeEvent;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
@@ -48,18 +48,18 @@ final class EventSnapshotsTest extends TestCase
 
         self::assertContains('DecisionEvaluated', $names);
         self::assertContains('SystemOverrideUsed', $names);
-        self::assertContains('Identity/RoleAssigned', $names);
+        self::assertContains('Grantee/RoleAssigned', $names);
         self::assertContains('Role/PermissionGranted', $names);
-        self::assertContains('Identity/BoundarySet', $names);
-        self::assertContains('Identity/BoundaryRemoved', $names);
+        self::assertContains('Grantee/BoundarySet', $names);
+        self::assertContains('Grantee/BoundaryRemoved', $names);
         self::assertContains('Guardrail/GuardrailSet', $names);
         self::assertContains('Guardrail/GuardrailRemoved', $names);
         self::assertContains('Role/ExclusionDeclared', $names);
         self::assertContains('Role/ExclusionRemoved', $names);
-        self::assertContains('Identity/BreakGlassActivated', $names);
-        self::assertContains('Identity/BreakGlassSurrendered', $names);
-        self::assertContains('Identity/BreakGlassRevoked', $names);
-        self::assertContains('Identity/BreakGlassExpired', $names);
+        self::assertContains('Grantee/BreakGlassActivated', $names);
+        self::assertContains('Grantee/BreakGlassSurrendered', $names);
+        self::assertContains('Grantee/BreakGlassRevoked', $names);
+        self::assertContains('Grantee/BreakGlassExpired', $names);
         self::assertCount(40, $names);
     }
 
@@ -119,14 +119,14 @@ final class EventSnapshotsTest extends TestCase
     }
 
     /**
-     * Every change event under `Events\Identity` names its grantee.
+     * Every change event under `Events\Grantee` names its grantee.
      *
      * @return iterable<string, array{class-string}>
      */
-    public static function identityEvents(): iterable
+    public static function granteeEvents(): iterable
     {
         foreach (self::events() as $name => [$class]) {
-            if (!\str_starts_with($name, 'Identity/')) {
+            if (!\str_starts_with($name, 'Grantee/')) {
                 continue;
             }
 
@@ -135,18 +135,18 @@ final class EventSnapshotsTest extends TestCase
     }
 
     /**
-     * Every grant event implements `IdentityEvent` and names its grantee by
+     * Every grant event implements `GranteeEvent` and names its grantee by
      * reference, as the cache listener reads it.
      *
      * @param  class-string  $class
      * @return void
      */
-    #[DataProvider('identityEvents')]
+    #[DataProvider('granteeEvents')]
     public function testNamesTheGrantee(string $class): void
     {
         $grantee = new \ReflectionProperty($class, 'grantee');
 
-        self::assertTrue(\is_subclass_of($class, IdentityEvent::class));
+        self::assertTrue(\is_subclass_of($class, GranteeEvent::class));
         self::assertSame(Reference::class, (string) $grantee->getType());
     }
 

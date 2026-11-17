@@ -85,9 +85,9 @@ replaces the check's policies alone, so the subject's boundaries and permissions
 cap. `hasPermission()` and `hasRole()` report what is granted, not what a boundary lets through; decide with `can()`,
 `check()` or the Gate.
 
-**Lifecycle.** Setting or removing a boundary dispatches `Identity\BoundarySet` (carrying the policy it replaced as
-`previous`, when it replaced one) or `Identity\BoundaryRemoved` once the call commits, only when it changed something,
-with the grantee, the policy, its name, the scope and the actor. Both implement `IdentityEvent`, and the change takes
+**Lifecycle.** Setting or removing a boundary dispatches `Grantee\BoundarySet` (carrying the policy it replaced as
+`previous`, when it replaced one) or `Grantee\BoundaryRemoved` once the call commits, only when it changed something,
+with the grantee, the policy, its name, the scope and the actor. Both implement `GranteeEvent`, and the change takes
 effect on the next check in every worker, as a grant's does. Deleting the grantee removes its boundaries, each reported
 as removed, and `authorization:prune` removes those of a grantee deleted without its model events, counting them apart
 from its grants. A policy in use as a boundary cannot be deleted: the delete is refused with `BoundaryException`, whose
@@ -416,10 +416,10 @@ it is still admitted to an application whose permission it holds, which is decid
 ```php
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Concerns\HasAuthorization;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 
-class ServiceAccount extends Model implements AuthorizableIdentity, AuthorizableMachine
+class ServiceAccount extends Model implements AuthorizableGrantee, AuthorizableMachine
 {
     use HasAuthorization;
 }

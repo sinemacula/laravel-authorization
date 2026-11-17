@@ -4,11 +4,11 @@
  * Create the `permissions` table.
  *
  * Permissions are atomic action strings that can be granted directly to an
- * identity or inherited via a role. The `guard` column is nullable: a null
- * value marks the permission as guard-agnostic (applies to every guard), a
- * concrete string scopes it to a single guard. A permission is owned by the
- * platform (null tenant columns) or by one tenant, and its name is unique
- * within its owner and guard.
+ * grantee or inherited via a role. The `guard` column is nullable: a null value
+ * marks the permission as guard-agnostic (applies to every guard), a concrete
+ * string scopes it to a single guard. A permission is owned by the platform
+ * (null tenant columns) or by one tenant, and its name is unique within its
+ * owner and guard.
  *
  * The tenant columns compare their exact bytes on every database: on MySQL they
  * are collated `utf8mb4_0900_bin`, which neither folds case nor pads trailing

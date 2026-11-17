@@ -13,7 +13,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\FailingResourceAttributes;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\BulkChecks\AnsweringBulkAttributes;
 use Tests\Fixtures\BulkChecks\FailingTenantTree;
 
@@ -71,7 +71,7 @@ final class ResourceAttributeBatchTest extends TestCase
      */
     public function testTheRecordsOfATypeAreReadTogetherWhenFirstNeeded(): void
     {
-        $model    = new StubIdentity(['id' => '1']);
+        $model    = new StubGrantee(['id' => '1']);
         $first    = ResourceReference::record('posts', '1', null, $model);
         $second   = ResourceReference::record('posts', '2');
         $note     = ResourceReference::record('notes', '1');
@@ -300,7 +300,7 @@ final class ResourceAttributeBatchTest extends TestCase
      */
     public function testAProviderThatDoesNotReadInBulkIsAskedOnceForEachItem(): void
     {
-        $model    = new StubIdentity(['id' => '1']);
+        $model    = new StubGrantee(['id' => '1']);
         $record   = ResourceReference::record('posts', '1', null, $model);
         $loose    = ResourceReference::record('posts', '2');
         $provider = new RecordingResourceAttributes('published');

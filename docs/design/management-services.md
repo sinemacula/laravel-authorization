@@ -2,7 +2,7 @@
 
 Every write of a role, permission, policy, grant, resource attachment, permission boundary, guardrail, role exclusion
 or break-glass activation goes through one of nine injectable services, so each write runs in one transaction on the
-package's connection, reads the configured models and reports only what it changed. The identity traits, the role's
+package's connection, reads the configured models and reports only what it changed. The grantee traits, the role's
 permission helpers, the grant and revoke commands and the Spatie import all delegate to them. The one exception is
 `authorization:sync`, which writes the permission catalogue through the permission model in its own transaction on the
 package's connection, rather than through `PermissionService`.
@@ -14,8 +14,8 @@ package's connection, rather than through `PermissionService`.
 - `PermissionService`: create, rename, describe, delete, find and list permissions.
 - `PolicyService`: create, rename, describe, rewrite, delete and list policies, and create a grantee's inline policies
   (`createInline()`).
-- `GrantService`: grant, revoke and sync roles, permissions and policies to a grantee, an identity or a role, with an
-  optional expiry.
+- `GrantService`: grant, revoke and sync roles, permissions and policies to a grantee, a principal, an identity or a
+  role, with an optional expiry.
 - `ResourcePolicyService`: attach a policy to a resource, a record or a whole resource type, and detach it.
 - `BoundaryService`: set, replace and remove the permission boundary of a principal or an identity, platform-wide or in
   a tenant.
@@ -63,7 +63,7 @@ themselves are described in [Events](events.md).
    with the granted event and in `SyncResult::$reachChanged`; listed with both reaches in a tenant, the sync is refused
    with `InvalidArgumentException` before anything is written; a platform-wide sync writes every grant reaching
    everywhere, so there both entries name the same reach and the sync goes ahead. A sync given no expiry, as every
-   identity trait sync is, re-arms a lapsed temporary grant as a permanent one. A role's grants of permissions behave
+   grantee trait sync is, re-arms a lapsed temporary grant as a permanent one. A role's grants of permissions behave
    the same way through `RoleService::grantPermission()` and `syncPermissions()`, which take the expiry before the
    actor. A batch grant (`GrantService::grantRoles()`) grants each role as `grantRole()` does, in one transaction and
    one operation, revoking nothing. It compares a role listed twice by the key it resolves to: the same reach is granted
@@ -136,7 +136,7 @@ themselves are described in [Events](events.md).
     refused with `ResourcePolicyException` before anything is written, and a resource that names no type, an unsaved
     model, or a record whose key is `*` (which the whole type stands for), with `InvalidResourceException`. A pair names
     its record without asking the resource tenant resolver, since the call names the scope. A policy naming principals
-    is refused the other way, by every grant path to an identity or a role. Each call is one transaction and one
+    is refused the other way, by every grant path to a grantee. Each call is one transaction and one
     operation, dispatches `Resource\PolicyAttached` or `Resource\PolicyDetached` after commit only when it changed
     something, and refreshes the resolution cache for the resource's type. The rows carry no actor column; the events
     carry the actor.
@@ -159,8 +159,8 @@ themselves are described in [Events](events.md).
     one without a key (`InvalidGranteeException`) are refused before anything is written. `GrantService::revokeAll()`
     removes the grantee's boundaries in every scope with its grants, so deleting a grantee removes them too;
     `removeAll()` removes them alone, which the grant pruner does for a grantee that is gone, counting them apart from
-    its grants. Each call is one transaction and one operation, dispatches `Identity\BoundarySet` (with the
-    `previous` policy it replaced) or `Identity\BoundaryRemoved` after commit only when it changed something, and
+    its grants. Each call is one transaction and one operation, dispatches `Grantee\BoundarySet` (with the
+    `previous` policy it replaced) or `Grantee\BoundaryRemoved` after commit only when it changed something, and
     refreshes the grantee's cached resolutions through its version.
 
 14. **A guardrail is one row per policy per scope, and only an acting subject allowed to may write it.**
@@ -245,7 +245,7 @@ working: each forwards to the matching service method, with the `actor` it is gi
 - **List methods are reads** and run outside a transaction. `list()` takes the actor as the writes do, but decides
   nothing with it. The other reads, `find()` and `RoleExclusionService`'s `pairs()`, `conflicts()` and
   `conflictsForAll()`, take none.
-- **`authorization:grant` gives no expiry**, so granting a role the identity holds on a temporary or expired grant makes
+- **`authorization:grant` gives no expiry**, so granting a role the grantee holds on a temporary or expired grant makes
   it permanent and is reported as granted; only a role already held with no expiry is reported as held.
 - **`authorization:sync` writes directly.** The permission catalogue sync saves and deletes through the permission
   model, in one transaction on the package's connection and as one operation, rather than through

@@ -35,7 +35,7 @@ final class UnresolvedSubjectExceptionTest extends TestCase
             UnresolvedSubjectException::NOT_FOUND    => [UnresolvedSubjectException::notFound('user:1'), 'No subject \'user:1\' was found.'],
             UnresolvedSubjectException::UNSUPPORTED  => [
                 UnresolvedSubjectException::unsupported('user:2'),
-                'The subject \'user:2\' cannot be checked: its principal is not a saved authorizable identity.',
+                'The subject \'user:2\' cannot be checked: its principal is not a saved authorizable grantee.',
             ],
             UnresolvedSubjectException::AMBIGUOUS => [
                 UnresolvedSubjectException::ambiguous('user:3'),
@@ -83,7 +83,7 @@ final class UnresolvedSubjectExceptionTest extends TestCase
             'The reference must be in the format {morphType}:{key} (e.g. user:1).'                        => UnresolvedSubjectException::malformed(),
             'The reference\'s type is not an Eloquent model.'                                             => UnresolvedSubjectException::unknownType('sentinel'),
             'The reference names no saved row.'                                                           => UnresolvedSubjectException::notFound('user:sentinel'),
-            'The reference cannot be checked: its principal is not a saved authorizable identity.'        => UnresolvedSubjectException::unsupported('user:sentinel'),
+            'The reference cannot be checked: its principal is not a saved authorizable grantee.'         => UnresolvedSubjectException::unsupported('user:sentinel'),
             'The reference is ambiguous: the subject resolver maps it to a subject that is not about it.' => UnresolvedSubjectException::ambiguous('user:sentinel'),
         ];
 

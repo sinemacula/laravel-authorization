@@ -4,11 +4,11 @@
  * Create the `policies` table.
  *
  * Policies are JSON documents of allow and deny statements attached to
- * authorizable identities and roles. A policy belongs to the platform (null
- * tenant columns) or to one tenant; a managed policy's name is unique within
- * its tenant. An inline policy names the one grantee it belongs to, and its
- * name is unique among that grantee's inline policies (it may share a managed
- * policy's name).
+ * authorizable models and roles. A policy belongs to the platform (null tenant
+ * columns) or to one tenant; a managed policy's name is unique within its
+ * tenant. An inline policy names the one grantee it belongs to, and its name is
+ * unique among that grantee's inline policies (it may share a managed policy's
+ * name).
  *
  * The tenant and owner columns compare their exact bytes on every database: on
  * MySQL they are collated `utf8mb4_0900_bin`, which neither folds case nor pads

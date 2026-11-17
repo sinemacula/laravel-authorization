@@ -90,7 +90,7 @@ resolver, `DefaultPolicyResolver`, asks the subject's principal and unions three
 
 - **The policy store.** The `PolicyStore` bound as `policy_store`, asked on every check, for policies shipped in code
   or kept outside the package's tables.
-- **The principal's own attachments.** When the principal is an `AuthorizableIdentity`: managed policies, stored once
+- **The principal's own attachments.** When the principal is an `AuthorizableGrantee`: managed policies, stored once
   and attached to any number of grantees, and its inline policies, each of which belongs to it alone, attached through
   `authorizable_policies` in the current scope.
 - **Its roles' policies.** The policies attached to each role such a principal holds, through the same table with the
@@ -135,9 +135,9 @@ identity may be listed twice, and a policy may be held and set as a guardrail or
 both: the evaluator gathers each policy once for each part it plays (`StatementEntries`), its denies once, its allows
 once as a policy, once as a guardrail and once as a boundary, so the decision is unchanged and names each statement
 once. The stored policies are read through the resolution cache; a change to any role's policy attachments refreshes
-every identity's cached policies, and a change to the hierarchy refreshes those of the identities whose roles it
+every grantee's cached policies, and a change to the hierarchy refreshes those of the grantees whose roles it
 reaches. The order the sources are read in is never relied on: invariant 2 orders the policies within each stage, so a
-deny in a role's policy, or in the resource's, is decided exactly as one attached to the identity, and wins over every
+deny in a role's policy, or in the resource's, is decided exactly as one attached to the subject, and wins over every
 allow and every permission.
 
 The resource's policies are read in one query, on the write connection, through the resolution cache, keyed by the
@@ -163,8 +163,8 @@ do, so its statements are read the other way round:
   its own resource holds across that fallback.
 - **The rule follows the attachment.** `PolicyValidator` refuses a malformed selector and `principals` on a deny when a
   policy is saved. A policy attached to a resource must name principals on every allow, and may not be inline; a policy
-  attached to an identity or a role may name none. Each attachment is refused with `ResourcePolicyException` when the
-  stored policy breaks the rule for it, and a rewrite of an attached policy that would break it is refused as well
+  attached to a grantee may name none. Each attachment is refused with `ResourcePolicyException` when the stored policy
+  breaks the rule for it, and a rewrite of an attached policy that would break it is refused as well
   (`PolicyPrincipals`).
 
 ## Permission Boundaries
@@ -206,7 +206,7 @@ The boundaries and their documents are read in one query on the write connection
 grantee's policies are (`ResolutionCache::rememberBoundaries()`), so a warm check reads none. Every boundary entry pins
 one shared boundaries version, which updating or deleting any policy bumps, rather than a version per policy: a
 coarser invalidation that saves a second cold query. Setting or removing a boundary bumps the grantee's version through
-its `IdentityEvent`.
+its `GranteeEvent`.
 
 ## Guardrails
 
@@ -635,7 +635,7 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   ever about one. A role's holders are capped only by their own boundaries; a role's policies are ordinary policies,
   never a cap.
 - **A grantee of the narrow contracts**: a principal or identity that holds grants through `SupportsRoles`,
-  `SupportsPermissions` or `SupportsPolicies` without being an `AuthorizableIdentity` is capped by its boundaries as any
+  `SupportsPermissions` or `SupportsPolicies` without being an `AuthorizableGrantee` is capped by its boundaries as any
   saved model is.
 - **A policy reached twice**: a policy held and set as a boundary, or the boundary of both the principal and its
   identity, denies once at the deny stage, is assessed once as a policy and once as a boundary, and is named once.
@@ -713,7 +713,7 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   `PolicyEvaluator::isForSubject()` -- whether an allow applies to the subject; `PolicyPrincipals` -- the attachment
   and rewrite refusals; `ResourcePolicyService` -- attaching and detaching.
 - `DefaultPolicyResolver::policiesFor()` -- the policy store and the principal's own policies;
-  `HasPolicies::getPolicies()` and `GrantResolver::policies()` -- the identity's own attachments and its roles';
+  `HasPolicies::getPolicies()` and `GrantResolver::policies()` -- the grantee's own attachments and its roles';
   `RolePolicies` -- where a role's policy applies; `RoleGraph::keysHeldBy()` and `RoleGraph::keysWithin()` -- the roles
   reached, shared with the permissions; `InlinePolicies` -- the grantee an inline policy belongs to and the refusals;
   `SubjectGrants::identityPolicies()` -- the policies of a separate identity, appended after the resolver's, whole or,

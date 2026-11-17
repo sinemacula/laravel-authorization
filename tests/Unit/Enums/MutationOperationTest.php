@@ -64,9 +64,9 @@ final class MutationOperationTest extends TestCase
      */
     public function testTheValuesAreStable(): void
     {
-        self::assertSame('identity.role.assigned', MutationOperation::IDENTITY_ROLE_ASSIGNED->value);
-        self::assertSame('identity.role.expiry_changed', MutationOperation::IDENTITY_ROLE_EXPIRY_CHANGED->value);
-        self::assertSame('identity.break_glass.activated', MutationOperation::IDENTITY_BREAK_GLASS_ACTIVATED->value);
+        self::assertSame('grantee.role.assigned', MutationOperation::GRANTEE_ROLE_ASSIGNED->value);
+        self::assertSame('grantee.role.expiry_changed', MutationOperation::GRANTEE_ROLE_EXPIRY_CHANGED->value);
+        self::assertSame('grantee.break_glass.activated', MutationOperation::GRANTEE_BREAK_GLASS_ACTIVATED->value);
         self::assertSame('permission.deleted', MutationOperation::PERMISSION_DELETED->value);
         self::assertSame('resource.policy.detached', MutationOperation::RESOURCE_POLICY_DETACHED->value);
         self::assertSame('guardrail.set', MutationOperation::GUARDRAIL_SET->value);

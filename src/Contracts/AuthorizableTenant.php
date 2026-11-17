@@ -7,7 +7,7 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 /**
  * Contract for non-Eloquent tenant objects participating in tenant scoping.
  *
- * Parallels `AuthorizableIdentity` — a noun-form contract that marks an object
+ * Parallels `AuthorizableGrantee` — a noun-form contract that marks an object
  * as "a tenant that can own authorization rows." The two accessors mirror
  * Eloquent's `Model::getKey()` and `Model::getMorphClass()` verbatim so an
  * Eloquent Model satisfies the contract's shape by construction; non-Model

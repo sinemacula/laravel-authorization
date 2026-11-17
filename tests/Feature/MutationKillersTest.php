@@ -19,19 +19,19 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
  * Mutation-killer feature tests targeting the `ResolvesPivotExpiry` helper, the
- * `ResolutionCache` TTL / key routing, and the authorizable-identity trait
+ * `ResolutionCache` TTL / key routing, and the authorizable grantee trait
  * branches whose semantic mutants escaped the initial mutation sweep.
  *
  * These tests assert exact values (counts, keys, time bounds) so subtle
@@ -56,7 +56,7 @@ use Tests\TestCase;
 final class MutationKillersTest extends TestCase
 {
     /**
-     * `assignRole()` fires `IdentityRoleAssigned` exactly once for a first-time
+     * `assignRole()` fires `GranteeRoleAssigned` exactly once for a first-time
      * grant and does not re-fire if the expiry is unchanged — pins the
      * expiry-equality branch.
      *
@@ -69,7 +69,7 @@ final class MutationKillersTest extends TestCase
         );
 
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'idem', 'guard' => 'web']);
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         // Anchor Carbon so the computed expiry is deterministic and identical
         // across both calls — avoids wall-clock drift.
@@ -89,8 +89,8 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `assignRole()` with a different expiry fires `IdentityRoleExpiryChanged`
-     * — pins the `!grantExpiriesEqual` branch against LogicalAnd/Negation
+     * `assignRole()` with a different expiry fires `GranteeRoleExpiryChanged` —
+     * pins the `!grantExpiriesEqual` branch against LogicalAnd/Negation
      * mutations.
      *
      * @return void
@@ -102,7 +102,7 @@ final class MutationKillersTest extends TestCase
         );
 
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'moving', 'guard' => 'web']);
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         // Anchor Carbon so the two expiries are computed against a fixed
         // instant — keeps the +1h vs +2h delta deterministic.
@@ -123,7 +123,7 @@ final class MutationKillersTest extends TestCase
 
     /**
      * `givePermission()` with a different expiry fires
-     * `IdentityPermissionExpiryChanged`.
+     * `GranteePermissionExpiryChanged`.
      *
      * @return void
      */
@@ -134,7 +134,7 @@ final class MutationKillersTest extends TestCase
         );
 
         $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'p:m', 'guard' => 'web']);
-        $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user       = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         // Anchor Carbon so the two expiries are computed against a fixed
         // instant — keeps the +1h vs +2h delta deterministic.
@@ -249,7 +249,7 @@ final class MutationKillersTest extends TestCase
 
         // Deny path — authorize() throws, lastDecision captures the decision.
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard' => 'web']);
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         try {
             Authorization::for($user)->authorize('forbidden:action');
@@ -300,14 +300,14 @@ final class MutationKillersTest extends TestCase
 
         // The scoped clone evaluates through the supplied policies and yields
         // allow; the base does not.
-        $scopedPrincipal = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $scopedPrincipal = StubGrantee::create(['id' => (string) Str::uuid()]);
         self::assertTrue($scoped->for($scopedPrincipal)->can('probe:clone'));
         self::assertFalse($manager->for($scopedPrincipal)->can('probe:clone'));
     }
 
     /**
      * `attachPolicy()` with a different expiry fires
-     * `IdentityPolicyExpiryChanged`.
+     * `GranteePolicyExpiryChanged`.
      *
      * @return void
      */
@@ -322,7 +322,7 @@ final class MutationKillersTest extends TestCase
             'name'     => 'policy-m',
             'document' => ['statements' => [['effect' => 'allow', 'actions' => ['x']]]],
         ]);
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         // Anchor Carbon so the two expiries are computed against a fixed
         // instant — keeps the +1h vs +2h delta deterministic.

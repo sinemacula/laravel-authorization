@@ -18,7 +18,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
@@ -34,7 +34,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\FailingCacheStore;
 use Tests\Feature\Stubs\RecordingLogger;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -400,11 +400,11 @@ final class OperationScopeTest extends TestCase
         self::assertCount(3, \array_unique(\array_map(static fn (mixed $token): string => \is_scalar($token) ? (string) $token : '', $tokens)));
         self::assertSame(0, $heard);
 
-        $memo = $cache->rememberRoles(new StubIdentity(['id' => 'user-2']), static fn (): Resolution => new Resolution(['editor']));
+        $memo = $cache->rememberRoles(new StubGrantee(['id' => 'user-2']), static fn (): Resolution => new Resolution(['editor']));
 
         OperationScope::invalidate();
 
-        self::assertSame($memo, $cache->rememberRoles(new StubIdentity(['id' => 'user-2']), static fn (): Resolution => new Resolution(['other'])));
+        self::assertSame($memo, $cache->rememberRoles(new StubGrantee(['id' => 'user-2']), static fn (): Resolution => new Resolution(['other'])));
         self::assertSame($tokens[2], $store->tokens([$key])[$key] ?? null);
     }
 
@@ -477,7 +477,7 @@ final class OperationScopeTest extends TestCase
      */
     public function testAWriteRolledBackWithoutACacheRollsBackCleanly(): void
     {
-        $user = StubIdentity::query()->create(['id' => 'user-1']);
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
         $role = Role::query()->create(['name' => 'editor']);
 
         $this->app?->offsetUnset(ResolutionCache::class);
@@ -892,7 +892,7 @@ final class OperationScopeTest extends TestCase
     {
         config(['authorization.administration.retries' => 0]);
 
-        $actor     = ActingContext::for(StubIdentity::query()->create(['id' => 'admin']));
+        $actor     = ActingContext::for(StubGrantee::query()->create(['id' => 'admin']));
         $operation = Operation::begin($actor, ['authorization:role.grant']);
 
         /** @var \ArrayObject<int, string|null> $failed */
@@ -1015,7 +1015,7 @@ final class OperationScopeTest extends TestCase
      * Keep entries in the array store, from a new request, and return a user
      * and a role that gives `posts:edit`.
      *
-     * @return array{\Tests\Feature\Stubs\StubIdentity, \SineMacula\Laravel\Authorization\Models\Role}
+     * @return array{\Tests\Feature\Stubs\StubGrantee, \SineMacula\Laravel\Authorization\Models\Role}
      */
     private function cachedEditor(): array
     {
@@ -1027,16 +1027,16 @@ final class OperationScopeTest extends TestCase
 
         $role->givePermission(Permission::query()->create(['name' => 'posts:edit']));
 
-        return [StubIdentity::query()->create(['id' => 'user-1']), $role];
+        return [StubGrantee::query()->create(['id' => 'user-1']), $role];
     }
 
     /**
      * Return whether the user may edit posts in this request, then in the next.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @return array{bool, bool}
      */
-    private function checks(StubIdentity $user): array
+    private function checks(StubGrantee $user): array
     {
         $now = self::fresh($user)->hasPermission('posts:edit');
 
@@ -1048,12 +1048,12 @@ final class OperationScopeTest extends TestCase
     /**
      * Read the user afresh, as the next request does.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function fresh(StubIdentity $user): StubIdentity
+    private static function fresh(StubGrantee $user): StubGrantee
     {
-        return StubIdentity::query()->whereKey($user->getKey())->firstOrFail();
+        return StubGrantee::query()->whereKey($user->getKey())->firstOrFail();
     }
 
     /**

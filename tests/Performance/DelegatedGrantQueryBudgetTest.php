@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -53,9 +53,9 @@ final class DelegatedGrantQueryBudgetTest extends TestCase
         $actor  = self::administrator();
         $tenant = new Reference('tenant', 'a');
         $calls  = [
-            'a grant in a tenant' => static fn (StubIdentity $user): mixed => self::grants()->grantPermission($user, 'posts:edit', actor: $actor, tenant: $tenant),
-            'a platform grant'    => static fn (StubIdentity $user): mixed => self::grants()->grantPermission($user, 'posts:edit', actor: $actor),
-            'a sync'              => static fn (StubIdentity $user): mixed => self::grants()->syncPermissions($user, ['posts:edit', 'posts:read'], actor: $actor, tenant: $tenant),
+            'a grant in a tenant' => static fn (StubGrantee $user): mixed => self::grants()->grantPermission($user, 'posts:edit', actor: $actor, tenant: $tenant),
+            'a platform grant'    => static fn (StubGrantee $user): mixed => self::grants()->grantPermission($user, 'posts:edit', actor: $actor),
+            'a sync'              => static fn (StubGrantee $user): mixed => self::grants()->syncPermissions($user, ['posts:edit', 'posts:read'], actor: $actor, tenant: $tenant),
         ];
 
         foreach ($calls as $name => $call) {
@@ -100,11 +100,11 @@ final class DelegatedGrantQueryBudgetTest extends TestCase
     /**
      * Count the queries the call makes for the grantee.
      *
-     * @param  \Closure(\Tests\Feature\Stubs\StubIdentity): mixed  $call
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Closure(\Tests\Feature\Stubs\StubGrantee): mixed  $call
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @return int
      */
-    private static function queriesOf(\Closure $call, StubIdentity $user): int
+    private static function queriesOf(\Closure $call, StubGrantee $user): int
     {
         DB::flushQueryLog();
         DB::enableQueryLog();
@@ -129,7 +129,7 @@ final class DelegatedGrantQueryBudgetTest extends TestCase
      */
     private static function administrator(): ActingContext
     {
-        $admin = StubIdentity::create(['id' => 'admin']);
+        $admin = StubGrantee::create(['id' => 'admin']);
 
         self::grants()->grantRole($admin, Role::create(['name' => 'chief', 'rank' => 0]));
 
@@ -147,11 +147,11 @@ final class DelegatedGrantQueryBudgetTest extends TestCase
      * Return a new identity with the id.
      *
      * @param  string  $id
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function user(string $id): StubIdentity
+    private static function user(string $id): StubGrantee
     {
-        return StubIdentity::create(['id' => $id]);
+        return StubGrantee::create(['id' => $id]);
     }
 
     /**

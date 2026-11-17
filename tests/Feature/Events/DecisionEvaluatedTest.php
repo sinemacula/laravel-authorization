@@ -23,7 +23,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\DecidesOnAttributeValues;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\ReportsEveryDecision;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -196,7 +196,7 @@ final class DecisionEvaluatedTest extends TestCase
 
         $refused = Authorization::check(self::VALUE_ACTION, $resource);
 
-        StubIdentity::query()->findOrFail('user-1')->givePermission(Permission::create(['name' => self::VALUE_ACTION]));
+        StubGrantee::query()->findOrFail('user-1')->givePermission(Permission::create(['name' => self::VALUE_ACTION]));
 
         $admitted = Authorization::check(self::VALUE_ACTION, $resource);
         $events   = self::dispatchedEvents(DecisionEvaluated::class);
@@ -223,7 +223,7 @@ final class DecisionEvaluatedTest extends TestCase
 
         config(['authorization.application_access' => ['admin' => 'admin:access']]);
 
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $own  = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'tenant-a']);
 
         Permission::create(['name' => 'admin:access']);
@@ -257,7 +257,7 @@ final class DecisionEvaluatedTest extends TestCase
     {
         $this->valueReadingSubject();
 
-        $other = StubIdentity::create(['id' => 'user-2']);
+        $other = StubGrantee::create(['id' => 'user-2']);
 
         Event::fake([DecisionEvaluated::class]);
 
@@ -281,7 +281,7 @@ final class DecisionEvaluatedTest extends TestCase
      */
     public function testTheShippedSettingsReportDenialsAndSensitiveAllowsAlone(): void
     {
-        $user = StubIdentity::create(['id' => 'user-9']);
+        $user = StubGrantee::create(['id' => 'user-9']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
         $user->givePermission(Permission::create(['name' => 'posts:delete']));
@@ -323,7 +323,7 @@ final class DecisionEvaluatedTest extends TestCase
      */
     public function testTheSettingsDecideWhichDecisionsAreReported(): void
     {
-        $user = StubIdentity::create(['id' => 'user-9']);
+        $user = StubGrantee::create(['id' => 'user-9']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
         $user->givePermission(Permission::create(['name' => 'posts:delete']));

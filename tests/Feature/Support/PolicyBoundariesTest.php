@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Support\PolicyBoundaries;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -95,7 +95,7 @@ final class PolicyBoundariesTest extends TestCase
      */
     public function testDeletingAPolicyInUseIsRefusedUntilItsBoundariesAreRemoved(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = self::cap('cap');
 
         self::service()->set($user, $policy);

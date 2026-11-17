@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use SineMacula\Laravel\Authorization\Observers\BreakGlassActivationObserver;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -61,9 +61,9 @@ final class BreakGlassActivationObserverTest extends TestCase
      */
     public function testEveryChangeBumpsItsGrantees(): void
     {
-        $ann      = StubIdentity::create(['id' => 'ann']);
-        $bob      = StubIdentity::create(['id' => 'bob']);
-        $carol    = Reference::of(StubIdentity::create(['id' => 'carol']));
+        $ann      = StubGrantee::create(['id' => 'ann']);
+        $bob      = StubGrantee::create(['id' => 'bob']);
+        $carol    = Reference::of(StubGrantee::create(['id' => 'carol']));
         $cache    = $this->request();
         $versions = new VersionedStore($this->store, 'observer-test');
         $grantees = [Reference::of($ann), Reference::of($bob), $carol];
@@ -114,7 +114,7 @@ final class BreakGlassActivationObserverTest extends TestCase
      */
     public function testTheVersionsAreBumpedAgainOnceTheTransactionCommits(): void
     {
-        $ann      = StubIdentity::create(['id' => 'ann']);
+        $ann      = StubGrantee::create(['id' => 'ann']);
         $role     = self::emergencyRole();
         $versions = new VersionedStore($this->store, 'observer-test');
         $key      = $versions->granteeKey(Reference::of($ann));
@@ -142,9 +142,9 @@ final class BreakGlassActivationObserverTest extends TestCase
      */
     public function testARolledBackActivationIsDeniedAgain(): void
     {
-        $ann   = StubIdentity::create(['id' => 'ann']);
+        $ann   = StubGrantee::create(['id' => 'ann']);
         $role  = self::emergencyRole();
-        $check = static fn (): bool => StubIdentity::query()->findOrFail('ann')->hasPermission('posts:create');
+        $check = static fn (): bool => StubGrantee::query()->findOrFail('ann')->hasPermission('posts:create');
 
         $this->request();
 
@@ -167,7 +167,7 @@ final class BreakGlassActivationObserverTest extends TestCase
      */
     public function testNothingIsBumpedWithoutACache(): void
     {
-        $ann = StubIdentity::create(['id' => 'ann']);
+        $ann = StubGrantee::create(['id' => 'ann']);
 
         $this->app?->offsetUnset(ResolutionCache::class);
 

@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -73,7 +73,7 @@ final class GateParityTest extends TestCase
      */
     public function testGrantedPermissionProducesParity(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'writer', 'guard' => 'web']);
         $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => PermissionEnum::POSTS_CREATE->value, 'guard' => 'web']);
@@ -90,7 +90,7 @@ final class GateParityTest extends TestCase
      */
     public function testMissingPermissionProducesParity(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         // User has no role, no permission, no policy.
         self::assertGateParity($user, PermissionEnum::POSTS_DELETE, expected: false);
@@ -104,7 +104,7 @@ final class GateParityTest extends TestCase
      */
     public function testPolicyDenyProducesParity(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'contributor', 'guard' => 'web']);
         $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => PermissionEnum::POSTS_DELETE->value, 'guard' => 'web']);
@@ -133,7 +133,7 @@ final class GateParityTest extends TestCase
      */
     public function testResourceAndContextForwardingProducesParity(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $user->attachPolicy(Policy::create([
             'id'       => (string) Str::uuid(),
@@ -177,12 +177,12 @@ final class GateParityTest extends TestCase
      * Assert the Gate decision and facade decision agree for the supplied enum
      * case.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  \Tests\Feature\Stubs\Enums\PermissionEnum  $case
      * @param  bool  $expected
      * @return void
      */
-    private static function assertGateParity(StubIdentity $user, PermissionEnum $case, bool $expected): void
+    private static function assertGateParity(StubGrantee $user, PermissionEnum $case, bool $expected): void
     {
         $gateDecision   = Gate::forUser($user)->allows($case->value);
         $facadeDecision = Authorization::for($user)->can($case->value);

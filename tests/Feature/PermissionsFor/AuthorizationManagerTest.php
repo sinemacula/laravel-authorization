@@ -39,7 +39,7 @@ use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FailingResourceAttributes;
 use Tests\Feature\Stubs\FixedSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -95,7 +95,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testGrantsRolesAndDeniesAreWeighedAsTheCheckWeighsThem(): void
     {
-        $user = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $user = $this->resolve(StubGrantee::create(['id' => 'user-1']));
         $role = Role::create(['name' => 'editor']);
 
         $role->givePermission(Permission::create(['name' => self::DELETE]));
@@ -122,8 +122,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testNullIsTheSubjectTheManagersChecksAreAbout(): void
     {
-        $user  = $this->resolve(StubIdentity::create(['id' => 'user-1']));
-        $other = StubIdentity::create(['id' => 'user-2']);
+        $user  = $this->resolve(StubGrantee::create(['id' => 'user-1']));
+        $other = StubGrantee::create(['id' => 'user-2']);
 
         $user->givePermission(Permission::create(['name' => self::CREATE]));
         $other->givePermission(Permission::create(['name' => self::DELETE]));
@@ -148,7 +148,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testNullKeepsTheRequestsSession(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $this->app?->instance(AuthenticationRequirementChecker::class, new InvariantRequirementChecker(true));
         $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($user, $user, null, null, 'web', 'session-1')));
@@ -173,7 +173,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAResolvedSubjectKeepsItsSessionAndInsufficientAuthenticationIsNotListed(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $this->app?->instance(AuthenticationRequirementChecker::class, new InvariantRequirementChecker(true));
         $this->resolve($user);
@@ -198,8 +198,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAModelIsNamedAsForNamesIt(): void
     {
-        $user  = $this->resolve(StubIdentity::create(['id' => 'user-1']));
-        $other = StubIdentity::create(['id' => 'user-2']);
+        $user  = $this->resolve(StubGrantee::create(['id' => 'user-1']));
+        $other = StubGrantee::create(['id' => 'user-2']);
 
         $user->givePermission(Permission::create(['name' => self::CREATE]));
         $other->givePermission(Permission::create(['name' => self::DELETE]));
@@ -220,7 +220,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $first  = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
         $second = StubTenant::query()->create(['id' => 't2', 'name' => 't2']);
-        $user   = $this->resolve(StubIdentity::create(['id' => 'user-1']), $first);
+        $user   = $this->resolve(StubGrantee::create(['id' => 'user-1']), $first);
 
         $user->givePermission(Permission::create(['name' => self::CREATE]), null, $first);
         $user->givePermission(Permission::create(['name' => self::DELETE]), null, $second);
@@ -241,7 +241,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testTheApplicationLimitsTheGrantsThatCount(): void
     {
-        $user = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $user = $this->resolve(StubGrantee::create(['id' => 'user-1']));
 
         $user->givePermission(Permission::create(['name' => self::CREATE]), null, null, true, 'admin');
         $user->givePermission(Permission::create(['name' => self::DELETE]));
@@ -262,7 +262,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $first  = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
         $second = StubTenant::query()->create(['id' => 't2', 'name' => 't2']);
-        $user   = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $user   = $this->resolve(StubGrantee::create(['id' => 'user-1']));
 
         $user->givePermission(Permission::create(['name' => self::CREATE]), null, $first);
         $user->givePermission(Permission::create(['name' => self::DELETE]));
@@ -290,7 +290,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org)));
 
-        $user = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $user = $this->resolve(StubGrantee::create(['id' => 'user-1']));
 
         $user->givePermission(Permission::create(['name' => self::CREATE]), null, $org, true);
 
@@ -309,7 +309,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAResourceSpecificListingDiffersFromTheGenericOne(): void
     {
-        $user = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $user = $this->resolve(StubGrantee::create(['id' => 'user-1']));
 
         $onePost = ['effect' => 'allow', 'actions' => [self::DELETE], 'resources' => ['posts:p1']];
 
@@ -329,7 +329,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testTheContextIsReadUnderInput(): void
     {
-        $user = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $user = $this->resolve(StubGrantee::create(['id' => 'user-1']));
 
         $flagged = ['effect' => 'allow', 'actions' => [self::CREATE], 'conditions' => ['eq' => ['input.flag' => 'on']]];
 
@@ -348,7 +348,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testListingRecordsNothing(): void
     {
-        $user = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $user = $this->resolve(StubGrantee::create(['id' => 'user-1']));
 
         $user->givePermission(Permission::create(['name' => self::CREATE]));
 
@@ -376,7 +376,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $first    = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
         $second   = StubTenant::query()->create(['id' => 't2', 'name' => 't2']);
-        $user     = $this->resolve(StubIdentity::create(['id' => 'user-1']), $first);
+        $user     = $this->resolve(StubGrantee::create(['id' => 'user-1']), $first);
         $provider = new FailingResourceAttributes;
 
         $this->app?->instance(FailingResourceAttributes::class, $provider);
@@ -409,7 +409,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAThrowingPermissionProviderThrows(): void
     {
-        $user = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $user = $this->resolve(StubGrantee::create(['id' => 'user-1']));
 
         $this->app?->instance(DeclaredPermissions::class, new DeclaredPermissions([], new \RuntimeException('provider down')));
         $this->config()->set('authorization.permission_providers', [DeclaredPermissions::class]);
@@ -429,7 +429,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testACatalogueThatCannotBeReadThrows(): void
     {
-        $user = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $user = $this->resolve(StubGrantee::create(['id' => 'user-1']));
 
         $this->app?->instance(DeclaredPermissions::class, new DeclaredPermissions([new PermissionDefinition(self::CREATE, 'Another description')]));
         $this->config()->set('authorization.permission_providers', [DeclaredPermissions::class]);
@@ -449,7 +449,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testTheCatalogueIsListedInItsOrderEachNameOnce(): void
     {
-        $user = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $user = $this->resolve(StubGrantee::create(['id' => 'user-1']));
 
         $this->config()->set('authorization.permission_enums', [CataloguePermission::class]);
         $this->config()->set('authorization.permission_providers', [DeclaredPermissions::class]);
@@ -480,7 +480,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAnEnumEntryTheValidationWouldRefuseIsRefused(): void
     {
-        $user = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $user = $this->resolve(StubGrantee::create(['id' => 'user-1']));
 
         $user->givePermission(Permission::create(['name' => self::CREATE]));
 
@@ -505,11 +505,11 @@ final class AuthorizationManagerTest extends TestCase
      * Resolve the request about the user, in the tenant or none, and make the
      * manager afresh.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  \Tests\Feature\Stubs\StubTenant|null  $tenant
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function resolve(StubIdentity $user, ?StubTenant $tenant = null): StubIdentity
+    private function resolve(StubGrantee $user, ?StubTenant $tenant = null): StubGrantee
     {
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $tenant));
         $this->app?->forgetInstance(ResolvedTenant::class);

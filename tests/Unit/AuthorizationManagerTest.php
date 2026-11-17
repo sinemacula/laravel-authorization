@@ -15,7 +15,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
@@ -43,7 +43,7 @@ use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSessionPolicySource;
 use Tests\Feature\Stubs\StubSubjectResolver;
 
@@ -499,7 +499,7 @@ final class AuthorizationManagerTest extends TestCase
         yield 'a single-item list' => [static fn (): array => ['posts']];
         yield 'a pair with a boolean key' => [static fn (): array => ['posts', true]];
         yield 'an unnameable object' => [static fn (): object => new \stdClass];
-        yield 'an unsaved model' => [static fn (): object => new StubIdentity];
+        yield 'an unsaved model' => [static fn (): object => new StubGrantee];
     }
 
     /**
@@ -596,7 +596,7 @@ final class AuthorizationManagerTest extends TestCase
                 'name'       => 'by-identifier',
                 'statements' => [
                     ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['posts:7']],
-                    ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => [StubIdentity::class . ':*']],
+                    ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => [StubGrantee::class . ':*']],
                     ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['report:q3']],
                     ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['arn:posts']],
                     ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['comments:9']],
@@ -634,7 +634,7 @@ final class AuthorizationManagerTest extends TestCase
             }
         };
 
-        $resources = [['posts', 7], StubIdentity::class, $nameable, 'arn:posts', ResourceReference::record('comments', '9')];
+        $resources = [['posts', 7], StubGrantee::class, $nameable, 'arn:posts', ResourceReference::record('comments', '9')];
 
         foreach ($resources as $index => $resource) {
             $decision = $manager->check('posts:read', $resource);
@@ -648,7 +648,7 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertFalse($unmatched->isAllowed());
         self::assertSame(DecisionReason::NO_MATCH, $unmatched->reason);
-        self::assertSame(['posts:7', StubIdentity::class . ':*', 'report:q3', 'arn:posts', 'comments:9', 'posts:8'], $reported);
+        self::assertSame(['posts:7', StubGrantee::class . ':*', 'report:q3', 'arn:posts', 'comments:9', 'posts:8'], $reported);
     }
 
     /**
@@ -1376,7 +1376,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testDecisionEventsCarryTheSubjectsModel(): void
     {
-        $user = \Mockery::mock(Model::class, AuthorizableIdentity::class);
+        $user = \Mockery::mock(Model::class, AuthorizableGrantee::class);
         $user->shouldReceive('getPermissions')->andReturn([]);
         $user->shouldReceive('getPolicies')->andReturn([]);
         $user->shouldReceive('isAuthorizationActive')->andReturnTrue();
@@ -1445,7 +1445,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testTheSessionCapResolverCapsEachCheck(): void
     {
-        $machine = \Mockery::mock(AuthorizableIdentity::class, AuthorizableMachine::class);
+        $machine = \Mockery::mock(AuthorizableGrantee::class, AuthorizableMachine::class);
 
         $machine->shouldReceive('getPermissions')->andReturn(['*']);
         $machine->shouldReceive('getPolicies')->andReturn([]);
@@ -1666,11 +1666,11 @@ final class AuthorizationManagerTest extends TestCase
      * decision it reports, read as the last decision, which is stored before
      * the event is dispatched.
      *
-     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity|null  $principal
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee|null  $principal
      * @param  list<array{action: string, resource: string|null, keys: list<string>, decision: \SineMacula\Laravel\Authorization\Evaluation\Decision|null}>  $reported
      * @return \SineMacula\Laravel\Authorization\AuthorizationManager
      */
-    private function recordingManager(?AuthorizableIdentity $principal, array &$reported): AuthorizationManager
+    private function recordingManager(?AuthorizableGrantee $principal, array &$reported): AuthorizationManager
     {
         $store  = new LastDecisionStore;
         $events = \Mockery::mock(Dispatcher::class);
@@ -1842,11 +1842,11 @@ final class AuthorizationManagerTest extends TestCase
      * @param  array<int, string>  $permissions
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @param  bool  $active
-     * @return \SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity
+     * @return \SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee
      */
-    private function stubAuthorizable(array $permissions = [], array $policies = [], bool $active = true): AuthorizableIdentity
+    private function stubAuthorizable(array $permissions = [], array $policies = [], bool $active = true): AuthorizableGrantee
     {
-        $principal = \Mockery::mock(AuthorizableIdentity::class);
+        $principal = \Mockery::mock(AuthorizableGrantee::class);
 
         $principal->shouldReceive('getPermissions')
             ->andReturn($permissions);

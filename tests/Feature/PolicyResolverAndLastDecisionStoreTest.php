@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
@@ -48,7 +48,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
      */
     public function testDefaultResolverReturnsPrincipalPolicies(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->attachPolicy(PolicyModel::create([
             'id'       => (string) Str::uuid(),
             'name'     => 'allow-x',
@@ -73,7 +73,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
      */
     public function testDefaultResolverUnionsStoreWithPrincipalPolicies(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->attachPolicy(PolicyModel::create([
             'id'       => (string) Str::uuid(),
             'name'     => 'principal-side',
@@ -169,7 +169,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
         $this->container()->forgetInstance('authorization');
         $this->container()->forgetInstance(AuthorizationManager::class);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $decision = Authorization::for($user)->check('fixed:act');
 
@@ -303,14 +303,14 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     }
 
     /**
-     * Bind a subject resolver that returns a freshly-created StubIdentity so
-     * the facade picks it up via the configured resolver.
+     * Bind a subject resolver that returns a freshly-created StubGrantee so the
+     * facade picks it up via the configured resolver.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function bindResolvableUser(): StubIdentity
+    private function bindResolvableUser(): StubGrantee
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $resolver = new StubSubjectResolver($user);
 

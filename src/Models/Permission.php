@@ -25,9 +25,9 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * Eloquent model for permission rows.
  *
  * Permissions are atomic action strings that can be granted directly to an
- * identity or inherited via a role. The `guard` column is nullable: a null
- * value marks the permission as guard-agnostic (applies to every guard), a
- * concrete string scopes it to a single guard. The `is_system` flag marks
+ * grantee or inherited via a role. The `guard` column is nullable: a null value
+ * marks the permission as guard-agnostic (applies to every guard), a concrete
+ * string scopes it to a single guard. The `is_system` flag marks
  * platform-shipped permissions as protected: deleting, editing or clearing the
  * flag of a persisted `is_system = true` row raises
  * `SystemPermissionProtectedException` unless `forceSystem()` is invoked to

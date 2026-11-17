@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 
 /**
- * Shared helpers used by the authorizable-identity traits: the ones that feed
+ * Shared helpers used by the authorizable grantee traits: the ones that feed
  * the resolution-cache TTL-bound and role-tag invalidation paths, and the
  * accessor for the grant service their write methods go through.
  *
@@ -87,7 +87,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * Return the grants of the given relation, loading them first when they are
      * not loaded yet.
      *
-     * Loading is explicit, never lazy, so an identity hydrated from a query of
+     * Loading is explicit, never lazy, so a grantee hydrated from a query of
      * several rows resolves under `Model::preventLazyLoading()` as well.
      *
      * @param  string  $relation
@@ -102,7 +102,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     }
 
     /**
-     * Return the grant service the identity traits write through, as the
+     * Return the grant service the grantee traits write through, as the
      * container binds it.
      *
      * @return \SineMacula\Laravel\Authorization\Services\GrantService

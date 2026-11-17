@@ -3,7 +3,7 @@
 The package's Artisan commands: granting, revoking and listing, pruning, the Spatie import, explaining a check,
 exporting an access review and checking the configuration.
 
-From the command line, naming an identity as `{morph type}:{key}`, where the type is a morph map alias or a class:
+From the command line, naming a grantee as `{morph type}:{key}`, where the type is a morph map alias or a class:
 
 ```bash
 php artisan authorization:grant user:1 editor
@@ -32,20 +32,20 @@ test or a sibling package can refer to it without repeating the string: `PruneGr
 
 The listing commands are administrative views: they list every role or permission, platform-wide and tenant-owned alike,
 and show each one's owner. `grant` and `revoke` write through the grant service and look the role up within the tenant
-scope, so without a resolved tenant they find platform-wide roles only. A role the identity already holds with no
-expiry, or does not hold, is reported as such and nothing is written. `grant` gives no expiry, so a role the identity
+scope, so without a resolved tenant they find platform-wide roles only. A role the grantee already holds with no
+expiry, or does not hold, is reported as such and nothing is written. `grant` gives no expiry, so a role the grantee
 holds on a temporary or expired grant is made permanent and reported as granted. `grant`, `revoke` and
 `authorization:sync` take `--actor={morph type}:{key}` to name who made the change; it must name a row that exists, and
 without it the change is trusted work that records no actor. For `authorization:grant` and `authorization:revoke` the
 actor makes the change as delegated administration, decided as that actor, with no session (see [Delegated
 administration](administration.md#delegated-administration)), so a role grant passes only when the actor outranks the
-identity and may hand out everything the role carries; for `authorization:sync` it is recorded on the trusted
+grantee and may hand out everything the role carries; for `authorization:sync` it is recorded on the trusted
 operation's events alone.
 
 `authorization:prune` removes the grants that no longer count: a role's expired grants of permissions, reported as
 `Role\PermissionExpired`, and the other expired grants, reported as `RoleExpired`, `PermissionExpired` or
 `PolicyExpired`, each with no actor, then the permission boundaries of a grantee deleted without its model events,
-such as by a raw query, reported as `Identity\BoundaryRemoved` and counted apart from its grants, a grantee whose only
+such as by a raw query, reported as `Grantee\BoundaryRemoved` and counted apart from its grants, a grantee whose only
 rows are boundaries included, then its grants, reported as revoked, then the inline policies of such a grantee,
 reported as deleted, and last the resource policy attachments of a record that no longer exists, reported as
 `Resource\PolicyDetached`. The record's morph type is resolved to its model class as a grantee's is; a type that names
@@ -53,7 +53,7 @@ no model class is reported and its records' attachments are left, and a whole ty
 soft-deleted grantee keeps its grants, its boundaries and its inline policies, and a soft-deleted record its
 attachments. Expired grants stop counting at their expiry with or without it, so pruning keeps the tables small rather
 than making checks correct. It never removes a break-glass activation: one that expired without ending has its expiry
-recorded on its row and is reported as `Identity\BreakGlassExpired`, counted apart. Like `model:prune`, it takes
+recorded on its row and is reported as `Grantee\BreakGlassExpired`, counted apart. Like `model:prune`, it takes
 `--pretend`, which counts exactly what a run would remove or record, the boundaries apart from the grants as a run does,
 and `--chunk`, and is scheduled like any command:
 
@@ -473,7 +473,7 @@ class, loads the row with the key, and maps the model to its principal and ident
 `forUser()`, as the Gate's user is: under the shipped resolver the model is its own principal and identity; under an
 application's resolver with principals, a person is mapped to the principal it acts as. It refuses a reference not in
 that format, a type that names no model, a key no row has, a mapping about neither the model's principal nor its
-identity (ambiguous), a principal that is not a saved authorizable identity (unsupported), and a lookup or mapping that
+identity (ambiguous), a principal that is not a saved authorizable grantee (unsupported), and a lookup or mapping that
 fails (unresolvable), keeping the failure as the previous exception. The subject keeps its principal, identity, guard
 and platform marker, and nothing else the resolver gives it: the command adds the tenant and application, and there is
 never a session.

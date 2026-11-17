@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -84,7 +84,7 @@ final class RankComparisonTest extends TestCase
     {
         $ranked   = self::holding('ranked', 3);
         $unranked = self::holding('unranked', null);
-        $bare     = StubIdentity::create(['id' => 'bare']);
+        $bare     = StubGrantee::create(['id' => 'bare']);
 
         self::assertNull(RankComparison::rankOf($unranked));
         self::assertNull(RankComparison::rankOf($bare));
@@ -207,7 +207,7 @@ final class RankComparisonTest extends TestCase
     {
         $tenant = self::createTenant('tenant-a');
         $actor  = self::holding('actor', 2);
-        $target = StubIdentity::create(['id' => 'target']);
+        $target = StubGrantee::create(['id' => 'target']);
 
         $target->assignRole(Role::create(['name' => 'expiring', 'rank' => 0]), Carbon::now()->addHour());
         $target->assignRole(Role::create(['name' => 'mobile-boss', 'rank' => 0]), application: 'mobile');
@@ -259,8 +259,8 @@ final class RankComparisonTest extends TestCase
         self::assertTrue(RankComparison::canActOn($actor, $target, null, 4));
         self::assertFalse(RankComparison::canActOn($actor, $target, null, 3));
         self::assertFalse(RankComparison::canActOn($actor, $target, null, 1));
-        self::assertTrue(RankComparison::canActOn($actor, StubIdentity::create(['id' => 'bare']), null, 9));
-        self::assertFalse(RankComparison::canActOn($actor, StubIdentity::query()->findOrFail('bare'), null, 2));
+        self::assertTrue(RankComparison::canActOn($actor, StubGrantee::create(['id' => 'bare']), null, 9));
+        self::assertFalse(RankComparison::canActOn($actor, StubGrantee::query()->findOrFail('bare'), null, 2));
     }
 
     /**
@@ -456,7 +456,7 @@ final class RankComparisonTest extends TestCase
         self::assertFalse(RankComparison::isComparableType(\stdClass::class));
         self::assertFalse(RankComparison::isComparableType((new Role)->getMorphClass()));
 
-        Relation::morphMap(['ranked-member' => StubIdentity::class]);
+        Relation::morphMap(['ranked-member' => StubGrantee::class]);
 
         try {
             self::assertTrue(RankComparison::isComparableType('ranked-member'));
@@ -484,13 +484,13 @@ final class RankComparisonTest extends TestCase
      *
      * @param  string  $id
      * @param  int|null  ...$ranks
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      *
      * @throws \Throwable
      */
-    private static function holding(string $id, ?int ...$ranks): StubIdentity
+    private static function holding(string $id, ?int ...$ranks): StubGrantee
     {
-        $identity = StubIdentity::create(['id' => $id]);
+        $identity = StubGrantee::create(['id' => $id]);
 
         foreach ($ranks as $index => $rank) {
             $identity->assignRole(Role::create(['name' => "{$id}-{$index}", 'rank' => $rank]));
@@ -502,12 +502,12 @@ final class RankComparisonTest extends TestCase
     /**
      * Read the identity again, with nothing loaded.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function fresh(StubIdentity $identity): StubIdentity
+    private function fresh(StubGrantee $identity): StubGrantee
     {
-        /** @var \Tests\Feature\Stubs\StubIdentity */
-        return StubIdentity::query()->whereKey($identity->getKey())->sole();
+        /** @var \Tests\Feature\Stubs\StubGrantee */
+        return StubGrantee::query()->whereKey($identity->getKey())->sole();
     }
 }

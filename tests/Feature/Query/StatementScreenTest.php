@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Query\ResourceShape;
 use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Query\StatementScreen;
 use SineMacula\Laravel\Authorization\Subject;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\QueryScoping\InvariantRequirementChecker;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
@@ -227,7 +227,7 @@ final class StatementScreenTest extends TestCase
      */
     private function screen(): array
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
 
         return [new StatementScreen('posts:view', self::shape(), $subject), $subject];

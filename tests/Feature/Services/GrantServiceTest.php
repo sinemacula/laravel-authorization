@@ -25,16 +25,16 @@ use SineMacula\Laravel\Authorization\Enums\WideningReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
-use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\BoundaryRemoved;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\GranteeGuardMismatchException;
@@ -80,8 +80,8 @@ use Tests\Feature\Stubs\ApiGuardedUser;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\Feature\Stubs\RecordingLogger;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Fixtures\GrantHooks\RefusingGrantHook;
@@ -358,7 +358,7 @@ final class GrantServiceTest extends TestCase
     public function testRevokingEverythingRemovesEveryGrant(): void
     {
         $user   = self::user();
-        $other  = StubIdentity::create(['id' => 'user-2']);
+        $other  = StubGrantee::create(['id' => 'user-2']);
         $role   = Role::create(['name' => 'editor']);
         $policy = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
 
@@ -608,7 +608,7 @@ final class GrantServiceTest extends TestCase
         self::assertSame(1, DB::table('authorizable_permissions')->where('include_subtree', false)->count());
         self::assertSame(1, DB::table('authorizable_policies')->where('include_subtree', false)->count());
 
-        $other = StubIdentity::query()->create(['id' => 'user-2']);
+        $other = StubGrantee::query()->create(['id' => 'user-2']);
 
         self::service()->syncRoles($other, ['editor'], tenant: $tenant);
         self::service()->syncPermissions($other, ['posts:edit'], tenant: $tenant);
@@ -1185,7 +1185,7 @@ final class GrantServiceTest extends TestCase
         $user  = self::user();
         $named = Role::query()->create(['name' => 'named', 'rank' => 8]);
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $admin */
+        /** @var \Tests\Feature\Stubs\StubGrantee $admin */
         $admin = $actor->subject->subject;
 
         self::service()->grantPermission($admin, self::permission('authorization:*'), tenant: $parent);
@@ -1606,14 +1606,14 @@ final class GrantServiceTest extends TestCase
      */
     public static function invalidGrantees(): iterable
     {
-        yield 'an unsaved model' => [static fn (): StubIdentity => new StubIdentity(['name' => 'x']), 'an unsaved ' . StubIdentity::class];
-        yield 'an unsaved model with a key' => [static fn (): StubIdentity => new StubIdentity(['id' => 'user-1']), 'an unsaved ' . StubIdentity::class];
-        yield 'a saved model with an empty key' => [static function (): StubIdentity {
-            $identity         = new StubIdentity(['id' => '']);
+        yield 'an unsaved model' => [static fn (): StubGrantee => new StubGrantee(['name' => 'x']), 'an unsaved ' . StubGrantee::class];
+        yield 'an unsaved model with a key' => [static fn (): StubGrantee => new StubGrantee(['id' => 'user-1']), 'an unsaved ' . StubGrantee::class];
+        yield 'a saved model with an empty key' => [static function (): StubGrantee {
+            $identity         = new StubGrantee(['id' => '']);
             $identity->exists = true;
 
             return $identity;
-        }, 'an incomplete ' . StubIdentity::class];
+        }, 'an incomplete ' . StubGrantee::class];
         yield 'a reference with an empty key' => [static fn (): Reference => new Reference('App\Models\User', ''), 'an incomplete ' . Reference::class];
         yield 'a reference with an empty type' => [static fn (): Reference => new Reference('', '42'), 'an incomplete ' . Reference::class];
     }
@@ -2330,7 +2330,7 @@ final class GrantServiceTest extends TestCase
         $admin  = self::administrator();
         $nobody = self::administrator([], 'nobody');
         $user   = self::user();
-        $empty  = StubIdentity::create(['id' => 'user-2']);
+        $empty  = StubGrantee::create(['id' => 'user-2']);
 
         self::service()->grantPermission($user, Permission::query()->create(['name' => 'posts:edit']));
         BoundaryService::instance()?->set($user, Policy::create(['name' => 'cap', 'document' => ['version' => 1, 'statements' => []]]));
@@ -2366,7 +2366,7 @@ final class GrantServiceTest extends TestCase
     {
         $tenant = self::createTenant('tenant-a');
         $user   = self::user();
-        $local  = StubIdentity::create(['id' => 'local-admin']);
+        $local  = StubGrantee::create(['id' => 'local-admin']);
         $logger = new RecordingLogger;
         $read   = Permission::query()->create(['name' => 'posts:read']);
         $allow  = Policy::create(['name' => 'allow', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:list']]]]]);
@@ -2482,8 +2482,8 @@ final class GrantServiceTest extends TestCase
         $tenant = self::createTenant('tenant-a');
         $user   = self::user();
         $edit   = Permission::query()->create(['name' => 'posts:edit']);
-        $local  = StubIdentity::create(['id' => 'tenant-admin']);
-        $wide   = StubIdentity::create(['id' => 'platform-admin']);
+        $local  = StubGrantee::create(['id' => 'tenant-admin']);
+        $wide   = StubGrantee::create(['id' => 'platform-admin']);
         $revoke = Permission::query()->create(['name' => PackagePermissions::PERMISSION_REVOKE]);
 
         $role = self::role('editor');
@@ -2522,7 +2522,7 @@ final class GrantServiceTest extends TestCase
         $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent)));
 
         $user   = self::user();
-        $admin  = StubIdentity::create(['id' => 'child-admin']);
+        $admin  = StubGrantee::create(['id' => 'child-admin']);
         $editor = self::role('editor');
 
         self::service()->grantRole($user, $editor, tenant: $parent);
@@ -2549,7 +2549,7 @@ final class GrantServiceTest extends TestCase
         $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent)));
 
         $user       = self::user();
-        $admin      = StubIdentity::create(['id' => 'parent-admin']);
+        $admin      = StubGrantee::create(['id' => 'parent-admin']);
         $restricted = Role::query()->withoutGlobalScopes()->create(['name' => 'restricted', ...self::ownedBy($child)]);
         $editor     = Role::query()->withoutGlobalScopes()->create(['name' => 'editor', 'parent_id' => $restricted->id, ...self::ownedBy($child)]);
         $deny       = Policy::create(['name' => 'deny', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:*']]]]]);
@@ -2677,7 +2677,7 @@ final class GrantServiceTest extends TestCase
      */
     public function testTheEventsUseTheMorphMap(): void
     {
-        Relation::morphMap(['member' => StubIdentity::class, 'role' => Role::class]);
+        Relation::morphMap(['member' => StubGrantee::class, 'role' => Role::class]);
 
         try {
             Event::fake();
@@ -3493,7 +3493,7 @@ final class GrantServiceTest extends TestCase
      */
     public function testEveryOperationRefusesOnceThePackageRefuses(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $role    = Role::create(['name' => 'editor']);
         $policy  = new Policy(['name' => 'unsaved']);
         $service = $this->container()->make(GrantService::class);
@@ -3522,11 +3522,11 @@ final class GrantServiceTest extends TestCase
      * phase's classification has read the grants, as a concurrent call would,
      * and return the SQL of the read it landed after.
      *
-     * @param  \Tests\Feature\Stubs\StubSecondIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubSecondGrantee  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $evidence
      * @return \ArrayObject<int, string>
      */
-    private static function revokeOnTheHookPhase(StubSecondIdentity $grantee, Role $evidence): \ArrayObject
+    private static function revokeOnTheHookPhase(StubSecondGrantee $grantee, Role $evidence): \ArrayObject
     {
         return self::raceOnQuery('/ as grant_roots\b/', static function () use ($grantee, $evidence): void {
             GrantChanges::table(GrantTarget::ROLE, Reference::of($grantee), null, new GrantScope(self::tenant('acct1'), null, true))->revoke([GrantChanges::key($evidence)]);
@@ -3538,14 +3538,14 @@ final class GrantServiceTest extends TestCase
      * the entry point given, as the actor given or trusted.
      *
      * @param  string  $entry
-     * @param  \Tests\Feature\Stubs\StubSecondIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubSecondGrantee  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return mixed
      *
      * @throws \Throwable
      */
-    private static function raceThrough(string $entry, StubSecondIdentity $grantee, Role $role, ?ActingContext $actor): mixed
+    private static function raceThrough(string $entry, StubSecondGrantee $grantee, Role $role, ?ActingContext $actor): mixed
     {
         return $entry === 'grantRole'
             ? self::service()->grantRole($grantee, $role, actor: $actor, tenant: self::tenant('acct1'), includeSubtree: false)
@@ -3557,14 +3557,14 @@ final class GrantServiceTest extends TestCase
      * through the service's entry point given, as the actor given or trusted.
      *
      * @param  string  $entry
-     * @param  \Tests\Feature\Stubs\StubSecondIdentity  $grantee
+     * @param  \Tests\Feature\Stubs\StubSecondGrantee  $grantee
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @param  string  $name
      * @return mixed
      *
      * @throws \Throwable
      */
-    private static function grantThrough(string $entry, StubSecondIdentity $grantee, ?ActingContext $actor, string $name): mixed
+    private static function grantThrough(string $entry, StubSecondGrantee $grantee, ?ActingContext $actor, string $name): mixed
     {
         $tenant = self::tenant('acct1');
 
@@ -3639,10 +3639,10 @@ final class GrantServiceTest extends TestCase
     /**
      * Return the names of the roles the identity holds live, read afresh.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @return list<string>
      */
-    private static function heldRoleNames(StubIdentity $user): array
+    private static function heldRoleNames(StubGrantee $user): array
     {
         /** @var list<string> */
         return $user->roles()->pluck('name')->all();
@@ -3675,7 +3675,7 @@ final class GrantServiceTest extends TestCase
     {
         $actor = self::administrator([]);
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $admin */
+        /** @var \Tests\Feature\Stubs\StubGrantee $admin */
         $admin = $actor->subject->subject;
 
         foreach ([PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE] as $name) {
@@ -3689,11 +3689,11 @@ final class GrantServiceTest extends TestCase
      * Determine whether the identity holds the permission directly, as stored,
      * in any scope.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  string  $permission
      * @return bool
      */
-    private static function holdsPermission(StubIdentity $user, string $permission): bool
+    private static function holdsPermission(StubGrantee $user, string $permission): bool
     {
         return DB::table('authorizable_permissions')
             ->join('permissions', 'permissions.id', '=', 'authorizable_permissions.permission_id')
@@ -3724,13 +3724,13 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
-     * Create the stub identity.
+     * Create the stub grantee.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function user(): StubIdentity
+    private static function user(): StubGrantee
     {
-        return StubIdentity::query()->create(['id' => 'user-1']);
+        return StubGrantee::query()->create(['id' => 'user-1']);
     }
 
     /**
@@ -3767,8 +3767,8 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
-     * Return whether each role the stub identity holds reaches the tenants
-     * below its tenant, keyed by the role's name.
+     * Return whether each role the stub grantee holds reaches the tenants below
+     * its tenant, keyed by the role's name.
      *
      * @return array<string, bool>
      */
@@ -3784,7 +3784,7 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
-     * Return when the stub identity's grant of the role was created and last
+     * Return when the stub grantee's grant of the role was created and last
      * written.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role

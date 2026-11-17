@@ -13,7 +13,7 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Support\DeclaredAbilities;
 use Tests\Concerns\MeasuresTime;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubPermissionProvider;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
@@ -56,7 +56,7 @@ final class GateHookBudgetTest extends TestCase
 
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission('posts:create');
 
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user));

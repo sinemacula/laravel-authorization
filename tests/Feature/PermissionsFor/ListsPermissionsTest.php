@@ -32,7 +32,7 @@ use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\PermissionsFor\DeclaredPermissions;
@@ -269,7 +269,7 @@ final class ListsPermissionsTest extends TestCase
     {
         $first  = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
         $second = StubTenant::query()->create(['id' => 't2', 'name' => 't2']);
-        $user   = StubIdentity::query()->create(['id' => 'user-1']);
+        $user   = StubGrantee::query()->create(['id' => 'user-1']);
 
         $user->givePermission(self::permission(self::CREATE), null, $first);
         $user->givePermission(self::permission(self::DELETE), null, $second);

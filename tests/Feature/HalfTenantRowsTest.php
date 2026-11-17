@@ -28,7 +28,7 @@ use SineMacula\Laravel\Authorization\Support\TenantColumns;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\Fixtures\QueryScoping\TenantScopedPost;
@@ -139,7 +139,7 @@ final class HalfTenantRowsTest extends TestCase
     {
         $tenants = $this->tree();
         $posts   = self::posts($tenants);
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
 
         $this->app?->instance(ResourceTenantResolver::class, new DeclaredResourceTenant(new NoResourceTenant));
 
@@ -211,7 +211,7 @@ final class HalfTenantRowsTest extends TestCase
     {
         $tenants = $this->tree();
         $posts   = self::posts($tenants);
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $tenant  = (new StubTenant)->getMorphClass();
 
         $this->app?->instance(ResourceTenantResolver::class, new DeclaredResourceTenant(new NoResourceTenant));
@@ -246,7 +246,7 @@ final class HalfTenantRowsTest extends TestCase
     public function testAPolicyNamingHalfATenantIsAttachedNowhere(): void
     {
         $tenants = $this->tree();
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $grants  = $this->app?->make(GrantService::class);
 
         self::assertInstanceOf(GrantService::class, $grants);
@@ -291,7 +291,7 @@ final class HalfTenantRowsTest extends TestCase
      */
     public function testADenyIsNamedAtItsPositionColdOrWarm(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = Policy::create(['name' => 'p', 'document' => ['statements' => [
             ['effect' => 'allow', 'actions' => [self::ACTION]],
             ['effect' => 'deny', 'actions' => [self::DENIED], 'sid' => 'NoDelete'],
@@ -421,12 +421,12 @@ final class HalfTenantRowsTest extends TestCase
      * permission owned as the columns say, granted in the organisation.
      *
      * @param  string  $kind
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  string|null  $type
      * @param  string|null  $id
      * @return void
      */
-    private static function store(string $kind, StubIdentity $user, ?string $type, ?string $id): void
+    private static function store(string $kind, StubGrantee $user, ?string $type, ?string $id): void
     {
         $columns = ['tenant_type' => $type, 'tenant_id' => $id];
         $grantee = ['authorizable_type' => $user->getMorphClass(), 'authorizable_id' => Reference::of($user)->id, 'include_subtree' => true];
@@ -515,13 +515,13 @@ final class HalfTenantRowsTest extends TestCase
      * role it holds platform-wide, or to each post.
      *
      * @param  string  $kind
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  array<string, \Tests\Fixtures\QueryScoping\TenantScopedPost>  $posts
      * @param  array<string, string|null>  $columns
      * @param  array<string, string|null>  $owner
      * @return void
      */
-    private static function storeMixed(string $kind, StubIdentity $user, array $posts, array $columns, array $owner): void
+    private static function storeMixed(string $kind, StubGrantee $user, array $posts, array $columns, array $owner): void
     {
         $grantee = ['authorizable_type' => $user->getMorphClass(), 'authorizable_id' => Reference::of($user)->id, 'include_subtree' => true];
         $allow   = ['effect' => 'allow', 'actions' => [self::ACTION]];

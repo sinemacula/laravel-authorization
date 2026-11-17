@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -175,7 +175,7 @@ final class DelegatedRoleGrantQueryBudgetTest extends TestCase
      */
     private static function queriesOf(ActingContext $actor, Role $role, string $batch, ?Reference $tenant = null): int
     {
-        $user = StubIdentity::create(['id' => \md5($batch)]);
+        $user = StubGrantee::create(['id' => \md5($batch)]);
 
         DB::flushQueryLog();
         DB::enableQueryLog();
@@ -202,7 +202,7 @@ final class DelegatedRoleGrantQueryBudgetTest extends TestCase
      */
     private static function administrator(): ActingContext
     {
-        $admin = StubIdentity::create(['id' => 'admin']);
+        $admin = StubGrantee::create(['id' => 'admin']);
 
         self::grants()->grantRole($admin, Role::create(['name' => 'chief', 'rank' => 0]));
 

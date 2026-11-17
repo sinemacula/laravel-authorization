@@ -20,8 +20,8 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\RecordsRowLocks;
-use Tests\Feature\Stubs\NumberedIdentity;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\NumberedGrantee;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -49,9 +49,9 @@ final class InlinePoliciesTest extends TestCase
      */
     public function testOnlyAForceDeleteOrAModelWithoutSoftDeletesIsForGood(): void
     {
-        $soft = new NumberedIdentity;
+        $soft = new NumberedGrantee;
 
-        self::assertTrue(InlinePolicies::isDeletedForGood(new StubIdentity));
+        self::assertTrue(InlinePolicies::isDeletedForGood(new StubGrantee));
         self::assertFalse(InlinePolicies::isDeletedForGood($soft));
 
         (fn () => $this->forceDeleting = true)->call($soft);
@@ -327,8 +327,8 @@ final class InlinePoliciesTest extends TestCase
      */
     public function testDeletingAGranteesInlinePolicies(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-1']);
-        $other = StubIdentity::create(['id' => 'user-2']);
+        $user  = StubGrantee::create(['id' => 'user-1']);
+        $other = StubGrantee::create(['id' => 'user-2']);
         $kept  = self::policy('kept', ['owner_type' => $other->getMorphClass(), 'owner_id' => 'user-2']);
         $mine  = [
             self::policy('first', ['owner_type' => $user->getMorphClass(), 'owner_id' => 'user-1']),
@@ -387,7 +387,7 @@ final class InlinePoliciesTest extends TestCase
      */
     public function testAPolicyNamingPrincipalsIsNotAttachableToAGrantee(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $sharing = Policy::create(['name' => 'sharing', 'document' => ['statements' => [
             ['effect' => 'deny', 'actions' => ['posts:delete']],
             ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']],

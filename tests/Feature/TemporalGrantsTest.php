@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -75,7 +75,7 @@ final class TemporalGrantsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         Carbon::setTestNow('2026-01-01 12:00:00');
         $user->assignRole('oncall', expiresAt: Carbon::parse('2026-01-01 13:00:00'));
@@ -100,7 +100,7 @@ final class TemporalGrantsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         Carbon::setTestNow('2026-02-01 10:00:00');
         $user->givePermission('emergency:publish', expiresAt: Carbon::parse('2026-02-01 10:30:00'));
@@ -127,7 +127,7 @@ final class TemporalGrantsTest extends TestCase
             ],
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         Carbon::setTestNow('2026-03-01 09:00:00');
         $user->attachPolicy($policy, expiresAt: Carbon::parse('2026-03-01 09:15:00'));
@@ -152,7 +152,7 @@ final class TemporalGrantsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('staff');
 
         $row = DB::table('authorizable_roles')
@@ -179,7 +179,7 @@ final class TemporalGrantsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user    = StubGrantee::create(['id' => (string) Str::uuid()]);
         $expires = Carbon::parse('2026-06-01 09:00:00');
 
         Carbon::setTestNow('2026-06-01 08:00:00');
@@ -207,7 +207,7 @@ final class TemporalGrantsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         Carbon::setTestNow('2026-04-01 12:00:00');
         $user->assignRole('shadowed', expiresAt: Carbon::parse('2026-04-01 11:00:00'));
@@ -235,7 +235,7 @@ final class TemporalGrantsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         Carbon::setTestNow('2026-05-01 08:00:00');
         $user->assignRole('staff');
@@ -281,7 +281,7 @@ final class TemporalGrantsTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         Carbon::setTestNow('2026-07-01 12:00:00');
         $user->assignRole('oncall', expiresAt: Carbon::parse('2026-07-01 12:05:00'));
@@ -311,12 +311,12 @@ final class TemporalGrantsTest extends TestCase
     /**
      * Read the identity afresh, as a later request would.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function reread(StubIdentity $user): StubIdentity
+    private static function reread(StubGrantee $user): StubGrantee
     {
-        return StubIdentity::query()->whereKey($user->getKey())->firstOrFail();
+        return StubGrantee::query()->whereKey($user->getKey())->firstOrFail();
     }
 
     /**
@@ -343,10 +343,10 @@ final class TemporalGrantsTest extends TestCase
     /**
      * Sort an identity's role names for stable comparison.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity|null  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee|null  $user
      * @return array<int, string>
      */
-    private function sortedRoleNames(?StubIdentity $user): array
+    private function sortedRoleNames(?StubGrantee $user): array
     {
         $names = $user?->getRoles() ?? [];
         \sort($names);

@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Models\BreakGlassActivation;
 use Tests\Concerns\ActivatesBreakGlass;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -62,7 +62,7 @@ final class BreakGlassActivationTest extends TestCase
      */
     public function testItStoresInstantsInUtcAndHidesTheNote(): void
     {
-        $user       = StubIdentity::create(['id' => 'user-1']);
+        $user       = StubGrantee::create(['id' => 'user-1']);
         $activation = self::activate($user, self::emergencyRole(), [
             'activated_at'    => Carbon::parse('2026-07-01 08:00:00', 'America/New_York'),
             'expires_at'      => Carbon::parse('2026-07-01 09:00:00', 'America/New_York'),

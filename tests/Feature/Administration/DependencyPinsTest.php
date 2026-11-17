@@ -28,7 +28,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\RecordsRowLocks;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Fixtures\EmptyLockGrammar;
 use Tests\Fixtures\ReversingLockGrammar;
@@ -145,7 +145,7 @@ final class DependencyPinsTest extends TestCase
         self::assertSame([$edit->getKey()], \array_column(DependencyPins::lockCoverage(self::permissions('posts:edit')), 'id'));
         self::assertSame([['permissions', ['posts:read']], ['permissions', ['posts:edit']], ['permissions', ['posts:edit']]], $locks->getArrayCopy());
 
-        $operation = new Operation('op', new Reference(StubIdentity::class, 'admin'), CarbonImmutable::now('UTC'), false);
+        $operation = new Operation('op', new Reference(StubGrantee::class, 'admin'), CarbonImmutable::now('UTC'), false);
 
         $refusal = OperationScope::run($operation, static function (): ?string {
             $pins = OperationScope::delegatedPins();
@@ -365,7 +365,7 @@ final class DependencyPinsTest extends TestCase
             ['authorizable_roles', 'break_glass_activations', 'authorizable_permissions', 'authorizable_policies', 'authorizable_boundaries', 'guardrails', 'resource_policies'],
             \array_column($locked, 0),
         );
-        self::assertSame([StubIdentity::class, 'admin', StubIdentity::class, 'identity'], $locked[0][1]);
+        self::assertSame([StubGrantee::class, 'admin', StubGrantee::class, 'identity'], $locked[0][1]);
         self::assertSame($locked[0][1], \array_slice($locked[1][1], 0, 4));
         self::assertSame([$tenant->getMorphClass(), 'team'], $locked[5][1]);
         self::assertSame([OperationResource::TYPE], $locked[6][1]);
@@ -388,7 +388,7 @@ final class DependencyPinsTest extends TestCase
         $locks      = $this->recordRowLocks();
         $pins       = self::pins();
 
-        $pins->lockChanges(OperationResource::grant(PackagePermissions::PERMISSION_GRANT, new Reference(StubIdentity::class, 'user'), $permission, GrantScope::platform()));
+        $pins->lockChanges(OperationResource::grant(PackagePermissions::PERMISSION_GRANT, new Reference(StubGrantee::class, 'user'), $permission, GrantScope::platform()));
 
         self::assertSame(DependencyPhase::TARGET, $pins->phase());
         self::assertSame('authorizable_roles', $locks[0][0] ?? null);
@@ -416,7 +416,7 @@ final class DependencyPinsTest extends TestCase
      */
     public function testAGrantToTheActorFailsValidation(): void
     {
-        $actor = StubIdentity::query()->create(['id' => 'admin']);
+        $actor = StubGrantee::query()->create(['id' => 'admin']);
         $pins  = self::pins();
 
         $pins->lockActor();
@@ -489,11 +489,11 @@ final class DependencyPinsTest extends TestCase
     public function testAnActorWithNoIdentityLocksItsPrincipalAlone(): void
     {
         $locks = $this->recordRowLocks();
-        $pins  = new DependencyPins(new Operation('op', new Reference(StubIdentity::class, 'admin'), CarbonImmutable::now('UTC'), false));
+        $pins  = new DependencyPins(new Operation('op', new Reference(StubGrantee::class, 'admin'), CarbonImmutable::now('UTC'), false));
 
         $pins->lockActor();
 
-        self::assertSame(['authorizable_roles', [StubIdentity::class, 'admin']], $locks[0] ?? null);
+        self::assertSame(['authorizable_roles', [StubGrantee::class, 'admin']], $locks[0] ?? null);
     }
 
     /**
@@ -574,7 +574,7 @@ final class DependencyPinsTest extends TestCase
     public function testGranteesAreLockedAfterTheActorAndComparedWithTheirRows(): void
     {
         $role  = Role::query()->whereKey(Role::query()->create(['name' => 'editor', 'rank' => 5])->getKey())->firstOrFail();
-        $user  = StubIdentity::query()->create(['id' => 'user']);
+        $user  = StubGrantee::query()->create(['id' => 'user']);
         $locks = $this->recordRowLocks();
         $pins  = self::pins();
 
@@ -582,8 +582,8 @@ final class DependencyPinsTest extends TestCase
         $pins->lockChanges(OperationResource::definition(PackagePermissions::ROLE_CREATE, new Role(['name' => 'new'])));
 
         self::assertSame(DependencyPhase::TARGET, $pins->phase());
-        self::assertSame(['authorizable_roles', [StubIdentity::class, 'admin', StubIdentity::class, 'identity']], $locks[0] ?? null);
-        self::assertContains(['authorizable_roles', [StubIdentity::class, 'user']], $locks->getArrayCopy());
+        self::assertSame(['authorizable_roles', [StubGrantee::class, 'admin', StubGrantee::class, 'identity']], $locks[0] ?? null);
+        self::assertContains(['authorizable_roles', [StubGrantee::class, 'user']], $locks->getArrayCopy());
         self::assertContains(['roles', [$role->getKey()]], $locks->getArrayCopy());
 
         DB::table('roles')->where('id', $role->getKey())->update(['rank' => 1]);
@@ -612,7 +612,7 @@ final class DependencyPinsTest extends TestCase
     {
         $permission = Permission::query()->whereKey(Permission::query()->create(['name' => 'posts:read'])->getKey())->firstOrFail();
         $policy     = Policy::query()->whereKey(Policy::query()->create(['name' => 'readers', 'document' => ['statements' => []]])->getKey())->firstOrFail();
-        $grantee    = new Reference(StubIdentity::class, 'user');
+        $grantee    = new Reference(StubGrantee::class, 'user');
         $grant      = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $grantee, $permission, GrantScope::platform());
         $rewrite    = OperationResource::definition(PackagePermissions::POLICY_UPDATE, $policy);
 
@@ -672,10 +672,10 @@ final class DependencyPinsTest extends TestCase
      */
     public function testTheKeysOfASetWithinTheLimit(): void
     {
-        $user = StubIdentity::query()->create(['id' => 'user']);
+        $user = StubGrantee::query()->create(['id' => 'user']);
 
         foreach ([['a', 'posts:read'], ['a', 'posts:edit'], ['b', 'posts:read']] as [$id, $name]) {
-            GrantService::instance()?->grantPermission(StubIdentity::query()->firstOrCreate(['id' => $id]), Permission::query()->firstOrCreate(['name' => $name]));
+            GrantService::instance()?->grantPermission(StubGrantee::query()->firstOrCreate(['id' => $id]), Permission::query()->firstOrCreate(['name' => $name]));
         }
 
         $rows = static fn (): Builder => self::table('authorizable_permissions')->orderBy('authorizable_id');
@@ -683,7 +683,7 @@ final class DependencyPinsTest extends TestCase
         self::assertSame(['a', 'b'], DependencyPins::keysWithin($rows(), 'authorizable_id', 3));
         self::assertNull(DependencyPins::keysWithin($rows(), 'authorizable_id', 2));
 
-        $operation = new Operation('op', new Reference(StubIdentity::class, 'admin'), CarbonImmutable::now('UTC'), false);
+        $operation = new Operation('op', new Reference(StubGrantee::class, 'admin'), CarbonImmutable::now('UTC'), false);
 
         OperationScope::run($operation, static function () use ($rows, $user): void {
             self::assertSame(['a', 'b'], DependencyPins::keysWithin($rows(), 'authorizable_id', 3));
@@ -722,7 +722,7 @@ final class DependencyPinsTest extends TestCase
      */
     private static function pins(): DependencyPins
     {
-        $operation = new Operation('op', new Reference(StubIdentity::class, 'admin'), CarbonImmutable::now('UTC'), false, new Reference(StubIdentity::class, 'identity'));
+        $operation = new Operation('op', new Reference(StubGrantee::class, 'admin'), CarbonImmutable::now('UTC'), false, new Reference(StubGrantee::class, 'identity'));
 
         return new DependencyPins($operation);
     }

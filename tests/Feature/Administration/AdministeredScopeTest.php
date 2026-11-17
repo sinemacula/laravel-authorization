@@ -30,7 +30,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\AssertsDelegatedRefusals;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
@@ -69,7 +69,7 @@ final class AdministeredScopeTest extends TestCase
         $actor  = self::administrator();
         $denied = self::createTenant('t0');
         $other  = self::createTenant('t1');
-        $user   = StubIdentity::query()->create(['id' => 'u1']);
+        $user   = StubGrantee::query()->create(['id' => 'u1']);
         $named  = Role::query()->create(['name' => 'named', 'rank' => 8]);
 
         self::grants()->grantRole(self::actorModel(), self::denyingRole(PackagePermissions::ROLE_GRANT), tenant: $denied);
@@ -94,7 +94,7 @@ final class AdministeredScopeTest extends TestCase
         [$parent, $child] = $this->tree();
 
         $actor = self::administrator([]);
-        $user  = StubIdentity::query()->create(['id' => 'u1']);
+        $user  = StubGrantee::query()->create(['id' => 'u1']);
         $named = Role::query()->create(['name' => 'named', 'rank' => 8]);
 
         self::grants()->grantPermission(self::actorModel(), Permission::query()->firstOrCreate(['name' => 'authorization:*']), tenant: $parent);
@@ -195,7 +195,7 @@ final class AdministeredScopeTest extends TestCase
     {
         $resource = ResourceReference::record('authorization:review', 'holders');
         $reach    = new GrantScope(new Reference('tenant', 'a'), 'admin');
-        $actor    = StubIdentity::query()->firstOrCreate(['id' => 'admin']);
+        $actor    = StubGrantee::query()->firstOrCreate(['id' => 'admin']);
         $asked    = [];
 
         $checks = static function (bool $allowed, ?CheckSources $sources) use ($actor, $resource, &$asked): FurtherChecks {
@@ -231,7 +231,7 @@ final class AdministeredScopeTest extends TestCase
     {
         $resource = ResourceReference::record('authorization:review', 'holders');
         $node     = new GrantScope(new Reference('tenant', 'a'), null, false);
-        $actor    = StubIdentity::query()->firstOrCreate(['id' => 'admin']);
+        $actor    = StubGrantee::query()->firstOrCreate(['id' => 'admin']);
         $checks   = static fn (?CheckSources $sources): FurtherChecks => new FurtherChecks(
             new Subject($actor, $actor),
             static fn (): Decision => Decision::allow(DecisionStage::ALLOW),
@@ -262,7 +262,7 @@ final class AdministeredScopeTest extends TestCase
     {
         $role      = Role::query()->firstOrCreate(['name' => 'named']);
         $reach     = new GrantScope(new Reference('tenant', 'a'), 'admin');
-        $operation = OperationResource::grant(PackagePermissions::ROLE_GRANT, StubIdentity::query()->firstOrCreate(['id' => 'u1']), $role, $reach)->toResourceReference();
+        $operation = OperationResource::grant(PackagePermissions::ROLE_GRANT, StubGrantee::query()->firstOrCreate(['id' => 'u1']), $role, $reach)->toResourceReference();
         $self      = PackagePermissions::ADMINISTRATION_SELF;
         $denying   = self::sources(policies: [['effect' => 'deny', 'actions' => [$self]]]);
 
@@ -295,7 +295,7 @@ final class AdministeredScopeTest extends TestCase
     private static function refusal(GrantScope $reach, FurtherChecks $checks): ?DecisionReason
     {
         $role      = Role::query()->firstOrCreate(['name' => 'named']);
-        $operation = OperationResource::grant(PackagePermissions::ROLE_GRANT, StubIdentity::query()->firstOrCreate(['id' => 'u1']), $role, $reach);
+        $operation = OperationResource::grant(PackagePermissions::ROLE_GRANT, StubGrantee::query()->firstOrCreate(['id' => 'u1']), $role, $reach);
 
         return AdministeredScope::refusal($operation, $operation->toResourceReference(), $reach, $checks);
     }
@@ -325,7 +325,7 @@ final class AdministeredScopeTest extends TestCase
             return $sources;
         };
 
-        $actor = StubIdentity::query()->firstOrCreate(['id' => 'admin']);
+        $actor = StubGrantee::query()->firstOrCreate(['id' => 'admin']);
 
         return new FurtherChecks(new Subject($actor, $actor), $decide, $gather);
     }
@@ -397,11 +397,11 @@ final class AdministeredScopeTest extends TestCase
     /**
      * Return the administrator's identity.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function actorModel(): StubIdentity
+    private static function actorModel(): StubGrantee
     {
-        return StubIdentity::query()->findOrFail('admin-1');
+        return StubGrantee::query()->findOrFail('admin-1');
     }
 
     /**

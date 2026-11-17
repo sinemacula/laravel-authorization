@@ -33,7 +33,7 @@ use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -91,7 +91,7 @@ final class BreakGlassAttributionTest extends TestCase
      */
     public function testAnAllowThroughAnActivatedRoleNamesTheActivation(): void
     {
-        $user       = StubIdentity::create(['id' => 'user-1']);
+        $user       = StubGrantee::create(['id' => 'user-1']);
         $activation = self::activate($user, self::emergencyRole());
 
         [$decision, $events] = $this->checked($user, self::ACTION);
@@ -113,10 +113,10 @@ final class BreakGlassAttributionTest extends TestCase
      */
     public function testAnAncestorsPermissionAndAPolicyNameTheActivation(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $parent = Role::create(['name' => 'base']);
         $role   = Role::create(['name' => 'responder', 'parent_id' => $parent->id]);
-        $other  = StubIdentity::create(['id' => 'user-2']);
+        $other  = StubGrantee::create(['id' => 'user-2']);
 
         $parent->givePermission(Permission::query()->firstOrCreate(['name' => self::OTHER]));
 
@@ -149,9 +149,9 @@ final class BreakGlassAttributionTest extends TestCase
      */
     public function testTheGrantsThatAllowedDecideWhatIsNamed(): void
     {
-        $normal = StubIdentity::create(['id' => 'normal']);
-        $both   = StubIdentity::create(['id' => 'both']);
-        $two    = StubIdentity::create(['id' => 'two']);
+        $normal = StubGrantee::create(['id' => 'normal']);
+        $both   = StubGrantee::create(['id' => 'both']);
+        $two    = StubGrantee::create(['id' => 'two']);
         $role   = self::emergencyRole();
 
         $normal->assignRole($role);
@@ -187,8 +187,8 @@ final class BreakGlassAttributionTest extends TestCase
      */
     public function testAPatternThroughAnActivationNamesItBesideADirectGrant(): void
     {
-        $exact   = StubIdentity::create(['id' => 'exact']);
-        $pattern = StubIdentity::create(['id' => 'pattern']);
+        $exact   = StubGrantee::create(['id' => 'exact']);
+        $pattern = StubGrantee::create(['id' => 'pattern']);
 
         $exact->givePermission(Permission::query()->firstOrCreate(['name' => self::ACTION]));
         $pattern->givePermission(Permission::query()->firstOrCreate(['name' => 'posts:*']));
@@ -213,8 +213,8 @@ final class BreakGlassAttributionTest extends TestCase
      */
     public function testAnAllowOnAnotherTenantsResourceNamesTheActivation(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
-        $other  = StubIdentity::create(['id' => 'user-2']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
+        $other  = StubGrantee::create(['id' => 'user-2']);
         $role   = self::emergencyRole();
         $record = static fn (): ResourceReference => ResourceReference::record('document', '7', new Reference(StubTenant::class, 'tenant-b'));
 
@@ -248,9 +248,9 @@ final class BreakGlassAttributionTest extends TestCase
      */
     public function testAResourcePolicysRoleSelectorNamesTheActivation(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
-        $both    = StubIdentity::create(['id' => 'user-2']);
-        $granted = StubIdentity::create(['id' => 'user-3']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
+        $both    = StubGrantee::create(['id' => 'user-2']);
+        $granted = StubGrantee::create(['id' => 'user-3']);
         $parent  = Role::create(['name' => 'base']);
         $role    = Role::create(['name' => 'responder', 'parent_id' => $parent->id]);
 
@@ -285,14 +285,14 @@ final class BreakGlassAttributionTest extends TestCase
      */
     public function testNothingIsNamedWhileBreakGlassIsOff(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $role = self::emergencyRole();
 
         $user->assignRole($role);
         self::activate($user, $role);
         self::switchBreakGlass(false);
 
-        [$decision, $events] = $this->checked(StubIdentity::query()->findOrFail('user-1'), self::ACTION);
+        [$decision, $events] = $this->checked(StubGrantee::query()->findOrFail('user-1'), self::ACTION);
 
         self::assertTrue($decision->isAllowed());
         self::assertSame([], $decision->activations);
@@ -310,8 +310,8 @@ final class BreakGlassAttributionTest extends TestCase
     {
         $role      = self::emergencyRole();
         $machine   = StubMachine::create(['id' => 'machine-1']);
-        $identity  = StubIdentity::create(['id' => 'person-1']);
-        $principal = StubIdentity::create(['id' => 'account-1']);
+        $identity  = StubGrantee::create(['id' => 'person-1']);
+        $principal = StubGrantee::create(['id' => 'account-1']);
 
         $identity->assignRole($role);
         self::activate($machine, $role);
@@ -338,7 +338,7 @@ final class BreakGlassAttributionTest extends TestCase
      */
     public function testWhatTheDecisionNamesIsWhatWasNoted(): void
     {
-        $user       = StubIdentity::create(['id' => 'user-1']);
+        $user       = StubGrantee::create(['id' => 'user-1']);
         $role       = self::emergencyRole();
         $activation = self::activate($user, $role);
         $policy     = Policy::query()->create(['name' => 'allow delete', 'document' => ['statements' => [['effect' => 'allow', 'actions' => [self::OTHER]]]]]);
@@ -386,7 +386,7 @@ final class BreakGlassAttributionTest extends TestCase
      */
     public function testAWarmCacheAndAnExplanationNameTheSameActivation(): void
     {
-        $user       = StubIdentity::create(['id' => 'user-1']);
+        $user       = StubGrantee::create(['id' => 'user-1']);
         $activation = self::activate($user, self::emergencyRole());
 
         Authorization::for($user)->explain(self::ACTION);
@@ -397,7 +397,7 @@ final class BreakGlassAttributionTest extends TestCase
 
         $this->app?->forgetInstance(ResolutionCache::class);
 
-        $later = StubIdentity::query()->findOrFail('user-1');
+        $later = StubGrantee::query()->findOrFail('user-1');
 
         DB::enableQueryLog();
         DB::flushQueryLog();

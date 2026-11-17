@@ -13,12 +13,12 @@ use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted as IdentityPermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked as IdentityPermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached as IdentityPolicyAttached;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached as IdentityPolicyDetached;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned as IdentityRoleAssigned;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked as IdentityRoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionGranted as GranteePermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionRevoked as GranteePermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyAttached as GranteePolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyDetached as GranteePolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned as GranteeRoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked as GranteeRoleRevoked;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
@@ -29,7 +29,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -50,12 +50,12 @@ use Tests\TestCase;
  */
 #[CoversClass(Role::class)]
 #[CoversClass(RoleObserver::class)]
-#[CoversClass(IdentityRoleAssigned::class)]
-#[CoversClass(IdentityRoleRevoked::class)]
-#[CoversClass(IdentityPermissionGranted::class)]
-#[CoversClass(IdentityPermissionRevoked::class)]
-#[CoversClass(IdentityPolicyAttached::class)]
-#[CoversClass(IdentityPolicyDetached::class)]
+#[CoversClass(GranteeRoleAssigned::class)]
+#[CoversClass(GranteeRoleRevoked::class)]
+#[CoversClass(GranteePermissionGranted::class)]
+#[CoversClass(GranteePermissionRevoked::class)]
+#[CoversClass(GranteePolicyAttached::class)]
+#[CoversClass(GranteePolicyDetached::class)]
 #[CoversClass(RolePermissionGranted::class)]
 #[CoversClass(RolePermissionRevoked::class)]
 #[CoversClass(TenantScope::class)]
@@ -70,8 +70,8 @@ use Tests\TestCase;
 final class SyncEventsTest extends TestCase
 {
     /**
-     * `syncRoles` adding two and removing one fires two `IdentityRoleAssigned`
-     * and one `IdentityRoleRevoked`.
+     * `syncRoles` adding two and removing one fires two `GranteeRoleAssigned`
+     * and one `GranteeRoleRevoked`.
      *
      * @return void
      */
@@ -81,26 +81,26 @@ final class SyncEventsTest extends TestCase
         Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard' => 'web']);
         Role::create(['id' => (string) Str::uuid(), 'name' => 'c', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->assignRole('a');
 
-        Event::fake([IdentityRoleAssigned::class, IdentityRoleRevoked::class]);
+        Event::fake([GranteeRoleAssigned::class, GranteeRoleRevoked::class]);
 
         $user->syncRoles(['b', 'c']);
 
-        Event::assertDispatchedTimes(IdentityRoleAssigned::class, 2);
-        Event::assertDispatchedTimes(IdentityRoleRevoked::class, 1);
+        Event::assertDispatchedTimes(GranteeRoleAssigned::class, 2);
+        Event::assertDispatchedTimes(GranteeRoleRevoked::class, 1);
         Event::assertDispatched(
-            IdentityRoleAssigned::class,
-            static fn (IdentityRoleAssigned $e): bool => $e->name === 'b',
+            GranteeRoleAssigned::class,
+            static fn (GranteeRoleAssigned $e): bool => $e->name === 'b',
         );
         Event::assertDispatched(
-            IdentityRoleAssigned::class,
-            static fn (IdentityRoleAssigned $e): bool => $e->name === 'c',
+            GranteeRoleAssigned::class,
+            static fn (GranteeRoleAssigned $e): bool => $e->name === 'c',
         );
         Event::assertDispatched(
-            IdentityRoleRevoked::class,
-            static fn (IdentityRoleRevoked $e): bool => $e->name === 'a',
+            GranteeRoleRevoked::class,
+            static fn (GranteeRoleRevoked $e): bool => $e->name === 'a',
         );
     }
 
@@ -115,20 +115,20 @@ final class SyncEventsTest extends TestCase
         Role::create(['id' => (string) Str::uuid(), 'name' => 'a', 'guard' => 'web']);
         Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->syncRoles(['a', 'b']);
 
-        Event::fake([IdentityRoleAssigned::class, IdentityRoleRevoked::class]);
+        Event::fake([GranteeRoleAssigned::class, GranteeRoleRevoked::class]);
 
         $user->syncRoles(['a', 'b']);
 
-        Event::assertNotDispatched(IdentityRoleAssigned::class);
-        Event::assertNotDispatched(IdentityRoleRevoked::class);
+        Event::assertNotDispatched(GranteeRoleAssigned::class);
+        Event::assertNotDispatched(GranteeRoleRevoked::class);
     }
 
     /**
      * `syncPermissions` adding two and removing one fires two
-     * `IdentityPermissionGranted` and one `IdentityPermissionRevoked`.
+     * `GranteePermissionGranted` and one `GranteePermissionRevoked`.
      *
      * @return void
      */
@@ -138,32 +138,32 @@ final class SyncEventsTest extends TestCase
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard' => 'web']);
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'c:do', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission('a:do');
 
-        Event::fake([IdentityPermissionGranted::class, IdentityPermissionRevoked::class]);
+        Event::fake([GranteePermissionGranted::class, GranteePermissionRevoked::class]);
 
         $user->syncPermissions(['b:do', 'c:do']);
 
-        Event::assertDispatchedTimes(IdentityPermissionGranted::class, 2);
-        Event::assertDispatchedTimes(IdentityPermissionRevoked::class, 1);
+        Event::assertDispatchedTimes(GranteePermissionGranted::class, 2);
+        Event::assertDispatchedTimes(GranteePermissionRevoked::class, 1);
         Event::assertDispatched(
-            IdentityPermissionGranted::class,
-            static fn (IdentityPermissionGranted $e): bool => $e->name === 'b:do',
+            GranteePermissionGranted::class,
+            static fn (GranteePermissionGranted $e): bool => $e->name === 'b:do',
         );
         Event::assertDispatched(
-            IdentityPermissionGranted::class,
-            static fn (IdentityPermissionGranted $e): bool => $e->name === 'c:do',
+            GranteePermissionGranted::class,
+            static fn (GranteePermissionGranted $e): bool => $e->name === 'c:do',
         );
         Event::assertDispatched(
-            IdentityPermissionRevoked::class,
-            static fn (IdentityPermissionRevoked $e): bool => $e->name === 'a:do',
+            GranteePermissionRevoked::class,
+            static fn (GranteePermissionRevoked $e): bool => $e->name === 'a:do',
         );
     }
 
     /**
      * `syncPolicies` adding two and removing one fires two
-     * `IdentityPolicyAttached` and one `IdentityPolicyDetached`.
+     * `GranteePolicyAttached` and one `GranteePolicyDetached`.
      *
      * @return void
      */
@@ -173,26 +173,26 @@ final class SyncEventsTest extends TestCase
         $b = $this->makeNamedPolicy('b', 'y');
         $c = $this->makeNamedPolicy('c', 'z');
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->attachPolicy($a);
 
-        Event::fake([IdentityPolicyAttached::class, IdentityPolicyDetached::class]);
+        Event::fake([GranteePolicyAttached::class, GranteePolicyDetached::class]);
 
         $user->syncPolicies([$b, $c]);
 
-        Event::assertDispatchedTimes(IdentityPolicyAttached::class, 2);
-        Event::assertDispatchedTimes(IdentityPolicyDetached::class, 1);
+        Event::assertDispatchedTimes(GranteePolicyAttached::class, 2);
+        Event::assertDispatchedTimes(GranteePolicyDetached::class, 1);
         Event::assertDispatched(
-            IdentityPolicyAttached::class,
-            static fn (IdentityPolicyAttached $e): bool => $e->name === 'b',
+            GranteePolicyAttached::class,
+            static fn (GranteePolicyAttached $e): bool => $e->name === 'b',
         );
         Event::assertDispatched(
-            IdentityPolicyAttached::class,
-            static fn (IdentityPolicyAttached $e): bool => $e->name === 'c',
+            GranteePolicyAttached::class,
+            static fn (GranteePolicyAttached $e): bool => $e->name === 'c',
         );
         Event::assertDispatched(
-            IdentityPolicyDetached::class,
-            static fn (IdentityPolicyDetached $e): bool => $e->name === 'a',
+            GranteePolicyDetached::class,
+            static fn (GranteePolicyDetached $e): bool => $e->name === 'a',
         );
     }
 

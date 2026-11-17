@@ -13,7 +13,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -126,7 +126,7 @@ final class ForeignKeysTest extends TestCase
         $role       = Role::query()->create(['name' => 'editor']);
         $permission = Permission::query()->create(['name' => 'posts:edit']);
         $policy     = Policy::query()->create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
-        $identity   = StubIdentity::query()->create(['id' => (string) Str::uuid()]);
+        $identity   = StubGrantee::query()->create(['id' => (string) Str::uuid()]);
 
         $role->permissions()->attach($permission);
         $identity->assignRole($role);

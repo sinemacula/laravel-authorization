@@ -36,13 +36,13 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Concerns\ReportsEveryDecision;
-use Tests\Feature\Stubs\CustomGrantsIdentity;
+use Tests\Feature\Stubs\CustomGrantsGrantee;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubRequirementChecker;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -94,7 +94,7 @@ final class AuthorizationManagerTest extends TestCase
     public function testADirectGrantNamesItsGrantRow(): void
     {
         $tenant = StubTenant::query()->create(['id' => 'tenant-1', 'name' => 'tenant-1']);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']), null, $tenant, true, 'web');
 
@@ -123,7 +123,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $author = Role::create(['name' => 'author']);
         $editor = Role::create(['name' => 'editor', 'parent_id' => $author->id]);
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
 
         $author->givePermissionTo(Permission::create(['name' => 'posts:publish']));
         $editor->givePermissionTo(Permission::create(['name' => 'posts:edit']));
@@ -148,8 +148,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAnIdentityGrantNamesTheIdentity(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-1']);
-        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $principal = StubGrantee::create(['id' => 'principal-1']);
+        $identity  = StubSecondGrantee::create(['id' => 'person-1']);
 
         $identity->givePermission(Permission::create(['name' => 'posts:read']));
 
@@ -171,7 +171,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAPolicyAllowNamesHowThePolicyReachedTheSubject(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $role   = Role::create(['name' => 'reviewer']);
         $own    = self::policy('own', [['effect' => 'allow', 'actions' => ['posts:read']]]);
         $shared = self::policy('shared', [['effect' => 'allow', 'actions' => ['posts:review']]]);
@@ -203,7 +203,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAnIdentityOfTheOtherKindNeverExplainsAnAllow(): void
     {
-        $principal = StubIdentity::create(['id' => 'user-1']);
+        $principal = StubGrantee::create(['id' => 'user-1']);
         $machine   = StubMachine::create(['id' => 'machine-1']);
         $editors   = self::policy('editors', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
 
@@ -228,7 +228,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAStaleCacheIsExplainedAsUnavailable(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $own  = self::policy('own', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
@@ -261,7 +261,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAnEverydayDecisionExplainsWithoutItsRequest(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
 
@@ -281,7 +281,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testACustomSourceIsUnavailable(): void
     {
-        $user = CustomGrantsIdentity::create(['id' => 'custom-1']);
+        $user = CustomGrantsGrantee::create(['id' => 'custom-1']);
 
         $read   = Authorization::for($user)->explain('reports:read');
         $export = Authorization::for($user)->explain('reports:export');
@@ -319,7 +319,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAnExplicitDenyNamesEveryDenyAndStopsThere(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:delete']));
         $user->attachPolicy(self::policy('first', [['effect' => 'deny', 'actions' => ['posts:delete']]]));
@@ -347,7 +347,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testACapIsNamedAsTheCause(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:edit']));
 
@@ -377,7 +377,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAnInvalidPolicyIsExplained(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $broken = Policy::create(['name' => 'broken', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
 
         $user->attachPolicy($broken);
@@ -400,7 +400,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testInsufficientAuthenticationNamesTheRequirements(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($user, $user, session: 'session-1')));
         $this->app?->instance(AuthenticationRequirementChecker::class, new StubRequirementChecker(RequirementResult::unmet(['multifactor'])));
@@ -439,7 +439,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testEachConditionTestIsExplainedWithItsOutcome(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = EvaluationPolicy::fromArray(['name' => 'conditions', 'statements' => [[
             'effect'     => 'allow',
             'actions'    => ['posts:read'],
@@ -484,7 +484,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testExplainRecordsAsACheckAndRenderingHasNoSideEffects(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']));
 
@@ -521,7 +521,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testExplainModeReadsNothingMoreThanTheCheck(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $role   = Role::create(['name' => 'editor']);
         $type   = $user->getMorphClass();
         $posts  = new RecordingResourceAttributes;

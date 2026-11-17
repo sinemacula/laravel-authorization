@@ -48,7 +48,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\ReportsEveryDecision;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\BulkChecks\BulkStatusAttributes;
@@ -764,7 +764,7 @@ final class CheckBatchTest extends TestCase
 
         $user->givePermission(Permission::create(['name' => self::ACTION]));
 
-        $model = new StubIdentity(['id' => '1']);
+        $model = new StubGrantee(['id' => '1']);
 
         $model->exists = true;
 
@@ -1033,7 +1033,7 @@ final class CheckBatchTest extends TestCase
      */
     public function testATenantThatCannotBeReadStopsNoCheckThatReadsNone(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, new \stdClass));
         $this->app?->instance(ResourceTenantResolver::class, new CountingBulkTenants);
@@ -1173,11 +1173,11 @@ final class CheckBatchTest extends TestCase
      * user.
      *
      * @param  \Tests\Feature\Stubs\StubTenant|null  $tenant
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function subject(?StubTenant $tenant = null): StubIdentity
+    private function subject(?StubTenant $tenant = null): StubGrantee
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $tenant));
         $this->app?->forgetInstance(AuthorizationManager::class);

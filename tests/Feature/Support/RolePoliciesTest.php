@@ -33,7 +33,7 @@ use SineMacula\Laravel\Authorization\Support\RolePolicies;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\NonMorphRolesGrantee;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Feature\Stubs\UndeclaredRolesGrantee;
@@ -90,7 +90,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testOnlyAGranteeHoldingRolesThroughTheGrantMorphHasThem(): void
     {
-        $identity = new StubIdentity;
+        $identity = new StubGrantee;
         $roles    = RolePolicies::heldBy($identity);
 
         self::assertInstanceOf(MorphToMany::class, $roles);
@@ -108,8 +108,8 @@ final class RolePoliciesTest extends TestCase
      */
     public function testARolesPolicyAppliesToItsHolders(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
-        $other  = StubIdentity::create(['id' => 'user-2']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
+        $other  = StubGrantee::create(['id' => 'user-2']);
         $editor = Role::create(['name' => 'editor']);
 
         $editor->attachPolicy(self::policy('editors'));
@@ -131,7 +131,7 @@ final class RolePoliciesTest extends TestCase
     {
         [$tenantA, $tenantB] = \array_map(self::createTenant(...), ['tenant-a', 'tenant-b']);
 
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $local   = Role::create(['name' => 'local']);
         $global  = Role::create(['name' => 'global']);
         $minimal = self::policy('in-a');
@@ -153,7 +153,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testARolesPolicyAppliesOnlyWhereBothGrantsHoldOnTheApplication(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $admin  = Role::create(['name' => 'admin']);
         $mobile = Role::create(['name' => 'mobile']);
 
@@ -176,7 +176,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testARolesPolicyLapsesWithEitherGrant(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $role    = Role::create(['name' => 'editor']);
         $lapsing = Role::create(['name' => 'lapsing']);
 
@@ -208,7 +208,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testARolesAttachmentBoundsTheResolution(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $role = Role::create(['name' => 'editor']);
 
         $role->attachPolicy(self::policy('soon'), Carbon::parse('2026-07-01 12:02:00'));
@@ -226,7 +226,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testTheProbeReadsAtMostOneAttachment(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         foreach (['first', 'second', 'third'] as $name) {
             Role::create(['name' => $name])->attachPolicy(self::policy($name));
@@ -242,7 +242,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testNoHeldRoleReadsNothing(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         Role::create(['name' => 'editor'])->attachPolicy(self::policy('editors'));
 
@@ -263,7 +263,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testAnotherRolesInlinePolicyNeverApplies(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $owner  = Role::create(['name' => 'owner']);
         $holder = Role::create(['name' => 'holder']);
         $inline = $owner->createInlinePolicy('owners', ['version' => 1, 'statements' => []]);
@@ -292,7 +292,7 @@ final class RolePoliciesTest extends TestCase
 
         $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org)));
 
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $orgOnly  = Role::create(['name' => 'org-only']);
         $reaching = Role::create(['name' => 'reaching']);
 
@@ -315,7 +315,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testARolesPoliciesAreInheritedDownTheHierarchy(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $root    = Role::create(['name' => 'root']);
         $middle  = Role::create(['name' => 'middle', 'parent_id' => $root->id]);
         $leaf    = Role::create(['name' => 'leaf', 'parent_id' => $middle->id]);
@@ -342,7 +342,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testAPolicyHeldSeveralWaysIsListedOnce(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $policy = self::policy('shared');
         $parent = Role::create(['name' => 'parent']);
         $child  = Role::create(['name' => 'child', 'parent_id' => $parent->id]);
@@ -364,7 +364,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testADenyInARolesPolicyRefusesThePermission(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $parent = Role::create(['name' => 'staff']);
         $role   = Role::create(['name' => 'editor', 'parent_id' => $parent->id]);
 
@@ -394,7 +394,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testEverySourceCombinesInOneDeterministicOrder(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $role   = Role::create(['name' => 'editor']);
         $stored = EvaluationPolicy::fromArray(['name' => 'b-stored', 'version' => 1, 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]);
 
@@ -447,7 +447,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testTheResolutionPinsTheSharedVersionTheRolesAndThePolicies(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $parent = Role::create(['name' => 'parent']);
         $role   = Role::create(['name' => 'child', 'parent_id' => $parent->id]);
         $policy = self::policy('parents');
@@ -476,7 +476,7 @@ final class RolePoliciesTest extends TestCase
     {
         [$tenantA] = \array_map(self::createTenant(...), ['tenant-a']);
 
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $role = Role::create(['name' => 'editor']);
 
         $role->attachPolicy(self::policy('in-a'), null, $tenantA);
@@ -497,7 +497,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testAHierarchyThatMovesWhileResolvingIsUnstable(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $parent = Role::create(['name' => 'publisher']);
         $role   = Role::create(['name' => 'editor']);
 
@@ -533,7 +533,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testARoutedResolutionReadsWhichRoleEachPolicyCameThrough(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $parent = Role::create(['name' => 'publisher']);
         $role   = Role::create(['name' => 'editor', 'parent_id' => $parent->id]);
         $policy = self::policy('publishers');
@@ -581,7 +581,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testAnActivatedRoleNamesItsActivationBehindItsPolicies(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $parent  = Role::create(['name' => 'publisher']);
         $role    = Role::create(['name' => 'responder', 'parent_id' => $parent->id]);
         $granted = Role::create(['name' => 'editor']);
@@ -631,7 +631,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testAHolderWithoutRolesGetsNoRolesPolicy(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         Role::create(['name' => 'editor'])->attachPolicy(self::policy('editors'));
 
@@ -651,7 +651,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testRolesHoldingNoPolicyDoNotBoundTheResolution(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
 
         Role::create(['name' => 'author'])->attachPolicy(self::policy('authors'));
         $user->assignRole(Role::create(['name' => 'editor']), Carbon::parse('2026-07-01 12:05:00'));
@@ -708,7 +708,7 @@ final class RolePoliciesTest extends TestCase
      */
     public function testARolesAttachmentNamingHalfATenantCountsForItsDeniesAloneEverywhere(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $editor = Role::create(['name' => 'editor']);
         $type   = $editor->getMorphClass();
         $row    = ['authorizable_type' => $type, 'authorizable_id' => $editor->id, 'include_subtree' => true];
@@ -768,16 +768,16 @@ final class RolePoliciesTest extends TestCase
      * Return the names of the identity's policies in the tenant and on the
      * application, read afresh, in name order.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  \Tests\Feature\Stubs\StubTenant|null  $tenant
      * @param  string|null  $application
      * @return list<string>
      */
-    private function policyNames(StubIdentity $user, ?StubTenant $tenant = null, ?string $application = null): array
+    private function policyNames(StubGrantee $user, ?StubTenant $tenant = null, ?string $application = null): array
     {
         $this->app?->forgetInstance(ResolutionCache::class);
 
-        $fresh = StubIdentity::query()->whereKey($user->getKey())->firstOrFail();
+        $fresh = StubGrantee::query()->whereKey($user->getKey())->firstOrFail();
 
         /** @var list<string> $names */
         $names = TenantScope::within($tenant, $application, static fn (): array => self::names($fresh->getPolicies()));

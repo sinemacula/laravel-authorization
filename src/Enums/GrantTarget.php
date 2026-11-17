@@ -8,22 +8,22 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Config\DefaultGuard;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
-use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
+use SineMacula\Laravel\Authorization\Contracts\GranteeEvent;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpired;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpired;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleExpired;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -269,9 +269,9 @@ enum GrantTarget: string
      * @param  \Illuminate\Database\Eloquent\Model  $target
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @param  \DateTimeInterface|null  $expiresAt
-     * @return \SineMacula\Laravel\Authorization\Contracts\IdentityEvent
+     * @return \SineMacula\Laravel\Authorization\Contracts\GranteeEvent
      */
-    public function grantedEvent(Operation $operation, Reference $grantee, Model $target, GrantScope $scope, ?\DateTimeInterface $expiresAt): IdentityEvent
+    public function grantedEvent(Operation $operation, Reference $grantee, Model $target, GrantScope $scope, ?\DateTimeInterface $expiresAt): GranteeEvent
     {
         $event = match ($this) {
             self::ROLE       => RoleAssigned::class,
@@ -290,9 +290,9 @@ enum GrantTarget: string
      * @param  \Illuminate\Database\Eloquent\Model  $target
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @param  \DateTimeInterface  $expiredAt
-     * @return \SineMacula\Laravel\Authorization\Contracts\IdentityEvent
+     * @return \SineMacula\Laravel\Authorization\Contracts\GranteeEvent
      */
-    public function expiredEvent(Operation $operation, Reference $grantee, Model $target, GrantScope $scope, \DateTimeInterface $expiredAt): IdentityEvent
+    public function expiredEvent(Operation $operation, Reference $grantee, Model $target, GrantScope $scope, \DateTimeInterface $expiredAt): GranteeEvent
     {
         $event = match ($this) {
             self::ROLE       => RoleExpired::class,
@@ -313,9 +313,9 @@ enum GrantTarget: string
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \Illuminate\Database\Eloquent\Model  $target
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
-     * @return \SineMacula\Laravel\Authorization\Contracts\IdentityEvent
+     * @return \SineMacula\Laravel\Authorization\Contracts\GranteeEvent
      */
-    public function revokedEvent(Operation $operation, Reference $grantee, Model $target, GrantScope $scope): IdentityEvent
+    public function revokedEvent(Operation $operation, Reference $grantee, Model $target, GrantScope $scope): GranteeEvent
     {
         $event = match ($this) {
             self::ROLE       => RoleRevoked::class,
@@ -335,7 +335,7 @@ enum GrantTarget: string
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @param  \DateTimeInterface|null  $previous
      * @param  \DateTimeInterface|null  $next
-     * @return \SineMacula\Laravel\Authorization\Contracts\IdentityEvent
+     * @return \SineMacula\Laravel\Authorization\Contracts\GranteeEvent
      */
     public function expiryChangedEvent(
         Operation $operation,
@@ -344,7 +344,7 @@ enum GrantTarget: string
         GrantScope $scope,
         ?\DateTimeInterface $previous,
         ?\DateTimeInterface $next,
-    ): IdentityEvent {
+    ): GranteeEvent {
         $event = match ($this) {
             self::ROLE       => RoleExpiryChanged::class,
             self::PERMISSION => PermissionExpiryChanged::class,
@@ -374,7 +374,7 @@ enum GrantTarget: string
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantChange  $change
      * @param  \DateTimeInterface|null  $expiresAt
-     * @return list<\SineMacula\Laravel\Authorization\Contracts\IdentityEvent>
+     * @return list<\SineMacula\Laravel\Authorization\Contracts\GranteeEvent>
      */
     public function changeEvents(Operation $operation, Reference $grantee, Model $model, GrantScope $scope, GrantChange $change, ?\DateTimeInterface $expiresAt): array
     {

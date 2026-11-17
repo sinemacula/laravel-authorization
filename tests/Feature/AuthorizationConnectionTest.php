@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Concerns\UsesAnAuthorizationConnection;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -210,7 +210,7 @@ final class AuthorizationConnectionTest extends TestCase
 
         $role->permissions()->attach($permission);
 
-        $identity = StubIdentity::create(['id' => 'b3c1a9de-6f43-4d0e-9a52-0d0d6cf0c001']);
+        $identity = StubGrantee::create(['id' => 'b3c1a9de-6f43-4d0e-9a52-0d0d6cf0c001']);
         $identity->assignRole($role);
         $identity->givePermission($permission);
         $identity->attachPolicy($policy);
@@ -220,7 +220,7 @@ final class AuthorizationConnectionTest extends TestCase
             self::assertSame(0, DB::connection()->table($table)->count(), $table);
         }
 
-        $fresh = StubIdentity::query()->findOrFail('b3c1a9de-6f43-4d0e-9a52-0d0d6cf0c001');
+        $fresh = StubGrantee::query()->findOrFail('b3c1a9de-6f43-4d0e-9a52-0d0d6cf0c001');
 
         self::assertSame(['editor'], $fresh->roles->pluck('name')->all());
         self::assertSame(['posts:edit'], $fresh->permissions->pluck('name')->all());
@@ -244,7 +244,7 @@ final class AuthorizationConnectionTest extends TestCase
         $permission = Permission::create(['name' => 'posts:edit']);
         $policy     = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
 
-        $identity = new StubIdentity(['id' => 'b3c1a9de-6f43-4d0e-9a52-0d0d6cf0c002']);
+        $identity = new StubGrantee(['id' => 'b3c1a9de-6f43-4d0e-9a52-0d0d6cf0c002']);
         $identity->setConnection('identities');
         $identity->save();
 
@@ -257,8 +257,8 @@ final class AuthorizationConnectionTest extends TestCase
             self::assertFalse(DB::connection('identities')->getSchemaBuilder()->hasTable($table), $table);
         }
 
-        /** @var \Tests\Feature\Stubs\StubIdentity $fresh */
-        $fresh = StubIdentity::on('identities')->findOrFail('b3c1a9de-6f43-4d0e-9a52-0d0d6cf0c002');
+        /** @var \Tests\Feature\Stubs\StubGrantee $fresh */
+        $fresh = StubGrantee::on('identities')->findOrFail('b3c1a9de-6f43-4d0e-9a52-0d0d6cf0c002');
 
         self::assertTrue($fresh->hasRole('editor'));
         self::assertSame(['posts:edit'], $fresh->permissions->pluck('name')->all());
@@ -287,7 +287,7 @@ final class AuthorizationConnectionTest extends TestCase
             'prefix'   => '',
         ]);
 
-        DB::connection('identities')->getSchemaBuilder()->create('stub_identities', static function (Blueprint $table): void {
+        DB::connection('identities')->getSchemaBuilder()->create('stub_grantees', static function (Blueprint $table): void {
             $table->string('id')->primary();
             $table->string('name')->nullable();
             $table->timestamps();

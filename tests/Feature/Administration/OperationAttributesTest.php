@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -97,7 +97,7 @@ final class OperationAttributesTest extends TestCase
      */
     public function testAPolicyReadsWhetherTheChangeChangesNothing(): void
     {
-        $admin = StubIdentity::create(['id' => 'admin-1']);
+        $admin = StubGrantee::create(['id' => 'admin-1']);
 
         config(['authorization.rank.enabled' => false]);
 
@@ -128,7 +128,7 @@ final class OperationAttributesTest extends TestCase
      */
     public function testAPolicyConditionsOnTheOperation(): void
     {
-        $admin = StubIdentity::create(['id' => 'admin-1']);
+        $admin = StubGrantee::create(['id' => 'admin-1']);
 
         // The grantee is named by a reference alone, whose rank cannot be read,
         // so rank is off: the attributes are what this test is about.

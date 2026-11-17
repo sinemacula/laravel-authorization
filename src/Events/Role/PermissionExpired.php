@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * whose expiry has passed. The grant stopped counting at its expiry; this
  * reports its removal, in an operation with no actor.
  *
- * Distinct from `Identity\PermissionExpired`, which reports the removal of an
+ * Distinct from `Grantee\PermissionExpired`, which reports the removal of an
  * expired permission granted to a grantee directly.
  *
  * A snapshot of plain values, never a model. It is dispatched once the removal

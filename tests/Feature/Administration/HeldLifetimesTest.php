@@ -13,7 +13,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Subject;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -39,7 +39,7 @@ final class HeldLifetimesTest extends TestCase
      */
     public function testEachLifetimeIsReadOnce(): void
     {
-        $user   = StubIdentity::query()->create(['id' => 'user-1']);
+        $user   = StubGrantee::query()->create(['id' => 'user-1']);
         $policy = Policy::query()->create(['name' => 'reader', 'document' => ['statements' => []]]);
         $grants = app(GrantService::class);
 

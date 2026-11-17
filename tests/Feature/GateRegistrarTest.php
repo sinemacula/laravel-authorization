@@ -39,11 +39,11 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\ReportsEveryDecision;
 use Tests\Feature\Stubs\AllowingLaravelPolicy;
-use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\Feature\Stubs\DenyingLaravelPolicy;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubPermissionProvider;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
@@ -97,7 +97,7 @@ final class GateRegistrarTest extends TestCase
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         // Register a morph alias so model identifiers are short and exact.
-        Relation::morphMap(['stub' => StubIdentity::class]);
+        Relation::morphMap(['stub' => StubGrantee::class]);
 
         (new AuthorizationServiceProvider($this->container()))->boot();
 
@@ -128,7 +128,7 @@ final class GateRegistrarTest extends TestCase
     {
         $user = $this->actAsFullyPermittedPrincipal();
 
-        $this->assertGateRefusesUnidentifiedArgument(new StubIdentity, $user);
+        $this->assertGateRefusesUnidentifiedArgument(new StubGrantee, $user);
         $this->assertResourcelessCheckStillAllowed();
     }
 
@@ -142,7 +142,7 @@ final class GateRegistrarTest extends TestCase
     {
         $user = $this->actAsFullyPermittedPrincipal();
 
-        $this->assertGateRefusesUnidentifiedArgument(new StubIdentity(['id' => '']), $user);
+        $this->assertGateRefusesUnidentifiedArgument(new StubGrantee(['id' => '']), $user);
         $this->assertResourcelessCheckStillAllowed();
     }
 
@@ -240,7 +240,7 @@ final class GateRegistrarTest extends TestCase
      */
     public function testSpreadTypeAndIdArgumentsNameTheRecord(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $user->attachPolicy(Policy::create([
             'id'       => (string) Str::uuid(),
@@ -271,7 +271,7 @@ final class GateRegistrarTest extends TestCase
      */
     public function testContextBesideSpreadTypeAndIdArgumentsIsMerged(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $user->attachPolicy(Policy::create([
             'id'       => (string) Str::uuid(),
@@ -308,7 +308,7 @@ final class GateRegistrarTest extends TestCase
     public function testMoreResourceArgumentsThanAPairAreRefusedAsUnresolved(): void
     {
         $user   = $this->actAsFullyPermittedPrincipal();
-        $target = StubIdentity::create(['id' => 'target-1']);
+        $target = StubGrantee::create(['id' => 'target-1']);
 
         self::assertFalse(Gate::allows('posts:create', ['post', 42, 'extra']));
         $this->assertRefusalRecorded(0, $user);
@@ -329,7 +329,7 @@ final class GateRegistrarTest extends TestCase
     {
         $this->actAsPrincipalAllowedOn('stub:*');
 
-        $recordOnly = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $recordOnly = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $recordOnly->attachPolicy(Policy::create([
             'id'       => (string) Str::uuid(),
@@ -341,8 +341,8 @@ final class GateRegistrarTest extends TestCase
             ],
         ]));
 
-        self::assertTrue(Gate::allows('posts:create', [StubIdentity::class]));
-        self::assertFalse(Gate::forUser($recordOnly)->allows('posts:create', [StubIdentity::class]));
+        self::assertTrue(Gate::allows('posts:create', [StubGrantee::class]));
+        self::assertFalse(Gate::forUser($recordOnly)->allows('posts:create', [StubGrantee::class]));
         self::assertSame(['stub:*', 'stub:*'], $this->evaluatedResources());
     }
 
@@ -373,7 +373,7 @@ final class GateRegistrarTest extends TestCase
 
         // Resolve a different principal so the recorded decision can only name
         // the Gate user if the callback scoped the manager to it.
-        $this->actAs(StubIdentity::create(['id' => (string) Str::uuid()]));
+        $this->actAs(StubGrantee::create(['id' => (string) Str::uuid()]));
 
         self::assertFalse(Gate::forUser($user)->allows('posts:create', [42]));
         $this->assertRefusalRecorded(0, $user);
@@ -406,7 +406,7 @@ final class GateRegistrarTest extends TestCase
      */
     public function testNullArgumentAppliesWildcardResourceAllow(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -432,7 +432,7 @@ final class GateRegistrarTest extends TestCase
      */
     public function testNullArgumentDoesNotApplyResourceScopedAllow(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -471,7 +471,7 @@ final class GateRegistrarTest extends TestCase
      */
     public function testSavedModelIsIdentifiedByMorphClassAndKey(): void
     {
-        $target = StubIdentity::create(['id' => 'target-1']);
+        $target = StubGrantee::create(['id' => 'target-1']);
 
         $this->actAsPrincipalAllowedOn('stub:target-1');
 
@@ -490,7 +490,7 @@ final class GateRegistrarTest extends TestCase
     public function testSavedModelCarriesTheTenantItsResolverNames(): void
     {
         $resolver = new FixedResourceTenantResolver(new Reference('org', 'org-1'));
-        $target   = StubIdentity::create(['id' => 'target-1']);
+        $target   = StubGrantee::create(['id' => 'target-1']);
 
         $this->app?->instance(ResourceTenantResolver::class, $resolver);
 
@@ -548,7 +548,7 @@ final class GateRegistrarTest extends TestCase
 
         $resource = new class extends Model implements AuthorizableResource {
             /** @var string|null Backing table. */
-            protected $table = 'stub_identities';
+            protected $table = 'stub_grantees';
 
             /**
              * Return the reference to the resource.
@@ -606,7 +606,7 @@ final class GateRegistrarTest extends TestCase
     public function testTheGatesUserIsTranslatedIntoTheSubject(): void
     {
         $principal = $this->actAsFullyPermittedPrincipal();
-        $user      = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user      = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $resolver = \Mockery::mock(SubjectResolver::class);
         $resolver->shouldReceive('forUser')->with($user)->andReturn(new Subject($principal, $user));
@@ -631,7 +631,7 @@ final class GateRegistrarTest extends TestCase
     {
         $this->actAsFullyPermittedPrincipal();
 
-        $other = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $other = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         self::assertTrue(Gate::allows('posts:create'));
         self::assertFalse(Gate::forUser($other)->allows('posts:create'));
@@ -703,15 +703,15 @@ final class GateRegistrarTest extends TestCase
      */
     public function testAllowAndDenyStandOverALaravelPolicyClass(): void
     {
-        $target = StubIdentity::create(['id' => 'target-1']);
+        $target = StubGrantee::create(['id' => 'target-1']);
 
         $this->actAsPrincipalAllowedOn('stub:target-1');
 
-        Gate::policy(StubIdentity::class, DenyingLaravelPolicy::class);
+        Gate::policy(StubGrantee::class, DenyingLaravelPolicy::class);
 
         self::assertTrue(Gate::allows('posts:create', $target));
 
-        Gate::policy(StubIdentity::class, AllowingLaravelPolicy::class);
+        Gate::policy(StubGrantee::class, AllowingLaravelPolicy::class);
 
         self::assertFalse(Gate::allows('posts:delete', $target));
 
@@ -777,14 +777,14 @@ final class GateRegistrarTest extends TestCase
      */
     public function testUndeclaredAbilitiesFallThroughToLaravel(): void
     {
-        $target = StubIdentity::create(['id' => 'target-1']);
+        $target = StubGrantee::create(['id' => 'target-1']);
 
         $this->actAsFullyPermittedPrincipal();
 
         Gate::define('reports:view', static fn (?object $user = null): bool => true);
         Gate::define('posts:*', static fn (?object $user = null): bool => true);
         Gate::define('Posts:Create', static fn (?object $user = null): bool => true);
-        Gate::policy(StubIdentity::class, AllowingLaravelPolicy::class);
+        Gate::policy(StubGrantee::class, AllowingLaravelPolicy::class);
 
         self::assertTrue(Gate::allows('reports:view'));
         self::assertTrue(Gate::allows('posts:*'));
@@ -805,7 +805,7 @@ final class GateRegistrarTest extends TestCase
     {
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'reports:archive', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission('reports:archive');
 
         $this->actAs($user);
@@ -834,7 +834,7 @@ final class GateRegistrarTest extends TestCase
             Gate::define($name, static fn (?object $user = null): bool => false);
         }
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission('media:upload');
         $user->givePermission(PackagePermissions::GUARDRAIL_MANAGE);
 
@@ -964,7 +964,7 @@ final class GateRegistrarTest extends TestCase
     {
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
 
-        $user = AuthenticatableIdentity::create(['id' => (string) Str::uuid()]);
+        $user = AuthenticatableGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission('posts:create');
 
         self::assertFalse(Gate::allows('posts:create'));
@@ -980,10 +980,10 @@ final class GateRegistrarTest extends TestCase
      * recorded unresolved-resource refusal for the supplied principal.
      *
      * @param  mixed  $argument
-     * @param  \Tests\Feature\Stubs\StubIdentity  $principal
+     * @param  \Tests\Feature\Stubs\StubGrantee  $principal
      * @return void
      */
-    private function assertGateRefusesUnidentifiedArgument(mixed $argument, StubIdentity $principal): void
+    private function assertGateRefusesUnidentifiedArgument(mixed $argument, StubGrantee $principal): void
     {
         $previousCount = \count($this->decisions());
 
@@ -1002,13 +1002,13 @@ final class GateRegistrarTest extends TestCase
      * trace prove neither was evaluated.
      *
      * @param  int  $previousCount
-     * @param  \Tests\Feature\Stubs\StubIdentity  $principal
+     * @param  \Tests\Feature\Stubs\StubGrantee  $principal
      * @param  array<string, mixed>  $context
      * @return void
      *
      * @throws \JsonException
      */
-    private function assertRefusalRecorded(int $previousCount, StubIdentity $principal, array $context = []): void
+    private function assertRefusalRecorded(int $previousCount, StubGrantee $principal, array $context = []): void
     {
         $decisions = $this->decisions();
 
@@ -1098,13 +1098,13 @@ final class GateRegistrarTest extends TestCase
      * Act as a principal that both holds the permission and carries a
      * wildcard-resource allow, so any check that is evaluated is allowed.
      *
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function actAsFullyPermittedPrincipal(): StubIdentity
+    private function actAsFullyPermittedPrincipal(): StubGrantee
     {
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission('posts:create');
 
         $user->attachPolicy(Policy::create([
@@ -1143,7 +1143,7 @@ final class GateRegistrarTest extends TestCase
      */
     private function actAsPrincipalAllowedOn(string $resource): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $user->attachPolicy(Policy::create([
             'id'       => (string) Str::uuid(),
@@ -1162,10 +1162,10 @@ final class GateRegistrarTest extends TestCase
      * Swap the subject resolver for one that returns the supplied authorizable
      * and refresh the manager so the next facade call picks it up.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @return void
      */
-    private function actAs(StubIdentity $user): void
+    private function actAs(StubGrantee $user): void
     {
         $resolver = new StubSubjectResolver($user);
 

@@ -27,7 +27,7 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Concerns\TracksGrantUsage;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
@@ -67,7 +67,7 @@ final class AuthorizationManagerTest extends TestCase
         $editor   = self::role('editor', $admin);
         $writer   = self::role('writer');
         $identity = self::identity('person');
-        $ann      = StubSecondIdentity::query()->create(['id' => 'ann']);
+        $ann      = StubSecondGrantee::query()->create(['id' => 'ann']);
 
         $admin->givePermissionTo($read);
         $writer->givePermissionTo($read);

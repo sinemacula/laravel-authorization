@@ -56,7 +56,7 @@ use Tests\Concerns\ReportsEveryDecision;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomRole;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
@@ -161,7 +161,7 @@ final class RoleServiceTest extends TestCase
 
         self::service()->grantPermission($editor, $edit);
         self::administrator([], 'peer');
-        app(GrantService::class)->grantRole(StubIdentity::query()->findOrFail('peer'), $editor);
+        app(GrantService::class)->grantRole(StubGrantee::query()->findOrFail('peer'), $editor);
 
         self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_RANK, static fn (): mixed => self::service()->syncPermissions($editor, [$edit, $read], actor: $admin));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): mixed => self::service()->syncPermissions($editor, [], actor: $nobody));
@@ -188,7 +188,7 @@ final class RoleServiceTest extends TestCase
         $editor = self::role('editor', ['rank' => 7]);
         $top    = self::role('top');
 
-        app(GrantService::class)->grantRole(StubIdentity::query()->create(['id' => 'junior']), $editor);
+        app(GrantService::class)->grantRole(StubGrantee::query()->create(['id' => 'junior']), $editor);
 
         $delete        = Permission::query()->create(['name' => 'posts:delete']);
         $renamed       = Permission::query()->whereKey($delete->getKey())->firstOrFail();
@@ -308,8 +308,8 @@ final class RoleServiceTest extends TestCase
         $owned    = Role::query()->withoutGlobalScopes()->create(['name' => 'owned', ...self::ownedBy($parent)]);
         $edit     = Permission::query()->create(['name' => 'posts:edit']);
         $revoke   = Permission::query()->create(['name' => PackagePermissions::PERMISSION_REVOKE]);
-        $local    = StubIdentity::create(['id' => 'child-admin']);
-        $wide     = StubIdentity::create(['id' => 'platform-admin']);
+        $local    = StubGrantee::create(['id' => 'child-admin']);
+        $wide     = StubGrantee::create(['id' => 'platform-admin']);
 
         self::service()->grantPermission($platform, $edit);
         self::service()->grantPermission($owned, $edit);
@@ -1241,7 +1241,7 @@ final class RoleServiceTest extends TestCase
         $revoke = static fn (): int => self::service()->revokePermission($role, 'billing:refund');
 
         self::service()->grantPermission($role, Permission::query()->create(['name' => 'billing:refund']));
-        app(GrantService::class)->grantRole(StubIdentity::query()->create(['id' => 'user']), $role);
+        app(GrantService::class)->grantRole(StubGrantee::query()->create(['id' => 'user']), $role);
 
         $raced   = self::raceOnQuery('/^select permission_id from role_permissions .*expires_at/', $revoke);
         $refusal = self::refusalOf(static fn (): SyncResult => self::service()->syncPermissions($role, ['billing:refund'], actor: $actor));
@@ -1270,7 +1270,7 @@ final class RoleServiceTest extends TestCase
 
         self::service()->grantPermission($role, Permission::query()->create(['name' => 'billing:refund']));
         self::service()->grantPermission($role, Permission::query()->firstOrCreate(['name' => 'posts:read']));
-        app(GrantService::class)->grantRole(StubIdentity::query()->create(['id' => 'user']), $role);
+        app(GrantService::class)->grantRole(StubGrantee::query()->create(['id' => 'user']), $role);
 
         $raced   = self::raceOnQuery('/^delete from role_permissions/', $revoke);
         $refusal = self::refusalOf(static fn (): SyncResult => self::service()->syncPermissions($role, ['billing:refund'], actor: $admin));

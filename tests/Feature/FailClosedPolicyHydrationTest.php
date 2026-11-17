@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -57,7 +57,7 @@ final class FailClosedPolicyHydrationTest extends TestCase
      */
     public function testMalformedPolicyRowMakesGetPoliciesThrow(): void
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         // Persist a valid policy via the happy path.
         $user->attachPolicy(Policy::create([
@@ -92,7 +92,7 @@ final class FailClosedPolicyHydrationTest extends TestCase
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:delete', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission('posts:create');
         $user->givePermission('posts:delete');
 
@@ -135,7 +135,7 @@ final class FailClosedPolicyHydrationTest extends TestCase
     {
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission('posts:create');
 
         self::attachMalformedPolicy($user, 'broken', ['statements' => 'not-a-list']);
@@ -169,7 +169,7 @@ final class FailClosedPolicyHydrationTest extends TestCase
     {
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission('posts:create');
 
         $user->attachPolicy(Policy::create(['name' => 'allow-create', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:create']]]]]));
@@ -217,7 +217,7 @@ final class FailClosedPolicyHydrationTest extends TestCase
 
         Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
 
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user = StubGrantee::create(['id' => (string) Str::uuid()]);
         $user->givePermission('posts:create');
         $user->attachPolicy(Policy::create(['name' => 'wide', 'document' => ['statements' => [
             ['effect' => 'deny', 'actions' => ['posts:delete']],
@@ -259,12 +259,12 @@ final class FailClosedPolicyHydrationTest extends TestCase
      * Persist a malformed policy document directly and attach it to the
      * supplied identity, bypassing the write-side validation.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee  $user
      * @param  string  $name
      * @param  array<string, mixed>  $document
      * @return void
      */
-    private static function attachMalformedPolicy(StubIdentity $user, string $name, array $document): void
+    private static function attachMalformedPolicy(StubGrantee $user, string $name, array $document): void
     {
         $id = (string) Str::uuid();
 

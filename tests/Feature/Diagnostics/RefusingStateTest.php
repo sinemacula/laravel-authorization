@@ -46,7 +46,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Usage\GrantUsageRecorder;
 use Tests\Feature\Stubs\RecordingPermissionProvider;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
@@ -101,7 +101,7 @@ final class RefusingStateTest extends TestCase
      */
     public function testTheManagerRefusesEveryOperation(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $manager  = $this->container()->make(AuthorizationManager::class);
         $scoped   = $manager->for($user);
         $decision = $manager->check('posts:read');
@@ -247,8 +247,8 @@ final class RefusingStateTest extends TestCase
             'hasAllRoles'            => static fn () => BladeHelpers::hasAllRoles([]),
             'hasPermission'          => static fn () => BladeHelpers::hasPermission([]),
             'hasAllPermissions'      => static fn () => BladeHelpers::hasAllPermissions([]),
-            'whereAuthorized'        => static fn () => StubIdentity::query()->whereAuthorized('posts:read'),
-            'the authorized scope'   => static fn () => (new AuthorizedScope('posts:read'))->apply(StubIdentity::query(), new StubIdentity),
+            'whereAuthorized'        => static fn () => StubGrantee::query()->whereAuthorized('posts:read'),
+            'the authorized scope'   => static fn () => (new AuthorizedScope('posts:read'))->apply(StubGrantee::query(), new StubGrantee),
         ]);
 
         $this->assertNothingRead();
@@ -292,7 +292,7 @@ final class RefusingStateTest extends TestCase
      */
     public function testServicesReviewsAndThePrunerRefuse(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $actor    = ActingContext::for($user);
         $policy   = new Policy(['name' => 'unsaved']);
         $unused   = ReviewQuery::unused(ReviewScope::everywhere(), Carbon::now());
@@ -324,7 +324,7 @@ final class RefusingStateTest extends TestCase
             'an export'                              => static fn () => $review->export($unused, $actor, static fn (): null => null),
             'a trusted export'                       => static fn () => $review->trustedExport($unused, static fn (): null => null),
             'a prune'                                => static fn () => $pruner->prune(100),
-            'an identity\'s grant scope'             => static fn () => $scopes->forIdentity(new Reference('stub_identity', 'user-1'), new Reference('stub_tenant', 't1')),
+            'an identity\'s grant scope'             => static fn () => $scopes->forIdentity(new Reference('stub_grantee', 'user-1'), new Reference('stub_tenant', 't1')),
             'a grant in a tenant'                    => static fn () => $scopes->hasGrantIn($user, new Reference('stub_tenant', 't1')),
             'the grantees reaching a tenant'         => static fn () => $scopes->granteesReaching(new Reference('stub_tenant', 't1')),
             'the grantees within a tenant'           => static fn () => $scopes->granteesWithin(new Reference('stub_tenant', 't1')),
@@ -410,11 +410,11 @@ final class RefusingStateTest extends TestCase
      * A user holding `posts:read` through the role `editor`, which outranks the
      * role `viewer`; return the user and both roles.
      *
-     * @return array{\Tests\Feature\Stubs\StubIdentity, \SineMacula\Laravel\Authorization\Models\Role, \SineMacula\Laravel\Authorization\Models\Role}
+     * @return array{\Tests\Feature\Stubs\StubGrantee, \SineMacula\Laravel\Authorization\Models\Role, \SineMacula\Laravel\Authorization\Models\Role}
      */
     private function grantee(): array
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $editor = Role::create(['name' => 'editor', 'rank' => 1]);
         $viewer = Role::create(['name' => 'viewer', 'rank' => 2]);
 

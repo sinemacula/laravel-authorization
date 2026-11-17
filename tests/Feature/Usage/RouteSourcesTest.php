@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Usage\GrantUsageKey;
 use SineMacula\Laravel\Authorization\Usage\RouteSources;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ReviewsAccess;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -253,11 +253,11 @@ final class RouteSourcesTest extends TestCase
      * Return the usage key of each of the subject's holdings the review lists
      * as described, sorted.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $subject
+     * @param  \Tests\Feature\Stubs\StubGrantee  $subject
      * @param  list<string>  $described
      * @return list<string>
      */
-    private static function rowKeys(StubIdentity $subject, array $described): array
+    private static function rowKeys(StubGrantee $subject, array $described): array
     {
         $query  = ReviewQuery::holdings(new Subject($subject, $subject), ReviewScope::everywhere());
         $result = self::trusted($query);

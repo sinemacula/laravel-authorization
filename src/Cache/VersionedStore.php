@@ -88,9 +88,9 @@ final class VersionedStore
 
     /**
      * Return the key of the one version token every policy attachment to a role
-     * shares, which every entry of an identity's policies records before it
-     * reads whether any role holds a policy, and every attachment, detachment
-     * or expiry change of a role's policy bumps.
+     * shares, which every entry of a grantee's policies records before it reads
+     * whether any role holds a policy, and every attachment, detachment or
+     * expiry change of a role's policy bumps.
      *
      * @return string
      */

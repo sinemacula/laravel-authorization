@@ -18,7 +18,7 @@ use Tests\Feature\Stubs\ContributingAuthenticationContext;
 use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\ReservedContextSource;
 use Tests\Feature\Stubs\SiblingAuthenticationContext;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -104,9 +104,9 @@ final class ContextConfigValidatorTest extends TestCase
         yield 'an empty source' => [['sources' => ['']], 'authorization.context.sources.0', 'entry must be a non-empty class-string, got string.'];
         yield 'a source that does not exist' => [['sources' => ['App\Missing']], 'authorization.context.sources.0', 'class \'App\Missing\' does not exist.'];
         yield 'a source not implementing the contract' => [
-            ['sources' => [StubIdentity::class]],
+            ['sources' => [StubGrantee::class]],
             'authorization.context.sources.0',
-            'class \'' . StubIdentity::class . '\' does not implement ' . ContextSource::class . '.',
+            'class \'' . StubGrantee::class . '\' does not implement ' . ContextSource::class . '.',
         ];
         yield 'a source claiming a reserved namespace' => [
             ['sources' => [PlanContextSource::class, ReservedContextSource::class]],

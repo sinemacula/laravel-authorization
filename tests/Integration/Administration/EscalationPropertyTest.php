@@ -25,7 +25,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions as Actions;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\AssertsDelegatedRefusals;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -316,7 +316,7 @@ final class EscalationPropertyTest extends TestCase
             foreach ($scenario->subjects as $subject) {
                 $this->forgetState();
 
-                $actor = StubIdentity::query()->whereKey($scenario->actorModel->getKey())->firstOrFail();
+                $actor = StubGrantee::query()->whereKey($scenario->actorModel->getKey())->firstOrFail();
 
                 $scope = EscalationScenario::key($tenant, 'platform');
 

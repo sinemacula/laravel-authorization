@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RefusesThePackage;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -177,7 +177,7 @@ final class ManagesPermissionsTest extends TestCase
     public function testTheWriteHelpersPassTheActorThrough(): void
     {
         $role   = Role::create(['name' => 'editor']);
-        $nobody = ActingContext::for(StubIdentity::create(['id' => 'nobody']));
+        $nobody = ActingContext::for(StubGrantee::create(['id' => 'nobody']));
         $calls  = [
             static fn (): Role => $role->givePermission('posts:edit', actor: $nobody),
             static fn (): Role => $role->givePermissionTo('posts:edit', actor: $nobody),
@@ -200,7 +200,7 @@ final class ManagesPermissionsTest extends TestCase
 
         self::assertSame(0, DB::table('role_permissions')->count());
 
-        $admin = StubIdentity::create(['id' => 'admin']);
+        $admin = StubGrantee::create(['id' => 'admin']);
 
         foreach ([PackagePermissions::PERMISSION_GRANT, 'posts:edit'] as $name) {
             $admin->givePermission(Permission::query()->firstOrCreate(['name' => $name]));

@@ -9,7 +9,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 
 /**
  * Shared checks of a grant's expiry: given in another zone, it is stored in UTC
@@ -45,7 +45,7 @@ trait ChecksGrantExpiry
 
         $first    = Carbon::parse('2030-01-01 12:00:00', 'UTC');
         $second   = Carbon::parse('2030-06-01 12:00:00', 'UTC');
-        $identity = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $identity = StubGrantee::create(['id' => (string) Str::uuid()]);
 
         $this->grantUntil($identity, $first);
 
@@ -78,7 +78,7 @@ trait ChecksGrantExpiry
         try {
             Carbon::setTestNow(Carbon::parse('2026-07-01 12:00:00', 'UTC'));
 
-            $identity = StubIdentity::create(['id' => (string) Str::uuid()]);
+            $identity = StubGrantee::create(['id' => (string) Str::uuid()]);
 
             $this->grantUntil($identity, Carbon::parse('2026-07-01 10:00:00', 'America/New_York'));
 
@@ -125,30 +125,30 @@ trait ChecksGrantExpiry
      * Grant the identity the row named by `grantedName()` until the given
      * instant, creating the row on the first grant.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  \DateTimeInterface  $expiresAt
      * @return void
      */
-    abstract protected function grantUntil(StubIdentity $identity, \DateTimeInterface $expiresAt): void;
+    abstract protected function grantUntil(StubGrantee $identity, \DateTimeInterface $expiresAt): void;
 
     /**
      * Return the names of the rows the identity holds through the grant
      * relation.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @return list<string>
      */
-    abstract protected function heldNames(StubIdentity $identity): array;
+    abstract protected function heldNames(StubGrantee $identity): array;
 
     /**
      * Load the identity afresh, so its relations are read again.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $identity
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private static function reload(Model $identity): StubIdentity
+    private static function reload(Model $identity): StubGrantee
     {
-        /** @var \Tests\Feature\Stubs\StubIdentity */
-        return StubIdentity::query()->findOrFail($identity->getKey());
+        /** @var \Tests\Feature\Stubs\StubGrantee */
+        return StubGrantee::query()->findOrFail($identity->getKey());
     }
 }

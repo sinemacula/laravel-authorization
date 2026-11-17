@@ -6,10 +6,10 @@ namespace Tests\Fixtures\GrantHooks;
 
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Subject;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
 
 /**
- * A subject resolver for an application with principals: a second stub identity
+ * A subject resolver for an application with principals: a second stub grantee
  * is a principal, whose identity the test maps by its key, and any other model
  * is its own identity.
  *
@@ -52,7 +52,7 @@ final readonly class PrincipalSubjectResolver implements SubjectResolver
     #[\Override]
     public function forUser(object $user): Subject
     {
-        if (!$user instanceof StubSecondIdentity) {
+        if (!$user instanceof StubSecondGrantee) {
             return new Subject($user, $user);
         }
 

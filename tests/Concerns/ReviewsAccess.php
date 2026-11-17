@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Reviews\ReviewRow;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\GrantScope\ListedIdentityDirectory;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 
@@ -81,12 +81,12 @@ trait ReviewsAccess
      * Return a new identity with the id.
      *
      * @param  string  $id
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    protected static function identity(string $id): StubIdentity
+    protected static function identity(string $id): StubGrantee
     {
-        /** @var \Tests\Feature\Stubs\StubIdentity */
-        return StubIdentity::query()->create(['id' => $id]);
+        /** @var \Tests\Feature\Stubs\StubGrantee */
+        return StubGrantee::query()->create(['id' => $id]);
     }
 
     /**

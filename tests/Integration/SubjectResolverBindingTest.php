@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
@@ -121,13 +121,13 @@ final class SubjectResolverBindingTest extends TestCase
     }
 
     /**
-     * Create a stub identity holding a direct permission grant.
+     * Create a stub grantee holding a direct permission grant.
      *
      * @param  string  $permission
      * @param  string|null  $id
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function makeIdentityWithPermission(string $permission, ?string $id = null): StubIdentity
+    private function makeIdentityWithPermission(string $permission, ?string $id = null): StubGrantee
     {
         $role = Role::create([
             'id'    => 'role-' . \md5($permission),
@@ -143,7 +143,7 @@ final class SubjectResolverBindingTest extends TestCase
 
         $role->permissions()->attach($permissionModel->getKey());
 
-        $user = StubIdentity::create([
+        $user = StubGrantee::create([
             'id' => $id ?? ('usr-' . \md5($permission)),
         ]);
 

@@ -28,8 +28,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Usage\WeighedGrants;
 use Tests\Concerns\ActivatesBreakGlass;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\TestCase;
 
 /**
@@ -100,7 +100,7 @@ final class CheckGrantsTest extends TestCase
      */
     public function testACustomResolversPoliciesAreUnavailable(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $subject  = new Subject($user, $user);
         $policy   = EvaluationPolicy::fromArray(['name' => 'coded', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]);
         $resolver = new class ($policy) implements PolicyResolver {
@@ -147,7 +147,7 @@ final class CheckGrantsTest extends TestCase
      */
     public function testThePermissionHeldIsNotedOnWhatWasWeighed(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($user, $user);
         $weighed = new WeighedGrants(true, true);
 
@@ -167,7 +167,7 @@ final class CheckGrantsTest extends TestCase
      */
     public function testAnExplainedCheckNotesWhereThePermissionCameFrom(): void
     {
-        $user     = StubIdentity::create(['id' => 'user-1']);
+        $user     = StubGrantee::create(['id' => 'user-1']);
         $subject  = new Subject($user, $user);
         $recorder = new EvidenceRecorder;
         $weighed  = new WeighedGrants(true, true);
@@ -192,7 +192,7 @@ final class CheckGrantsTest extends TestCase
      */
     public function testTheActivationsBehindTheGrantsAreNoted(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $subject = new Subject($user, $user);
         $role    = self::emergencyRole();
         $policy  = Policy::create(['name' => 'deleting', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:delete']]]]]);
@@ -220,12 +220,12 @@ final class CheckGrantsTest extends TestCase
      * Return a principal and an identity that each have a policy, with those
      * policies, and attach a policy to the record `posts:7`.
      *
-     * @return array{\Tests\Feature\Stubs\StubIdentity, \Tests\Feature\Stubs\StubSecondIdentity, list<\SineMacula\Laravel\Authorization\Models\Policy>}
+     * @return array{\Tests\Feature\Stubs\StubGrantee, \Tests\Feature\Stubs\StubSecondGrantee, list<\SineMacula\Laravel\Authorization\Models\Policy>}
      */
     private static function withPolicies(): array
     {
-        $principal = StubIdentity::create(['id' => 'account-1']);
-        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $principal = StubGrantee::create(['id' => 'account-1']);
+        $identity  = StubSecondGrantee::create(['id' => 'person-1']);
         $editing   = Policy::create(['name' => 'editing', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:*']]]]]);
         $denying   = Policy::create(['name' => 'no-publishing', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:publish']]]]]);
         $locked    = Policy::create(['name' => 'locked', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:edit']]]]]);

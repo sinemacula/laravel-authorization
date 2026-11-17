@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Support;
 
 /**
- * The keys of the policies an identity gets through its roles, the seconds
- * until the nearest of the grants they come through expires, whether the role
+ * The keys of the policies a grantee gets through its roles, the seconds until
+ * the nearest of the grants they come through expires, whether the role
  * hierarchy stayed the same while they were read, and, read for grant usage
  * tracking, the chain of each role held and the policies attached to each role;
  * the keys of those reached only through an attachment whose denies alone

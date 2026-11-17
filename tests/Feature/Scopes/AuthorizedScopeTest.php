@@ -18,7 +18,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\FixedSubjectResolver;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\QueryScoping\GuardedPost;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
@@ -48,7 +48,7 @@ final class AuthorizedScopeTest extends TestCase
      */
     public function testEveryQueryIsDecidedWhenItRuns(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         $this->resolveRequest($user);
 
@@ -80,7 +80,7 @@ final class AuthorizedScopeTest extends TestCase
      */
     public function testARefusalThrowsFromTheCallThatRuns(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         $this->resolveRequest($user);
         $user->attachPolicy(self::storedPolicy('unknown', [['effect' => 'deny', 'actions' => [GuardedPost::ACTION], 'resources' => [(new GuardedPost)->getMorphClass() . ':?']]]));
@@ -99,7 +99,7 @@ final class AuthorizedScopeTest extends TestCase
      */
     public function testRemovingTheModelLevelScopeIsAnOptOut(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
 
         $manager = $this->resolveRequest($user);
 
@@ -123,7 +123,7 @@ final class AuthorizedScopeTest extends TestCase
      */
     public function testTheScopeRefusesReentry(): void
     {
-        $this->resolveRequest(StubIdentity::create(['id' => 'u1']));
+        $this->resolveRequest(StubGrantee::create(['id' => 'u1']));
 
         $refused = self::refusalOf(static fn (): mixed => Reentrancy::guarded(static fn (): mixed => GuardedPost::query()->get()));
 
@@ -146,7 +146,7 @@ final class AuthorizedScopeTest extends TestCase
      */
     public function testTheScopeRefusesOnTheModelOfEitherHalfOfTheSubject(): void
     {
-        $user = StubIdentity::create(['id' => 'u1']);
+        $user = StubGrantee::create(['id' => 'u1']);
         $post = GuardedPost::query()->withoutGlobalScope(AuthorizedScope::class)->create(['id' => 9, 'title' => 'post']);
 
         foreach ([new Subject($user, $post), new Subject($post, $user)] as $subject) {
@@ -196,7 +196,7 @@ final class AuthorizedScopeTest extends TestCase
         $this->refuseThePackage();
 
         $this->assertEachRefused([
-            'apply' => static fn () => (new AuthorizedScope('posts:read'))->apply(StubIdentity::query(), new StubIdentity),
+            'apply' => static fn () => (new AuthorizedScope('posts:read'))->apply(StubGrantee::query(), new StubGrantee),
         ]);
     }
 }

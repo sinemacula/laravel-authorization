@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Query\ResourceShape;
 use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Query\StatementScreen;
 use SineMacula\Laravel\Authorization\Subject;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
@@ -32,7 +32,7 @@ final class ClassRequestTest extends TestCase
      */
     public function testTheRequestHoldsWhatItIsGiven(): void
     {
-        $user    = StubIdentity::create(['id' => 'u1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
         $shape   = ResourceShape::of(new ScopedPost, 'posts:view', new SchemaInspector);
         $screen  = new StatementScreen('posts:view', $shape, $subject);

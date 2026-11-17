@@ -11,9 +11,9 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
-use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\BoundaryRemoved;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -31,7 +31,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\ApiGuardedUser;
 use Tests\Feature\Stubs\RecordingLogger;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\VanishedPolicy;
 use Tests\TestCase;
 
@@ -75,7 +75,7 @@ final class GrantChangesTest extends TestCase
      */
     public function testASyncsChangesAreItsGrantsAndRevocations(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $live    = Role::create(['name' => 'live']);
         $expired = Role::create(['name' => 'expired']);
         $fresh   = Role::create(['name' => 'fresh']);
@@ -124,7 +124,7 @@ final class GrantChangesTest extends TestCase
     {
         Carbon::setTestNow('2026-07-01 12:00:00');
 
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $tenant  = new Reference('stub_tenant', 'tenant-a');
         $widened = Role::create(['name' => 'widened']);
         $narrow  = Role::create(['name' => 'narrowed']);
@@ -199,7 +199,7 @@ final class GrantChangesTest extends TestCase
     public function testARevocationDecidesWhatIsHeldElseTheFirstCandidate(): void
     {
         $tenant  = self::createTenant('tenant-a');
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $first   = Role::create(['name' => 'editor']);
         $second  = Role::create(['name' => 'editor', ...self::ownedBy($tenant)]);
         $grantee = Reference::of($user);
@@ -231,14 +231,14 @@ final class GrantChangesTest extends TestCase
     public function testEverythingNamesEveryGrantAndBoundary(): void
     {
         $tenant = self::createTenant('tenant-a');
-        $user   = StubIdentity::create(['id' => 'user-1']);
+        $user   = StubGrantee::create(['id' => 'user-1']);
         $cap    = Policy::create(['name' => 'cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:*']]]]]);
 
         self::grants()->grantRole($user, Role::create(['name' => 'editor']), tenant: $tenant);
         self::grants()->grantPermission($user, Permission::create(['name' => 'posts:edit']));
         self::grants()->attachPolicy($user, Policy::create(['name' => 'audit', 'document' => ['statements' => []]]));
         BoundaryService::instance()?->set($user, $cap, $tenant);
-        self::grants()->grantRole(StubIdentity::create(['id' => 'user-2']), Role::create(['name' => 'other']));
+        self::grants()->grantRole(StubGrantee::create(['id' => 'user-2']), Role::create(['name' => 'other']));
 
         [$changes, $grants, $boundaries] = GrantChanges::everything(Reference::of($user));
 
@@ -267,7 +267,7 @@ final class GrantChangesTest extends TestCase
      */
     public function testRowsNamingHalfATenantAreDecidedAtPlatformScopeAndRevokedApart(): void
     {
-        $user    = StubIdentity::create(['id' => 'user-1']);
+        $user    = StubGrantee::create(['id' => 'user-1']);
         $grantee = Reference::of($user);
         $logger  = new RecordingLogger;
         $half    = ['authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1', 'tenant_type' => null, 'tenant_id' => 'tenant-a'];
@@ -360,7 +360,7 @@ final class GrantChangesTest extends TestCase
     public function testEverythingIsRevokedOrExactlyWhatWasDecided(): void
     {
         $tenant    = self::createTenant('tenant-a');
-        $user      = StubIdentity::create(['id' => 'user-1']);
+        $user      = StubGrantee::create(['id' => 'user-1']);
         $grantee   = Reference::of($user);
         $cap       = Policy::create(['name' => 'cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:*']]]]]);
         $operation = Operation::begin();
@@ -412,7 +412,7 @@ final class GrantChangesTest extends TestCase
      */
     public function testABoundaryWhosePolicyIsGoneRefusesEverything(): void
     {
-        $user = StubIdentity::create(['id' => 'user-1']);
+        $user = StubGrantee::create(['id' => 'user-1']);
         $cap  = Policy::create(['name' => 'cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:*']]]]]);
 
         BoundaryService::instance()?->set($user, $cap);
@@ -456,7 +456,7 @@ final class GrantChangesTest extends TestCase
         self::assertSame($role->id, GrantChanges::key($role));
         self::assertSame('api', GrantChanges::guard(new ApiGuardedUser));
         self::assertNull(GrantChanges::guard(new Reference('user', '1')));
-        self::assertNull(GrantChanges::guard(StubIdentity::create(['id' => 'user-1'])));
+        self::assertNull(GrantChanges::guard(StubGrantee::create(['id' => 'user-1'])));
     }
 
     /**

@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Performance\Support\CountingSubjectResolver;
@@ -306,11 +306,11 @@ final class TenantScopingTest extends TestCase
     }
 
     /**
-     * An identity assigned a tenant role receives the expected permissions.
+     * A grantee assigned a tenant role receives the expected permissions.
      *
      * @return void
      */
-    public function testIdentityWithTenantRoleGetsCorrectPermissions(): void
+    public function testGranteeWithTenantRoleGetsCorrectPermissions(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
@@ -332,7 +332,7 @@ final class TenantScopingTest extends TestCase
 
         $role->givePermission($permission);
 
-        $identity = StubIdentity::create(['id' => 'user-1', 'name' => 'Alice']);
+        $identity = StubGrantee::create(['id' => 'user-1', 'name' => 'Alice']);
         $identity->assignRole($role);
 
         self::assertTrue($identity->hasRole('editor'));

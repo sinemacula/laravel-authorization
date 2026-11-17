@@ -77,14 +77,14 @@ final class UnresolvedSubjectException extends \InvalidArgumentException
 
     /**
      * Refuse a model that cannot be the subject of a check: its principal is
-     * not a saved authorizable identity.
+     * not a saved authorizable grantee.
      *
      * @param  string  $reference
      * @return self
      */
     public static function unsupported(string $reference): self
     {
-        return new self("The subject '{$reference}' cannot be checked: its principal is not a saved authorizable identity.", self::UNSUPPORTED);
+        return new self("The subject '{$reference}' cannot be checked: its principal is not a saved authorizable grantee.", self::UNSUPPORTED);
     }
 
     /**
@@ -130,7 +130,7 @@ final class UnresolvedSubjectException extends \InvalidArgumentException
             self::MALFORMED    => "The {$argument} must be in the format {morphType}:{key} (e.g. user:1).",
             self::UNKNOWN_TYPE => "The {$argument}'s type is not an Eloquent model.",
             self::NOT_FOUND    => "The {$argument} names no saved row.",
-            self::UNSUPPORTED  => "The {$argument} cannot be checked: its principal is not a saved authorizable identity.",
+            self::UNSUPPORTED  => "The {$argument} cannot be checked: its principal is not a saved authorizable grantee.",
             self::AMBIGUOUS    => "The {$argument} is ambiguous: the subject resolver maps it to a subject that is not about it.",
             default            => "The {$argument} could not be resolved.",
         };

@@ -82,14 +82,14 @@ trait HasRoles // @phpstan-ignore trait.unused
     }
 
     /**
-     * Assign the given role to this identity, through the grant service.
+     * Assign the given role to this grantee, through the grant service.
      *
      * An optional `$expiresAt` makes the grant temporal — the assignment is
      * filtered out of `$user->roles` automatically the moment the clock passes
      * the supplied instant, without requiring a sweeper run. Passing null (the
-     * default) creates a forever grant. Assigning a role the identity holds
-     * with the same expiry and reach changes nothing and dispatches no event; a
-     * role whose grant has expired is re-armed with the new expiry.
+     * default) creates a forever grant. Assigning a role the grantee holds with
+     * the same expiry and reach changes nothing and dispatches no event; a role
+     * whose grant has expired is re-armed with the new expiry.
      *
      * A grant in a tenant also holds in the tenants below it in the tenant
      * tree, unless `$includeSubtree` is false.
@@ -118,14 +118,14 @@ trait HasRoles // @phpstan-ignore trait.unused
     }
 
     /**
-     * Revoke the given role from this identity, through the grant service.
+     * Revoke the given role from this grantee, through the grant service.
      *
-     * A name is revoked from the grants the identity holds, not from the one
-     * row a lookup would pick: every held role of that name for the identity's
+     * A name is revoked from the grants the grantee holds, not from the one row
+     * a lookup would pick: every held role of that name for the grantee's
      * guard, or guard-agnostic, is detached, whether the current tenant or the
      * platform owns it, so a tenant's role of the same name never hides the
-     * platform grant. `IdentityRoleRevoked` fires once for each role really
-     * detached, and not at all when the identity held none.
+     * platform grant. `GranteeRoleRevoked` fires once for each role really
+     * detached, and not at all when the grantee held none.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
@@ -143,11 +143,11 @@ trait HasRoles // @phpstan-ignore trait.unused
     }
 
     /**
-     * Replace this identity's roles with the supplied set, through the grant
+     * Replace this grantee's roles with the supplied set, through the grant
      * service.
      *
-     * Each net attachment fires `IdentityRoleAssigned` and each net detachment
-     * fires `IdentityRoleRevoked`, so audit consumers receive the same per-row
+     * Each net attachment fires `GranteeRoleAssigned` and each net detachment
+     * fires `GranteeRoleRevoked`, so audit consumers receive the same per-row
      * signal they would for `assignRole()` / `revokeRole()` calls and the cache
      * invalidation listener wired to those events keeps the resolution cache
      * coherent without a separate forget call in this method. A listed role
@@ -155,7 +155,7 @@ trait HasRoles // @phpstan-ignore trait.unused
      * limited time, call `GrantService::syncRoles()` with an expiry.
      *
      * A name keeps every held role of that name, whether the current tenant or
-     * the platform owns it, and only when the identity holds none is the role
+     * the platform owns it, and only when the grantee holds none is the role
      * the lookup ranks first attached, so a tenant's role of the same name
      * never replaces a platform grant.
      *
@@ -182,7 +182,7 @@ trait HasRoles // @phpstan-ignore trait.unused
     }
 
     /**
-     * Determine whether this identity has the given role.
+     * Determine whether this grantee has the given role.
      *
      * A role model matches only that row, by primary key, so a tenant's role
      * that shares the name of a platform role never passes a check for the
@@ -227,7 +227,7 @@ trait HasRoles // @phpstan-ignore trait.unused
     }
 
     /**
-     * Return the names of every role assigned to this identity.
+     * Return the names of every role assigned to this grantee.
      *
      * The names are read through the resolution cache: memoised for the request
      * or job, and kept in the persistent store when one is configured, for no
@@ -250,7 +250,7 @@ trait HasRoles // @phpstan-ignore trait.unused
     // ------------------------------------------------------------------
 
     /**
-     * Determine whether rank lets this identity act on the given target, as
+     * Determine whether rank lets this grantee act on the given target, as
      * `RankComparison` compares them: strictly senior, an unranked target the
      * most junior, an unranked actor acting on no one, and either side whose
      * roles cannot be read not comparable. Both are resolved the same way, in

@@ -24,11 +24,11 @@ final class DecidingLaravelPolicy
     /**
      * Decide whether the user may publish the tenant.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity|null  $user
+     * @param  \Tests\Feature\Stubs\StubGrantee|null  $user
      * @param  \Tests\Feature\Stubs\StubTenant  $tenant
      * @return \Illuminate\Auth\Access\Response
      */
-    public function publish(?StubIdentity $user, StubTenant $tenant): Response
+    public function publish(?StubGrantee $user, StubTenant $tenant): Response
     {
         return $this->decide($user, 'tenants:publish', $tenant);
     }

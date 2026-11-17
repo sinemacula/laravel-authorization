@@ -6,7 +6,7 @@ namespace Tests\Feature\Usage;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableGrantee;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -18,9 +18,9 @@ use SineMacula\Laravel\Authorization\Usage\GrantRoute;
 use SineMacula\Laravel\Authorization\Usage\WeighedGrants;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Concerns\TracksGrantUsage;
-use Tests\Feature\Stubs\CustomGrantsIdentity;
+use Tests\Feature\Stubs\CustomGrantsGrantee;
 use Tests\Feature\Stubs\StubMachine;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\TestCase;
 
 /**
@@ -55,7 +55,7 @@ final class DecisionRoutesTest extends TestCase
     public function testAnAllowRestsOnTheMatchingPermissionsRoutes(): void
     {
         $identity = self::identity('person');
-        $ann      = StubSecondIdentity::query()->create(['id' => 'ann']);
+        $ann      = StubSecondGrantee::query()->create(['id' => 'ann']);
         $reader   = self::role('reader');
         $read     = self::permission('posts:read');
 
@@ -88,7 +88,7 @@ final class DecisionRoutesTest extends TestCase
     public function testAnAllowByTheIdentityRestsOnItsRoutes(): void
     {
         $identity = self::identity('person');
-        $ann      = StubSecondIdentity::query()->create(['id' => 'ann']);
+        $ann      = StubSecondGrantee::query()->create(['id' => 'ann']);
 
         self::grants()->grantPermission($ann, self::permission('posts:write'));
         self::grants()->grantPermission($identity, self::permission('posts:read'));
@@ -150,7 +150,7 @@ final class DecisionRoutesTest extends TestCase
      */
     public function testAnIdentitysAttachmentIsUsedWhenItDecides(): void
     {
-        $ann     = StubSecondIdentity::query()->create(['id' => 'ann']);
+        $ann     = StubSecondGrantee::query()->create(['id' => 'ann']);
         $person  = self::identity('person');
         $machine = StubMachine::query()->create(['id' => 'svc-1']);
         $policy  = self::policy('no-delete');
@@ -236,7 +236,7 @@ final class DecisionRoutesTest extends TestCase
             #[\Override]
             public function policiesFor(object $principal): array
             {
-                return $principal instanceof AuthorizableIdentity ? $principal->getPolicies() : [];
+                return $principal instanceof AuthorizableGrantee ? $principal->getPolicies() : [];
             }
         });
 
@@ -254,7 +254,7 @@ final class DecisionRoutesTest extends TestCase
      */
     public function testAGranteeThatCannotSayUsesNoRoute(): void
     {
-        $custom   = CustomGrantsIdentity::query()->create(['id' => 'custom']);
+        $custom   = CustomGrantsGrantee::query()->create(['id' => 'custom']);
         $decision = $this->actAs($custom)->check('reports:read');
 
         self::assertTrue($decision->isAllowed());

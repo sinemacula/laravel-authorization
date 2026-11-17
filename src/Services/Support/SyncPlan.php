@@ -142,7 +142,7 @@ final readonly class SyncPlan
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Support\Carbon  $now
      * @param  list<string>  $live
-     * @return array{list<\SineMacula\Laravel\Authorization\Contracts\IdentityEvent>, array<string, list<string>>}
+     * @return array{list<\SineMacula\Laravel\Authorization\Contracts\GranteeEvent>, array<string, list<string>>}
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException
@@ -183,7 +183,7 @@ final readonly class SyncPlan
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  array<string, bool>  $dropped
-     * @return list<\SineMacula\Laravel\Authorization\Contracts\IdentityEvent>
+     * @return list<\SineMacula\Laravel\Authorization\Contracts\GranteeEvent>
      */
     public function revokedEvents(Operation $operation, Reference $grantee, array $dropped): array
     {

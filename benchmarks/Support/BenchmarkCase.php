@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
  *
  * Spins up a Testbench-backed application with the authorization service
  * provider registered, an in-memory SQLite connection, and the shipped package
- * migrations + stub identity table applied. Each bench subclass calls `boot()`
+ * migrations + stub grantee table applied. Each bench subclass calls `boot()`
  * from its `@BeforeMethods` hook so the container is ready before the first
  * revolution.
  *
@@ -88,7 +88,7 @@ abstract class BenchmarkCase
     }
 
     /**
-     * Run the package migrations plus a small stub-identity table used by
+     * Run the package migrations plus a small stub-grantee table used by
      * benches that need a persistable principal.
      *
      * @return void
@@ -119,11 +119,11 @@ abstract class BenchmarkCase
             $migration->up();
         }
 
-        if (Schema::hasTable('bench_identities')) {
+        if (Schema::hasTable('bench_grantees')) {
             return;
         }
 
-        Schema::create('bench_identities', static function (Blueprint $table): void {
+        Schema::create('bench_grantees', static function (Blueprint $table): void {
             $table->string('id')->primary();
             $table->string('name')->nullable();
             $table->timestamps();

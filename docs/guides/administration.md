@@ -351,10 +351,10 @@ first refusal, and its reason, never depend on the order the rows were read in.
     'conditions' => ['eq' => ['resource.policy' => 'support', 'resource.digest' => $approvedDigest]]]
 ```
 
-`canActOn($target)` on an identity compares rank alone, as the rank rule does, and grants nothing by itself. When
+`canActOn($target)` on a grantee compares rank alone, as the rank rule does, and grants nothing by itself. When
 neither side holds a ranked role, the comparison refuses: both count as the most junior, so their ranks are equal, and
 strict seniority refuses equal rank. An application that leaves rank on but ranks no role should turn rank off
-(`authorization.rank.enabled`), or no delegated change to an identity will pass it.
+(`authorization.rank.enabled`), or no delegated change to a principal or an identity will pass it.
 
 **Concurrency.** A delegated call never commits on authority that changed under it, and never writes a row its
 decisions did not see. Each try runs in a transaction of its own and locks, with `lockForUpdate()` on the write
@@ -417,15 +417,15 @@ write now widens an identity's scope with no hook run for it, up to `administrat
 **Trusted surfaces.** Each of these is trusted system work when it is used without an actor: nothing is decided, so use
 it that way only from your own code, never as an endpoint for user-controlled administration:
 
-| Surface                                                                                    | Warning                                                                 |
-|--------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
-| A management service called without `actor:`                                               | Trusted: decides nothing; pass the acting context of the administrator  |
-| A raw Eloquent write on the package's models, pivots or tables                             | Always trusted: no actor; pivot and builder writes dispatch no event    |
-| An identity's `assignRole()`, `givePermission()`, `attachPolicy()`, `createInlinePolicy()` | Trusted without `actor:`; every write helper takes one and passes it on |
-| The Spatie aliases `givePermissionTo()`, `revokePermissionTo()` and `removeRole()`         | Trusted without `actor:`; each takes one and passes it on               |
-| A role's `givePermission()`, `revokePermission()`, `syncPermissions()` and their aliases   | Trusted without `actor:`; each takes one and passes it to `RoleService` |
-| `authorization:grant` and `authorization:revoke`, seeders and migrations                   | Trusted without `--actor`; both commands take one and pass it on        |
-| `AccessReview::trusted()`, `trustedPage()`, `trustedStream()`, `trustedExport()`           | Always trusted; `authorization:review` uses `trustedExport()` alone     |
+| Surface                                                                                  | Warning                                                                 |
+|------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
+| A management service called without `actor:`                                             | Trusted: decides nothing; pass the acting context of the administrator  |
+| A raw Eloquent write on the package's models, pivots or tables                           | Always trusted: no actor; pivot and builder writes dispatch no event    |
+| A grantee's `assignRole()`, `givePermission()`, `attachPolicy()`, `createInlinePolicy()` | Trusted without `actor:`; every write helper takes one and passes it on |
+| The Spatie aliases `givePermissionTo()`, `revokePermissionTo()` and `removeRole()`       | Trusted without `actor:`; each takes one and passes it on               |
+| A role's `givePermission()`, `revokePermission()`, `syncPermissions()` and their aliases | Trusted without `actor:`; each takes one and passes it to `RoleService` |
+| `authorization:grant` and `authorization:revoke`, seeders and migrations                 | Trusted without `--actor`; both commands take one and pass it on        |
+| `AccessReview::trusted()`, `trustedPage()`, `trustedStream()`, `trustedExport()`         | Always trusted; `authorization:review` uses `trustedExport()` alone     |
 
 The maintenance commands `authorization:sync`, `authorization:prune` and `authorization:migrate-spatie` define the
 catalogue, clear expired and orphaned rows and import from Spatie for whoever runs the console; they are not
@@ -701,7 +701,7 @@ principals an identity owns only from the identity directory, a class implementi
 `IdentityPrincipals`: the references to the principals the identity owns, the identity itself left out, and whether
 that list is complete. A directory that cannot tell, for an identity it does not know or a store it cannot read,
 returns an incomplete list with whatever principals it does know. The package never infers an identity's principals,
-from `AuthorizableIdentity` or from anything else.
+from `AuthorizableGrantee` or from anything else.
 
 The shipped default, `GuardUserIdentityDirectory`, knows the answer only under the shipped subject resolver, where
 every user is its own identity and owns no other principal, so its list is complete and empty. Under any other

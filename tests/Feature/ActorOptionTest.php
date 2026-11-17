@@ -11,7 +11,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Console\Support\ActorOption;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
 /**
@@ -63,8 +63,8 @@ final class ActorOptionTest extends TestCase
      */
     public function testNamesTheActorAsAnActingContext(): void
     {
-        $admin = StubIdentity::create(['id' => 'admin-1']);
-        $actor = ActorOption::acting(StubIdentity::class . ':admin-1');
+        $admin = StubGrantee::create(['id' => 'admin-1']);
+        $actor = ActorOption::acting(StubGrantee::class . ':admin-1');
 
         self::assertNull(ActorOption::acting(null));
         self::assertInstanceOf(ActingContext::class, $actor);
@@ -72,7 +72,7 @@ final class ActorOptionTest extends TestCase
         self::assertTrue($admin->is($actor->subject->subject));
         self::assertNull($actor->subject->session);
 
-        foreach (['admin-1', StubIdentity::class . ':missing'] as $value) {
+        foreach (['admin-1', StubGrantee::class . ':missing'] as $value) {
             try {
                 ActorOption::acting($value);
                 self::fail("'{$value}' was not refused.");
@@ -90,9 +90,9 @@ final class ActorOptionTest extends TestCase
      */
     public function testResolvesAMorphAlias(): void
     {
-        Relation::morphMap(['member' => StubIdentity::class]);
+        Relation::morphMap(['member' => StubGrantee::class]);
 
-        StubIdentity::query()->create(['id' => 'admin-1']);
+        StubGrantee::query()->create(['id' => 'admin-1']);
 
         self::assertEquals(new Reference('member', 'admin-1'), ActorOption::parse('member:admin-1'));
     }
@@ -105,13 +105,13 @@ final class ActorOptionTest extends TestCase
      */
     public function testNamesAClassByItsMorphClass(): void
     {
-        StubIdentity::query()->create(['id' => 'admin:1']);
+        StubGrantee::query()->create(['id' => 'admin:1']);
 
-        self::assertEquals(new Reference(StubIdentity::class, 'admin:1'), ActorOption::parse(StubIdentity::class . ':admin:1'));
+        self::assertEquals(new Reference(StubGrantee::class, 'admin:1'), ActorOption::parse(StubGrantee::class . ':admin:1'));
 
-        Relation::morphMap(['member' => StubIdentity::class]);
+        Relation::morphMap(['member' => StubGrantee::class]);
 
-        self::assertEquals(new Reference('member', 'admin:1'), ActorOption::parse(StubIdentity::class . ':admin:1'));
+        self::assertEquals(new Reference('member', 'admin:1'), ActorOption::parse(StubGrantee::class . ':admin:1'));
     }
 
     /**
@@ -161,8 +161,8 @@ final class ActorOptionTest extends TestCase
      */
     public function testRefusesAnActorThatDoesNotExist(): void
     {
-        $this->expectExceptionObject(new \InvalidArgumentException('No actor ' . StubIdentity::class . ' found with key \'ghost\'.'));
+        $this->expectExceptionObject(new \InvalidArgumentException('No actor ' . StubGrantee::class . ' found with key \'ghost\'.'));
 
-        ActorOption::parse(StubIdentity::class . ':ghost');
+        ActorOption::parse(StubGrantee::class . ':ghost');
     }
 }

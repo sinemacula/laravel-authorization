@@ -103,7 +103,7 @@ use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
-use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\Feature\Stubs\CatalogueReadingProvider;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
 use Tests\Feature\Stubs\DeferredBindingProvider;
@@ -112,7 +112,7 @@ use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\InjectedRequirementChecker;
 use Tests\Feature\Stubs\LateAuthenticationContextProvider;
 use Tests\Feature\Stubs\PermissiveActionCatalogue;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\Feature\Stubs\StubSessionPolicySource;
 use Tests\Feature\Stubs\StubSubjectResolver;
@@ -1519,7 +1519,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['environment.region' => 'eu']]],
         ]]);
 
-        self::assertTrue(Authorization::for(new StubIdentity(['id' => 'eu']))->withPolicies([$policy])->can('posts:create', null, ['environment' => ['region' => 'us']]));
+        self::assertTrue(Authorization::for(new StubGrantee(['id' => 'eu']))->withPolicies([$policy])->can('posts:create', null, ['environment' => ['region' => 'us']]));
     }
 
     /**
@@ -1631,7 +1631,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     public function testConfiguredResourceTenantResolverIsBound(): void
     {
         $app   = $this->application();
-        $model = new StubIdentity;
+        $model = new StubGrantee;
 
         $default = $app->make(ResourceTenantResolver::class);
 
@@ -1769,7 +1769,7 @@ final class AuthorizationServiceProviderTest extends TestCase
 
         self::assertSame(['platform'], Role::query()->pluck('name')->all());
 
-        $this->actingAs(AuthenticatableIdentity::create(['id' => 'user-signed-in']));
+        $this->actingAs(AuthenticatableGrantee::create(['id' => 'user-signed-in']));
         $this->startNextJob();
 
         self::assertSame(['platform'], Role::query()->pluck('name')->all());
@@ -2364,7 +2364,7 @@ final class AuthorizationServiceProviderTest extends TestCase
         $aEditor = Role::create(['name' => 'a-editor', 'guard' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => 'tenant-a']);
         $bEditor = Role::create(['name' => 'b-editor', 'guard' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => 'tenant-b']);
 
-        $user = StubIdentity::create(['id' => 'user-1', 'name' => 'Alice']);
+        $user = StubGrantee::create(['id' => 'user-1', 'name' => 'Alice']);
         $user->assignRole($onCall, Carbon::parse('2026-07-01 12:05:00'));
         $user->assignRole($aEditor);
         $user->assignRole($bEditor);
@@ -2710,11 +2710,11 @@ final class AuthorizationServiceProviderTest extends TestCase
      * Load an identity afresh.
      *
      * @param  string  $userId
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function identity(string $userId): StubIdentity
+    private function identity(string $userId): StubGrantee
     {
-        return StubIdentity::query()->findOrFail($userId);
+        return StubGrantee::query()->findOrFail($userId);
     }
 
     /**

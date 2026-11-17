@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 
 /**
  * A grantee that holds roles, permissions and policies through the standalone
- * traits, implementing each narrow contract but not `AuthorizableIdentity`, so
+ * traits, implementing each narrow contract but not `AuthorizableGrantee`, so
  * the boundaries set on it are shown to cap it all the same.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -36,5 +36,5 @@ final class NarrowContractsGrantee extends Model implements SupportsPermissions,
     protected $fillable = ['id', 'name'];
 
     /** @var string|null Backing table. */
-    protected $table = 'stub_identities';
+    protected $table = 'stub_grantees';
 }

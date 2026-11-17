@@ -14,8 +14,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * grant or sync writes, with the expiry the grant carries. A grant that had
  * expired and is re-armed dispatches it again, with `PermissionExpiryChanged`.
  *
- * Distinct from `Identity\PermissionGranted`, which reports a permission
- * granted to a grantee directly.
+ * Distinct from `Grantee\PermissionGranted`, which reports a permission granted
+ * to a grantee directly.
  *
  * A snapshot of plain values, never a model. It is dispatched once the write
  * commits, on the package's connection, and never for a write that rolls back

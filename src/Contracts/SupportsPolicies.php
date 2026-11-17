@@ -7,10 +7,10 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 
 /**
- * Narrow contract for grantees, identities or roles, that carry attached
- * policies.
+ * Narrow contract for grantees, authorizable models and roles, that carry
+ * attached policies.
  *
- * Split from the composite `AuthorizableIdentity` so a consumer who only needs
+ * Split from the composite `AuthorizableGrantee` so a consumer who only needs
  * policy attachment — no direct RBAC grants — can typehint on the minimum
  * surface they actually implement. The parameters take the shipped `Policy`,
  * which the class `authorization.models.policy` configures extends; any other

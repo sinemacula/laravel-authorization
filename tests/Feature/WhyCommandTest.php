@@ -37,11 +37,11 @@ use Tests\Feature\Stubs\FailingContextSource;
 use Tests\Feature\Stubs\FailingSubjectResolver;
 use Tests\Feature\Stubs\FixedConsoleSubjectResolver;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
-use Tests\Feature\Stubs\NumberedIdentity;
+use Tests\Feature\Stubs\NumberedGrantee;
 use Tests\Feature\Stubs\PrincipalSubjectResolver;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
-use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -112,7 +112,7 @@ final class WhyCommandTest extends TestCase
     {
         $user = $this->editor('user-1');
 
-        [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-1', 'action' => 'posts:edit']);
+        [$code, $output] = self::why(['subject' => StubGrantee::class . ':user-1', 'action' => 'posts:edit']);
 
         self::assertSame(0, $code);
         self::assertStringStartsWith(WhyCommand::PREAMBLE . "\n\nALLOW at the allow stage by permission \"posts:edit\".\n", $output);
@@ -129,9 +129,9 @@ final class WhyCommandTest extends TestCase
      */
     public function testExplainsADenyAsText(): void
     {
-        StubIdentity::create(['id' => 'user-2']);
+        StubGrantee::create(['id' => 'user-2']);
 
-        [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-2', 'action' => 'posts:delete']);
+        [$code, $output] = self::why(['subject' => StubGrantee::class . ':user-2', 'action' => 'posts:delete']);
 
         self::assertSame(0, $code);
         self::assertStringContainsString("\n\nDENY (no_match: ", $output);
@@ -149,7 +149,7 @@ final class WhyCommandTest extends TestCase
         $user = $this->editor('user-3');
 
         foreach (['posts:edit' => 'allow', 'posts:delete' => 'deny'] as $action => $effect) {
-            [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-3', 'action' => $action, '--format' => 'json']);
+            [$code, $output] = self::why(['subject' => StubGrantee::class . ':user-3', 'action' => $action, '--format' => 'json']);
 
             self::assertSame(0, $code, $action);
             self::assertStringStartsWith('{', $output, $action);
@@ -179,7 +179,7 @@ final class WhyCommandTest extends TestCase
         $user     = $this->editor('user-4');
         $resource = '<fg=red>posts/42</>';
 
-        [, $output] = self::why(['subject' => StubIdentity::class . ':user-4', 'action' => 'posts:edit', 'resource' => $resource, '--format' => 'json']);
+        [, $output] = self::why(['subject' => StubGrantee::class . ':user-4', 'action' => 'posts:edit', 'resource' => $resource, '--format' => 'json']);
 
         $explanation = Authorization::for(AuthorizationScope::platform()->subjectIn(new Subject($user, $user, guard: 'web')))->explain('posts:edit', $resource);
 
@@ -195,12 +195,12 @@ final class WhyCommandTest extends TestCase
      */
     public function testTheVerdictIsTheChecksVerdict(): void
     {
-        $user = StubIdentity::create(['id' => 'user-5']);
+        $user = StubGrantee::create(['id' => 'user-5']);
         $user->attachPolicy(self::policy('purposes', [['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['input.purpose' => 'support']]]]));
 
         foreach (['support' => 'allow', 'sales' => 'deny'] as $purpose => $effect) {
             $context         = '{"purpose":"' . $purpose . '"}';
-            [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-5', 'action' => 'posts:read', '--context' => $context, '--format' => 'json']);
+            [$code, $output] = self::why(['subject' => StubGrantee::class . ':user-5', 'action' => 'posts:read', '--context' => $context, '--format' => 'json']);
 
             $input   = ['purpose' => $purpose];
             $scope   = AuthorizationScope::platform();
@@ -220,11 +220,11 @@ final class WhyCommandTest extends TestCase
      */
     public function testTheContextIsTheInputNamespace(): void
     {
-        $user = StubIdentity::create(['id' => 'user-6']);
+        $user = StubGrantee::create(['id' => 'user-6']);
         $user->attachPolicy(self::policy('purposes', [['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['input.purpose' => 'support']]]]));
 
-        [, $without] = self::why(['subject' => StubIdentity::class . ':user-6', 'action' => 'posts:read', '--format' => 'json']);
-        [, $with]    = self::why(['subject' => StubIdentity::class . ':user-6', 'action' => 'posts:read', '--format' => 'json', '--context' => '{"purpose":"support"}']);
+        [, $without] = self::why(['subject' => StubGrantee::class . ':user-6', 'action' => 'posts:read', '--format' => 'json']);
+        [, $with]    = self::why(['subject' => StubGrantee::class . ':user-6', 'action' => 'posts:read', '--format' => 'json', '--context' => '{"purpose":"support"}']);
 
         self::assertSame('deny', self::decoded($without)['effect']);
         self::assertSame(['input.purpose'], self::decoded($without)['missing_keys']);
@@ -241,8 +241,8 @@ final class WhyCommandTest extends TestCase
      */
     public function testNoValueIsEverPrinted(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-1', 'name' => self::NAME]);
-        $person    = StubSecondIdentity::create(['id' => 'person-1', 'name' => self::NAME]);
+        $principal = StubGrantee::create(['id' => 'principal-1', 'name' => self::NAME]);
+        $person    = StubSecondGrantee::create(['id' => 'person-1', 'name' => self::NAME]);
         $posts     = new RecordingResourceAttributes;
 
         $principal->attachPolicy(self::policy('secrets', [
@@ -254,7 +254,7 @@ final class WhyCommandTest extends TestCase
         $this->useResourceAttributes('post', $posts);
 
         $context = '{"code":"' . self::SECRET . '","note":"' . self::SECRET . '"}';
-        $subject = StubSecondIdentity::class . ':person-1';
+        $subject = StubSecondGrantee::class . ':person-1';
 
         foreach (['text', 'json'] as $format) {
             [$code, $output] = self::why(['subject' => $subject, 'action' => 'posts:read', 'resource' => 'post:42', '--context' => $context, '--format' => $format]);
@@ -278,7 +278,7 @@ final class WhyCommandTest extends TestCase
      */
     public function testResourceAttributesComeOnlyFromProviders(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-7', 'name' => self::NAME]);
+        $user  = StubGrantee::create(['id' => 'user-7', 'name' => self::NAME]);
         $posts = new RecordingResourceAttributes;
 
         $conditions = ['eq' => ['resource.status' => 'draft', 'resource.name' => self::NAME]];
@@ -286,17 +286,17 @@ final class WhyCommandTest extends TestCase
         $user->attachPolicy(self::policy('drafts', [['effect' => 'allow', 'actions' => ['posts:edit'], 'conditions' => $conditions]]));
         $this->useResourceAttributes($user->getMorphClass(), $posts);
 
-        [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-7', 'action' => 'posts:edit', 'resource' => StubIdentity::class . ':user-7', '--format' => 'json']);
+        [$code, $output] = self::why(['subject' => StubGrantee::class . ':user-7', 'action' => 'posts:edit', 'resource' => StubGrantee::class . ':user-7', '--format' => 'json']);
 
         $document = self::decoded($output);
 
         self::assertSame(0, $code);
         self::assertSame('deny', $document['effect']);
         self::assertSame(['resource.name'], $document['missing_keys']);
-        self::assertSame(StubIdentity::class . ':user-7', $document['request']['resource'] ?? null);
+        self::assertSame(StubGrantee::class . ':user-7', $document['request']['resource'] ?? null);
         self::assertEquals(['resource.status' => 'held', 'resource.name' => 'missing'], self::outcomes($document));
         self::assertCount(1, $posts->calls);
-        self::assertSame(StubIdentity::class . ':user-7', $posts->calls[0][0]->identifier);
+        self::assertSame(StubGrantee::class . ':user-7', $posts->calls[0][0]->identifier);
         self::assertNull($posts->calls[0][1]);
         self::assertStringNotContainsString(self::NAME, $output);
     }
@@ -313,14 +313,14 @@ final class WhyCommandTest extends TestCase
      */
     public function testExplainsARecordWithItsPolicyAndProviderAttribute(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-18']);
+        $user  = StubGrantee::create(['id' => 'user-18']);
         $posts = new RecordingResourceAttributes(self::STATUS);
 
         self::attach(self::policy('sharing', [self::share($user, 'posts:read', ['eq' => ['resource.status' => self::STATUS]])]), ['post', '42']);
         $this->useResourceAttributes('post', $posts);
 
-        [$code, $json] = self::why(['subject' => StubIdentity::class . ':user-18', 'action' => 'posts:read', 'resource' => 'post:42', '--format' => 'json']);
-        [, $text]      = self::why(['subject' => StubIdentity::class . ':user-18', 'action' => 'posts:read', 'resource' => 'post:42']);
+        [$code, $json] = self::why(['subject' => StubGrantee::class . ':user-18', 'action' => 'posts:read', 'resource' => 'post:42', '--format' => 'json']);
+        [, $text]      = self::why(['subject' => StubGrantee::class . ':user-18', 'action' => 'posts:read', 'resource' => 'post:42']);
 
         $document = self::decoded($json);
         $decided  = $document['decided_by']['statements'][0] ?? [];
@@ -350,13 +350,13 @@ final class WhyCommandTest extends TestCase
      */
     public function testTheVerdictOnARecordIsTheChecksVerdict(): void
     {
-        $named = StubIdentity::create(['id' => 'user-19']);
-        $other = StubIdentity::create(['id' => 'user-20']);
+        $named = StubGrantee::create(['id' => 'user-19']);
+        $other = StubGrantee::create(['id' => 'user-20']);
 
         self::attach(self::policy('sharing', [self::share($named, 'posts:read')]), ['post', '43']);
 
         foreach (['user-19' => [$named, 'allow'], 'user-20' => [$other, 'deny']] as $id => [$user, $effect]) {
-            [, $output] = self::why(['subject' => StubIdentity::class . ':' . $id, 'action' => 'posts:read', 'resource' => 'post:43', '--format' => 'json']);
+            [, $output] = self::why(['subject' => StubGrantee::class . ':' . $id, 'action' => 'posts:read', 'resource' => 'post:43', '--format' => 'json']);
 
             $scope   = AuthorizationScope::platform();
             $checked = $scope->within(static fn (): bool => Authorization::for($scope->subjectIn(new Subject($user, $user)))->check('posts:read', ['post', '43'])->isAllowed());
@@ -378,20 +378,20 @@ final class WhyCommandTest extends TestCase
     {
         $tenant = self::createTenant('tenant-f');
         $other  = self::createTenant('tenant-g');
-        $user   = StubIdentity::create(['id' => 'user-21']);
+        $user   = StubGrantee::create(['id' => 'user-21']);
         $option = $tenant->getMorphClass() . ':tenant-f';
 
         $user->givePermission(Permission::create(['name' => 'posts:read']), null, $tenant);
 
         $this->app?->instance(ResourceTenantResolver::class, new FixedResourceTenantResolver(null, Reference::of($tenant)));
 
-        [, $own] = self::why(['subject' => StubIdentity::class . ':user-21', 'action' => 'posts:read', 'resource' => 'post:44', '--tenant' => $option, '--format' => 'json']);
+        [, $own] = self::why(['subject' => StubGrantee::class . ':user-21', 'action' => 'posts:read', 'resource' => 'post:44', '--tenant' => $option, '--format' => 'json']);
 
         $foreign = new FixedResourceTenantResolver(null, Reference::of($other));
 
         $this->app?->instance(ResourceTenantResolver::class, $foreign);
 
-        $parameters  = ['subject' => StubIdentity::class . ':user-21', 'action' => 'posts:read', 'resource' => 'post:44', '--tenant' => $option, '--format' => 'json'];
+        $parameters  = ['subject' => StubGrantee::class . ':user-21', 'action' => 'posts:read', 'resource' => 'post:44', '--tenant' => $option, '--format' => 'json'];
         [, $outside] = self::why($parameters);
         [, $opaque]  = self::why([...$parameters, '--opaque' => true]);
 
@@ -415,13 +415,13 @@ final class WhyCommandTest extends TestCase
      */
     public function testExplainsTheTypeAlone(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-22']);
+        $user  = StubGrantee::create(['id' => 'user-22']);
         $posts = new RecordingResourceAttributes;
 
         self::attach(self::policy('creators', [self::share($user, 'posts:create')]), 'post');
         $this->useResourceAttributes('post', $posts);
 
-        [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-22', 'action' => 'posts:create', 'resource' => 'post:*', '--format' => 'json']);
+        [$code, $output] = self::why(['subject' => StubGrantee::class . ':user-22', 'action' => 'posts:create', 'resource' => 'post:*', '--format' => 'json']);
 
         self::assertSame(0, $code);
         self::assertSame('allow', self::decoded($output)['effect']);
@@ -441,7 +441,7 @@ final class WhyCommandTest extends TestCase
      */
     public function testAnOpaqueResourceNamesNoRecord(): void
     {
-        $user  = StubIdentity::create(['id' => 'user-23']);
+        $user  = StubGrantee::create(['id' => 'user-23']);
         $posts = new RecordingResourceAttributes;
 
         self::attach(self::policy('sharing', [self::share($user, 'posts:read')]), ['post', '45']);
@@ -449,7 +449,7 @@ final class WhyCommandTest extends TestCase
 
         foreach ([['post:45', true], ['post-45', false]] as [$resource, $isOpaque]) {
             $options         = $isOpaque ? ['--opaque' => true] : [];
-            [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-23', 'action' => 'posts:read', 'resource' => $resource, '--format' => 'json', ...$options]);
+            [$code, $output] = self::why(['subject' => StubGrantee::class . ':user-23', 'action' => 'posts:read', 'resource' => $resource, '--format' => 'json', ...$options]);
 
             self::assertSame(0, $code, $resource);
             self::assertSame('deny', self::decoded($output)['effect'], $resource);
@@ -469,7 +469,7 @@ final class WhyCommandTest extends TestCase
     {
         $this->editor('user-8');
 
-        [, $output] = self::why(['subject' => StubIdentity::class . ':user-8', 'action' => 'posts:edit', '--format' => 'json']);
+        [, $output] = self::why(['subject' => StubGrantee::class . ':user-8', 'action' => 'posts:edit', '--format' => 'json']);
 
         $request = self::decoded($output)['request'];
 
@@ -489,7 +489,7 @@ final class WhyCommandTest extends TestCase
     {
         $tenant = self::createTenant('tenant-a');
         $other  = self::createTenant('tenant-b');
-        $user   = StubIdentity::create(['id' => 'user-9']);
+        $user   = StubGrantee::create(['id' => 'user-9']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']), null, $tenant, true, 'web');
 
@@ -503,14 +503,14 @@ final class WhyCommandTest extends TestCase
                 $options = ($scope[0] ?? null) === null ? [] : ['--tenant' => $scope[0]];
                 $options = ($scope[1] ?? null) === null ? $options : [...$options, '--application' => $scope[1]];
 
-                [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-9', 'action' => 'posts:read', '--format' => 'json', ...$options]);
+                [$code, $output] = self::why(['subject' => StubGrantee::class . ':user-9', 'action' => 'posts:read', '--format' => 'json', ...$options]);
 
                 self::assertSame(0, $code, (string) \json_encode($scope));
                 self::assertSame($effect, self::decoded($output)['effect'], (string) \json_encode($scope));
             }
         }
 
-        [, $platform] = self::why(['subject' => StubIdentity::class . ':user-9', 'action' => 'posts:read', '--format' => 'json']);
+        [, $platform] = self::why(['subject' => StubGrantee::class . ':user-9', 'action' => 'posts:read', '--format' => 'json']);
 
         self::assertSame(['tenant' => null, 'application' => null], self::decoded($platform)['request']['decision_scope'] ?? null);
     }
@@ -525,7 +525,7 @@ final class WhyCommandTest extends TestCase
     public function testTheTenantInPlaceIsNotInherited(): void
     {
         $tenant = self::createTenant('tenant-c');
-        $user   = StubIdentity::create(['id' => 'user-10']);
+        $user   = StubGrantee::create(['id' => 'user-10']);
 
         $user->givePermission(Permission::create(['name' => 'posts:read']), null, $tenant);
 
@@ -533,7 +533,7 @@ final class WhyCommandTest extends TestCase
 
         self::assertTrue(Authorization::for($user)->check('posts:read')->isAllowed());
 
-        [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-10', 'action' => 'posts:read', '--format' => 'json']);
+        [$code, $output] = self::why(['subject' => StubGrantee::class . ':user-10', 'action' => 'posts:read', '--format' => 'json']);
 
         self::assertSame(0, $code);
         self::assertSame('deny', self::decoded($output)['effect']);
@@ -541,7 +541,7 @@ final class WhyCommandTest extends TestCase
         self::assertSame([$tenant->getMorphClass(), 'tenant-c'], TenantScope::currentTenant());
 
         $tenantOption = $tenant->getMorphClass() . ':tenant-c';
-        [, $named]    = self::why(['subject' => StubIdentity::class . ':user-10', 'action' => 'posts:read', '--format' => 'json', '--tenant' => $tenantOption]);
+        [, $named]    = self::why(['subject' => StubGrantee::class . ':user-10', 'action' => 'posts:read', '--format' => 'json', '--tenant' => $tenantOption]);
 
         self::assertSame('allow', self::decoded($named)['effect']);
     }
@@ -555,7 +555,7 @@ final class WhyCommandTest extends TestCase
     public function testAFailureExitsOneAndRestoresTheScope(): void
     {
         $tenant = self::createTenant('tenant-d');
-        $user   = StubIdentity::create(['id' => 'user-11']);
+        $user   = StubGrantee::create(['id' => 'user-11']);
 
         $user->attachPolicy(self::policy('ledger', [['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['ledger.balance' => 1]]]]));
 
@@ -564,7 +564,7 @@ final class WhyCommandTest extends TestCase
         $this->app?->forgetInstance('authorization');
         $this->actAsTenant($tenant);
 
-        [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-11', 'action' => 'posts:read', '--tenant' => $tenant->getMorphClass() . ':tenant-d']);
+        [$code, $output] = self::why(['subject' => StubGrantee::class . ':user-11', 'action' => 'posts:read', '--tenant' => $tenant->getMorphClass() . ':tenant-d']);
 
         self::assertSame(1, $code);
         self::assertSame("The explanation could not be produced (RuntimeException).\n", $output);
@@ -585,7 +585,7 @@ final class WhyCommandTest extends TestCase
 
         $user = $this->editor('user-12');
 
-        self::assertSame(0, self::why(['subject' => StubIdentity::class . ':user-12', 'action' => 'posts:edit'])[0]);
+        self::assertSame(0, self::why(['subject' => StubGrantee::class . ':user-12', 'action' => 'posts:edit'])[0]);
 
         $reported = Event::dispatched(DecisionEvaluated::class);
 
@@ -605,14 +605,14 @@ final class WhyCommandTest extends TestCase
      */
     public function testExplainsThePrincipalAPersonActsAs(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-2']);
-        $person    = StubSecondIdentity::create(['id' => 'person-2']);
+        $principal = StubGrantee::create(['id' => 'principal-2']);
+        $person    = StubSecondGrantee::create(['id' => 'person-2']);
 
         $person->givePermission(Permission::create(['name' => 'posts:read']));
 
         $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, $person));
 
-        [$code, $output] = self::why(['subject' => StubSecondIdentity::class . ':person-2', 'action' => 'posts:read', '--format' => 'json']);
+        [$code, $output] = self::why(['subject' => StubSecondGrantee::class . ':person-2', 'action' => 'posts:read', '--format' => 'json']);
 
         $request = self::decoded($output)['request'];
 
@@ -671,11 +671,11 @@ final class WhyCommandTest extends TestCase
         yield 'a tenant without a key' => [['--tenant' => 'team'], 'The --tenant option must be in the format {morphType}:{key} (e.g. team:1).'];
         yield 'a tenant without a type' => [['--tenant' => ':1'], 'The --tenant option must be in the format {morphType}:{key} (e.g. team:1).'];
         yield 'an empty tenant' => [['--tenant' => ''], 'The --tenant option must be in the format {morphType}:{key} (e.g. team:1).'];
-        yield 'an unknown tenant' => [['--tenant' => StubIdentity::class . ':' . self::SECRET], 'The --tenant option names no saved row.'];
+        yield 'an unknown tenant' => [['--tenant' => StubGrantee::class . ':' . self::SECRET], 'The --tenant option names no saved row.'];
         yield 'an empty application' => [['--application' => ''], 'The --application option must name an application.'];
         yield 'a malformed subject' => [['subject' => 'user'], 'The subject must be in the format {morphType}:{key} (e.g. user:1).'];
         yield 'an unknown subject type' => [['subject' => self::SECRET . ':1'], 'The subject\'s type is not an Eloquent model.'];
-        yield 'an unknown subject' => [['subject' => StubIdentity::class . ':' . self::SECRET], 'The subject names no saved row.'];
+        yield 'an unknown subject' => [['subject' => StubGrantee::class . ':' . self::SECRET], 'The subject names no saved row.'];
         yield 'a resource without a type' => [['resource' => ':42'], self::RESOURCE];
         yield 'a resource without a key' => [['resource' => 'post:'], self::RESOURCE];
         yield 'a bare tenant' => [['--tenant' => null], 'The --tenant option must be given a value.'];
@@ -698,9 +698,9 @@ final class WhyCommandTest extends TestCase
     #[DataProvider('invalidInvocations')]
     public function testRefusesAnInvalidInvocation(array $parameters, string $message): void
     {
-        StubIdentity::create(['id' => 'user-14']);
+        StubGrantee::create(['id' => 'user-14']);
 
-        $parameters = [...['subject' => StubIdentity::class . ':user-14', 'action' => 'posts:edit'], ...$parameters];
+        $parameters = [...['subject' => StubGrantee::class . ':user-14', 'action' => 'posts:edit'], ...$parameters];
 
         $given = \array_filter($parameters, static fn (?string $value, string $name): bool => $value !== null || \str_starts_with($name, '--'), \ARRAY_FILTER_USE_BOTH);
 
@@ -718,12 +718,12 @@ final class WhyCommandTest extends TestCase
      */
     public function testRefusesTheApplicationsOwnNamespace(): void
     {
-        StubIdentity::create(['id' => 'user-15']);
+        StubGrantee::create(['id' => 'user-15']);
 
         $this->app?->make(ConfigRepository::class)->set('authorization.context.sources', [FailingContextSource::class]);
         $this->app?->forgetInstance(CheckContextFactory::class);
 
-        [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-15', 'action' => 'posts:edit', '--context' => '{"ledger":{"balance":1}}']);
+        [$code, $output] = self::why(['subject' => StubGrantee::class . ':user-15', 'action' => 'posts:edit', '--context' => '{"ledger":{"balance":1}}']);
 
         self::assertSame(2, $code);
         self::assertSame("The --context option supplies the input namespace alone and cannot fill the trusted namespace 'ledger'.\n", $output);
@@ -737,13 +737,13 @@ final class WhyCommandTest extends TestCase
      */
     public function testRefusesAnUnsupportedOrAmbiguousSubject(): void
     {
-        $principal = StubIdentity::create(['id' => 'principal-3']);
-        $person    = StubSecondIdentity::create(['id' => 'person-3']);
+        $principal = StubGrantee::create(['id' => 'principal-3']);
+        $person    = StubSecondGrantee::create(['id' => 'person-3']);
 
         self::createTenant('tenant-e');
-        StubIdentity::create(['id' => 'stranger-1']);
+        StubGrantee::create(['id' => 'stranger-1']);
 
-        [$code, $output] = self::why(['subject' => StubIdentity::class . ':stranger-1', 'action' => 'posts:edit']);
+        [$code, $output] = self::why(['subject' => StubGrantee::class . ':stranger-1', 'action' => 'posts:edit']);
 
         self::assertSame(0, $code, $output);
 
@@ -754,7 +754,7 @@ final class WhyCommandTest extends TestCase
 
         $this->app?->instance(SubjectResolver::class, new PrincipalSubjectResolver($principal, $person));
 
-        [$ambiguous, $refusal] = self::why(['subject' => StubIdentity::class . ':stranger-1', 'action' => 'posts:edit']);
+        [$ambiguous, $refusal] = self::why(['subject' => StubGrantee::class . ':stranger-1', 'action' => 'posts:edit']);
 
         self::assertSame(2, $ambiguous);
         self::assertStringContainsString('is ambiguous', $refusal);
@@ -767,7 +767,7 @@ final class WhyCommandTest extends TestCase
      */
     public static function uncastableKeys(): iterable
     {
-        $subject = NumberedIdentity::class . ':abc';
+        $subject = NumberedGrantee::class . ':abc';
 
         yield 'a subject' => [['subject' => $subject], ['The subject names no saved row.', 'The subject could not be resolved.']];
         yield 'a tenant' => [['--tenant' => $subject], ['The --tenant option names no saved row.', 'The --tenant option could not be resolved.']];
@@ -785,9 +785,9 @@ final class WhyCommandTest extends TestCase
     #[DataProvider('uncastableKeys')]
     public function testRefusesAKeyTheKeyColumnCannotHold(array $parameters, array $messages): void
     {
-        StubIdentity::create(['id' => 'user-24']);
+        StubGrantee::create(['id' => 'user-24']);
 
-        [$code, $output] = self::why([...['subject' => StubIdentity::class . ':user-24', 'action' => 'posts:edit'], ...$parameters]);
+        [$code, $output] = self::why([...['subject' => StubGrantee::class . ':user-24', 'action' => 'posts:edit'], ...$parameters]);
 
         self::assertSame(2, $code);
         self::assertContains(\rtrim($output, "\n"), $messages);
@@ -803,12 +803,12 @@ final class WhyCommandTest extends TestCase
     {
         $tenant = self::createTenant('tenant-h');
 
-        StubIdentity::create(['id' => 'user-25']);
-        StubIdentity::retrieved(static function (): never {
+        StubGrantee::create(['id' => 'user-25']);
+        StubGrantee::retrieved(static function (): never {
             throw new \RuntimeException(self::SECRET);
         });
 
-        $subject = self::why(['subject' => StubIdentity::class . ':user-25', 'action' => 'posts:edit']);
+        $subject = self::why(['subject' => StubGrantee::class . ':user-25', 'action' => 'posts:edit']);
 
         StubTenant::retrieved(static function (): never {
             throw new \InvalidArgumentException(self::SECRET);
@@ -828,12 +828,12 @@ final class WhyCommandTest extends TestCase
      */
     public function testRefusesASubjectResolverThatFails(): void
     {
-        StubIdentity::create(['id' => 'user-26']);
+        StubGrantee::create(['id' => 'user-26']);
 
         foreach ([new \RuntimeException(self::SECRET), new \InvalidArgumentException(self::SECRET)] as $failure) {
             $this->app?->instance(SubjectResolver::class, new FailingSubjectResolver($failure));
 
-            self::assertSame([2, "The subject could not be resolved.\n"], self::why(['subject' => StubIdentity::class . ':user-26', 'action' => 'posts:edit']));
+            self::assertSame([2, "The subject could not be resolved.\n"], self::why(['subject' => StubGrantee::class . ':user-26', 'action' => 'posts:edit']));
         }
     }
 
@@ -859,7 +859,7 @@ final class WhyCommandTest extends TestCase
 
         foreach ($failures as $message => $thrown) {
             foreach ($thrown as $failure) {
-                $this->app?->instance(ConsoleSubjectResolver::class, new FixedConsoleSubjectResolver(new Subject(new StubIdentity), $failure));
+                $this->app?->instance(ConsoleSubjectResolver::class, new FixedConsoleSubjectResolver(new Subject(new StubGrantee), $failure));
 
                 self::assertSame([2, $message], self::why(['subject' => 'staff:1', 'action' => 'posts:edit']));
             }
@@ -877,7 +877,7 @@ final class WhyCommandTest extends TestCase
     {
         $this->editor('user-27');
 
-        $subject = StubIdentity::class . ':user-27';
+        $subject = StubGrantee::class . ':user-27';
 
         self::assertSame([2, "The \"--as-of\" option does not exist.\n"], $this->commandLine(['authorization:why', $subject, 'posts:edit', '--as-of=2026-01-01']));
         self::assertSame([2, "Not enough arguments (missing: \"action\").\n"], $this->commandLine(['authorization:why', $subject]));
@@ -912,7 +912,7 @@ final class WhyCommandTest extends TestCase
 
         $explained = $this->tester();
 
-        $code = $explained->execute(['subject' => StubIdentity::class . ':user-16', 'action' => 'posts:edit', '--format' => 'json'], ['capture_stderr_separately' => true]);
+        $code = $explained->execute(['subject' => StubGrantee::class . ':user-16', 'action' => 'posts:edit', '--format' => 'json'], ['capture_stderr_separately' => true]);
 
         self::assertSame(0, $code);
         self::assertSame('', $explained->getErrorOutput());
@@ -975,7 +975,7 @@ final class WhyCommandTest extends TestCase
     {
         $this->editor('user-17');
 
-        [$code, $output] = self::why(['subject' => StubIdentity::class . ':user-17', 'action' => 'posts:edit', 'resource' => '<fg=red>post</>', '--application' => "<b>app\e</b>"]);
+        [$code, $output] = self::why(['subject' => StubGrantee::class . ':user-17', 'action' => 'posts:edit', 'resource' => '<fg=red>post</>', '--application' => "<b>app\e</b>"]);
 
         self::assertSame(0, $code);
         self::assertStringContainsString('on "\u003Cfg=red\u003Epost\u003C/\u003E"', $output);
@@ -1049,12 +1049,12 @@ final class WhyCommandTest extends TestCase
      * Create an identity holding `posts:edit` through the `editor` role.
      *
      * @param  string  $id
-     * @return \Tests\Feature\Stubs\StubIdentity
+     * @return \Tests\Feature\Stubs\StubGrantee
      */
-    private function editor(string $id): StubIdentity
+    private function editor(string $id): StubGrantee
     {
         $role = Role::query()->where('name', 'editor')->first() ?? Role::create(['name' => 'editor', 'guard' => 'web']);
-        $user = StubIdentity::create(['id' => $id]);
+        $user = StubGrantee::create(['id' => $id]);
 
         if (!$role->hasPermission('posts:edit')) {
             $role->givePermissionTo(Permission::create(['name' => 'posts:edit', 'guard' => 'web']));
@@ -1102,12 +1102,12 @@ final class WhyCommandTest extends TestCase
      * Return a resource policy statement, `share`, allowing the identity the
      * action, on the conditions.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  string  $action
      * @param  array<string, mixed>  $conditions
      * @return array<string, mixed>
      */
-    private static function share(StubIdentity $identity, string $action, array $conditions = []): array
+    private static function share(StubGrantee $identity, string $action, array $conditions = []): array
     {
         $principal = Reference::of($identity);
         $statement = ['sid' => 'share', 'effect' => 'allow', 'actions' => [$action], 'principals' => [$principal->getMorphClass() . ':' . $principal->getKey()]];

@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use SineMacula\Laravel\Authorization\Support\Reference;
-use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubGrantee;
 
 /**
  * Shared checks that revoking and synchronising a role or permission by name
@@ -247,31 +247,31 @@ trait ChecksGrantsByName
     /**
      * Grant the row to the identity, until the given instant when one is given.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  \Illuminate\Database\Eloquent\Model  $row
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|null  $tenant
      * @return void
      */
-    abstract protected function grantTo(StubIdentity $identity, Model $row, ?\DateTimeInterface $expiresAt = null, ?Model $tenant = null): void;
+    abstract protected function grantTo(StubGrantee $identity, Model $row, ?\DateTimeInterface $expiresAt = null, ?Model $tenant = null): void;
 
     /**
      * Revoke the row, or the name, from the identity.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  \Illuminate\Database\Eloquent\Model|string  $grant
      * @return void
      */
-    abstract protected function revokeFrom(StubIdentity $identity, Model|string $grant): void;
+    abstract protected function revokeFrom(StubGrantee $identity, Model|string $grant): void;
 
     /**
      * Synchronise the identity's grants to the given rows and names.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Tests\Feature\Stubs\StubGrantee  $identity
      * @param  list<\Illuminate\Database\Eloquent\Model|string>  $grants
      * @return void
      */
-    abstract protected function syncTo(StubIdentity $identity, array $grants): void;
+    abstract protected function syncTo(StubGrantee $identity, array $grants): void;
 
     /**
      * Return the reference to the row a revocation event reports.
@@ -286,12 +286,12 @@ trait ChecksGrantsByName
      * a row of the same name and guard owned by a tenant, and act as that
      * tenant, which is returned last.
      *
-     * @return array{\Tests\Feature\Stubs\StubIdentity, \Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model, \Tests\Feature\Stubs\StubTenant}
+     * @return array{\Tests\Feature\Stubs\StubGrantee, \Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model, \Tests\Feature\Stubs\StubTenant}
      */
     private function platformAndTenantRows(): array
     {
         $tenant   = self::createTenant('tenant-a');
-        $identity = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $identity = StubGrantee::create(['id' => (string) Str::uuid()]);
         $platform = static::createNamed('editor', self::ownedBy(null));
         $owned    = static::createNamed('editor', self::ownedBy($tenant));
 

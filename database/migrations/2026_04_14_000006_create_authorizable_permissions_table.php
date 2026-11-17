@@ -2,7 +2,7 @@
 
 /**
  * Create the `authorizable_permissions` table: permissions granted directly to
- * authorizable identities.
+ * grantees.
  *
  * Each row grants one permission to one grantee within one scope: platform-wide
  * (null tenant columns) or one tenant, optionally that tenant's subtree, and
