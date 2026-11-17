@@ -32,7 +32,9 @@ return new class extends Migration {
 
         (new MigrationCollisionGuard($schema))->ensureNotExists($table);
 
-        $schema->create($table, static function (Blueprint $blueprint) use ($table, $rolesTable, $permissionsTable): void {
+        $isMysql = $schema->getConnection()->getDriverName() === 'mysql';
+
+        $schema->create($table, static function (Blueprint $blueprint) use ($table, $rolesTable, $permissionsTable, $isMysql): void {
             $blueprint->uuid('role_id');
             $blueprint->uuid('permission_id');
 
@@ -44,6 +46,13 @@ return new class extends Migration {
 
             $blueprint->primary(['role_id', 'permission_id']);
             $blueprint->index('expires_at', $table . '_expires_at_index');
+
+            // A review of a permission's holders finds the roles carrying it by
+            // the permission, as the primary key leads with the role. MySQL
+            // indexes the column for its foreign key already.
+            if (!$isMysql) {
+                $blueprint->index('permission_id', $table . '_permission_id_index');
+            }
 
             $blueprint->foreign('role_id')->references('id')->on($rolesTable)->cascadeOnDelete();
             $blueprint->foreign('permission_id')->references('id')->on($permissionsTable)->cascadeOnDelete();
