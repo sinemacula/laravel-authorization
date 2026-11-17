@@ -70,6 +70,10 @@ return new class extends Migration {
             $blueprint->index(['resource_type', 'resource_id'], $table . '_resource_index');
             $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
 
+            // A row naming a tenant's type without its key is found as a range
+            // of this index, as the tenant index leads with the type.
+            $blueprint->index(['tenant_id', 'tenant_type'], $table . '_tenant_id_index');
+
             $blueprint->foreign('policy_id')->references('id')->on($policiesTable)->cascadeOnDelete();
 
             // On MySQL the reference columns compare their exact bytes, as on
