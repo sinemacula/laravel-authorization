@@ -642,6 +642,35 @@ final class DecisionPipelineTest extends TestCase
     }
 
     /**
+     * The further checks of a subject asked outside a decision decide each
+     * action for that subject, with no context and from no record, and gather
+     * its sources.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testFurtherChecksOutsideADecisionAreDecidedWithNoContext(): void
+    {
+        $user    = StubGrantee::create(['id' => 'user-1']);
+        $subject = new Subject($user, $user);
+        $policy  = EvaluationPolicy::fromArray(['name' => 'inputs', 'statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:view'], 'conditions' => ['null' => ['input.flag' => true]]],
+        ]]);
+
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+
+        $checks = $this->pipeline()->furtherChecksFor($subject);
+
+        self::assertSame($subject, $checks->subject);
+        self::assertNull($checks->from);
+        self::assertTrue($checks->decide('posts:edit')->isAllowed());
+        self::assertFalse($checks->decide('posts:delete')->isAllowed());
+        self::assertNotNull($checks->sources('posts:edit'));
+        self::assertTrue($this->pipeline()->withPolicies([$policy])->furtherChecksFor($subject)->decide('posts:view')->isAllowed());
+    }
+
+    /**
      * A further check the stage asks is decided without the stage, so deciding
      * the operation's own action again, across its reach, never recurses; and a
      * check of a permission whose sources cannot be read cannot be proved held,

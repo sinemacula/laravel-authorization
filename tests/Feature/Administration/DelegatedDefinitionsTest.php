@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Administration\RoleAuthority;
 use SineMacula\Laravel\Authorization\Administration\RoleParent;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Exceptions\UndeclaredPermissionException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -35,6 +36,7 @@ use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\AssertsDelegatedRefusals;
+use Tests\Concerns\DeclaresPermissions;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -63,7 +65,7 @@ use Tests\TestCase;
 #[CoversClass(AffectedHolders::class)]
 final class DelegatedDefinitionsTest extends TestCase
 {
-    use ActsAsTenant, AssertsDelegatedRefusals;
+    use ActsAsTenant, AssertsDelegatedRefusals, DeclaresPermissions;
 
     /**
      * A role grant hands out the role's whole authority: every permission it
@@ -291,6 +293,8 @@ final class DelegatedDefinitionsTest extends TestCase
      */
     public function testADefinitionIsCreatedFromItsOwnersContext(): void
     {
+        $this->declarePermissions('posts:read', 'posts:platform', 'posts:other', 'posts:owned');
+
         $tenant = self::createTenant('acme');
         $other  = self::createTenant('other');
         $actor  = self::actor('admin', [Actions::ROLE_CREATE, Actions::PERMISSION_CREATE, Actions::POLICY_CREATE]);
@@ -325,6 +329,46 @@ final class DelegatedDefinitionsTest extends TestCase
 
         self::assertDecided(null, $actor, $platform('shared'), $shared('shared'));
         self::inTenant($tenant, static fn (): mixed => self::assertDecided(DecisionReason::ADMINISTRATION_OWNER, $actor, $platform('stray'), $shared('stray')));
+    }
+
+    /**
+     * A tenant's own permission is a copy of a declared one: its administrator
+     * creates the tenant's copy of a declared permission the platform also
+     * holds, and is refused one nothing declares, by name or by a rename,
+     * before anything is decided or written.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATenantsOwnPermissionNamesADeclaredOne(): void
+    {
+        $this->declarePermissions('posts:read', 'posts:update');
+
+        $tenant   = self::createTenant('acme');
+        $actor    = self::actor('admin', [Actions::PERMISSION_CREATE, Actions::PERMISSION_RENAME]);
+        $platform = self::permission('posts:read');
+        $copy     = self::inTenant($tenant, static fn (): mixed => self::permissions()->create('posts:read', actor: $actor, tenant: $tenant));
+
+        self::assertInstanceOf(Permission::class, $copy);
+        self::assertSame($tenant->getKey(), $copy->tenant_id);
+
+        $refused = [
+            'a create' => static fn (): mixed => self::permissions()->create('posts:invented', actor: $actor, tenant: $tenant),
+            'a rename' => static fn (): mixed => self::permissions()->rename($copy, 'posts:invented', $actor),
+        ];
+
+        foreach ($refused as $case => $call) {
+            try {
+                $call();
+                self::fail("{$case} was not refused.");
+            } catch (UndeclaredPermissionException $exception) {
+                self::assertSame('posts:invented', $exception->getPermission(), $case);
+            }
+        }
+
+        self::assertEqualsCanonicalizing([$platform->id, $copy->id], Permission::query()->withoutGlobalScopes()->where('name', 'posts:read')->pluck('id')->all());
+        self::assertFalse(Permission::query()->withoutGlobalScopes()->where('name', 'posts:invented')->exists());
     }
 
     /**

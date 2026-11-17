@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Usage\WeighedGrants;
 use Tests\Concerns\ReviewsAccess;
 use Tests\Concerns\TracksGrantUsage;
 use Tests\Feature\Stubs\CustomGrantsGrantee;
+use Tests\Feature\Stubs\RecordingLogger;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\TestCase;
@@ -269,6 +270,31 @@ final class DecisionRoutesTest extends TestCase
         unset($this->app[ResolutionCache::class]);
 
         self::assertSame([], DecisionRoutes::of(new Subject($ann, $ann), $allowed, self::weighed('posts:read', $ann)));
+    }
+
+    /**
+     * A failure finding the routes is written to the log channel and never
+     * thrown, and no route is used.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAFailureFindingTheRoutesUsesNoRoute(): void
+    {
+        $ann = self::identity('ann');
+
+        self::grants()->grantPermission($ann, self::permission('posts:read'));
+
+        $allowed = $this->actAs($ann)->check('posts:read');
+        $logger  = new RecordingLogger;
+
+        $this->app?->instance('log', $logger);
+        $this->app?->bind(ResolutionCache::class, static fn (): never => throw new \RuntimeException('cache down'));
+
+        self::assertSame([], DecisionRoutes::of(new Subject($ann, $ann), $allowed, self::weighed('posts:read', $ann)));
+        self::assertSame(['Authorization: the grants a check used could not be found — cache down'], $logger->messages());
+        self::assertSame('cache down', $logger->records[0]['context']['reason'] ?? null);
     }
 
     /**

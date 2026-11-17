@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepositoryImplementation;
+use Illuminate\Console\Application as ConsoleApplication;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
@@ -1405,6 +1406,27 @@ final class AuthorizationServiceProviderTest extends TestCase
         }
 
         self::assertNotContains('authorization:why-can', $commands);
+    }
+
+    /**
+     * Outside the console, booting registers none of the package's commands.
+     *
+     * @return void
+     */
+    public function testRegistersNoCommandsOutsideTheConsole(): void
+    {
+        $app = $this->app;
+
+        self::assertInstanceOf(Application::class, $app);
+
+        ConsoleApplication::forgetBootstrappers();
+
+        (new \ReflectionProperty($app, 'isRunningInConsole'))->setValue($app, false);
+        (new AuthorizationServiceProvider($app))->boot();
+
+        $console = new ConsoleApplication($app, $app->make(Dispatcher::class), 'testing');
+
+        self::assertSame([], \array_filter(\array_keys($console->all()), static fn (string $name): bool => \str_starts_with($name, 'authorization:')));
     }
 
     /**

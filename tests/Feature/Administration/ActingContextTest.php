@@ -245,6 +245,29 @@ final class ActingContextTest extends TestCase
     }
 
     /**
+     * The further checks of the acting subject are decided about it with the
+     * call's caps, as its own decisions are.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheFurtherChecksAreTheActorsWithTheCallsCaps(): void
+    {
+        $admin = StubGrantee::create(['id' => 'admin-1']);
+
+        $admin->givePermission(Permission::create(['name' => 'posts:*']));
+
+        $actor  = ActingContext::for($admin)->capped(['posts:read']);
+        $checks = $actor->furtherChecks();
+
+        self::assertSame($actor->subject, $checks->subject);
+        self::assertTrue($checks->decide('posts:read')->isAllowed());
+        self::assertSame(DecisionReason::SESSION_POLICY, $checks->decide('posts:edit')->reason);
+        self::assertTrue(ActingContext::for($admin)->furtherChecks()->decide('posts:edit')->isAllowed());
+    }
+
+    /**
      * The refusal of an operation as a whole is recorded and reported as the
      * acting subject's, on the operation resource and under the operation's
      * first action, the operation type standing for an operation with none, and

@@ -64,4 +64,20 @@ final class GrantChangeTest extends TestCase
         self::assertFalse($unread->isWidening($day, false));
         self::assertFalse($forever->isWidening($day, true));
     }
+
+    /**
+     * A write changes the row of a key the keys list unless it left the row as
+     * it was.
+     *
+     * @return void
+     */
+    public function testAChangeCountsOnlyForAListedKey(): void
+    {
+        $granted = new GrantChange(GrantOutcome::GRANTED);
+
+        self::assertTrue($granted->changesAnyOf('1', ['2', '1']));
+        self::assertFalse($granted->changesAnyOf('1', ['2']));
+        self::assertFalse((new GrantChange(GrantOutcome::UNCHANGED))->changesAnyOf('1', ['1']));
+        self::assertTrue((new GrantChange(GrantOutcome::REPLACED))->changesAnyOf('1', ['1']));
+    }
 }

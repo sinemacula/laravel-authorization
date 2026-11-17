@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
@@ -21,6 +22,7 @@ use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Query\StatementScreen;
 use SineMacula\Laravel\Authorization\Subject;
 use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Fixtures\QueryScoping\InvariantRequirementChecker;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
@@ -218,6 +220,32 @@ final class StatementScreenTest extends TestCase
 
         self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::NO_ROW, true], $this->terms($screen, $subject, $statement));
         self::assertSame([], $screen->refusals());
+    }
+
+    /**
+     * A requirement judged by a checker not marked `ScopeInvariant` is refused,
+     * naming no row; a statement with no requirement still compiles.
+     *
+     * @return void
+     */
+    public function testARequirementAnUnmarkedCheckerJudgesIsRefused(): void
+    {
+        [, $subject] = $this->screen();
+
+        $this->app?->instance(AuthenticationRequirementChecker::class, new StubRequirementChecker(RequirementResult::met()));
+        $this->app?->forgetInstance(CheckContextFactory::class);
+
+        /** @var \SineMacula\Laravel\Authorization\Context\CheckContextFactory $factory */
+        $factory  = $this->app?->make(CheckContextFactory::class);
+        $screen   = new StatementScreen('posts:view', self::shape(), $subject, $factory);
+        $required = new Statement(PolicyEffect::ALLOW, ['posts:view'], null, ['authentication_requirement' => ['authentication' => ['multifactor' => []]]]);
+
+        self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::NO_ROW, false], $this->terms($screen, $subject, $required, 'required'));
+        self::assertSame([QueryAuthorizer::EVERY_ROW, QueryAuthorizer::EVERY_ROW, false], $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'])));
+
+        $refused = \array_map(static fn (Refusal $refusal): array => [$refusal->statement, $refusal->key, $refusal->reason], $screen->refusals());
+
+        self::assertSame([['required#0', 'authentication_requirement', RefusalReason::SCOPE_VARIANT_SOURCE]], $refused);
     }
 
     /**

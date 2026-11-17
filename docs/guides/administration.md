@@ -276,8 +276,11 @@ operation's constraints, in this order, and can only refuse:
   administrator creates its own tenant's definitions from that tenant's context, and a create is refused as
   `administration.owner` from any other; a screen builds the same new record with its owner's `tenant_type` and
   `tenant_id`, such as `OperationResource::definition('authorization:role.create', new Role(['tenant_type' => 'team',
-  'tenant_id' => '7']), ['name' => 'editor'])`. A resource policy's attachment is a grant to a resource, never weighed
-  by the rule, and nor is a grant row: who may change one is the administered scope.
+  'tenant_id' => '7']), ['name' => 'editor'])`. A tenant's permission, like any other, must name a declared one, so it
+  is the tenant's own copy of a permission the code declares; an undeclared name is refused with
+  `UndeclaredPermissionException` before anything is decided (see [Managing roles, permissions and
+  grants](grants.md#managing-roles-permissions-and-grants)). A resource policy's attachment is a grant to a resource,
+  never weighed by the rule, and nor is a grant row: who may change one is the administered scope.
 - **Definitions.** Creating a definition widens no one, so it passes, but a role is created only junior to the actor
   (`administration.rank`). Describing a role, permission or policy, and renaming a policy, pass. Renaming a role, or a
   permission (or changing a permission's name or guard), changes what every existing grant means, so it is a new grant

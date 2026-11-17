@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\CacheWriteRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantHookRecursionException;
 use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
@@ -34,6 +35,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\FailingCacheStore;
 use Tests\Feature\Stubs\RecordingLogger;
+use Tests\Feature\Stubs\RefusingCacheStore;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
@@ -329,6 +331,32 @@ final class OperationScopeTest extends TestCase
 
         self::assertSame(0, Role::query()->count());
         Event::assertNotDispatched(SystemOverrideUsed::class);
+    }
+
+    /**
+     * A revoke whose invalidation the store refuses rolls back, so the grant is
+     * kept rather than revoked with entries that still allow.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARefusedInvalidationRollsTheRevokeBack(): void
+    {
+        [$user, $role] = $this->cachedEditor();
+
+        $user->assignRole($role);
+
+        $this->app?->instance(ResolutionCache::class, new ResolutionCache(new Repository(new RefusingCacheStore)));
+
+        try {
+            $user->revokeRole($role);
+            self::fail('The refused invalidation was not thrown.');
+        } catch (CacheWriteRefusedException $exception) {
+            self::assertSame('The resolution cache store refused a write.', $exception->getMessage());
+        }
+
+        self::assertTrue(self::fresh($user)->hasRole('editor'));
     }
 
     /**

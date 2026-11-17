@@ -125,7 +125,7 @@ final readonly class SeamClassifier
             contract: $contract,
             origin: $origin,
             classes: $classes,
-            factory: $classes === [] && $origin->isOthers() ? $this->location($binding->concrete) : null,
+            factory: $classes === [] && $origin->isOthers() && $binding->concrete !== null ? $this->location($binding->concrete) : null,
             lifetime: $this->lifetime($contract, $origin, $binding, $record, $declaration),
             extenders: $record !== null && $record->unwrap($binding->instance) !== $binding->instance ? [self::APPLIED, ...$extenders] : $extenders,
             binding: $binding,
@@ -330,22 +330,18 @@ final readonly class SeamClassifier
             return GrantHookConfigValidator::KEY;
         }
 
-        return $this->location($extender) ?? 'unknown';
+        return $this->location($extender);
     }
 
     /**
      * Return where the closure is written, as a file relative to the base path
-     * and a line, or null for none.
+     * and a line.
      *
-     * @param  (\Closure(mixed ...): mixed)|null  $closure
-     * @return string|null
+     * @param  \Closure(mixed ...): mixed  $closure
+     * @return string
      */
-    private function location(?\Closure $closure): ?string
+    private function location(\Closure $closure): string
     {
-        if ($closure === null) {
-            return null;
-        }
-
         $function = new \ReflectionFunction($closure);
         $file     = (string) $function->getFileName();
         $base     = $this->basePath === null ? '' : \rtrim($this->basePath, '/') . '/';

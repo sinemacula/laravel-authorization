@@ -45,6 +45,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException;
 use SineMacula\Laravel\Authorization\Exceptions\TransactionConflictException;
+use SineMacula\Laravel\Authorization\Exceptions\UndeclaredPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Hooks\GrantWidening;
@@ -69,6 +70,7 @@ use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\AssertsTransactions;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\DeclaresPermissions;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
@@ -103,8 +105,8 @@ use Tests\TestCase;
 final class GrantServiceTest extends TestCase
 {
     use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals,
-        ComparesReferences, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage,
-        ReportsEveryDecision, UsesAnAuthorizationConnection, WidensGrants;
+        ComparesReferences, DeclaresPermissions, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks,
+        RefusesThePackage, ReportsEveryDecision, UsesAnAuthorizationConnection, WidensGrants;
 
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
@@ -2049,6 +2051,59 @@ final class GrantServiceTest extends TestCase
         $this->expectExceptionObject(new UnknownPermissionException('ghost'));
 
         self::service()->revokePermission(self::user(), 'ghost');
+    }
+
+    /**
+     * A grantee is never given a permission nothing declares, by name or model,
+     * alone or in a sync, trusted or delegated, or under a name changed in
+     * hand, and nothing is written or dispatched; one it already holds stays
+     * until a sync drops it, and a role, which is not an action, is granted as
+     * before.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnUndeclaredPermissionIsNeverGranted(): void
+    {
+        $user   = self::user();
+        $edit   = self::permission('posts:edit');
+        $legacy = self::permission('posts:legacy');
+
+        self::service()->grantPermission($user, $legacy);
+
+        $this->declarePermissions('posts:edit');
+
+        $renamed       = $legacy->fresh() ?? $legacy;
+        $renamed->name = 'posts:edit';
+        $actor         = self::administrator();
+        $refused       = [
+            'a grant by name'   => static fn (): mixed => self::service()->grantPermission($user, 'posts:legacy'),
+            'a grant by model'  => static fn (): mixed => self::service()->grantPermission($user, $legacy),
+            'a renamed model'   => static fn (): mixed => self::service()->grantPermission($user, $renamed),
+            'a delegated grant' => static fn (): mixed => self::service()->grantPermission($user, $legacy, actor: $actor),
+            'a sync by name'    => static fn (): mixed => self::service()->syncPermissions($user, [$edit, 'posts:legacy']),
+            'a delegated sync'  => static fn (): mixed => self::service()->syncPermissions($user, [$legacy], actor: $actor),
+        ];
+
+        Event::fake([PermissionGranted::class, PermissionRevoked::class]);
+
+        foreach ($refused as $case => $call) {
+            try {
+                $call();
+                self::fail("{$case} was not refused.");
+            } catch (UndeclaredPermissionException $exception) {
+                self::assertSame('posts:legacy', $exception->getPermission(), $case);
+            }
+        }
+
+        Event::assertNothingDispatched();
+        self::assertTrue(self::holdsPermission($user, 'posts:legacy'));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantRole($user, self::role('editor')));
+        self::assertFalse(self::service()->syncRoles($user, ['editor'])->isChange());
+        self::assertSame([$legacy->id], self::service()->syncPermissions($user, [$edit])->revoked);
+        self::assertTrue(self::holdsPermission($user, 'posts:edit'));
+        self::assertFalse(self::holdsPermission($user, 'posts:legacy'));
     }
 
     /**

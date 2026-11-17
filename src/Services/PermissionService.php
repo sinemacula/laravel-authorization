@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
+use SineMacula\Laravel\Authorization\Support\DeclaredPermissions;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 
@@ -25,7 +26,11 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
  * permission observer, name validation and system protection apply. A
  * permission named by a string is looked up under the package's default guard;
  * a permission model that has not been saved is refused with
- * `UnsavedRecordException`, so a change never creates one outside `create()`.
+ * `UnsavedRecordException`, so a change never creates one outside `create()`. A
+ * permission is created or renamed only under a name that covers a declared
+ * permission (see `Support\DeclaredPermissions`), else the call throws
+ * `UndeclaredPermissionException` before anything is decided or written, so a
+ * tenant's own permission is a copy of a declared one.
  *
  * Each method takes the acting context making the call as `$actor`, the reads
  * as well as the writes: null for trusted system work, such as seeders,
@@ -82,6 +87,7 @@ final class PermissionService
         AuthorizableTenant|Model|null $tenant = null,
     ): Permission {
         PackageState::guardCurrent();
+        DeclaredPermissions::assert($name);
 
         $class = self::permissionClass();
 
@@ -106,6 +112,7 @@ final class PermissionService
     public function rename(Permission|string $permission, string $name, ?ActingContext $actor = null): Permission
     {
         PackageState::guardCurrent();
+        DeclaredPermissions::assert($name);
 
         return RecordWriter::save($actor, PackagePermissions::PERMISSION_RENAME, static fn (): Permission => self::resolve($permission), ['name' => $name]);
     }

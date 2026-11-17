@@ -618,7 +618,8 @@ return [
     | one every guardrail entry shares, which updating or deleting any policy
     | bumps, as setting or removing a guardrail bumps the guardrails'); every
     | write bumps the versions it affects, so a change takes effect on the next
-    | check in every worker. A store that fails is skipped for the rest of the
+    | check in the worker that made it, and from the next request or job in
+    | every other worker. A store that fails is skipped for the rest of the
     | request or job, and checks read the database.
     |
     | `ttl` is the longest, in seconds, any entry lives in either tier; an

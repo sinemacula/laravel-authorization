@@ -99,12 +99,13 @@ List the enums and providers under `permission_enums` and `permission_providers`
 [Configuration](configuration.md)).
 
 `authorization:sync` adds the declared permissions that have no row and updates the description and category of those
-that differ, in one transaction, through the configured permission model. A platform permission that no enum or
-provider declares is reported as `stale` and left alone; `--prune` deletes stale permissions, except system ones, which
-are reported as `protected` and never changed. Permissions owned by a tenant are never read or changed. Every row is
-listed with its action, as a table or, with `--format=json`, as JSON. A name outside the package's name rules, an empty
-guard list or a guard that is not a non-empty string fails the sync with exit code `2` before anything is written. In
-CI, `--dry-run` exits with `1` when anything would be added, updated or pruned:
+that differ, in one transaction, through the configured permission model. A platform permission that no enum or provider
+declares is reported as `stale` and left alone, with the grants already made of it, but can no longer be granted (see
+[Managing roles, permissions and grants](#managing-roles-permissions-and-grants)); `--prune` deletes stale permissions,
+except system ones, which are reported as `protected` and never changed. Permissions owned by a tenant are never read or
+changed. Every row is listed with its action, as a table or, with `--format=json`, as JSON. A name outside the package's
+name rules, an empty guard list or a guard that is not a non-empty string fails the sync with exit code `2` before
+anything is written. In CI, `--dry-run` exits with `1` when anything would be added, updated or pruned:
 
 ```bash
 php artisan authorization:sync --dry-run --format=json
@@ -169,6 +170,15 @@ Roles and permissions are Eloquent models with UUID keys, granted through polymo
 stored in UTC whatever zone it is given in. A name is made of letters, digits and `_ - : . *`, and anything else is
 refused when it is saved. A permission can be a wildcard: `posts:*`, `posts.*`, `*:create`, or `*` for everything,
 while `*:*` matches only names with a `:`. With the role hierarchy enabled, a role inherits its parent's permissions.
+
+Only declared permissions are created or granted. `PermissionService::create()` and `rename()`, and every permission
+grant and sync of `RoleService` and `GrantService`, refuse a name that covers no declared permission with
+`UndeclaredPermissionException` before anything is written: the name must be one the configured enums or providers
+declare, or one of the package's own, and a wildcard must cover at least one, as a policy's action patterns must (see
+[Writing policies](policies.md#writing-policies)). A tenant's own permission names a declared one too, so a tenant
+creates its own copy of `posts:edit`, never a permission the code cannot check. A stale permission keeps the grants
+already made of it until they are revoked, synced away or pruned; granting it again, or listing it in a sync, is
+refused.
 
 A role, permission or policy flagged `is_system` cannot be edited, deleted or have the flag cleared unless
 `forceSystem()` on the model unlocks the next change.
@@ -266,20 +276,20 @@ a key without a type, is neither the platform's nor any tenant's, and fails clos
 
 This holds in a check, a bulk check, `permissionsFor()` and query scoping alike, cold or from the resolution cache. A
 check reads such rows through queries of their own, each a range of an index, so with none it does no more work than it
-would without them; the `2026_11_11_000001_add_half_tenant_indexes` migration adds the `tenant_id` indexes of
-`guardrails`, `resource_policies` and `policies` these reads use. An explanation never names such a row as the
-platform's or as where an allow came from. A role, permission or policy owned that way is never granted, attached or
-linked to a role anywhere (`InvalidTenantColumnsException`); a link to one already stored applies nowhere, so it never
-keeps the guard of a role or permission from changing. A rewrite of a policy that a boundary stored that way uses is
-decided at platform scope, since the boundary caps everywhere. Such a row is removed by a removal in every scope:
-`revokeAll()`, `BoundaryService::removeAll()` and `ResourcePolicyService::detachAll()`, which `authorization:prune`
-runs, and, for a guardrail, removing its policy's guardrail at the platform. Each decides it at platform scope, in its
-application, so an acting context needs the platform authority for the action, never a tenant's; it is removed as
-stored, counted, and, once the removal commits, written to the log as malformed rather than reported by an event, and
-the cache forgets it. A row another writer removed first is neither counted nor written. An expired one is pruned the
-same way. `authorization:list-roles` and `authorization:list-permissions` show such an owner as
-`malformed (tenant_type=..., tenant_id=...)`, a policy's guardrail refusal counts such guardrails as malformed, and an
-[access review](access-reviews.md#access-reviews) lists such a row as `malformed`.
+would without them; the `tenant_id` indexes of `guardrails`, `resource_policies` and `policies` serve these reads. An
+explanation never names such a row as the platform's or as where an allow came from. A role, permission or policy owned
+that way is never granted, attached or linked to a role anywhere (`InvalidTenantColumnsException`); a link to one
+already stored applies nowhere, so it never keeps the guard of a role or permission from changing. A rewrite of a policy
+that a boundary stored that way uses is decided at platform scope, since the boundary caps everywhere. Such a row is
+removed by a removal in every scope: `revokeAll()`, `BoundaryService::removeAll()` and
+`ResourcePolicyService::detachAll()`, which `authorization:prune` runs, and, for a guardrail, removing its policy's
+guardrail at the platform. Each decides it at platform scope, in its application, so an acting context needs the
+platform authority for the action, never a tenant's; it is removed as stored, counted, and, once the removal commits,
+written to the log as malformed rather than reported by an event, and the cache forgets it. A row another writer removed
+first is neither counted nor written. An expired one is pruned the same way. `authorization:list-roles` and
+`authorization:list-permissions` show such an owner as `malformed (tenant_type=..., tenant_id=...)`, a policy's
+guardrail refusal counts such guardrails as malformed, and an [access review](access-reviews.md#access-reviews) lists
+such a row as `malformed`.
 
 Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class
 implementing `SineMacula\Laravel\Authorization\Contracts\TenantTree` as `tenant_tree` in `config/authorization.php`,

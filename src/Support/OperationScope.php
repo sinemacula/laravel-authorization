@@ -251,10 +251,6 @@ final class OperationScope
      */
     public static function beginWrite(Model $record): void
     {
-        if (self::$writes === null) {
-            return;
-        }
-
         unset(self::$writes[$record]);
     }
 

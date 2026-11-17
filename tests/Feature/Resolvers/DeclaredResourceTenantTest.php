@@ -7,6 +7,8 @@ namespace Tests\Feature\Resolvers;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder as QueryBuilder;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Database\SQLiteConnection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\After;
@@ -140,6 +142,51 @@ final class DeclaredResourceTenantTest extends TestCase
         });
 
         self::assertFalse(ResourceReferences::of([UuidScopedDocument::class, 'not-a-uuid']));
+    }
+
+    /**
+     * On PostgreSQL a key is looked up only when its column can hold it, as the
+     * column's described type decides, here on a SQLite connection that reports
+     * itself as PostgreSQL, which keeps any bytes.
+     *
+     * @return void
+     */
+    public function testOnPostgresOnlyAKeyTheColumnCanHoldIsLookedUp(): void
+    {
+        $default = config('database.default');
+
+        config(['database.connections.reported_pgsql' => ['driver' => 'sqlite', 'database' => ':memory:'], 'database.default' => 'reported_pgsql']);
+
+        DB::extend('reported_pgsql', static fn (array $config): SQLiteConnection => new class (new \PDO('sqlite::memory:'), ':memory:', '', $config) extends SQLiteConnection {
+            /**
+             * Report the connection as PostgreSQL.
+             *
+             * @return string
+             */
+            #[\Override]
+            public function getDriverName(): string
+            {
+                return 'pgsql';
+            }
+        });
+
+        try {
+            DB::connection()->getSchemaBuilder()->create('scoped_uuid_documents', static function (Blueprint $table): void {
+                $table->string('id')->primary();
+                $table->string('tenant_type')->nullable();
+                $table->string('tenant_id')->nullable();
+            });
+
+            UuidScopedDocument::query()->create(['id' => 'doc-a', 'tenant_type' => 'teams', 'tenant_id' => 't1']);
+            UuidScopedDocument::query()->create(['id' => "\xff\xfe", 'tenant_type' => 'teams', 'tenant_id' => 't2']);
+
+            $resolver = new DeclaredResourceTenant(new FixedResourceTenantResolver(null, false));
+
+            self::assertEquals(new Reference('teams', 't1'), $resolver->tenantOfRecord(UuidScopedDocument::class, 'doc-a'));
+            self::assertFalse($resolver->tenantOfRecord(UuidScopedDocument::class, "\xff\xfe"));
+        } finally {
+            config(['database.default' => $default]);
+        }
     }
 
     /**

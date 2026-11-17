@@ -779,6 +779,37 @@ final class GuardrailServiceTest extends TestCase
     }
 
     /**
+     * A policy deleted while its guardrail is written, which on MySQL leaves no
+     * row once `INSERT IGNORE` turns the foreign key failure into a warning, is
+     * refused as gone: nothing is reported set, no `GuardrailSet` is
+     * dispatched, and the guardrail held before is kept.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyDeletedWhileItsGuardrailIsWrittenIsRefused(): void
+    {
+        $actor  = self::manager();
+        $policy = self::rail('deleted');
+
+        self::service()->set($policy, null, ActingContext::for($actor));
+        self::churn((array) DB::table('guardrails')->sole(), true);
+
+        Event::fake([GuardrailSet::class]);
+
+        try {
+            self::service()->set($policy, null, ActingContext::for($actor));
+            self::fail('The deleted policy was set as a guardrail.');
+        } catch (InvalidGrantTargetException $exception) {
+            self::assertSame('policy', $exception->getKind());
+        }
+
+        self::assertSame([], self::dispatchedEvents(GuardrailSet::class));
+        self::assertSame(1, DB::table('guardrails')->where('policy_id', $policy->id)->count());
+    }
+
+    /**
      * Once the package refuses, every operation of the service refuses by its
      * own guard, before it reads or writes anything.
      *
@@ -854,18 +885,20 @@ final class GuardrailServiceTest extends TestCase
      * Interleave a concurrent change with each write of the guardrail row: it
      * is removed once each of the first two inserts is ignored, and put back
      * once the first locking read of it runs, so neither insert writes a row
-     * and no read finds one. Only the writer's own read of the row puts it
+     * and no read finds one, and the row's policy is deleted with the second
+     * removal when it is to be. Only the writer's own read of the row puts it
      * back, never the actor's check, which reads the guardrails too.
      *
      * @param  array<string, mixed>  $row
+     * @param  bool  $isDeleted
      * @return void
      */
-    private static function churn(array $row): void
+    private static function churn(array $row, bool $isDeleted = false): void
     {
         $removals = new \ArrayObject;
         $restored = new \ArrayObject;
 
-        DB::listen(static function (QueryExecuted $query) use ($row, $removals, $restored): void {
+        DB::listen(static function (QueryExecuted $query) use ($row, $isDeleted, $removals, $restored): void {
             $sql = \strtolower($query->sql);
 
             if (\str_starts_with($sql, 'select exists') && \str_contains($sql, 'guardrails') && $restored->count() < 1) {
@@ -879,6 +912,12 @@ final class GuardrailServiceTest extends TestCase
 
             $removals->append(true);
             self::remove($row);
+
+            if (!$isDeleted || $removals->count() !== 2) {
+                return;
+            }
+
+            DB::table('policies')->where('id', $row['policy_id'])->delete();
         });
     }
 

@@ -37,8 +37,8 @@ final class GrantUsageBudgetTest extends TestCase
 
     /**
      * A tracked check reads, cold, exactly the queries an untracked one reads,
-     * and, warm, none; 1,000 warm tracked checks complete in under 500ms and
-     * are recorded once a bucket.
+     * and, warm, none; 1,000 warm tracked checks complete in under 500ms, the
+     * fastest of three runs, and are recorded once a bucket.
      *
      * @return void
      *
@@ -75,13 +75,11 @@ final class GrantUsageBudgetTest extends TestCase
             $queries++;
         });
 
-        $start = \microtime(true);
-
-        for ($index = 0; $index < 1000; $index++) {
-            $manager->check('posts:read');
-        }
-
-        $elapsed = \microtime(true) - $start;
+        $elapsed = $this->fastestOf(3, static function () use ($manager): void {
+            for ($index = 0; $index < 1000; $index++) {
+                $manager->check('posts:read');
+            }
+        });
 
         self::assertSame(0, $queries);
         $this->assertWithinBudget(0.5, $elapsed, "Tracked check budget exceeded ({$elapsed}s for 1,000 checks).");

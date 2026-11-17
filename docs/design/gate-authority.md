@@ -15,7 +15,8 @@ decides through the package for the abilities the hook leaves to it.
 2. **The declared names, exactly.** The hook answers an ability whose exact name the permission catalogue holds: every
    case of the configured enums, every permission of the configured providers, whatever its guard, and the package's
    own (`PackagePermissions`). The match is by membership, never by pattern, so `posts:*` is answered only when a
-   permission of that name is declared. A permission row that exists only in the database is not declared.
+   permission of that name is declared. A permission row that exists only in the database is not declared, and the
+   services never create or grant one (see `permission-catalogue-sync.md`).
 
 3. **Both answers stand.** For a declared ability the hook returns the decision of `check()`, through
    `forUser($user)->can()`, true for an allow and false for a deny. Laravel stops at the first before-callback that
@@ -56,8 +57,9 @@ allow or deny is the Gate's answer; any define or policy for `posts:update` is n
 
 - **Undeclared ability.** `Gate::allows('reports:view')` with nothing declaring it is answered by the application's
   define or policy, or denied by Laravel when there is none. The package records nothing.
-- **Database-only row.** A permission created only in the database, and granted, is decided by `Authorization::can()`
-  but is not the Gate's to the package.
+- **Database-only row.** A stale permission, whose declaration was removed, or one written outside the services, is
+  decided by `Authorization::can()` for the grants already made of it, but is not the Gate's to the package. The
+  services refuse to create or grant one.
 - **Malformed catalogue.** A declaration that breaks the name rules throws on the first Gate check, as on any other
   read of the catalogue, rather than letting the Gate decide by default.
 - **Hook turned off.** With `authorization.gate.enabled` false, the Gate knows none of the package's permissions; the

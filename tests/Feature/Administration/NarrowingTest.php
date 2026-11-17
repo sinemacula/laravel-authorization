@@ -360,6 +360,27 @@ final class NarrowingTest extends TestCase
     }
 
     /**
+     * An action that grants nothing never shortens, even of what the grantee
+     * holds.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnActionThatGrantsNothingNeverShortens(): void
+    {
+        $user = StubGrantee::create(['id' => 'user-1']);
+        $edit = Permission::create(['name' => 'posts:edit']);
+
+        GrantService::instance()?->grantPermission($user, $edit);
+
+        $change = new OperationChange(Reference::of($user), $edit, GrantScope::platform());
+
+        self::assertTrue(Narrowing::isShortening(PackagePermissions::PERMISSION_GRANT, $change));
+        self::assertFalse(Narrowing::isShortening(PackagePermissions::PERMISSION_REVOKE, $change));
+    }
+
+    /**
      * Return the change of a grant of the target to the grantee in the scope,
      * until the expiry or forever.
      *
