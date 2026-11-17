@@ -289,10 +289,11 @@ Route::get('/api/admin', ApiAdmin::class)->middleware('role:admin,api');
   Without a parameter, the check has no resource. Like Laravel's `can:`, it is placed right after `SubstituteBindings`
   in the middleware priority, so it decides on the bound model wherever the route lists it.
 - `role:` checks role membership. A role is not an action, so policies never apply to it: it sees the roles the
-  subject's `hasRole()` sees, the platform's and its tenant's. A second argument limits it to the roles of that
-  authentication guard and the guard-agnostic ones. A name that is not in `auth.guards` is refused, and so is a bare
-  name that is also the name of a role, since `role:editor,admin` may mean "editor or admin"; write such a guard as
-  `role:editor,guard=admin`. Checking a bare guard against the roles costs one query.
+  subject's `hasRole()` sees, the platform's and its tenant's, read on the write connection as a decision reads its
+  grants, so a read replica that lags never admits a role revoked since. A second argument limits it to the roles of
+  that authentication guard and the guard-agnostic ones. A name that is not in `auth.guards` is refused, and so is a
+  bare name that is also the name of a role, since `role:editor,admin` may mean "editor or admin"; write such a guard
+  as `role:editor,guard=admin`. Checking a bare guard against the roles costs one query.
 
 In each of them `|` separates alternatives, and any one admits the request; chain the middleware to require several. A
 comma does not list alternatives: the second argument is the guard of `role:` or the route parameter of `authorize:`,

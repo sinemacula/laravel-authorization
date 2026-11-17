@@ -8,6 +8,7 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
@@ -16,7 +17,11 @@ use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
+use SineMacula\Laravel\Authorization\Services\GuardrailService;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -159,17 +164,48 @@ final class RbacQueryBudgetTest extends TestCase
      * the hierarchy and the roles' permissions are each read once.
      *
      * @return void
+     *
+     * @throws \Throwable
      */
     public function testResolutionQueriesDoNotGrowWithRolesOrDepth(): void
     {
-        $shallow = self::identityHolding(roles: 1, depth: 2);
-        $deep    = self::identityHolding(roles: 4, depth: 4);
+        $resolve = static fn (StubGrantee $user): array => $user->getPermissions();
 
-        $shallowQueries = self::resolutionQueries($shallow);
-        $deepQueries    = self::resolutionQueries($deep);
+        $shallowQueries = $this->coldQueries(self::identityHolding(roles: 1, depth: 2), $resolve);
+        $deepQueries    = $this->coldQueries(self::identityHolding(roles: 4, depth: 4), $resolve);
 
-        self::assertLessThanOrEqual(5, $deepQueries, 'Permission resolution exceeded its five-query budget.');
-        self::assertSame($shallowQueries, $deepQueries, 'Permission resolution grew with the number of roles or the depth of the hierarchy.');
+        self::assertLessThanOrEqual(5, \count($deepQueries), 'Permission resolution exceeded its five-query budget.');
+        self::assertCount(\count($shallowQueries), $deepQueries, 'Permission resolution grew with the number of roles or the depth of the hierarchy.');
+    }
+
+    /**
+     * A cold check through the manager takes the same 13 queries for one role
+     * as for four roles four levels deep, every role carrying a policy, with a
+     * policy and a boundary on the identity and a guardrail on the platform.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testColdCheckQueriesDoNotGrowWithRolesOrDepth(): void
+    {
+        $actor = StubGrantee::create(['id' => (string) Str::uuid()]);
+
+        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE, 'guard' => 'web']));
+
+        $this->app?->make(GuardrailService::class)->set(self::policy('guardrail', 'allow', '*'), null, ActingContext::for($actor));
+
+        $check = function (StubGrantee $user): void {
+            $manager = $this->app?->make(AuthorizationManager::class);
+
+            self::assertTrue($manager?->for($user)->can('chain-' . Reference::of($user)->id . '-0-0:read'));
+        };
+
+        $shallowQueries = $this->coldQueries(self::identityHolding(roles: 1, depth: 1), $check);
+        $deepQueries    = $this->coldQueries(self::identityHolding(roles: 4, depth: 4), $check);
+
+        self::assertLessThanOrEqual(13, \count($deepQueries), "A cold check exceeded its 13-query budget:\n" . \implode("\n", $deepQueries));
+        self::assertCount(\count($shallowQueries), $deepQueries, "A cold check grew with the number of roles or the depth of the hierarchy:\n" . \implode("\n", $deepQueries));
     }
 
     /**
@@ -239,11 +275,14 @@ final class RbacQueryBudgetTest extends TestCase
 
     /**
      * Create an identity holding the given number of roles, each at the bottom
-     * of its own chain of the given depth with a permission at every level.
+     * of its own chain of the given depth with a permission and a policy at
+     * every level, and a policy and a boundary of its own.
      *
      * @param  int  $roles
      * @param  int  $depth
      * @return \Tests\Feature\Stubs\StubGrantee
+     *
+     * @throws \Throwable
      */
     private static function identityHolding(int $roles, int $depth): StubGrantee
     {
@@ -258,6 +297,7 @@ final class RbacQueryBudgetTest extends TestCase
                 $parent = Role::create(['name' => $name, 'guard' => 'web', 'parent_id' => $parent?->getKey()]);
 
                 $parent->permissions()->attach(Permission::create(['name' => "{$name}:read", 'guard' => 'web'])->getKey());
+                $parent->attachPolicy(self::policy($name, 'allow', "{$name}:write"));
             }
 
             \assert($parent instanceof Role);
@@ -265,30 +305,55 @@ final class RbacQueryBudgetTest extends TestCase
             $user->assignRole($parent);
         }
 
+        $user->attachPolicy(self::policy("deny-{$id}", 'deny', 'posts:delete'));
+
+        BoundaryService::instance()?->set($user, self::policy("boundary-{$id}", 'allow', '*'));
+
         return $user;
     }
 
     /**
-     * Count the queries resolving a fresh copy of the identity's permissions
-     * runs.
+     * Return a policy of one statement with the effect on the action.
+     *
+     * @param  string  $name
+     * @param  string  $effect
+     * @param  string  $action
+     * @return \SineMacula\Laravel\Authorization\Models\Policy
+     */
+    private static function policy(string $name, string $effect, string $action): Policy
+    {
+        return Policy::create(['name' => $name, 'document' => ['statements' => [['effect' => $effect, 'actions' => [$action]]]]]);
+    }
+
+    /**
+     * Return the queries the callback runs on a fresh copy of the identity,
+     * with the resolution cache and every scoped instance cold.
      *
      * @param  \Tests\Feature\Stubs\StubGrantee  $user
-     * @return int
+     * @param  \Closure(\Tests\Feature\Stubs\StubGrantee): mixed  $run
+     * @return list<string>
      */
-    private static function resolutionQueries(StubGrantee $user): int
+    private function coldQueries(StubGrantee $user, \Closure $run): array
     {
+        $app = $this->app;
+        self::assertNotNull($app, 'Testbench application must be booted by setUp().');
+
+        $app->make('cache')->store('array')->clear();
+        $app->forgetScopedInstances();
+
         $fresh = StubGrantee::query()->whereKey($user->getKey())->firstOrFail();
 
         DB::enableQueryLog();
         DB::flushQueryLog();
 
-        $fresh->getPermissions();
+        $run($fresh);
 
-        $count = \count(DB::getQueryLog());
+        /** @var list<string> $queries */
+        $queries = \array_column(DB::getQueryLog(), 'query');
 
         DB::disableQueryLog();
 
-        return $count;
+        return $queries;
     }
 
     /**

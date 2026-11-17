@@ -12,10 +12,11 @@ use SineMacula\Laravel\Authorization\Models\Role;
 /**
  * PHPBench micro-benchmark for `Role::ancestors()` and `Role::descendants()`.
  *
- * Role hierarchy traversal runs on every `getPermissions()` call when hierarchy
- * is enabled — which is the default. The walk lazy-loads each level, so depth
- * and breadth both compound with query count. The bench carves the call surface
- * into the three shapes production traffic actually hits:
+ * The ancestors walk reads a chain in two queries whatever its depth, through
+ * `RoleGraph`, as permission resolution does with the hierarchy enabled. The
+ * descendants walk reads each role's children in a query of its own, so its
+ * cost grows with the subtree. The bench carves the call surface into the three
+ * shapes production traffic actually hits:
  *
  * - Ancestors on a 5-deep chain — realistic engineering-tier / platform-tier /
  *   tenant-tier hierarchy.
@@ -69,8 +70,6 @@ final class RoleHierarchyBench extends BenchmarkCase
     #[Bench\Revs(100)]
     public function benchAncestorsFiveDeep(): void
     {
-        // Reload the leaf so the parent relation is cold and the walk exercises
-        // the lazy-load chain every rep.
         $leaf = Role::query()->whereKey($this->fiveDeepLeaf->getKey())->firstOrFail();
         $leaf->ancestors();
     }

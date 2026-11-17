@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\ResolvesPivotExpiry;
@@ -18,6 +19,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\LagsTheReadConnection;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -25,7 +27,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the grant service accessor `ResolvesPivotExpiry` gives the
- * grantee traits.
+ * identity traits.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,7 +37,7 @@ use Tests\TestCase;
 #[CoversTrait(ResolvesPivotExpiry::class)]
 final class ResolvesPivotExpiryTest extends TestCase
 {
-    use ActivatesBreakGlass, ActsAsTenant;
+    use ActivatesBreakGlass, ActsAsTenant, LagsTheReadConnection;
 
     /**
      * Allow lazy loading again.
@@ -176,7 +178,7 @@ final class ResolvesPivotExpiryTest extends TestCase
     }
 
     /**
-     * The grantee traits write through the grant service the container binds.
+     * The identity traits write through the grant service the container binds.
      *
      * @return void
      */
@@ -227,6 +229,62 @@ final class ResolvesPivotExpiryTest extends TestCase
         $this->actAsTenant($tenant);
 
         self::assertSame(['auditor', 'responder'], $user->roles()->orderBy('name')->pluck('name')->all());
+    }
+
+    /**
+     * A role check reads the role grants and the break-glass activations on the
+     * write connection, so a read replica that lags never passes a role revoked
+     * or an activation ended since.
+     *
+     * @return void
+     */
+    public function testRoleChecksReadTheWriteConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $user       = StubGrantee::query()->create(['id' => 'user-1']);
+        $activation = self::activate($user, self::emergencyRole());
+
+        $user->assignRole(Role::query()->create(['name' => 'editor']));
+
+        self::lagTheReadConnection();
+
+        $user->revokeRole('editor');
+        $activation->update(['ended_at' => Carbon::now(), 'end_reason' => 'revoked']);
+
+        $reread = self::reread($user);
+
+        self::assertFalse($reread->hasRole('editor'));
+        self::assertFalse($reread->hasRole('responder'));
+    }
+
+    /**
+     * A role check reads the roles again in place of a roles relation loaded
+     * some other way, and keeps what it read for the next check.
+     *
+     * @return void
+     */
+    public function testRoleChecksKeepOnlyTheRolesTheyRead(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $user = StubGrantee::query()->create(['id' => 'user-1']);
+
+        $user->assignRole(Role::query()->create(['name' => 'editor']));
+
+        self::lagTheReadConnection();
+
+        $user->revokeRole('editor');
+
+        $reread = self::reread($user)->load('roles');
+
+        self::assertSame(['editor'], $reread->roles->pluck('name')->all());
+        self::assertFalse($reread->hasRole('editor'));
+
+        self::authorizationConnection()->enableQueryLog();
+
+        self::assertFalse($reread->hasRole('editor'));
+        self::assertSame([], self::authorizationConnection()->getQueryLog());
     }
 
     /**
