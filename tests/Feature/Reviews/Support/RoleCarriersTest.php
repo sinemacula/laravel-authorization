@@ -201,6 +201,13 @@ final class RoleCarriersTest extends TestCase
         self::assertSame(['role_policy y4 held'], self::routes($platform));
         self::assertSame(GrantState::MALFORMED, $platform->rows()[0]->grantState);
 
+        // A row holding no scope of its own, as an edge, reaches no attachment.
+        $unscoped = new RowCollector($run, 10);
+
+        RoleCarriers::throughAttachments($run, $unscoped, new Reference('u', 'ann'), self::edge('held', 'p1'), ['held', 'parent'], $attachments);
+
+        self::assertSame([], self::routes($unscoped));
+
         // The routes come in their own order: by how far up the chain the role
         // carrying each is, nearest first, whatever the roles' keys, then by
         // the row each rests on.

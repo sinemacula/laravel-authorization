@@ -9,7 +9,6 @@ use Symfony\Component\Console\Exception\ExceptionInterface;
 use Symfony\Component\Console\Exception\InvalidOptionException;
 use Symfony\Component\Console\Input\ArgvInput;
 use Symfony\Component\Console\Input\InputDefinition;
-use Symfony\Component\Console\Input\InputOption;
 
 /**
  * Read the name of the command the console runs from the process's arguments,
@@ -161,9 +160,7 @@ final class ConsoleInvocation
 
     /**
      * Read a set of short options, such as `-v` or `-vvq`, and return the
-     * arguments left once they have taken any value they take: an option that
-     * takes a value takes the rest of the set, or the next argument when it
-     * ends the set.
+     * arguments left. No shortcut of the console's own options takes a value.
      *
      * @param  string  $set
      * @param  list<string>  $tokens
@@ -174,17 +171,8 @@ final class ConsoleInvocation
      */
     private static function shortOptions(string $set, array $tokens, InputDefinition $definition): array
     {
-        $length = \strlen($set);
-
-        for ($index = 0; $index < $length; $index++) {
-            $option = $definition->getOptionForShortcut($set[$index]);
-            $rest   = \substr($set, $index + 1);
-
-            if ($option->acceptValue()) {
-                return self::option($option->getName(), $rest === '' ? null : $rest, $tokens, $definition);
-            }
-
-            $tokens = self::option($option->getName(), null, $tokens, $definition);
+        foreach (\str_split($set) as $shortcut) {
+            $tokens = self::option($definition->getOptionForShortcut($shortcut)->getName(), null, $tokens, $definition);
         }
 
         return $tokens;
@@ -217,33 +205,22 @@ final class ConsoleInvocation
             return $tokens;
         }
 
-        return $value === null ? self::takeValue($option, $tokens) : $tokens;
+        return $value === null ? self::takeValue($tokens) : $tokens;
     }
 
     /**
-     * Return the arguments left once the option, which takes a value and was
-     * given none, has taken the next one as its value, as the console takes it:
-     * when it is empty or no option. One that requires a value and finds none
-     * is refused.
+     * Return the arguments left once an option that takes a value and was given
+     * none has taken the next one as its value, as the console takes it: when
+     * it is empty or no option. None of the console's own options requires a
+     * value.
      *
-     * @param  \Symfony\Component\Console\Input\InputOption  $option
      * @param  list<string>  $tokens
      * @return list<string>
-     *
-     * @throws \Symfony\Component\Console\Exception\InvalidOptionException
      */
-    private static function takeValue(InputOption $option, array $tokens): array
+    private static function takeValue(array $tokens): array
     {
         $next = $tokens[0] ?? null;
 
-        if ($next !== null && ($next === '' || $next[0] !== '-')) {
-            return \array_slice($tokens, 1);
-        }
-
-        if ($option->isValueRequired()) {
-            throw new InvalidOptionException("The \"--{$option->getName()}\" option requires a value.");
-        }
-
-        return $tokens;
+        return $next !== null && ($next === '' || $next[0] !== '-') ? \array_slice($tokens, 1) : $tokens;
     }
 }

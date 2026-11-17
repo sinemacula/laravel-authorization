@@ -241,8 +241,8 @@ final class BreakGlassAttributionTest extends TestCase
     /**
      * A resource policy's allow whose role selector names a role held through
      * an activation, or a role above it, names the activation, a role also
-     * granted included; one that also names the subject by reference, or a role
-     * granted alone, names none.
+     * granted included; one that also names the subject by reference, a role
+     * granted alone, or a statement of a policy not weighed names none.
      *
      * @return void
      */
@@ -275,6 +275,7 @@ final class BreakGlassAttributionTest extends TestCase
         self::assertSame([], $this->checked($user, self::EDIT, ['posts', 9])[0]->activations);
         self::assertSame([$held->id], $this->checked($both, self::EDIT, ['posts', 7])[0]->activations);
         self::assertSame([], $this->checked($granted, self::EDIT, ['posts', 7])[0]->activations);
+        self::assertSame([], BreakGlassAttribution::of(new Subject($user), self::EDIT)?->behind($decision, []));
     }
 
     /**

@@ -27,6 +27,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Feature\Stubs\CustomGrantsIdentity;
 use Tests\Feature\Stubs\HiddenPolicy;
+use Tests\Feature\Stubs\OwnPoliciesGrantee;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSecondIdentity;
@@ -445,6 +446,33 @@ final class GrantProvenanceResolverTest extends TestCase
         self::assertEquals(
             [GrantProvenance::unavailable('coded', Reference::of($user), true)],
             $custom->evidenceFor(Decision::allow(DecisionStage::ALLOW, [new StatementReference('coded', 0)]))->grants,
+        );
+    }
+
+    /**
+     * A model that gives its policies without the package's traits holds what
+     * its own code gives, noted as unavailable, its attachments never read.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAModelWithoutThePackagesTraitsIsUnavailable(): void
+    {
+        $grantee  = OwnPoliciesGrantee::query()->create(['id' => 'own-1']);
+        $recorder = new EvidenceRecorder;
+
+        DB::table('authorizable_policies')->insert([
+            'policy_id'         => Policy::create(['name' => 'stored', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['reports:read']]]]])->id,
+            'authorizable_type' => $grantee->getMorphClass(),
+            'authorizable_id'   => 'own-1',
+            'include_subtree'   => true,
+        ]);
+
+        self::assertSame(['own'], self::names(GrantProvenanceResolver::policiesOf($grantee, $recorder)));
+        self::assertEquals(
+            [GrantProvenance::unavailable('own', Reference::of($grantee))],
+            $recorder->evidenceFor(Decision::allow(DecisionStage::ALLOW, [new StatementReference('own', 0)]))->grants,
         );
     }
 

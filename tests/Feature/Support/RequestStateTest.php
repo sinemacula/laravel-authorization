@@ -9,6 +9,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Support\RequestState;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\TestCase;
@@ -60,5 +61,23 @@ final class RequestStateTest extends TestCase
         self::assertNotSame($tenant, $app->make(ResolvedTenant::class));
         self::assertSame($state, PackageState::of($app));
         self::assertSame($unit, $app->make('application.unit'));
+    }
+
+    /**
+     * The facade reaches the manager built after forgetting, not the one it
+     * resolved before.
+     *
+     * @return void
+     */
+    public function testTheFacadeReachesTheNewManagerAfterForgetting(): void
+    {
+        $app = $this->container();
+
+        $manager = Authorization::getFacadeRoot();
+
+        RequestState::forget($app);
+
+        self::assertNotSame($manager, Authorization::getFacadeRoot());
+        self::assertSame($app->make(AuthorizationManager::class), Authorization::getFacadeRoot());
     }
 }
