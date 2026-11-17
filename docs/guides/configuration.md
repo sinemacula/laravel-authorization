@@ -152,7 +152,9 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 Roles, permissions, policies, boundaries and guardrails are read through a resolution cache, kept in memory for the
 request or job and, when `cache.store` names a cache store, in that store too. Its entries are versioned, so every
 write takes effect on the next check in every worker, and a write that rolls back bumps the versions too, so nothing a
-check stored from it inside the transaction is served. A store that fails is skipped while checks read the database.
+check stored from it inside the transaction is served. A store that fails, by throwing or by returning false from a
+write, is skipped while checks read the database, and a write whose versions it fails to bump inside the transaction
+rolls back.
 
 To add columns or behaviour to the `Role`, `Permission` or `Policy` model, name a subclass of it under `models` (see
 [Model extension](../design/model-extension.md)).
