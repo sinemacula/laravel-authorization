@@ -10,9 +10,11 @@ use Illuminate\Cache\Repository;
 use Illuminate\Events\Dispatcher;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
+use SineMacula\Laravel\Authorization\Exceptions\CacheWriteRefusedException;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\FailingCacheStore;
 use Tests\Feature\Stubs\RecordingLogger;
+use Tests\Feature\Stubs\RefusingCacheStore;
 use Tests\TestCase;
 
 /**
@@ -221,6 +223,81 @@ final class VersionedStoreTest extends TestCase
         $this->expectExceptionObject(new \RuntimeException('cache unavailable'));
 
         $store->bump(['key']);
+    }
+
+    /**
+     * A bump the store refuses throws without disabling the store, and a quiet
+     * one is written to the log channel and disables it, as a thrown failure
+     * is.
+     *
+     * @return void
+     */
+    public function testARefusedBumpFailsAsAThrownOneDoes(): void
+    {
+        $logger = new RecordingLogger;
+        $this->app?->instance('log', $logger);
+
+        $driver = new RefusingCacheStore;
+        $store  = new VersionedStore(new Repository($driver), 'authz');
+
+        $driver->refuses = false;
+        $store->put('entry', ['value' => [1]], 60);
+        $driver->refuses = true;
+
+        try {
+            $store->bump(['key']);
+            self::fail('The refused bump was not thrown.');
+        } catch (CacheWriteRefusedException $exception) {
+            self::assertSame('The resolution cache store refused a write.', $exception->getMessage());
+        }
+
+        self::assertSame([], $logger->messages());
+        self::assertSame(['value' => [1]], $store->get('entry'));
+
+        $store->bumpQuietly(['key']);
+
+        self::assertNull($store->get('entry'));
+        self::assertSame([
+            'Authorization: the resolution cache store failed, so checks read the database for the rest of this request or job — The resolution cache store refused a write.',
+        ], $logger->messages());
+        self::assertInstanceOf(CacheWriteRefusedException::class, $logger->records[0]['context']['exception']);
+    }
+
+    /**
+     * An entry write the store refuses is written to the log channel and
+     * disables the store, while forgetting a lapsed entry that is not there is
+     * no failure.
+     *
+     * @return void
+     */
+    public function testARefusedEntryWriteIsSkippedAndLogged(): void
+    {
+        $logger = new RecordingLogger;
+        $this->app?->instance('log', $logger);
+
+        $driver = new RefusingCacheStore;
+        $store  = new VersionedStore(new Repository($driver), 'authz');
+
+        $driver->refuses = false;
+        $store->put('one', ['value' => [1]], 60);
+        $store->putMany([60 => ['many' => ['value' => [2]]]]);
+        $driver->refuses = true;
+        $store->put('lapsed', [], 0);
+        $store->putMany([0 => ['lapsed' => []]]);
+
+        self::assertSame([], $logger->messages());
+        self::assertSame(['value' => [1]], $store->get('one'));
+        self::assertSame(['value' => [2]], $store->get('many'));
+
+        $store->put('entry', [], 1);
+
+        self::assertNull($store->get('one'));
+
+        (new VersionedStore(new Repository($driver), 'authz'))->putMany([1 => ['entry' => []]]);
+
+        self::assertCount(2, $logger->records);
+        self::assertInstanceOf(CacheWriteRefusedException::class, $logger->records[0]['context']['exception']);
+        self::assertInstanceOf(CacheWriteRefusedException::class, $logger->records[1]['context']['exception']);
     }
 
     /**
