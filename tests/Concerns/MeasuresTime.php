@@ -47,4 +47,27 @@ trait MeasuresTime
 
         self::assertLessThan($budget, $elapsed, $message);
     }
+
+    /**
+     * Return the fastest of several timed runs of the work, in seconds, so one
+     * run slowed by a busy runner does not fail a budget.
+     *
+     * @param  int  $runs
+     * @param  \Closure(): void  $work
+     * @return float
+     */
+    protected function fastestOf(int $runs, \Closure $work): float
+    {
+        $fastest = \INF;
+
+        for ($run = 0; $run < $runs; $run++) {
+            $start = \microtime(true);
+
+            $work();
+
+            $fastest = \min($fastest, \microtime(true) - $start);
+        }
+
+        return $fastest;
+    }
 }
