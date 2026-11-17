@@ -44,12 +44,12 @@ A resolver can say more about the subject than who and where. `scopes` says what
 such as an API token, carries, for the session policy source to cap its checks with (see [Session caps and
 machines](caps.md#session-caps-and-machines)): `CredentialScopes::uncapped()` when the credential carries no cap, and
 `CredentialScopes::of([...])` with the scopes it carries, where `of([])` carries none granted and allows nothing. Left
-null, the subject says nothing about them, which is not the same as no cap: the source then establishes the scopes of
-the credential the subject names, and fails closed when it cannot. `platform` marks a subject acting on the platform, as
-a queued job or a console command acting for no tenant does: it names no tenant, and `for()` of it decides on the
-platform whatever tenant is in place (see [The programmatic API](checking-access.md#the-programmatic-api)). Marking the
-request's subject moves neither `forUser()` nor a model named through `for()` out of the scope in place. The shipped
-resolver sets neither.
+null, the subject says nothing about them: the shipped source then sets no cap, except that a machine principal is
+allowed nothing, and a source that knows credentials establishes them itself and fails closed when it cannot. `platform`
+marks a subject acting on the platform, as a queued job or a console command acting for no tenant does: it names no
+tenant, and `for()` of it decides on the platform whatever tenant is in place (see [The programmatic
+API](checking-access.md#the-programmatic-api)). Marking the request's subject moves neither `forUser()` nor a model
+named through `for()` out of the scope in place. The shipped resolver sets neither.
 
 Every seam the package gives a default for can also be bound directly on its contract, from any service provider: the
 subject resolver, the tenant tree, the identity directory, the grant hook, the console subject resolver, the resource
