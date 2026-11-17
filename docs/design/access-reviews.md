@@ -223,22 +223,22 @@ out.
     subject or tenant that is malformed, names no model or no saved row, or cannot be resolved included
     (`UnresolvedSubjectException::namingOnly()`).
 
-20. **Indexes and what a page reads.** The migration `2026_11_08_000001_add_access_review_indexes` adds
-    `{table}_granted_by_index` on the `granted_by` pair of each grant table, `{table}_permission_id_index` on the role
-    permission edges, whose primary key leads with the role (MySQL already indexes that column for its foreign key and
-    keeps that index), and, on PostgreSQL, `{table}_review_order_index` on each grant table's target and its grantee's
-    type and key collated `C`. Checked against the review queries with `EXPLAIN` and measured by the paging budget. A
-    page of a target's direct holders matches the target exactly and orders by grantee and scope, so it seeks to its
-    keyset and reads no grant before it. On PostgreSQL the planner can walk the order index, sorting only each grantee's
-    grants of the target (an incremental sort), and read about the rows it returns, or, for a target with few grants
-    left, read those from the keyset on and sort them. On MySQL the unique index leads with the target and the grantee,
-    whose columns compare their bytes, but holds digests of the tenant and application, not their values, so a page
-    reads the target's grants from its keyset on and sorts them: its work grows with the target's grants after the page,
-    never with those before it or with the tenant's. A page of routes through the roles below a target, of an expiry
-    window (each table's `expires_at` index) or of an actor's grants (the `granted_by` index) reads the rows its filter
-    matches from its keyset on and sorts them, so its work grows with the rows those roles, that window or that actor
-    match; only the sort's top rows are bounded by the page. A grantee's holdings are read on its morph index. The
-    migration honours the configured table names and connection.
+20. **Indexes and what a page reads.** The create migrations add `{table}_granted_by_index` on the `granted_by` pair of
+    each grant table, `{table}_permission_id_index` on the role permission edges, whose primary key leads with the role
+    (MySQL already indexes that column for its foreign key, so it is not added there), and, on PostgreSQL,
+    `{table}_review_order_index` on each grant table's target and its grantee's type and key collated `C`. Checked
+    against the review queries with `EXPLAIN` and measured by the paging budget. A page of a target's direct holders
+    matches the target exactly and orders by grantee and scope, so it seeks to its keyset and reads no grant before it.
+    On PostgreSQL the planner can walk the order index, sorting only each grantee's grants of the target (an incremental
+    sort), and read about the rows it returns, or, for a target with few grants left, read those from the keyset on and
+    sort them. On MySQL the unique index leads with the target and the grantee, whose columns compare their bytes, but
+    holds digests of the tenant and application, not their values, so a page reads the target's grants from its keyset
+    on and sorts them: its work grows with the target's grants after the page, never with those before it or with the
+    tenant's. A page of routes through the roles below a target, of an expiry window (each table's `expires_at` index)
+    or of an actor's grants (the `granted_by` index) reads the rows its filter matches from its keyset on and sorts
+    them, so its work grows with the rows those roles, that window or that actor match; only the sort's top rows are
+    bounded by the page. A grantee's holdings are read on its morph index. The migrations honour the configured table
+    names and connection.
 
 21. **Usage tracking is opt-in and free when off.** `authorization.usage.enabled` is false by default. While it is off,
     no listener is registered, no usage table is read, the resolution cache keeps no routes, the manager hands its
@@ -445,7 +445,7 @@ tracking covered the whole window and `unknown` where it did not.
   stream that takes nothing.
 - `Console\ReviewCommand`, `Console\Support\ReviewInvocation`, `Console\Support\TenantOption`,
   `Console\Concerns\RefusesInvocations` -- `authorization:review`.
-- `database/migrations/2026_11_08_000001_add_access_review_indexes.php` -- the review indexes.
+- the create migrations of the grant tables and of `role_permissions` -- the review indexes.
 - `Reviews\ReviewQuery`, `Reviews\ReviewScope`, `Reviews\ApplicationSelector` -- the typed, immutable inputs.
 - `Reviews\ReviewRow`, `Reviews\SupportingGrant`, `Reviews\OriginScope`, `Reviews\ReviewResult` -- the versioned
   output.
@@ -507,8 +507,7 @@ tracking covered the whole window and `unknown` where it did not.
   prefixes and nullable parts; signing and every refusal; the format and its sinks.
 - `ReviewCommandTest`, `ReviewInvocationTest` (Feature) -- every option, refusal and exit code, `--output` and
   `--force`, JSON-only standard output.
-- `Database\ReviewIndexesMigrationTest` (Feature) -- the indexes created and dropped cleanly on custom table names, on
-  every database.
+- `Database\TablePrefixMigrationTest` (Feature) -- the indexes built on prefixed table names, on every database.
 - `Performance\AccessReviewPagingBudgetTest` -- five thousand holders across fifty nested tenants and a deep hierarchy:
   the same queries on every page, none at an offset, and a stream's memory bounded by its chunk.
 - `Usage\AuthorizationManagerTest`, `Usage\DecisionPipelineTest`, `Usage\DecisionRoutesTest` (Feature) -- every
