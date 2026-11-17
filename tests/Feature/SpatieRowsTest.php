@@ -105,8 +105,8 @@ final class SpatieRowsTest extends TestCase
     }
 
     /**
-     * A permission the code does not declare is skipped by the import, so it
-     * is no change to a system role.
+     * A permission the code does not declare is skipped by the import, so it is
+     * no change to a system role.
      *
      * @return void
      */
