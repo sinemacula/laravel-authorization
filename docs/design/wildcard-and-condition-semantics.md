@@ -95,7 +95,9 @@ saved, so a malformed name cannot match unrelated permissions. `authorization:mi
 before it writes a row, and reports and skips any role or permission whose name fails it, along with its grants. It also
 reports and skips any permission whose name contains `*`, along with its grants: Spatie compares `*` literally unless
 its wildcard permissions are enabled, while here it would become a wildcard that grants other permissions. Role names
-are compared literally, so a role name containing `*` is migrated.
+are compared literally, so a role name containing `*` is migrated. A permission the services create, rename or grant
+must also cover a declared permission, a wildcard at least one, and the import skips any other (see [Permission
+Catalogue Sync](permission-catalogue-sync.md)).
 
 ### RBAC interaction
 

@@ -28,6 +28,7 @@ use SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHasChildrenException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
+use SineMacula\Laravel\Authorization\Exceptions\UndeclaredPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
@@ -48,6 +49,7 @@ use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\AssertsTransactions;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\DeclaresPermissions;
 use Tests\Concerns\RacesDelegatedCalls;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
@@ -75,8 +77,8 @@ use Tests\TestCase;
 final class RoleServiceTest extends TestCase
 {
     use ActivatesBreakGlass, ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals,
-        ComparesReferences, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks, RefusesThePackage,
-        ReportsEveryDecision, UsesAnAuthorizationConnection;
+        ComparesReferences, DeclaresPermissions, RacesDelegatedCalls, ReadsDispatchedEvents, RecordsRowLocks,
+        RefusesThePackage, ReportsEveryDecision, UsesAnAuthorizationConnection;
 
     /**
      * Report every decision, allows included: these tests observe the decisions
@@ -915,6 +917,46 @@ final class RoleServiceTest extends TestCase
         $this->expectExceptionObject(new UnknownPermissionException('ghost'));
 
         self::service()->grantPermission('editor', 'ghost');
+    }
+
+    /**
+     * A role is never given a permission nothing declares, by name or model,
+     * alone or in a sync, and nothing is written; one it already carries stays
+     * until a sync drops it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnUndeclaredPermissionIsNeverGrantedToARole(): void
+    {
+        $role   = self::role('editor');
+        $edit   = Permission::query()->create(['name' => 'posts:edit']);
+        $legacy = Permission::query()->create(['name' => 'posts:legacy']);
+
+        self::service()->grantPermission($role, $legacy);
+
+        $this->declarePermissions('posts:edit');
+
+        $refused = [
+            'a grant by name'  => static fn (): mixed => self::service()->grantPermission($role, 'posts:legacy'),
+            'a grant by model' => static fn (): mixed => self::service()->grantPermission($role, $legacy),
+            'a sync by name'   => static fn (): mixed => self::service()->syncPermissions($role, [$edit, 'posts:legacy']),
+            'a sync by model'  => static fn (): mixed => self::service()->syncPermissions($role, [$legacy]),
+        ];
+
+        foreach ($refused as $case => $call) {
+            try {
+                $call();
+                self::fail("{$case} was not refused.");
+            } catch (UndeclaredPermissionException $exception) {
+                self::assertSame('posts:legacy', $exception->getPermission(), $case);
+            }
+        }
+
+        self::assertSame([$legacy->id], DB::table('role_permissions')->pluck('permission_id')->all());
+        self::assertSame([$legacy->id], self::service()->syncPermissions($role, [$edit])->revoked);
+        self::assertSame([$edit->id], DB::table('role_permissions')->pluck('permission_id')->all());
     }
 
     /**

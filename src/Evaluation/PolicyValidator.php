@@ -8,7 +8,7 @@ use SineMacula\Laravel\Authorization\Context\AssuranceKeys;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
-use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\DeclaredPermissions;
 
 /**
  * Decides whether a policy document may be written.
@@ -289,7 +289,7 @@ final readonly class PolicyValidator
      */
     private function isUndeclared(string $pattern): bool
     {
-        return !PackagePermissions::covers($pattern) && !$this->catalogue->covers($pattern);
+        return !DeclaredPermissions::covers($pattern, $this->catalogue);
     }
 
     /**

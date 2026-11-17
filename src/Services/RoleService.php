@@ -30,6 +30,7 @@ use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
 use SineMacula\Laravel\Authorization\Services\Support\RolePermissionTable;
 use SineMacula\Laravel\Authorization\Services\Support\StoredRecords;
+use SineMacula\Laravel\Authorization\Support\DeclaredPermissions;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -63,6 +64,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * violation. The role and role permission events are dispatched once the write
  * commits, on the package's connection, and only for a write that changed
  * something.
+ *
+ * A permission is granted, or listed by a sync, only when its name covers a
+ * declared permission (see `Support\DeclaredPermissions`), else the call throws
+ * `UndeclaredPermissionException` before anything is written. A role keeps an
+ * undeclared permission it carries until it is revoked.
  *
  * Each method takes the acting context making the call as `$actor`, the reads
  * as well as the writes: null for trusted system work, such as seeders,
@@ -303,6 +309,8 @@ final class RoleService
 
             $target = self::permissionFor($model, $permission, $actor);
 
+            DeclaredPermissions::assertStored($target);
+
             $actor?->authorizeIn($operation, OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $model, $target, self::scopeOf($model), $expiresAt));
 
             $model->unsetRelation('permissions');
@@ -525,6 +533,8 @@ final class RoleService
             $targets = \is_string($permission) ? GrantTarget::PERMISSION->heldOrFirst($permission, $role->guard, $held) : [self::permissionFor($role, $permission, $actor)];
 
             foreach ($targets as $target) {
+                DeclaredPermissions::assertStored($target);
+
                 $desired[$target->id] = $target;
             }
         }

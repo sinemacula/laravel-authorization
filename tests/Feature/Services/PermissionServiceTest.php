@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Events\Permission\Deleted as PermissionDele
 use SineMacula\Laravel\Authorization\Events\Permission\Updated as PermissionUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
+use SineMacula\Laravel\Authorization\Exceptions\UndeclaredPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -22,6 +23,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\DeclaresPermissions;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPermission;
@@ -41,7 +43,7 @@ use Tests\TestCase;
 #[CoversClass(PermissionService::class)]
 final class PermissionServiceTest extends TestCase
 {
-    use ComparesReferences, RefusesThePackage, UsesAnAuthorizationConnection;
+    use ComparesReferences, DeclaresPermissions, RefusesThePackage, UsesAnAuthorizationConnection;
 
     /**
      * A name finds the permission the lookup ranks first under the guard, and
@@ -297,6 +299,45 @@ final class PermissionServiceTest extends TestCase
         self::assertSame(['tenant', 'acme'], [$owned->tenant_type, $owned->tenant_id]);
         self::assertSame('acme', Permission::query()->withoutGlobalScopes()->whereKey($owned->getKey())->firstOrFail()->tenant_id);
         self::assertNull(self::service()->create('posts:read')->tenant_type);
+    }
+
+    /**
+     * A permission is created or renamed only under a name that covers a
+     * declared permission, a tenant's own copy of one included; a stored
+     * permission nothing declares stays, and may be renamed to a declared name.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testCreatesAndRenamesOnlyUnderADeclaredName(): void
+    {
+        $this->declarePermissions('posts:edit', 'posts:update');
+
+        $stale = Permission::query()->create(['name' => 'posts:legacy']);
+        $edit  = self::service()->create('posts:edit');
+        $owned = self::service()->create('posts:edit', tenant: new Reference('tenant', 'acme'));
+
+        self::service()->create('posts:*');
+
+        $refused = [
+            'an undeclared name'     => static fn (): Permission => self::service()->create('posts:invented'),
+            'an undeclared wildcard' => static fn (): Permission => self::service()->create('comments:*', tenant: new Reference('tenant', 'acme')),
+            'a rename'               => static fn (): Permission => self::service()->rename($edit, 'posts:invented'),
+        ];
+
+        foreach ($refused as $case => $call) {
+            try {
+                $call();
+                self::fail("{$case} was not refused.");
+            } catch (UndeclaredPermissionException $exception) {
+                self::assertStringStartsWith('Permission \'', $exception->getMessage(), $case);
+            }
+        }
+
+        self::assertSame('posts:update', self::service()->rename($stale, 'posts:update')->name);
+        self::assertSame('acme', $owned->tenant_id);
+        self::assertSame(['posts:*', 'posts:edit', 'posts:edit', 'posts:update'], Permission::query()->withoutGlobalScopes()->orderBy('name')->pluck('name')->all());
     }
 
     /**
