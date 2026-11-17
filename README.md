@@ -150,6 +150,7 @@ Authorization::for($user)->can('posts:delete', 'posts/42'); // false off the net
 | Guide                                                                         | Covers                                                                                   |
 |-------------------------------------------------------------------------------|------------------------------------------------------------------------------------------|
 | [Configuration](docs/guides/configuration.md)                                 | Publishing, the connection and table prefix, binding seams, every setting and its checks |
+| [Seams and the suite](docs/guides/seams.md)                                   | Each contract, its default and its adapter under the suite, the middleware order         |
 | [Roles, permissions and grants](docs/guides/grants.md)                        | The user model, declaring and syncing permissions, the management services, tenants      |
 | [Checking access](docs/guides/checking-access.md)                             | The facade, Laravel's Gate and policy classes, middleware and Blade, bulk checks         |
 | [Policies](docs/guides/policies.md)                                           | How a check is decided, policy documents, role, inline and resource-based policies       |
@@ -162,6 +163,8 @@ Authorization::for($user)->can('posts:delete', 'posts/42'); // false off the net
 | [Access reviews](docs/guides/access-reviews.md)                               | Holders and holdings, expiring grants, paging, exports and usage tracking                |
 | [Preview and explanations](docs/guides/preview-and-explanations.md)           | What another subject may do, and why a check was decided as it was                       |
 | [Events](docs/guides/events.md)                                               | Every event, reading a change for an audit log, which decisions are reported             |
+| [Caching](docs/guides/caching.md)                                             | The resolution cache's tiers, keys and versions, invalidation and a failing store        |
+| [Octane and long-lived workers](docs/guides/long-lived-workers.md)            | What is scoped to a request or job, your own bindings, long-running commands             |
 | [Localisation](docs/guides/localisation.md)                                   | The denial and unauthenticated messages and their translation                            |
 | [Console commands](docs/guides/console.md)                                    | Every command, the configuration check, the diagnostic boot, `authorization:why`         |
 | [Testing](docs/guides/testing.md)                                             | Assertions, acting as a subject and the tenant tree test kit                             |
