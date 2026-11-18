@@ -119,7 +119,7 @@ themselves are described in [Events](events.md).
 10. **A role's policies are its grants.** A policy attached to a role is a row of `authorizable_policies` with the role
     as the grantee, written, reported and invalidated as any grant is (the events name the role as the grantee).
     Deleting a role detaches its policies through `revokeAll()`, each reported as detached, since the grantee columns
-    carry no foreign key.
+    carry no foreign key. A soft-deleted role keeps them until it is force-deleted.
 
 11. **A name reaches every held row.** A role or permission name answers every row of it under the guard, the current
    tenant's and the platform's alike. A revocation by name revokes each of them the grantee or role holds, and a sync

@@ -113,6 +113,35 @@ final class ModelExtensionTest extends TestCase
     }
 
     /**
+     * A trashed role keeps its policy attachments, so a restore brings its
+     * policies back, and a force delete detaches them.
+     *
+     * @return void
+     */
+    public function testATrashedRoleKeepsItsPoliciesUntilForceDeleted(): void
+    {
+        $this->useModels(SoftDeletingRole::class);
+
+        $role = SoftDeletingRole::query()->create(['name' => 'editor']);
+
+        $role->attachPolicy(Policy::query()->create(['name' => 'publishers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:publish']]]]]));
+        StubGrantee::query()->create(['id' => 'user-1'])->assignRole($role);
+
+        $role->delete();
+
+        self::assertFalse(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:publish'));
+        self::assertSame(1, DB::table('authorizable_policies')->count());
+
+        $role->restore(); // @phpstan-ignore staticMethod.dynamicCall
+
+        self::assertTrue(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:publish'));
+
+        $role->forceDelete();
+
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+    }
+
+    /**
      * A parent passes its permissions and policies to the holders of its child
      * until it is trashed. A role with children cannot be trashed, and one set
      * as a parent once trashed passes nothing, as the hierarchy reads roles

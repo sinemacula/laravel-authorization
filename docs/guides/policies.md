@@ -199,7 +199,7 @@ Attaching or detaching a role's policy, or changing its expiry, dispatches the s
 `Grantee\PolicyDetached` and `Grantee\PolicyExpiryChanged` events, with the role as the grantee, and takes effect on
 the next check for every holder: a change to any role's policy attachments refreshes every grantee's cached policies,
 and moving a role in the hierarchy refreshes those of the grantees that reach it. Deleting a role detaches its
-policies, each reported as detached.
+policies, each reported as detached; a soft-deleted role keeps them until it is force-deleted.
 
 An inline policy belongs to one grantee, a principal, an identity or a role. It is attached to that grantee alone and is
 deleted with it. Create one through the grantee or `PolicyService::createInline()`, which check its document as any
