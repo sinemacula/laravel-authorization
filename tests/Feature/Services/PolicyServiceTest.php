@@ -222,6 +222,26 @@ final class PolicyServiceTest extends TestCase
     }
 
     /**
+     * Rewriting a policy with the document it was created from changes nothing
+     * and reports nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARewriteWithTheCreatedDocumentChangesNothing(): void
+    {
+        $policy = self::service()->create('readers', self::READ);
+
+        Event::fake([PolicyUpdated::class]);
+
+        $rewritten = self::service()->rewrite(Policy::query()->findOrFail($policy->id), self::READ);
+
+        self::assertFalse($rewritten->wasChanged());
+        Event::assertNotDispatched(PolicyUpdated::class);
+    }
+
+    /**
      * A system policy keeps its protection through the service.
      *
      * @return void
