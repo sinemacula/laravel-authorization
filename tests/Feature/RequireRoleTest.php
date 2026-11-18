@@ -6,11 +6,15 @@ namespace Tests\Feature;
 
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\TestWith;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -64,6 +68,33 @@ final class RequireRoleTest extends TestCase
         $principal->suspended = true;
 
         self::assertSame(DecisionReason::SUBJECT_INACTIVE, self::denialOf(fn (): Response => $this->handle('staff'))->getReason());
+    }
+
+    /**
+     * A role denial is not a decision: it fires no event and leaves the last
+     * decision as it was.
+     *
+     * @return void
+     */
+    public function testARoleDenialRecordsNoDecision(): void
+    {
+        Event::fake([DecisionEvaluated::class, AuthorizationFailed::class]);
+
+        $principal = SuspendableGrantee::create(['id' => 'account-1']);
+
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($principal, $principal)));
+
+        $before = Authorization::check('posts:read');
+
+        self::assertSame(DecisionReason::NO_MATCH, self::denialOf(fn (): Response => $this->handle('staff'))->getReason());
+        self::assertSame($before, Authorization::lastDecision());
+
+        $principal->suspended = true;
+
+        self::assertSame(DecisionReason::SUBJECT_INACTIVE, self::denialOf(fn (): Response => $this->handle('staff'))->getReason());
+        self::assertSame($before, Authorization::lastDecision());
+        Event::assertDispatchedTimes(DecisionEvaluated::class, 1);
+        Event::assertNotDispatched(AuthorizationFailed::class);
     }
 
     /**

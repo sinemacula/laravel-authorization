@@ -14,7 +14,10 @@ use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ActivatesBreakGlass;
@@ -23,6 +26,7 @@ use Tests\Concerns\LagsTheReadConnection;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenantTree;
+use Tests\Feature\Stubs\SwitchableSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -140,6 +144,57 @@ final class ResolvesPivotExpiryTest extends TestCase
         self::assertEqualsCanonicalizing(['staff', 'member'], $on('admin'));
         self::assertSame(['member'], $on('mobile'));
         self::assertSame(['member'], $on(null));
+    }
+
+    /**
+     * A role check on one instance answers for the tenant current at the check,
+     * whether the scope moved through `within()`, an authorization scope or a
+     * flushed tenant, not for the one its roles were first read under.
+     *
+     * @return void
+     */
+    public function testARoleCheckAnswersForTheTenantCurrentAtTheCheck(): void
+    {
+        $tenantA = self::createTenant('tenant-a');
+        $tenantB = self::createTenant('tenant-b');
+        $user    = StubGrantee::query()->create(['id' => 'user-1']);
+        $isAdmin = static fn (): bool => $user->hasRole('admin');
+
+        Role::query()->create(['name' => 'admin']);
+        $user->assignRole('admin', null, $tenantA);
+
+        $this->actAsTenant($tenantA);
+
+        self::assertTrue($isAdmin());
+        self::assertFalse(TenantScope::within($tenantB, null, $isAdmin));
+        self::assertFalse(AuthorizationScope::tenant($tenantB)->within($isAdmin));
+        self::assertTrue($isAdmin());
+
+        SwitchableSubjectResolver::$tenant = $tenantB;
+        (new TenantScope)->flushResolvedTenant();
+
+        self::assertFalse($isAdmin());
+    }
+
+    /**
+     * The Blade role helper, which the `role:` middleware shares, answers for
+     * the tenant current at the check when the subject is the same instance.
+     *
+     * @return void
+     */
+    public function testTheBladeRoleHelperAnswersForTheTenantCurrentAtTheCheck(): void
+    {
+        $tenantA = self::createTenant('tenant-a');
+        $tenantB = self::createTenant('tenant-b');
+        $user    = StubGrantee::query()->create(['id' => 'user-1']);
+
+        Role::query()->create(['name' => 'admin']);
+        $user->assignRole('admin', null, $tenantA);
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $tenantA));
+
+        self::assertTrue(BladeHelpers::hasRole('admin'));
+        self::assertFalse(TenantScope::within($tenantB, null, static fn (): bool => BladeHelpers::hasRole('admin')));
     }
 
     /**

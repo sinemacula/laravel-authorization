@@ -6,7 +6,9 @@ namespace Tests\Feature\Administration;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Container\Container;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
@@ -26,6 +28,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -36,6 +39,7 @@ use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ReportsEveryDecision;
+use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubMachine;
@@ -54,7 +58,7 @@ use Tests\TestCase;
 #[CoversClass(ActingContext::class)]
 final class ActingContextTest extends TestCase
 {
-    use ActsAsTenant, CatchesRefusals, ReportsEveryDecision;
+    use ActsAsTenant, CatchesRefusals, ReportsEveryDecision, UsesAnAuthorizationConnection;
 
     /**
      * Turn rank off: these tests are about the acting context, and name
@@ -394,6 +398,43 @@ final class ActingContextTest extends TestCase
             AuthorizationFailed::class,
             static fn (AuthorizationFailed $event): bool => $event->subject?->id === $admin->getKey() && $event->action === PackagePermissions::POLICY_DETACH,
         );
+    }
+
+    /**
+     * A service's refusal is reported inside the operation's transaction: a
+     * listener's write on the package's connection rolls back with it, and one
+     * on a connection of its own survives.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARefusalIsReportedInsideTheOperationsTransaction(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $actor = ActingContext::for(StubGrantee::create(['id' => 'admin-1']));
+        $user  = StubGrantee::create(['id' => 'user-1']);
+
+        /** @var \ArrayObject<int, int> $levels */
+        $levels = new \ArrayObject;
+
+        Permission::create(['name' => 'posts:edit']);
+
+        Event::listen(AuthorizationFailed::class, static function () use ($levels): void {
+            $levels->append(self::authorizationConnection()->transactionLevel());
+
+            foreach ([self::authorizationConnection(), DB::connection()] as $connection) {
+                $connection->table('permissions')->insert(['id' => (string) Str::uuid(), 'name' => 'audit:denied']);
+            }
+        });
+
+        $refusal = self::refusalOf(static fn (): mixed => GrantService::instance()?->grantPermission($user, 'posts:edit', actor: $actor));
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertSame([1], $levels->getArrayCopy());
+        self::assertFalse(self::authorizationConnection()->table('permissions')->where('name', 'audit:denied')->exists());
+        self::assertTrue(DB::table('permissions')->where('name', 'audit:denied')->exists());
     }
 
     /**
