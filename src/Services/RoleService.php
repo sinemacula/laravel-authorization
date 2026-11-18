@@ -37,6 +37,7 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * Creates, renames, describes, re-parents, deletes and lists roles, and grants,
@@ -51,7 +52,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * on the role as stored, which carries no unlock. A role named by a string is
  * looked up under the package's default guard; a permission named by a string
  * under the role's own guard, else the default, among the permissions visible
- * in the tenant that owns the role, or in the current tenant for a platform
+ * in the tenant that owns the role, or among the platform's for a platform
  * role. A role model that has not been saved, as the role or as the parent, is
  * refused with `UnsavedRecordException`.
  *
@@ -364,7 +365,7 @@ final class RoleService
 
             /** @var non-empty-list<\SineMacula\Laravel\Authorization\Models\Permission> $candidates */
             $candidates = \is_string($permission)
-                ? GrantTarget::PERMISSION->named($permission, $model->guard, Reference::tenantOf($model))
+                ? GrantTarget::PERMISSION->named($permission, $model->guard, Reference::tenantOf($model) ?? new TenantChain)
                 : [self::permissionFor($model, $permission, $actor)];
             $revoked = \array_values(\array_filter($candidates, static fn (Permission $target): bool => \in_array($target->id, $held, true)));
             $checked = $revoked === [] ? [$candidates[0]] : $revoked;
@@ -541,7 +542,7 @@ final class RoleService
         foreach ($permissions as $permission) {
             /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $targets */
             $targets = \is_string($permission)
-                ? GrantTarget::PERMISSION->heldOrFirst($permission, $role->guard, $held, Reference::tenantOf($role))
+                ? GrantTarget::PERMISSION->heldOrFirst($permission, $role->guard, $held, Reference::tenantOf($role) ?? new TenantChain)
                 : [self::permissionFor($role, $permission, $actor)];
 
             foreach ($targets as $target) {
@@ -588,7 +589,7 @@ final class RoleService
     private static function permissionFor(Role $role, mixed $permission, ?ActingContext $actor = null): Permission
     {
         /** @var \SineMacula\Laravel\Authorization\Models\Permission $resolved */
-        $resolved = GrantTarget::PERMISSION->resolve($permission, $role->guard, Reference::tenantOf($role));
+        $resolved = GrantTarget::PERMISSION->resolve($permission, $role->guard, Reference::tenantOf($role) ?? new TenantChain);
 
         return $actor === null || \is_string($permission) ? $resolved : StoredRecords::of('permission', $resolved);
     }

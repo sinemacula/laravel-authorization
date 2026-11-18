@@ -1057,6 +1057,54 @@ final class RoleServiceTest extends TestCase
     }
 
     /**
+     * A platform role's permission name is looked up among the platform's
+     * permissions, even in a tenant that owns one of that name.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPlatformRolesPermissionNameIsLookedUpOnThePlatform(): void
+    {
+        $tenant   = self::createTenant('tenant-a');
+        $role     = self::role('editor');
+        $platform = Permission::query()->create(['name' => 'posts:edit']);
+        $owned    = Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
+
+        $this->actAsTenant($tenant);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantPermission($role, 'posts:edit'));
+        self::assertSame([$platform->id], DB::table('role_permissions')->pluck('permission_id')->all());
+        self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
+        self::assertSame([$platform->id], self::service()->syncPermissions($role, ['posts:edit'])->granted);
+
+        $this->expectException(OwnerMismatchException::class);
+
+        self::service()->grantPermission($role, $owned);
+    }
+
+    /**
+     * A platform role never finds by name a permission only a tenant owns.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPlatformRoleNeverFindsATenantsPermissionByName(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $role   = self::role('editor');
+
+        Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
+
+        $this->actAsTenant($tenant);
+
+        $this->expectException(UnknownPermissionException::class);
+
+        self::service()->revokePermission($role, 'posts:edit');
+    }
+
+    /**
      * Granting and revoking a role's permission each run in one transaction on
      * the package's connection: the lookups as well as the write.
      *
