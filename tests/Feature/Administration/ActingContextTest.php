@@ -420,6 +420,7 @@ final class ActingContextTest extends TestCase
         self::assertSame(DecisionReason::NO_MATCH, self::reasonOf(static fn () => $actor->authorizeAction('posts:edit')));
         self::assertSame(DecisionReason::SESSION_POLICY, self::reasonOf(static fn () => $actor->capped(['posts:edit'])->authorizeAction('posts:read')));
         Event::assertDispatchedTimes(AuthorizationFailed::class, 2);
+        Event::assertDispatched(AuthorizationFailed::class, static fn (AuthorizationFailed $event): bool => $event->action === 'posts:edit' && $event->resource === null);
     }
 
     /**

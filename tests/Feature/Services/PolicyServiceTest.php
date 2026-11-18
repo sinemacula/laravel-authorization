@@ -8,6 +8,7 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
@@ -324,8 +325,8 @@ final class PolicyServiceTest extends TestCase
 
     /**
      * The policies are listed by name: inside a tenant the platform's, the
-     * tenant's own and its ancestors', never a sibling's; outside any tenant
-     * the platform's alone.
+     * tenant's own and its ancestors', never a sibling's or a descendant's;
+     * outside any tenant the platform's alone.
      *
      * @return void
      *
@@ -333,15 +334,19 @@ final class PolicyServiceTest extends TestCase
      */
     public function testListsThePoliciesVisibleFromTheCurrentTenant(): void
     {
-        [$parent, $child, $sibling] = \array_map(self::createTenant(...), ['parent', 'child', 'sibling']);
+        [$parent, $child, $sibling, $grandchild] = \array_map(self::createTenant(...), ['parent', 'child', 'sibling', 'grandchild']);
 
-        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent))->put(Reference::of($sibling), Reference::of($parent)));
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)
+            ->put(Reference::of($child), Reference::of($parent))
+            ->put(Reference::of($sibling), Reference::of($parent))
+            ->put(Reference::of($grandchild), Reference::of($child)));
 
         self::service()->create('writers', self::READ);
         self::service()->create('auditors', self::READ);
         self::service()->create('ancestors', self::READ, tenant: $parent);
         self::service()->create('own', self::READ, tenant: $child);
         self::service()->create('siblings', self::READ, tenant: $sibling);
+        self::service()->create('descendants', self::READ, tenant: $grandchild);
 
         self::assertSame(['auditors', 'writers'], self::service()->list()->pluck('name')->all());
 
@@ -380,7 +385,7 @@ final class PolicyServiceTest extends TestCase
 
     /**
      * An actor lists policies only when allowed `authorization:policy.read` in
-     * the scope in place, so a grant in another tenant does not count.
+     * the scope in place: a grant in a tenant counts there and nowhere else.
      *
      * @return void
      *
@@ -392,11 +397,10 @@ final class PolicyServiceTest extends TestCase
         $other  = self::createTenant('tenant-b');
         $user   = StubGrantee::create(['id' => 'user-1']);
         $reader = self::administrator([PackagePermissions::POLICY_READ]);
-        $local  = self::administrator([], 'admin-2');
+        $admin  = StubGrantee::create(['id' => 'admin-2']);
+        $local  = ActingContext::for($admin);
 
-        self::assertInstanceOf(StubGrantee::class, $local->subject->subject);
-
-        self::grants()->grantPermission($local->subject->subject, Permission::query()->firstOrCreate(['name' => PackagePermissions::POLICY_READ]), tenant: $other);
+        self::grants()->grantPermission($admin, Permission::query()->firstOrCreate(['name' => PackagePermissions::POLICY_READ]), tenant: $other);
         self::service()->create('readers', self::READ);
         self::service()->createInline($user, 'mine', self::READ);
 
@@ -406,6 +410,11 @@ final class PolicyServiceTest extends TestCase
         self::assertSame(['mine'], self::service()->listInline($user, $reader)->pluck('name')->all());
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): mixed => self::service()->list($local));
         self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): mixed => self::service()->listInline($user, $local));
+
+        $this->actAsTenant($other);
+
+        self::assertSame(['readers'], self::service()->list($local)->pluck('name')->all());
+        self::assertSame(['mine'], self::service()->listInline($user, $local)->pluck('name')->all());
     }
 
     /**

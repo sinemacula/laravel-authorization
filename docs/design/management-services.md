@@ -32,7 +32,7 @@ changes are not decided. A call with one is delegated administration: each chang
 through `check()`, on the change's operation resource, inside the call's transaction and before anything is written (see
 [Delegated administration](delegated-administration.md)). `GuardrailService` requires it, since it decides whether the
 actor may make the change, and so does `BreakGlassService::surrender()`, which ends the actor's own activation. Every
-event the call dispatches carries the call's operation, and every grant row it writes records the actor in
+change event the call dispatches carries the call's operation, and every grant row it writes records the actor in
 `granted_by_type` and `granted_by_id`. It is never read from the authenticated user or the subject resolver. The events
 themselves are described in [Events](events.md).
 
