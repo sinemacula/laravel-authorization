@@ -9,6 +9,7 @@ use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -60,6 +61,36 @@ final class SubjectGrantsTest extends TestCase
         self::assertTrue(SubjectGrants::holdsPermission($subject, 'admin:read'));
         self::assertFalse(SubjectGrants::holdsPermission($subject, 'billing:read'));
         self::assertFalse(SubjectGrants::isInactive($subject));
+    }
+
+    /**
+     * A principal's role, permission and policy never reach a sibling principal
+     * of the same identity, through the grant helpers or a full check.
+     *
+     * @return void
+     */
+    public function testAPrincipalsGrantsNeverReachASiblingPrincipal(): void
+    {
+        $first   = SuspendableGrantee::create(['id' => 'account-1']);
+        $second  = SuspendableGrantee::create(['id' => 'account-2']);
+        $person  = StubSecondGrantee::create(['id' => 'person-1']);
+        $editor  = Role::create(['name' => 'editor']);
+        $own     = new Subject($first, $person);
+        $sibling = new Subject($second, $person);
+
+        $editor->givePermission(Permission::create(['name' => 'posts:edit']));
+        $first->assignRole($editor);
+        $first->givePermission(Permission::create(['name' => 'posts:delete']));
+        $first->attachPolicy(Policy::create(['name' => 'publisher', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:publish']]]]]));
+
+        foreach (['posts:edit', 'posts:delete', 'posts:publish'] as $action) {
+            self::assertTrue(Authorization::for($own)->can($action), $action);
+            self::assertFalse(Authorization::for($sibling)->can($action), $action);
+        }
+
+        self::assertFalse(SubjectGrants::holdsRole($sibling, 'editor'));
+        self::assertFalse(SubjectGrants::holdsPermission($sibling, 'posts:delete'));
+        self::assertNull(SubjectGrants::permissionFor($sibling, 'posts:edit'));
     }
 
     /**

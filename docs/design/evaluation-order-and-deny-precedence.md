@@ -426,8 +426,9 @@ refuses never reads the permissions, since the session stage runs before the all
    **applies**. This deliberately departs from AWS IAM, where a missing key silently disables a conditional deny: a
    caller that leaves a key out of the context never gets past a deny written against it, and since the caller's values
    are held under `input` alone, no caller can supply a trusted key such as `request.ip` to get past one either. A check
-   outside a routed request has no `request` namespace, so a deny on `request.ip` applies to it unless written with
-   `_if_exists`. An allow is the mirror image: it applies only when its test definitely holds.
+   outside a routed request has no `request` namespace, so a deny on `request.ip` applies to it, written with
+   `_if_exists` or not, since a missing key passes an `_if_exists` test. An allow is the mirror image: it applies only
+   when its test definitely holds.
 
 6. **A policy that cannot be evaluated denies the check; it is never skipped.** Skipping a malformed statement or an
    unreadable policy row would also drop the denies it carries, so both deny as `invalid_policy`, and RBAC never
