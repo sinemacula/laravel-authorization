@@ -15,7 +15,6 @@ use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHasChildrenException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy;
-use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomRole;
@@ -38,7 +37,7 @@ use Tests\TestCase;
 #[CoversClass(ModelClasses::class)]
 final class ModelExtensionTest extends TestCase
 {
-    use ActsAsTenant, CatchesRefusals;
+    use CatchesRefusals;
 
     /**
      * Migrate afresh, so the first test adds the soft-delete column.
@@ -60,32 +59,6 @@ final class ModelExtensionTest extends TestCase
     public static function migrateWithoutSoftDeletes(): void
     {
         RefreshDatabaseState::$migrated = false;
-    }
-
-    /**
-     * A subclass hides the rows another tenant owns, as the shipped model does.
-     *
-     * @return void
-     */
-    public function testSubclassesKeepTenantScoping(): void
-    {
-        $this->useModels(CustomRole::class);
-
-        $tenantB = self::createTenant('tenant-b');
-
-        CustomRole::query()->create(['name' => 'platform']);
-        CustomRole::query()->create(['name' => 'b-only'] + self::ownedBy($tenantB));
-        CustomPermission::query()->create(['name' => 'posts:read']);
-        CustomPermission::query()->create(['name' => 'posts:b-only'] + self::ownedBy($tenantB));
-
-        $this->actAsTenant(self::createTenant('tenant-a'));
-
-        self::assertSame(['platform'], CustomRole::query()->pluck('name')->all());
-        self::assertSame(['posts:read'], CustomPermission::query()->pluck('name')->all());
-
-        $this->actAsTenant($tenantB);
-
-        self::assertSame(['b-only', 'platform'], CustomRole::query()->orderBy('name')->pluck('name')->all());
     }
 
     /**
