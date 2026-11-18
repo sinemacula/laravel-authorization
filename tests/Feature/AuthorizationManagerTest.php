@@ -76,6 +76,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
+use Tests\Concerns\LagsTheReadConnection;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ReportsEveryDecision;
@@ -119,7 +120,7 @@ use Tests\TestCase;
 #[CoversTrait(HasPolicies::class)]
 final class AuthorizationManagerTest extends TestCase
 {
-    use ReadsDispatchedEvents, RefusesThePackage, ReportsEveryDecision;
+    use LagsTheReadConnection, ReadsDispatchedEvents, RefusesThePackage, ReportsEveryDecision;
 
     /**
      * A role granted in an organisation allows in an account below it and not
@@ -418,6 +419,52 @@ final class AuthorizationManagerTest extends TestCase
         $user->detachPolicy($policy);
 
         self::assertTrue(Authorization::for($user)->can('posts:delete'));
+    }
+
+    /**
+     * A check reads every grant, boundary and guardrail on the write
+     * connection, so a read replica that lags never admits a revoked permission
+     * or policy, or misses a new cap.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testChecksReadTheWriteConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $ids = ['direct', 'via-role', 'via-policy', 'bounded', 'railed'];
+
+        [$direct, $viaRole, $viaPolicy, $bounded, $railed] = \array_map(static fn (string $id): StubGrantee => StubGrantee::create(['id' => $id]), $ids);
+
+        $direct->givePermission(Permission::create(['name' => 'posts:edit']));
+        $reviewer = Role::create(['name' => 'reviewer'])->givePermission(Permission::create(['name' => 'posts:review']));
+        $archive  = self::resourcePolicy('archive', [['effect' => 'allow', 'actions' => ['posts:archive']]]);
+        $readOnly = self::resourcePolicy('read-only', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+        $archiver = Role::create(['name' => 'archiver'])->attachPolicy($archive)->attachPolicy($readOnly);
+        $viaRole->assignRole($reviewer);
+        $viaPolicy->assignRole($archiver);
+        $bounded->givePermission(Permission::create(['name' => 'posts:publish']));
+        $railed->givePermission(Permission::create(['name' => 'posts:delete']));
+        $actor = self::guardrailManager();
+
+        self::lagTheReadConnection();
+
+        $direct->revokePermission('posts:edit');
+        $reviewer->revokePermission('posts:review');
+        $archiver->detachPolicy($archive);
+        self::boundaries()->set($bounded, $readOnly);
+
+        self::assertFalse(Authorization::for($direct)->can('posts:edit'));
+        self::assertFalse(Authorization::for($viaRole)->can('posts:review'));
+        self::assertFalse(Authorization::for($viaPolicy)->can('posts:archive'));
+        self::assertFalse(Authorization::for($bounded)->can('posts:publish'));
+        self::assertTrue(Authorization::for($railed)->can('posts:delete'));
+
+        self::guardrails()->set($readOnly, null, ActingContext::for($actor));
+
+        self::assertFalse(Authorization::for($railed)->can('posts:delete'));
     }
 
     /**

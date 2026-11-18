@@ -214,6 +214,30 @@ final class DatabaseGrantUsageStoreTest extends TestCase
     }
 
     /**
+     * A batch of more than a hundred routes is written a hundred to an insert
+     * and read back whole, a hundred keys to a read.
+     *
+     * @return void
+     */
+    public function testALargeBatchIsWrittenAndReadInChunks(): void
+    {
+        $store = new DatabaseGrantUsageStore;
+        $keys  = \array_map(static fn (int $route): string => \sprintf('route-%03d', $route), \range(1, 250));
+
+        $batch   = UsageBatch::of(\array_map(static fn (string $key): array => self::observation($key, null, self::TEN), $keys), self::TEN + 5);
+        $inserts = self::statementsDuring('insert', static fn () => $store->record($batch));
+
+        $found = [];
+        $reads = self::statementsDuring('select', static function () use ($store, $keys, &$found): void {
+            $found = $store->lastObserved($keys);
+        });
+
+        self::assertSame([100, 100, 50], $inserts);
+        self::assertSame([100, 100, 50], $reads);
+        self::assertEqualsCanonicalizing($keys, \array_keys($found));
+    }
+
+    /**
      * A route a concurrent writer inserted between the read and the insert is
      * rewritten when the observation is newer than what it wrote, and kept when
      * it is not, never twice.
@@ -234,6 +258,29 @@ final class DatabaseGrantUsageStoreTest extends TestCase
 
         self::assertSame(self::TEN + 7200, $store->lastObserved(['b'])['b']->lastObservedAt->getTimestamp());
         self::assertSame(2, DB::table('grant_usage')->count());
+    }
+
+    /**
+     * A rewrite keeps a newer grant creation, or a later bucket of the same
+     * grant, that a concurrent writer stored between the read and the update.
+     *
+     * @return void
+     */
+    public function testARacedRewriteKeepsTheNewerCreation(): void
+    {
+        $store = new DatabaseGrantUsageStore;
+
+        $store->record(UsageBatch::of([self::observation('a', self::TEN - 7200, self::TEN)], self::TEN + 5));
+
+        self::raceWith(self::observation('a', self::TEN - 60, self::TEN));
+        $store->record(UsageBatch::of([self::observation('a', self::TEN - 3600, self::TEN)], self::TEN + 100));
+
+        self::assertSame(self::TEN - 60, $store->lastObserved(['a'])['a']->grantCreatedAt?->getTimestamp());
+
+        self::raceWith(self::observation('a', self::TEN - 60, self::TEN + 7200));
+        $store->record(UsageBatch::of([self::observation('a', self::TEN - 60, self::TEN + 3600)], self::TEN + 3700));
+
+        self::assertSame(self::TEN + 7200, $store->lastObserved(['a'])['a']->lastObservedAt->getTimestamp());
     }
 
     /**
@@ -332,7 +379,7 @@ final class DatabaseGrantUsageStoreTest extends TestCase
     }
 
     /**
-     * Have a concurrent writer insert the observation's row as soon as the next
+     * Have a concurrent writer store the observation's row as soon as the next
      * write reads the usage table, once.
      *
      * @param  Observation  $observation
@@ -349,9 +396,11 @@ final class DatabaseGrantUsageStoreTest extends TestCase
 
             $isRaced = true;
 
-            DB::table('grant_usage')->insert([
-                ...\array_diff_key($observation, ['grant_created_at' => true, 'last_observed_at' => true]),
-                'grant_created_at' => null,
+            $created = $observation['grant_created_at'];
+
+            DB::table('grant_usage')->updateOrInsert(['grant_key' => $observation['grant_key']], [
+                ...\array_diff_key($observation, ['grant_key' => true, 'grant_created_at' => true, 'last_observed_at' => true]),
+                'grant_created_at' => $created === null ? null : self::at($created)->format('Y-m-d H:i:s'),
                 'last_observed_at' => self::at($observation['last_observed_at'])->format('Y-m-d H:i:s'),
             ]);
         });
@@ -414,6 +463,33 @@ final class DatabaseGrantUsageStoreTest extends TestCase
         Event::forget(QueryExecuted::class);
 
         return $writes;
+    }
+
+    /**
+     * Return how many route keys each statement of the kind the call ran on the
+     * usage table names, in order.
+     *
+     * @param  string  $kind
+     * @param  \Closure(): void  $call
+     * @return list<int>
+     */
+    private static function statementsDuring(string $kind, \Closure $call): array
+    {
+        $statements = [];
+
+        DB::listen(static function (QueryExecuted $query) use ($kind, &$statements): void {
+            if (!\str_starts_with($query->sql, $kind) || !\str_contains($query->sql, 'grant_usage')) {
+                return;
+            }
+
+            $statements[] = \count(\array_filter($query->bindings, static fn (mixed $binding): bool => \is_string($binding) && \str_starts_with($binding, 'route-')));
+        });
+
+        $call();
+
+        Event::forget(QueryExecuted::class);
+
+        return $statements;
     }
 
     /**

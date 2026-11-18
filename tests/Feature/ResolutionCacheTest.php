@@ -25,9 +25,11 @@ use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\BreakGlassActivations;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ActsAsTenant;
@@ -254,6 +256,31 @@ final class ResolutionCacheTest extends TestCase
         DB::transaction(fn () => $this->request()->treeChanged(Reference::of($org)));
         $this->permissions($this->request());
         DB::rollBack();
+
+        $this->permissions($this->request());
+
+        self::assertSame(2, $this->resolutions);
+    }
+
+    /**
+     * An entry another worker stores from the rows before a revocation commits
+     * is never served once it has.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnEntryStoredBeforeARevocationCommitsIsNeverServed(): void
+    {
+        $revoked = new RoleRevoked(Operation::begin(), self::grantee(), new Reference('role', 'role-1'), 'editor', GrantScope::platform());
+
+        $this->request();
+
+        DB::transaction(function () use ($revoked): void {
+            OperationScope::dispatch($revoked);
+
+            $this->permissions($this->request());
+        });
 
         $this->permissions($this->request());
 
