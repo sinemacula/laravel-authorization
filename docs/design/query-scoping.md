@@ -229,9 +229,12 @@ class has a pattern that resolves, since `fnmatch()` refuses an identifier of `P
   relation's definition used by `whereHas()`, `has()`, `withCount()` or `withExists()`, its scope is never applied and
   the query refuses. A relation scoped in its definition is honoured when it is loaded; to filter by a relation, pass
   the scope in the relation's constraint.
-- A pair naming a declared model is looked up on the write connection, and never with a key the key column could not
-  hold, which PostgreSQL would answer with an error that aborts the transaction around it: such a key denies as
-  `resource_unresolved`.
+- A pair naming a declared model with tenant columns is looked up on the write connection, and never with a key the key
+  column could not hold, which PostgreSQL would answer with an error that aborts the transaction around it: such a key
+  denies as `resource_unresolved`, as does a record that does not exist. A tenantless model's record is never looked up.
+  For either, when the model's key type is an integer, a key names a record only as an integer's canonical text within
+  64 bits, as the scope compares it, so `[Post::class, '07']` denies as `resource_unresolved` rather than be decided as
+  record 7 under another identifier.
 
 ## Limits
 
@@ -306,8 +309,9 @@ recurses.
 - `tests/Feature/Query/QueryAuthorizerTest.php`, `StatementScreenTest.php`, `ResourceShapeTest.php` and
   `AuthorizedQueryTest.php`: every refusal reason and every class, rows of no tenant `check()` cannot read, and the
   index's part of the active tenant's match.
-- `tests/Feature/Resolvers/DeclaredResourceTenantTest.php`: the pair lookup on the write connection, and keys the key
-  column could not hold, inside a transaction, on PostgreSQL too.
+- `tests/Feature/Resolvers/DeclaredResourceTenantTest.php`: the pair lookup on the write connection, keys that name no
+  record through `check()`, `checkMany()` and `canEach()`, and keys the key column could not hold, inside a transaction,
+  on PostgreSQL too.
 
 ## Change Triggers
 
