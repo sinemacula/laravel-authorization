@@ -499,6 +499,44 @@ final class OperationScopeTest extends TestCase
     }
 
     /**
+     * A grant in a savepoint that rolls back dispatches nothing, while the
+     * grant the enclosing transaction commits is dispatched once it commits.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantInARolledBackSavepointDispatchesNothing(): void
+    {
+        Event::fake([RoleAssigned::class]);
+
+        $user   = StubGrantee::query()->create(['id' => 'user-1']);
+        $viewer = Role::query()->create(['name' => 'viewer']);
+        $editor = Role::query()->create(['name' => 'editor']);
+
+        $rollBack = new \RuntimeException('Rolled back.');
+
+        DB::transaction(static function () use ($user, $viewer, $editor, $rollBack): void {
+            $user->assignRole($viewer);
+
+            try {
+                DB::transaction(static function () use ($user, $editor, $rollBack): never {
+                    $user->assignRole($editor);
+
+                    throw $rollBack;
+                });
+            } catch (\RuntimeException $exception) {
+                self::assertSame($rollBack, $exception);
+            }
+
+            Event::assertNotDispatched(RoleAssigned::class);
+        });
+
+        Event::assertDispatchedTimes(RoleAssigned::class, 1);
+        Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->name === 'viewer');
+    }
+
+    /**
      * A write rolled back with no resolution cache bound rolls back cleanly.
      *
      * @return void

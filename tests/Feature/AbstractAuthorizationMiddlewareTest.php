@@ -6,8 +6,10 @@ namespace Tests\Feature;
 
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Translation\Translator;
+use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Testing\TestResponse;
 use Illuminate\Translation\Translator as TranslatorImplementation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\TestWith;
@@ -16,6 +18,7 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -111,6 +114,43 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
         self::assertSame(DecisionReason::NO_MATCH, $role->getReason());
         self::assertSame('This action is unauthorized.', $action->getMessage());
         self::assertSame(DecisionReason::NO_MATCH, $action->getReason());
+    }
+
+    /**
+     * Behind `auth:` on another guard, every middleware decides about that
+     * guard's user, not the default guard's, and a request `auth:` refuses
+     * never reaches them.
+     *
+     * @return void
+     */
+    public function testARouteBehindAnotherGuardDecidesAboutThatGuardsUser(): void
+    {
+        config(['auth.guards.api' => ['driver' => 'bearer']]);
+
+        $byToken = static fn (Request $request): ?AuthenticatableGrantee => AuthenticatableGrantee::query()->find($request->bearerToken());
+
+        $this->container()->make('auth')->viaRequest('bearer', $byToken);
+
+        $router = $this->container()->make('router');
+
+        foreach (['role:admin', 'permission:posts:create', 'authorize:posts:create'] as $middleware) {
+            $router->get('/api/' . \strtok($middleware, ':'), static fn (): string => 'ok')->middleware(['auth:api', $middleware]);
+        }
+
+        $this->seedGrantedUser();
+
+        $bystander = AuthenticatableGrantee::create(['id' => 'bystander']);
+        $request   = function (string $uri, ?string $token) use ($bystander): TestResponse {
+            $this->actingAsGuest('api')->actingAs($bystander, 'web');
+
+            return ($token === null ? $this->withoutToken() : $this->withToken($token))->getJson($uri);
+        };
+
+        foreach (['/api/role', '/api/permission', '/api/authorize'] as $uri) {
+            $request($uri, 'signed-in')->assertOk();
+            $request($uri, 'bystander')->assertForbidden();
+            $request($uri, null)->assertUnauthorized();
+        }
     }
 
     /**
@@ -278,35 +318,7 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
      */
     public function testAnUnmetRequirementRaisesInsufficientAuthentication(): void
     {
-        $policy = EvaluationPolicy::fromArray(['name' => 'step-up', 'statements' => [[
-            'effect'     => 'allow',
-            'actions'    => ['reports:export'],
-            'conditions' => ['authentication_requirement' => ['authentication' => ['multifactor' => []]]],
-        ]]]);
-
-        $this->app?->instance(PolicyResolver::class, new class ($policy) implements PolicyResolver {
-            /**
-             * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
-             */
-            public function __construct(
-
-                /** The policy every subject is given. */
-                private readonly EvaluationPolicy $policy,
-            ) {}
-
-            /**
-             * @param  object  $principal
-             * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
-             */
-            #[\Override]
-            public function policiesFor(object $principal): array
-            {
-                return [$this->policy];
-            }
-        });
-        $this->app?->forgetInstance('authorization');
-        $this->app?->forgetInstance(AuthorizationManager::class);
-        Authorization::clearResolvedInstances();
+        $this->requireMultifactorForExport();
 
         $this->actingAs($this->seedGrantedUser());
 
@@ -319,6 +331,30 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
                 self::assertSame(['multifactor'], $exception->requirements()[0]->unmet);
             }
         }
+    }
+
+    /**
+     * An action whose allow needs a step-up, listed before another, does not
+     * raise insufficient authentication: the list ends in the last action's
+     * plain denial.
+     *
+     * @return void
+     */
+    public function testAStepUpActionBeforeTheLastEndsInThePlainDenial(): void
+    {
+        Event::fake([DecisionEvaluated::class, AuthorizationFailed::class]);
+
+        $this->requireMultifactorForExport();
+
+        $this->actingAs($this->seedGrantedUser());
+
+        $denial = self::denialOf(fn (): Response => $this->runMiddleware(RequirePermission::class, self::request(), 'reports:export|reports:manage'));
+
+        self::assertSame(DecisionReason::NO_MATCH, $denial->getReason());
+        Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->action === 'reports:export'
+            && $event->reason                                                                                          === DecisionReason::INSUFFICIENT_AUTHENTICATION);
+        Event::assertDispatchedTimes(AuthorizationFailed::class, 1);
+        Event::assertDispatched(AuthorizationFailed::class, static fn (AuthorizationFailed $event): bool => $event->action === 'reports:manage');
     }
 
     /**
@@ -357,6 +393,45 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
 
         $translator->addLines(['authorization.denied' => 'Action non autorisée.', 'authorization.unauthenticated' => 'Non authentifié.'], 'fr', 'authorization');
         $translator->setLocale('fr');
+    }
+
+    /**
+     * Give every subject a policy allowing `reports:export` only once it has
+     * signed in with multifactor authentication.
+     *
+     * @return void
+     */
+    private function requireMultifactorForExport(): void
+    {
+        $policy = EvaluationPolicy::fromArray(['name' => 'step-up', 'statements' => [[
+            'effect'     => 'allow',
+            'actions'    => ['reports:export'],
+            'conditions' => ['authentication_requirement' => ['authentication' => ['multifactor' => []]]],
+        ]]]);
+
+        $this->app?->instance(PolicyResolver::class, new class ($policy) implements PolicyResolver {
+            /**
+             * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
+             */
+            public function __construct(
+
+                /** The policy every subject is given. */
+                private readonly EvaluationPolicy $policy,
+            ) {}
+
+            /**
+             * @param  object  $principal
+             * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+             */
+            #[\Override]
+            public function policiesFor(object $principal): array
+            {
+                return [$this->policy];
+            }
+        });
+        $this->app?->forgetInstance('authorization');
+        $this->app?->forgetInstance(AuthorizationManager::class);
+        Authorization::clearResolvedInstances();
     }
 
     /**
