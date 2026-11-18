@@ -233,13 +233,25 @@ final class TenantScope implements Scope
     /**
      * Note a reported change to the tenant tree, so every chain held, by the
      * request or a `within()`, and the grants an instance read for a role
-     * check, are read again.
+     * check, are read again, and again once a transaction open now rolls back.
      *
      * @return void
      */
     public static function treeChanged(): void
     {
-        Container::getInstance()->instance(self::TREE_VERSION, new \stdClass);
+        $container = Container::getInstance();
+        $replace   = static fn (): object => $container->instance(self::TREE_VERSION, new \stdClass);
+
+        $replace();
+
+        /** @var \Illuminate\Database\DatabaseTransactionsManager $transactions */
+        $transactions = $container->make('db.transactions');
+
+        // Every level, since Laravel before 13.21 never runs the rollback
+        // callbacks of a savepoint that has already committed.
+        foreach ($transactions->callbackApplicableTransactions() as $transaction) {
+            $transaction->addCallbackForRollback($replace);
+        }
     }
 
     /**

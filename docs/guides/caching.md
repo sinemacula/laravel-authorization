@@ -135,9 +135,10 @@ worker that reports it, and from the next request or job in every other. In that
 request and for a `within()` running, and the roles a model instance read for `hasRole()`, are read again, and a
 delegated administration call running meanwhile is tried again rather than written on the chains its decisions read (see
 [Delegated administration](administration.md#delegated-administration)). Like a write, the version is bumped again once
-an open transaction commits or rolls back. A change not reported is seen only by a later request or job, once the
-entries built under the old tree have lapsed. Reporting runs no grant hook: an integration that widens a scope on a move
-asks the [grant scope query](administration.md#grant-scope-query) whose grants the move concerns.
+an open transaction commits or rolls back, and on a rollback the ancestors and roles held are read again too. A change
+not reported is seen only by a later request or job, once the entries built under the old tree have lapsed. Reporting
+runs no grant hook: an integration that widens a scope on a move asks the [grant scope
+query](administration.md#grant-scope-query) whose grants the move concerns.
 
 ## A failing store
 

@@ -515,6 +515,38 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
+     * A move reported in a savepoint that commits inside a transaction that
+     * rolls back is read again once it rolls back.
+     *
+     * @return void
+     */
+    public function testAMoveRolledBackIsReadAgain(): void
+    {
+        [$account, $org, $other] = \array_map(static fn (string $id): Reference => new Reference('stub_tenant', $id), ['account', 'org', 'other']);
+        $tree                    = (new StubTenantTree)->put($account, $org);
+        $ancestor                = static fn (): ?Reference => TenantScope::currentChain()->tenants[1] ?? null;
+
+        $this->app?->instance(TenantTree::class, $tree);
+
+        $seen = TenantScope::within($account, null, static function () use ($account, $org, $other, $tree, $ancestor): array {
+            DB::beginTransaction();
+            DB::transaction(static function () use ($account, $other, $tree): void {
+                $tree->put($account, $other);
+                Authorization::treeChanged($account);
+            });
+
+            $moved = $ancestor();
+
+            $tree->put($account, $org);
+            DB::rollBack();
+
+            return [$moved, $ancestor()];
+        });
+
+        self::assertEquals([$other, $org], $seen);
+    }
+
+    /**
      * What is resolved within another application is not served to the request
      * afterwards, and without a resolution cache bound, within runs all the
      * same.
@@ -872,6 +904,9 @@ final class TenantScopeTest extends TestCase
             $key(new Reference('a:b', 'c')),
             $key(new Reference('a', 'b:c')),
             $key(new Reference('team', 'x%3Abelow')),
+            $key(new Reference('platform', 'app=a')),
+            $key(null, 'a:every'),
+            $key(null, 'a%3Aevery'),
         ];
 
         self::assertSame($keys, \array_values(\array_unique($keys)));
