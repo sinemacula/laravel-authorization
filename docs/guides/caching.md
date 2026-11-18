@@ -117,8 +117,9 @@ with no transaction open on that connection has already committed, and is bumped
 
 The worker that wrote empties its memo at once, so its next check reads afresh. Every other worker reads the change from
 its next request or job; one already running keeps what its memo holds until each entry lapses, `ttl` seconds at most,
-unless it forgets it (see [Long-running commands](long-lived-workers.md#long-running-commands)). Without a store,
-invalidating empties the memo and nothing else.
+unless it forgets it (see [Long-running commands](long-lived-workers.md#long-running-commands)). A delegated
+administration call empties the memo once it has locked the actor's authority, so its decisions never read what the
+request memoised before the lock. Without a store, invalidating empties the memo and nothing else.
 
 ## Tree changes
 

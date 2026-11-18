@@ -12,7 +12,9 @@ use SineMacula\Laravel\Authorization\Administration\PossessionLimits;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubGrantee;
@@ -66,6 +68,74 @@ final class DelegatedGrantQueryBudgetTest extends TestCase
             self::storeUnrelated($name);
 
             self::assertSame($before, self::queriesOf($call, self::user('after-' . $name)), "{$name} read more once unrelated rows were stored.");
+        }
+    }
+
+    /**
+     * A delegated grant in a tenant, platform-wide, and a sync's additions,
+     * each run as many queries when the actor holds roles, policies and
+     * boundaries in thirty other tenants as in one.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedGrantCostsTheSameWhereverElseTheActorHoldsAuthority(): void
+    {
+        $actor  = self::administrator();
+        $admin  = StubGrantee::query()->findOrFail('admin');
+        $tenant = new Reference('tenant', 'a');
+        $calls  = [
+            'a grant in a tenant' => static fn (StubGrantee $user): mixed => self::grants()->grantPermission($user, 'posts:edit', actor: $actor, tenant: $tenant),
+            'a platform grant'    => static fn (StubGrantee $user): mixed => self::grants()->grantPermission($user, 'posts:edit', actor: $actor),
+            'a sync'              => static fn (StubGrantee $user): mixed => self::grants()->syncPermissions($user, ['posts:edit', 'posts:read'], actor: $actor, tenant: $tenant),
+        ];
+
+        self::holdElsewhere($admin, 0, 1);
+
+        $before = [];
+
+        foreach ($calls as $name => $call) {
+            $call(self::user('warm-' . $name));
+
+            $before[$name] = self::queriesOf($call, self::user('before-' . $name));
+        }
+
+        self::holdElsewhere($admin, 1, self::UNRELATED);
+
+        foreach ($calls as $name => $call) {
+            self::assertSame($before[$name], self::queriesOf($call, self::user('after-' . $name)), "{$name} read more once the actor held authority elsewhere.");
+        }
+    }
+
+    /**
+     * Give the actor, in each of the other tenants numbered from the first up
+     * to the last, a role carrying `posts:read`, a policy denying an action the
+     * grants never name, and a boundary allowing everything, none of which
+     * limits the grants.
+     *
+     * @param  \Tests\Feature\Stubs\StubGrantee  $admin
+     * @param  int  $first
+     * @param  int  $last
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private static function holdElsewhere(StubGrantee $admin, int $first, int $last): void
+    {
+        $read     = Permission::query()->firstOrCreate(['name' => 'posts:read']);
+        $deny     = ['statements' => [['effect' => 'deny', 'actions' => ['billing:refund']]]];
+        $boundary = ['statements' => [['effect' => 'allow', 'actions' => ['*']]]];
+
+        for ($index = $first; $index < $last; $index++) {
+            $tenant = new Reference('tenant', "elsewhere-{$index}");
+            $role   = Role::create(['name' => "elsewhere-{$index}"]);
+
+            RoleService::instance()?->grantPermission($role, $read);
+
+            self::grants()->grantRole($admin, $role, tenant: $tenant);
+            self::grants()->attachPolicy($admin, Policy::create(['name' => "elsewhere-deny-{$index}", 'document' => $deny]), tenant: $tenant);
+            BoundaryService::instance()?->set($admin, Policy::create(['name' => "elsewhere-boundary-{$index}", 'document' => $boundary]), $tenant);
         }
     }
 

@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Preview\PreviewAdmission;
 use SineMacula\Laravel\Authorization\Preview\Previewing;
 use SineMacula\Laravel\Authorization\Preview\PreviewResource;
 use SineMacula\Laravel\Authorization\Query\ScopeAnchors;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
@@ -67,6 +68,8 @@ final class ScopeAnchorsTest extends TestCase
         $user->givePermission($owned, null, new Reference('teams', 'permission'));
         $parent->attachPolicy(self::storedPolicy('role-policy', []), null, new Reference('teams', 'role-policy'));
         $other->givePermission(Permission::create(['name' => 'posts:edit']), null, new Reference('teams', 'stranger'));
+        app(BoundaryService::class)->set($identity, self::storedPolicy('bounded', [['effect' => 'allow', 'actions' => ['*']]]), new Reference('teams', 'bounded'));
+        app(BoundaryService::class)->set($other, self::storedPolicy('other-bound', [['effect' => 'allow', 'actions' => ['*']]]), new Reference('teams', 'other-bound'));
 
         // Owners apart from where they are granted, and a role carrying a
         // permission another tenant owns, which no grant made here allows but
@@ -85,7 +88,10 @@ final class ScopeAnchorsTest extends TestCase
 
         $ids = static fn (array $tenants): array => \array_map(static fn (Reference $tenant): string => $tenant->id, $tenants);
 
-        self::assertEqualsCanonicalizing(['expired', 'owner', 'role-owner', 'role-policy', 'permission', 'owned-permission', 'inherited', 'attached', 'railed'], $ids($sources));
+        self::assertEqualsCanonicalizing(
+            ['expired', 'owner', 'role-owner', 'role-policy', 'permission', 'owned-permission', 'inherited', 'bounded', 'attached', 'railed'],
+            $ids($sources),
+        );
         self::assertEqualsCanonicalizing(['attached', 'railed'], $ids($admitted));
         self::assertSame($ids($admitted), $ids(ScopeAnchors::read(new Subject($user, $identity), (new ScopedPost)->getMorphClass(), false)[0]));
     }
