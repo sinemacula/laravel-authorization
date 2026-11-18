@@ -624,9 +624,11 @@ final class WideningPhaseTest extends TestCase
         });
 
         $hook    = $deadlocking(1);
-        $outcome = self::grants()->grantRole($first, Role::query()->create(['name' => 'retried']), actor: $actor, tenant: self::tenant('acct1'));
+        $retried = Role::query()->create(['name' => 'retried']);
+        $outcome = self::grants()->grantRole($first, $retried, actor: $actor, tenant: self::tenant('acct1'));
 
         self::assertSame(GrantOutcome::GRANTED, $outcome);
+        self::assertSame([GrantChanges::key($retried)], self::rolesOf($first, self::authorizationConnection()->getName()));
         self::assertCount(2, $hook->widenings);
         self::assertSame(1, $prepared->count());
 
@@ -655,6 +657,7 @@ final class WideningPhaseTest extends TestCase
         }
 
         self::assertCount(1, $hook->widenings);
+        self::assertSame([], self::rolesOf($second, self::authorizationConnection()->getName()));
         self::assertSame(1, $prepared->count());
     }
 
