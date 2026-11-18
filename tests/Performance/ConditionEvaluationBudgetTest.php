@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use Tests\Concerns\MeasuresTime;
 
@@ -65,6 +66,35 @@ final class ConditionEvaluationBudgetTest extends TestCase
             $elapsed,
             "Statement::conditionsSatisfiedBy() budget exceeded ({$elapsed}s for 1,000 iterations of a 20-operator chain).",
         );
+    }
+
+    /**
+     * A many-star `like` operand at the length limit, tested against the
+     * longest value fnmatch() accepts that it does not match, must not stall a
+     * check.
+     *
+     * @return void
+     */
+    public function testManyStarLikeOperandAtTheLimitStaysWithinBudget(): void
+    {
+        $operand   = \str_pad('', (new PolicyLimits)->patternLength - 1, '*a') . 'b';
+        $statement = new Statement(
+            effect: PolicyEffect::ALLOW,
+            actions: ['*'],
+            conditions: ['like' => ['input.agent' => $operand]],
+        );
+        $context = ['input' => ['agent' => \str_repeat('a', \PHP_MAXPATHLEN - 1)]];
+
+        self::assertFalse($statement->conditionsSatisfiedBy($context));
+        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['agent' => \substr($context['input']['agent'], 1) . 'b']]));
+
+        $elapsed = $this->fastestOf(3, static function () use ($statement, $context): void {
+            for ($i = 0; $i < 100; $i++) {
+                $statement->conditionsSatisfiedBy($context);
+            }
+        });
+
+        $this->assertWithinBudget(0.05, $elapsed, "Many-star like operand budget exceeded ({$elapsed}s for 100 tests).");
     }
 
     /**
