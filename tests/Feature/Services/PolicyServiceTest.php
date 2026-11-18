@@ -8,7 +8,9 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
@@ -16,14 +18,19 @@ use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActsAsAdministrator;
+use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\UsesAnAuthorizationConnection;
@@ -46,7 +53,7 @@ use Tests\TestCase;
 #[CoversClass(PolicyService::class)]
 final class PolicyServiceTest extends TestCase
 {
-    use ComparesReferences, RefusesThePackage, UsesAnAuthorizationConnection;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, ComparesReferences, RefusesThePackage, UsesAnAuthorizationConnection;
 
     /** @var array{statements: list<array<string, mixed>>} An allow on reading posts. */
     private const array READ = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['*']]]];
@@ -134,6 +141,41 @@ final class PolicyServiceTest extends TestCase
         }
 
         self::assertSame(0, Policy::query()->count());
+    }
+
+    /**
+     * A delegated inline policy is decided at platform scope, offering the
+     * grantee it is created for: an actor's policy can limit whom it creates
+     * one for, authority held only in a tenant never covers it, and from a
+     * tenant's context the owner rule refuses it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedInlinePolicyIsDecidedAtPlatformScopeOnItsOwner(): void
+    {
+        $user    = StubGrantee::create(['id' => 'user-1']);
+        $other   = StubGrantee::create(['id' => 'user-2']);
+        $tenant  = self::createTenant('tenant-a');
+        $limited = self::administrator([]);
+        $local   = self::administrator([], 'admin-2');
+        $owner   = ['resource.change.owner_type' => $user->getMorphClass(), 'resource.change.owner_id' => 'user-1'];
+        $allow   = ['effect' => 'allow', 'actions' => [PackagePermissions::POLICY_CREATE], 'resources' => [OperationResource::TYPE . ':*'], 'conditions' => ['eq' => $owner]];
+
+        self::assertInstanceOf(StubGrantee::class, $limited->subject->subject);
+        self::assertInstanceOf(StubGrantee::class, $local->subject->subject);
+
+        self::grants()->attachPolicy($limited->subject->subject, Policy::query()->create(['name' => 'own-users', 'document' => ['statements' => [$allow]]]));
+        self::grants()->grantPermission($local->subject->subject, Permission::query()->create(['name' => PackagePermissions::POLICY_CREATE]), tenant: $tenant);
+
+        self::assertSame('user-1', self::service()->createInline($user, 'mine', self::READ, actor: $limited)->owner_id);
+        self::assertDelegatedRefusal(DecisionReason::CONDITION_FAILED, static fn (): Policy => self::service()->createInline($other, 'theirs', self::READ, actor: $limited));
+
+        $this->actAsTenant($tenant);
+
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): Policy => self::service()->createInline($user, 'local', self::READ, actor: $local));
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_OWNER, static fn (): Policy => self::service()->createInline($user, 'local', self::READ, actor: $limited));
     }
 
     /**
@@ -397,6 +439,16 @@ final class PolicyServiceTest extends TestCase
     private static function service(): PolicyService
     {
         return app(PolicyService::class);
+    }
+
+    /**
+     * Return the grant service.
+     *
+     * @return \SineMacula\Laravel\Authorization\Services\GrantService
+     */
+    private static function grants(): GrantService
+    {
+        return app(GrantService::class);
     }
 
     /**
