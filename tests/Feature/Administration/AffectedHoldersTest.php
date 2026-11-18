@@ -9,9 +9,12 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\AffectedHolders;
 use SineMacula\Laravel\Authorization\Administration\DocumentComparison;
 use SineMacula\Laravel\Authorization\Enums\DependencyPhase;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -23,6 +26,7 @@ use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\CatchesRefusals;
@@ -90,6 +94,54 @@ final class AffectedHoldersTest extends TestCase
 
         self::assertSame(['one', 'two'], self::ids(AffectedHolders::none()->ofRoles([$role->id])->holders()));
         self::assertSame(['two'], self::ids(AffectedHolders::none()->ofRoles([$below->id])->holders()));
+    }
+
+    /**
+     * A holder whose grant of the role has expired is still reached, since
+     * re-arming the grant restores what it carried: it counts toward the limit,
+     * and a change to the role is refused on its live rank elsewhere and, when
+     * it is the actor, by the self rule.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAHolderWhoseGrantExpiredIsStillWeighed(): void
+    {
+        $role   = Role::query()->create(['name' => 'editor']);
+        $edit   = Permission::query()->create(['name' => 'posts:edit']);
+        $admin  = self::user('admin');
+        $senior = self::user('senior');
+
+        foreach (['posts:*', PackagePermissions::PERMISSION_GRANT] as $name) {
+            self::grants()->grantPermission($admin, Permission::query()->create(['name' => $name]));
+        }
+
+        self::grants()->grantRole($admin, Role::query()->create(['name' => 'manager', 'rank' => 1]));
+        self::grants()->grantRole($senior, Role::query()->create(['name' => 'chief', 'rank' => 0]));
+        self::grants()->grantRole($senior, $role, Carbon::now()->addHour());
+        self::grants()->grantRole(self::user('live'), $role);
+
+        $this->travel(2)->hours();
+
+        $add = static fn (): mixed => RoleService::instance()?->grantPermission($role, $edit, actor: ActingContext::for($admin));
+
+        self::assertSame(['live', 'senior'], self::ids(self::holdersOf($role)));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::reasonOf($add));
+
+        config(['authorization.administration.max_impact' => 1]);
+
+        self::assertNull(self::holdersOf($role));
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::reasonOf($add));
+
+        config(['authorization.administration.max_impact' => 2]);
+
+        self::grants()->revokeRole($senior, $role);
+        self::grants()->grantRole($admin, $role, Carbon::now()->addHour());
+
+        $this->travel(2)->hours();
+
+        self::assertSame(DecisionReason::ADMINISTRATION_SELF, self::reasonOf($add));
     }
 
     /**
@@ -592,6 +644,22 @@ final class AffectedHoldersTest extends TestCase
     private static function holdersOf(Role $role): ?array
     {
         return AffectedHolders::none()->ofRoles([$role->id])->holders();
+    }
+
+    /**
+     * Return the reason the call is refused with, failing the test when it is
+     * not refused.
+     *
+     * @param  \Closure(): mixed  $call
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason
+     */
+    private static function reasonOf(\Closure $call): DecisionReason
+    {
+        $refusal = self::refusalOf($call);
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+
+        return $refusal->getReason();
     }
 
     /**

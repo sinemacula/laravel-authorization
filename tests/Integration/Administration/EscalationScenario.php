@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
@@ -64,8 +65,8 @@ final class EscalationScenario
     /** @var list<string> The administration rights an actor may be given. */
     private const array RIGHTS = [
         Actions::PERMISSION_GRANT, Actions::PERMISSION_REVOKE, Actions::ROLE_GRANT, Actions::ROLE_REVOKE, Actions::POLICY_ATTACH,
-        Actions::POLICY_DETACH, Actions::ROLE_PARENT_SET, Actions::POLICY_UPDATE, Actions::BOUNDARY_SET, Actions::BOUNDARY_REMOVE,
-        Actions::ADMINISTRATION_SELF, Actions::ADMINISTRATION_UNBOUNDED,
+        Actions::POLICY_DETACH, Actions::ROLE_PARENT_SET, Actions::POLICY_UPDATE, Actions::PERMISSION_RENAME, Actions::BOUNDARY_SET,
+        Actions::BOUNDARY_REMOVE, Actions::ADMINISTRATION_SELF, Actions::ADMINISTRATION_UNBOUNDED,
     ];
 
     /** @var list<string> The actions, patterns and rights an operation may grant. */
@@ -116,6 +117,9 @@ final class EscalationScenario
     /** @var \SineMacula\Laravel\Authorization\Services\PolicyService The policy service. */
     private readonly PolicyService $policyService;
 
+    /** @var \SineMacula\Laravel\Authorization\Services\PermissionService The permission service. */
+    private readonly PermissionService $permissionService;
+
     /** @var \SineMacula\Laravel\Authorization\Services\BoundaryService The boundary service. */
     private readonly BoundaryService $boundaryService;
 
@@ -145,6 +149,7 @@ final class EscalationScenario
         $this->policyService   = $app->make(PolicyService::class);
         $this->boundaryService = $app->make(BoundaryService::class);
 
+        $this->permissionService     = $app->make(PermissionService::class);
         $this->resourcePolicyService = $app->make(ResourcePolicyService::class);
         $this->actorModel            = StubGrantee::query()->create(['id' => 'actor']);
         $this->actor                 = ActingContext::for($this->actorModel);
@@ -183,12 +188,14 @@ final class EscalationScenario
     public function operation(): array
     {
         $kind = $this->random->pick([
-            'permission', 'permission', 'role', 'role', 'role', 'policy', 'sync', 'attach', 'revoke', 'membership', 'parent', 'rewrite', 'boundary', 'unbound',
+            'permission', 'permission', 'role', 'role', 'role', 'policy', 'sync', 'attach', 'revoke', 'membership', 'parent', 'rewrite', 'rename', 'boundary',
+            'unbound',
         ]);
 
         [$description, $action, $call] = match ($kind) {
             'permission', 'role', 'policy', 'sync', 'attach' => $this->grant($kind),
             'revoke', 'boundary', 'unbound'                  => $this->removal($kind),
+            'rename'                                         => $this->rename(),
             default                                          => $this->definition($kind),
         };
 
@@ -313,6 +320,27 @@ final class EscalationScenario
             default => [($policy = $this->random->pick($this->policies))->name . ' as ' . \json_encode($document = $this->document()), Actions::POLICY_UPDATE,
                 static fn (): mixed => $policies->rewrite(Policy::query()->whereKey($policy->getKey())->firstOrFail(), $document, $actor)],
         };
+    }
+
+    /**
+     * Return a random rename as the actor: a stored permission, renamed to a
+     * declared name or pattern no permission has.
+     *
+     * @return array{string, string, \Closure(): mixed}
+     */
+    private function rename(): array
+    {
+        $this->target = null;
+
+        $names   = [...self::HELD, self::SHARED, 'files:*', '*'];
+        $stored  = \array_values(\array_filter($names, static fn (string $name): bool => Permission::query()->where('name', $name)->exists()));
+        $held    = \array_values(\array_intersect(self::HELD, $stored));
+        $source  = self::permission($this->random->pick($held === [] ? self::HELD : $held));
+        $name    = $this->random->pick(\array_values(\array_diff($names, $stored, [$source->name])));
+        $actor   = $this->actor;
+        $service = $this->permissionService;
+
+        return ["{$source->name} as {$name}", Actions::PERMISSION_RENAME, static fn (): mixed => $service->rename($source, $name, $actor)];
     }
 
     /**
