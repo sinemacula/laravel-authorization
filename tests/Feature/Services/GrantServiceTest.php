@@ -2918,8 +2918,8 @@ final class GrantServiceTest extends TestCase
 
     /**
      * A grant whose row a concurrent call keeps removing, even once the write
-     * is tried again, is refused as not written: the row held before is kept
-     * and nothing is dispatched.
+     * is tried again, is refused as not written: the call rolls back and
+     * nothing is dispatched.
      *
      * @return void
      *
@@ -2940,13 +2940,14 @@ final class GrantServiceTest extends TestCase
             DB::table('authorizable_roles')->insert($row);
         }, 2, 1);
 
-        Event::fake([RoleAssigned::class]);
+        Event::fake([RoleAssigned::class, RoleExpiryChanged::class]);
 
         $exception = self::refusalOf(static fn () => self::service()->grantRole($user, $role, Carbon::parse('2026-07-09 12:00:00')));
 
         self::assertInstanceOf(UnwrittenGrantException::class, $exception);
         self::assertSame('grant of role \'editor\' to ' . $user->getMorphClass() . ':user-1', $exception->getGrant());
         Event::assertNotDispatched(RoleAssigned::class);
+        Event::assertNotDispatched(RoleExpiryChanged::class);
         self::assertSame([$role->id => null], self::expiries());
     }
 

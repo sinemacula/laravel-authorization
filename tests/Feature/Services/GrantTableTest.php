@@ -377,7 +377,7 @@ final class GrantTableTest extends TestCase
         DB::table('roles')->where('id', $role->id)->delete();
 
         self::assertNull(self::table()->grant($role->id, null));
-        self::assertNull(self::table(tenant: self::tenant())->rearmWithReach($role->id, null));
+        self::assertNull(self::table(tenant: self::tenant(), includeSubtree: false)->rearmWithReach($role->id, null));
         self::assertSame([], self::rows());
     }
 

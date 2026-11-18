@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\StoredRecords;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\TestCase;
 
 /**
@@ -32,7 +33,7 @@ use Tests\TestCase;
 #[CoversClass(StoredRecords::class)]
 final class StoredRecordsTest extends TestCase
 {
-    use CatchesRefusals;
+    use CatchesRefusals, RecordsRowLocks;
 
     /**
      * The row is read again by its key, as a new instance, discarding what the
@@ -107,7 +108,8 @@ final class StoredRecordsTest extends TestCase
     /**
      * A change that wrote a row is returned as it is, and a grant that wrote
      * none is refused as its target's, when the target's row is gone, else as
-     * the role's it is granted to, when that row is gone, else as not written.
+     * the role's it is granted to, when that row is gone, else as not written,
+     * each row read under a lock.
      *
      * @return void
      */
@@ -125,7 +127,9 @@ final class StoredRecordsTest extends TestCase
 
         self::assertInstanceOf(UnwrittenGrantException::class, $unwritten);
         self::assertSame('grant of permission \'posts:edit\' to user:1', $unwritten->getGrant());
-        self::assertInstanceOf(UnwrittenGrantException::class, $refusal($role));
+        self::assertSame(['permissions', 'roles'], $this->lockedTables(static function () use ($refusal, $role): void {
+            self::assertInstanceOf(UnwrittenGrantException::class, $refusal($role));
+        }));
 
         DB::table('roles')->where('id', $role->id)->delete();
 

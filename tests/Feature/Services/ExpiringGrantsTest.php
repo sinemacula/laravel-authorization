@@ -139,7 +139,10 @@ final class ExpiringGrantsTest extends TestCase
         $role  = Role::query()->create(['name' => 'editor']);
         $table = GrantChanges::table(GrantTarget::ROLE, new Reference('user', '1'), null, new GrantScope(new Reference('tenant', 'a'), null, false));
 
-        self::assertNull($table->grant($role->id, Carbon::parse(self::NOW))?->previousReach);
+        $stored = $table->grant($role->id, Carbon::parse(self::NOW));
+
+        self::assertSame(GrantOutcome::GRANTED, $stored?->outcome);
+        self::assertNull($stored->previousReach);
         self::assertFalse($table->grant($role->id, null)?->previousReach);
         self::assertFalse($table->grant($role->id, null)->previousReach);
         self::assertFalse($table->rearm($role->id, Carbon::parse(self::NOW)->addDay(), Carbon::parse(self::NOW))?->previousReach);
@@ -228,8 +231,8 @@ final class ExpiringGrantsTest extends TestCase
     }
 
     /**
-     * A grant or re-arm of a row that is gone writes nothing, on every driver,
-     * and leaves the transaction usable.
+     * A grant or re-arm the foreign key refuses, as to a role that is gone,
+     * writes nothing, on every driver, and leaves the transaction usable.
      *
      * @return void
      */
@@ -237,7 +240,7 @@ final class ExpiringGrantsTest extends TestCase
     {
         [$table, $permission] = self::grants();
 
-        DB::table('permissions')->where('id', $permission->id)->delete();
+        DB::table('roles')->delete();
 
         self::assertNull($table->grant($permission->id, null));
         self::assertNull($table->rearm($permission->id, null));
