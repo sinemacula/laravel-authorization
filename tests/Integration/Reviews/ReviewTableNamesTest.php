@@ -104,11 +104,13 @@ final class ReviewTableNamesTest extends TestCase
             DB::table('renamed_break_glass')->where('id', self::activate($bob, $editor)->getKey())->update(['id' => '00000000-0000-4000-8000-00000000000' . $key]);
         }
 
-        self::assertTrue(Schema::hasTable('renamed_break_glass'));
-        self::assertFalse(Schema::hasTable('break_glass_activations'));
+        foreach (self::TABLES as $table) {
+            self::assertTrue(Schema::hasTable('renamed_' . $table), $table);
+        }
 
         $holders = ReviewQuery::holders($editor, ReviewScope::everywhere());
         $whole   = self::trusted($holders)->rows;
+        $paged   = self::pagedThrough($holders, 1);
         $keys    = static fn (array $rows): array => \array_map(static fn (ReviewRow $row): string => $row->rowKey, $rows);
 
         self::assertSame(['role_grant ann [editor] editor', ...\array_fill(0, 4, 'role_grant bob [editor] editor (break-glass)')], \array_map(self::describe(...), $whole));
@@ -116,7 +118,11 @@ final class ReviewTableNamesTest extends TestCase
             [null, ...\array_map(static fn (int $key): string => '00000000-0000-4000-8000-00000000000' . $key, [1, 2, 3, 4])],
             \array_map(static fn (ReviewRow $row): mixed => $row->breakGlass['activation'] ?? null, $whole),
         );
-        self::assertSame($keys($whole), $keys(self::pagedThrough($holders, 1)['rows']));
+        self::assertSame($keys($whole), $keys($paged['rows']));
+
+        // An InnoDB scan already returns activations by key, so the order the
+        // query asks for is asserted too.
+        self::assertMatchesRegularExpression('/include_subtree asc, (cast\()?renamed_break_glass\.id\b/', \str_replace(['"', '`'], '', \implode("\n", $paged['queries'][0])));
         self::assertCount(5, self::trusted(ReviewQuery::holders($edit, ReviewScope::everywhere()))->rows);
         self::assertSame(
             ['role_permission ann [editor>admin] posts:edit'],
