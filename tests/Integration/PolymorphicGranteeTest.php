@@ -4,20 +4,29 @@ declare(strict_types = 1);
 
 namespace Tests\Integration;
 
+use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Cache\PrincipalCacheKey;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
+use SineMacula\Laravel\Authorization\Database\GrantRelation;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\RequestState;
+use Tests\Feature\Stubs\FoundationUser;
+use Tests\Feature\Stubs\NumberedGrantee;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\TestCase;
 
 /**
- * Integration tests covering polymorphic grantee support — two unrelated models
- * share the same role and produce identical decisions without model-class
- * collisions.
+ * Integration tests covering polymorphic grantee support: two unrelated models
+ * share the same role without model-class collisions, and a grant to one never
+ * reaches another type with the same key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,6 +35,8 @@ use Tests\TestCase;
  *
  * @SuppressWarnings("php:S1192")
  */
+#[CoversClass(PrincipalCacheKey::class)]
+#[CoversClass(GrantRelation::class)]
 #[CoversTrait(HasRoles::class)]
 final class PolymorphicGranteeTest extends TestCase
 {
@@ -55,6 +66,93 @@ final class PolymorphicGranteeTest extends TestCase
             [StubGrantee::class, StubSecondGrantee::class],
             self::sortedTypes(),
         );
+    }
+
+    /**
+     * A grant to user 5 never lets client 5 through, cold, or with only the
+     * user's entries in the memo or the store.
+     *
+     * @return void
+     */
+    public function testAGrantNeverAllowsAnotherTypeWithTheSameKey(): void
+    {
+        // Two integer-keyed types; that they read one table is incidental.
+        $user   = FoundationUser::query()->forceCreate(['id' => 5]);
+        $client = NumberedGrantee::query()->findOrFail(5);
+
+        Role::create(['name' => 'writer', 'guard' => 'web'])->givePermission(Permission::create(['name' => 'posts:create', 'guard' => 'web']));
+
+        $user->assignRole('writer');
+        $user->givePermission(Permission::create(['name' => 'posts:delete', 'guard' => 'web']));
+        $user->attachPolicy(Policy::create([
+            'name'     => 'publish',
+            'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:publish']]]],
+        ]));
+
+        self::assertSame([false, false, false], self::decisions($client), 'cold');
+
+        $this->startRequest(flushStore: true);
+
+        self::assertSame([true, true, true], self::decisions($user));
+        self::assertSame([false, false, false], self::decisions($client), 'memo');
+
+        $this->startRequest(flushStore: true);
+
+        self::assertSame([true, true, true], self::decisions($user));
+
+        $this->startRequest();
+
+        DB::enableQueryLog();
+        self::assertSame([true, true, true], self::decisions($user));
+        self::assertSame([], DB::getQueryLog(), 'The user is decided from the store.');
+        DB::disableQueryLog();
+
+        $this->startRequest();
+
+        self::assertSame([false, false, false], self::decisions($client), 'store');
+    }
+
+    /**
+     * Back the resolution cache with a persistent store.
+     *
+     * @param  mixed  $app
+     * @return void
+     */
+    #[\Override]
+    protected function defineEnvironment(mixed $app): void
+    {
+        parent::defineEnvironment($app);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = app(ConfigRepository::class);
+
+        $config->set('authorization.cache.store', 'array');
+    }
+
+    /**
+     * Start a request with an empty memo, and an empty store when asked.
+     *
+     * @param  bool  $flushStore
+     * @return void
+     */
+    private function startRequest(bool $flushStore = false): void
+    {
+        if ($flushStore) {
+            Cache::store('array')->clear();
+        }
+
+        RequestState::forget($this->container());
+    }
+
+    /**
+     * Return whether the grantee may create, delete and publish posts.
+     *
+     * @param  object  $grantee
+     * @return list<bool>
+     */
+    private static function decisions(object $grantee): array
+    {
+        return \array_map(static fn (string $action): bool => Authorization::for($grantee)->can($action), ['posts:create', 'posts:delete', 'posts:publish']);
     }
 
     /**

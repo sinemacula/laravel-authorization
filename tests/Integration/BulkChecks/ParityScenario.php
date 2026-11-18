@@ -284,7 +284,8 @@ final class ParityScenario
 
     /**
      * Attach the subject's policies, one allowing a post by its status often,
-     * and set a boundary and a guardrail, each sometimes.
+     * and set boundaries in the platform or a tenant and a guardrail, each
+     * sometimes.
      *
      * @return void
      *
@@ -315,8 +316,13 @@ final class ParityScenario
             $this->user->attachPolicy($policy, null, $tenant, $this->random->getInt(0, 2) > 0);
         }
 
-        if ($this->random->getInt(0, 3) === 0) {
-            app(BoundaryService::class)->set($this->user, $this->policy('boundary', $this->capStatements()));
+        for ($index = $this->random->getInt(0, 3) - 1; $index > 0; $index--) {
+            $tenant    = $this->pick($this->tenants);
+            $isSubtree = $this->random->getInt(0, 2) > 0;
+
+            $this->log[] = 'boundary in ' . self::nameOf($tenant) . ($isSubtree ? ' and below' : ' alone');
+
+            app(BoundaryService::class)->set($this->user, $this->policy('boundary-' . $index, $this->capStatements()), $tenant, $isSubtree);
         }
 
         if ($this->random->getInt(0, 3) !== 0) {
