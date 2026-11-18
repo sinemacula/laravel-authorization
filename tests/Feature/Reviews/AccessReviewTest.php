@@ -394,8 +394,9 @@ final class AccessReviewTest extends TestCase
     }
 
     /**
-     * Every grant a review reads is read on the write connection, so a replica
-     * that lags never hides one.
+     * Every grant a review reads is read on the write connection, and so is
+     * every definition a review of an action reads, so a replica that lags
+     * never hides one.
      *
      * @return void
      *
@@ -417,7 +418,10 @@ final class AccessReviewTest extends TestCase
 
         self::authorizationConnection()->setReadPdo(static fn (): never => throw new \LogicException('The read connection was used.'));
 
-        self::assertCount(4, self::trusted(ReviewQuery::holdings(new Subject($ann, $ann), ReviewScope::appliesIn(null, ApplicationSelector::none())))->rows);
+        $holdings = ReviewQuery::holdings(new Subject($ann, $ann), ReviewScope::appliesIn(null, ApplicationSelector::none()));
+
+        self::assertCount(4, self::trusted($holdings)->rows);
+        self::assertCount(1, self::trusted($holdings->forAction('posts:edit'))->rows);
         self::assertCount(1, self::trusted(ReviewQuery::holders($admin, ReviewScope::everywhere()))->rows);
         self::assertCount(1, self::trusted(ReviewQuery::holders($permission, ReviewScope::everywhere()))->rows);
         self::assertCount(1, self::trusted(ReviewQuery::expiring(ReviewScope::everywhere(), now()->subYear(), now()->addYear()))->rows);
@@ -581,6 +585,54 @@ final class AccessReviewTest extends TestCase
         self::assertSame(['expired', 'expired', 'expired'], \array_map(static fn (ReviewRow $row): string => $row->grantState->value, self::trusted($expiring)->rows));
 
         Carbon::setTestNow();
+    }
+
+    /**
+     * A stream and an export read every chunk at the instant of the first, the
+     * instant an export's header states: a grant that expires while later
+     * chunks are read is still listed, and still live.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAStreamAndAnExportKeepTheirFirstChunksInstant(): void
+    {
+        $start = CarbonImmutable::parse('2026-11-08 12:00:00', 'UTC');
+
+        Carbon::setTestNow($start);
+
+        $role = self::role('reviewed');
+
+        foreach (['a', 'b', 'c'] as $id) {
+            self::grants()->grantRole(new Reference('u', $id), $role, $start->addMinutes(10));
+        }
+
+        $query    = ReviewQuery::holders($role, ReviewScope::everywhere());
+        $streamed = [];
+
+        foreach (self::reviews()->trustedStream($query, 1) as $row) {
+            $streamed[] = $row;
+
+            Carbon::setTestNow($start->addHour());
+        }
+
+        Carbon::setTestNow($start);
+
+        /** @var list<array<string, mixed>> $lines */
+        $lines = [];
+
+        self::reviews()->trustedExport($query, static function (string $line) use (&$lines, $start): void {
+            $lines[] = \json_decode($line, true, 512, \JSON_THROW_ON_ERROR);
+
+            Carbon::setTestNow($start->addHour());
+        }, 1);
+
+        Carbon::setTestNow();
+
+        self::assertSame(['a live', 'b live', 'c live'], \array_map(static fn (ReviewRow $row): string => $row->subject->id . ' ' . $row->grantState->value, $streamed));
+        self::assertSame('2026-11-08T12:00:00.000000Z', $lines[0]['reviewed_at'] ?? null);
+        self::assertSame(\array_map(static fn (ReviewRow $row): array => ['record' => 'row', ...$row->toArray()], $streamed), \array_slice($lines, 1, -1));
     }
 
     /**
