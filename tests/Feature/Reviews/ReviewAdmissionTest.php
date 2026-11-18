@@ -154,6 +154,70 @@ final class ReviewAdmissionTest extends TestCase
     }
 
     /**
+     * A tenant's reviewer, in that tenant, is refused every review above it,
+     * while an organisation's right reaching below admits reviews of a child
+     * tenant and one held at the organisation's node alone does not.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATenantsRightReachesNoReviewAboveIt(): void
+    {
+        $this->tree();
+
+        $reviewed = self::role('reviewed');
+        $account  = ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none());
+        $review   = static fn (ReviewScope $scope): mixed => self::reviews()->review(ReviewQuery::holders($reviewed, $scope), ActingContext::current());
+
+        $this->signIn(self::reviewer('account', self::tenant('acct1')), 'session-1', self::tenant('acct1'));
+
+        self::assertRefusedAs(DecisionReason::NO_MATCH, static fn (): mixed => $review(ReviewScope::rootedWithin(self::tenant('org1'))));
+        self::assertRefusedAs(DecisionReason::NO_MATCH, static fn (): mixed => $review(ReviewScope::appliesIn(null, ApplicationSelector::none())));
+        self::assertRefusedAs(DecisionReason::NO_MATCH, static fn (): mixed => $review(ReviewScope::everywhere()));
+
+        $this->signIn(self::reviewer('organisation', self::tenant('org1')));
+
+        self::assertSame([], $review($account)->rows);
+        self::assertSame([], $review(ReviewScope::rootedWithin(self::tenant('acct1')))->rows);
+
+        $this->signIn(self::reviewer('node', self::tenant('org1'), false));
+
+        self::assertRefusedAs(DecisionReason::NO_MATCH, static fn (): mixed => $review($account));
+    }
+
+    /**
+     * No rank rule applies to a review: a junior auditor holding the right
+     * through its role lists the holders of the most senior role.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAJuniorReviewerListsTheHoldersOfASeniorRole(): void
+    {
+        $auditor = self::identity('auditor');
+        $junior  = self::role('auditor');
+        $owner   = self::role('owner');
+        $holder  = self::identity('holder');
+
+        $junior->forceFill(['rank' => 9])->save();
+        $owner->forceFill(['rank' => 0])->save();
+        $junior->givePermissionTo(self::right());
+
+        self::grants()->grantRole($auditor, $junior);
+        self::grants()->grantRole($holder, $owner);
+
+        $this->signIn($auditor);
+
+        self::assertFalse($auditor->canActOn($holder));
+
+        $rows = self::reviews()->review(ReviewQuery::holders($owner, ReviewScope::everywhere()), ActingContext::current())->rows;
+
+        self::assertSame(['holder'], \array_map(static fn ($row): string => $row->subject->id, $rows));
+    }
+
+    /**
      * A session cap that does not cover the right refuses the review, and so
      * does a step-up the right needs and the session has not met, as an
      * authorization exception carrying the decision.

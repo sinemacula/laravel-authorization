@@ -149,6 +149,38 @@ final class HolderRoutesTest extends TestCase
     }
 
     /**
+     * A tenant's review lists the activations that apply there, the platform's,
+     * its own and an ancestor's reaching below, never a sibling's or a child's;
+     * a review rooted within it lists its own and its child's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testActivationsFollowTheReviewsTenant(): void
+    {
+        $this->tree();
+
+        $role = self::role('responder');
+
+        self::activate(self::identity('platform'), $role);
+
+        foreach (['parent' => 'org1', 'own' => 'acct1', 'child' => 'team1', 'sibling' => 'acct2'] as $id => $tenant) {
+            self::activate(self::identity($id), $role, ['tenant_type' => 'tenant', 'tenant_id' => $tenant]);
+        }
+
+        self::activate(self::identity('node'), $role, ['tenant_type' => 'tenant', 'tenant_id' => 'org1', 'include_subtree' => false]);
+
+        $holders = static fn (ReviewScope $scope): array => \array_map(
+            static fn (ReviewRow $row): string => $row->subject->id,
+            self::trusted(ReviewQuery::holders($role, $scope))->rows,
+        );
+
+        self::assertSame(['own', 'parent', 'platform'], $holders(ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none())));
+        self::assertSame(['child', 'own'], $holders(ReviewScope::rootedWithin(self::tenant('acct1'))));
+    }
+
+    /**
      * With the hierarchy disabled a role is held only by its own grantees.
      *
      * @return void
