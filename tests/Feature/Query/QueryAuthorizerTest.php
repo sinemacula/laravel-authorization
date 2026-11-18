@@ -26,7 +26,10 @@ use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Query\Dialects\SqliteDialect;
 use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
@@ -39,16 +42,21 @@ use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\CredentialScopes;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
 use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubRequirementChecker;
+use Tests\Feature\Stubs\StubSecondGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\SuspendableGrantee;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
+use Tests\Fixtures\QueryScoping\InvariantPlanContextSource;
+use Tests\Fixtures\QueryScoping\InvariantSubjectAttributes;
 use Tests\Fixtures\QueryScoping\NumberedTenantPost;
 use Tests\Fixtures\QueryScoping\ScopedDocument;
 use Tests\Fixtures\QueryScoping\ScopedPost;
@@ -417,6 +425,52 @@ final class QueryAuthorizerTest extends TestCase
 
         self::assertSame(['none', 't1', 't2', 'kept'], self::allowed($manager));
         self::assertSame(['none', 't1', 't2', 'kept'], TenantScopedPost::query()->whereRaw(new ComposedExpression($condition))->orderBy('id')->pluck('title')->all());
+    }
+
+    /**
+     * A principal acting with another model as its identity has the identity's
+     * grants and denies weighed on the rows as `check()` weighs them: a person
+     * gets the identity's platform-wide grant, a machine only its own, and the
+     * identity's deny in an account cuts the rows there and below for both.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnIdentitysGrantsAndDeniesAreWeighedAsCheckWeighsThem(): void
+    {
+        $this->app?->instance(TenantTree::class, new ClosureTenantTree);
+
+        [$organisation, $account] = [new Reference('teams', 'o1'), new Reference('teams', 'a1')];
+
+        ClosureTenantTree::add($organisation);
+        ClosureTenantTree::add($account, $organisation);
+        ClosureTenantTree::add(new Reference('teams', 's1'), $account);
+
+        $user    = StubGrantee::create(['id' => 'u1']);
+        $machine = StubMachine::query()->create(['id' => 'm1']);
+
+        $this->resolveRequest($user, $organisation);
+
+        foreach ([null, 'o1', 'a1', 's1', 'o2'] as $tenant) {
+            TenantScopedPost::query()->create(['title' => $tenant ?? 'none', 'tenant_type' => $tenant === null ? null : 'teams', 'tenant_id' => $tenant]);
+        }
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+        $user->attachPolicy(self::storedPolicy('not-in-a1', [['effect' => 'deny', 'actions' => ['posts:view']]]), null, $account);
+        $machine->givePermission('posts:view', null, $organisation);
+
+        $principals = [
+            'person'  => [new Subject(StubSecondGrantee::query()->create(['id' => 'p1']), $user, $organisation), ['none', 'o1', 'o2']],
+            'machine' => [new Subject($machine, $user, $organisation, scopes: CredentialScopes::of(['posts:*'])), ['none', 'o1']],
+        ];
+
+        foreach ($principals as $name => [$subject, $expected]) {
+            $manager = Authorization::for($subject);
+
+            self::assertSame($expected, self::allowed($manager), $name);
+            self::assertSame($expected, self::kept($manager, 'posts:view', 'title'), $name);
+        }
     }
 
     /**
@@ -849,7 +903,82 @@ final class QueryAuthorizerTest extends TestCase
     }
 
     /**
-     * Forget the morph map a test set.
+     * A statement on a namespace whose source is marked `ScopeInvariant`, a
+     * subject attribute provider or a context source, keeps the rows `check()`
+     * allows rather than being refused.
+     *
+     * @return void
+     */
+    public function testAStatementReadingAMarkedSourceKeepsTheRowsCheckAllows(): void
+    {
+        $user   = StubGrantee::create(['id' => 'u1']);
+        $config = $this->container()->make(ConfigRepository::class);
+
+        $config->set('authorization.context.sources', [InvariantPlanContextSource::class]);
+        $config->set('authorization.attributes.subjects', [$user->getMorphClass() => InvariantSubjectAttributes::class]);
+        $this->app?->forgetInstance(CheckContextFactory::class);
+
+        $manager = $this->resolveRequest($user);
+
+        foreach ([1, 2] as $id) {
+            TenantScopedPost::query()->create(['id' => $id, 'title' => 'post']);
+        }
+
+        $user->attachPolicy(self::storedPolicy('marked', [
+            ['effect' => 'allow', 'actions' => ['posts:view'], 'conditions' => ['eq' => ['subject.department' => 'sales']]],
+            ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['subject.department' => 'marketing']]],
+            ['effect' => 'allow', 'actions' => ['posts:edit'], 'conditions' => ['eq' => ['plan.tier' => 'pro']]],
+            ['effect' => 'allow', 'actions' => ['posts:delete'], 'conditions' => ['eq' => ['plan.tier' => 'free']]],
+        ]));
+
+        foreach (['posts:view' => [1, 2], 'posts:create' => [], 'posts:edit' => [1, 2], 'posts:delete' => []] as $action => $expected) {
+            self::assertSame($expected, self::checked($manager, $action, [1, 2]), $action);
+            self::assertSame($expected, self::kept($manager, $action), $action);
+        }
+    }
+
+    /**
+     * Under a morph map, a pattern, a record attachment and a row's tenant are
+     * compared by the alias, as `check()` compares them: the class name names
+     * no record and no tenant.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testUnderAMorphMapTheAliasIsCompared(): void
+    {
+        Relation::enforceMorphMap([
+            'user'       => StubGrantee::class,
+            'post'       => TenantScopedPost::class,
+            'tenant'     => StubTenant::class,
+            'permission' => Permission::class,
+            'role'       => Role::class,
+            'policy'     => Policy::class,
+        ]);
+
+        $tenant  = StubTenant::query()->create(['id' => 't1']);
+        $user    = StubGrantee::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user, $tenant);
+
+        foreach ([4 => 'tenant', 5 => 'tenant', 6 => 'tenant', 7 => StubTenant::class, 8 => null] as $id => $type) {
+            TenantScopedPost::query()->create(['id' => $id, 'title' => 'post', 'tenant_type' => $type, 'tenant_id' => $type === null ? null : 't1']);
+        }
+
+        $user->givePermission(Permission::create(['name' => 'posts:edit']), null, $tenant);
+        $user->attachPolicy(self::storedPolicy('by-alias', [['effect' => 'allow', 'actions' => ['posts:view'], 'resources' => ['post:5', TenantScopedPost::class . ':6']]]));
+        self::attachToResource([TenantScopedPost::class, '4'], [['effect' => 'deny', 'actions' => ['posts:*']]]);
+
+        self::assertSame(['post'], DB::table('resource_policies')->pluck('resource_type')->all());
+
+        foreach (['posts:view' => [5], 'posts:edit' => [5, 6, 8]] as $action => $expected) {
+            self::assertSame($expected, self::checked($manager, $action, [4, 5, 6, 7, 8]), $action);
+            self::assertSame($expected, self::kept($manager, $action), $action);
+        }
+    }
+
+    /**
+     * Forget the morph map a test set, and stop enforcing one.
      *
      * @return void
      */
@@ -857,6 +986,7 @@ final class QueryAuthorizerTest extends TestCase
     protected function forgetMorphMap(): void
     {
         Relation::morphMap([], false);
+        Relation::requireMorphMap(false);
     }
 
     /**
@@ -883,6 +1013,34 @@ final class QueryAuthorizerTest extends TestCase
         $contexts = app(CheckContextFactory::class);
 
         return new DecisionPipeline(new PolicyEvaluator, new DefaultPolicyResolver, $contexts, new ResourcePolicyResolver, new GuardrailResolver);
+    }
+
+    /**
+     * Return the keys of the tenant-scoped posts given whose record `check()`
+     * allows the action on, in order.
+     *
+     * @param  \SineMacula\Laravel\Authorization\AuthorizationManager  $manager
+     * @param  string  $action
+     * @param  list<int>  $ids
+     * @return list<int>
+     */
+    private static function checked(AuthorizationManager $manager, string $action, array $ids): array
+    {
+        return \array_values(\array_filter($ids, static fn (int $id): bool => $manager->can($action, TenantScopedPost::query()->find($id))));
+    }
+
+    /**
+     * Return the column of the tenant-scoped posts the manager's scope keeps
+     * for the action, in order of their keys.
+     *
+     * @param  \SineMacula\Laravel\Authorization\AuthorizationManager  $manager
+     * @param  string  $action
+     * @param  string  $column
+     * @return array<int, mixed>
+     */
+    private static function kept(AuthorizationManager $manager, string $action, string $column = 'id'): array
+    {
+        return TenantScopedPost::query()->whereAuthorized($action, [], $manager)->orderBy('id')->pluck($column)->all(); // @phpstan-ignore method.notFound
     }
 
     /**
