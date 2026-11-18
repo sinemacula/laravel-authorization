@@ -58,10 +58,10 @@ use Tests\TestCase;
  *
  * The operations are grants of permissions, roles and policies, syncs of each,
  * attachments to the posts of policies naming principals, revocations, boundary
- * changes, and changes to what a role carries, its parent and a policy's
- * document. Two roles carry nothing, so a grant of either is weighed on one
- * rule alone: one of the most senior rank, and one a resource policy on the
- * posts names.
+ * changes, and changes to what a role carries, its parent, a permission's name
+ * and a policy's document. Two roles carry nothing, so a grant of either is
+ * weighed on one rule alone: one of the most senior rank, and one a resource
+ * policy on the posts names.
  *
  * The scenarios are drawn from `AUTHZ_PARITY_SEED`, a random seed when it is
  * not set, and there are `AUTHZ_PARITY_RUNS` of them, 150 by default; a failure
