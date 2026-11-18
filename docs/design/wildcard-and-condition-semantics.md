@@ -183,7 +183,9 @@ A test is **undecidable** when:
 - an interpolated operand resolves to a value of the wrong type for the operator (for example a `${...}` `ip_in` operand
   that resolves to something other than an address or range), with the detail
   `condition '<key>': the substituted operand is an invalid operand for operator '<operator>'`;
-- a `starts_with`, `ends_with` or `like` operand is empty after interpolation.
+- a `starts_with`, `ends_with` or `like` operand is empty after interpolation;
+- a `like` value or operand is `PHP_MAXPATHLEN` bytes or more (1024 on macOS, 4096 on Linux), which `fnmatch()`
+  cannot test, written or substituted, with the detail `operator 'like' cannot test a string of <n> bytes or more`.
 
 A test is **invalid** when (reachable only on a directly constructed statement, since `Statement::fromArray()` refuses
 each of these):
@@ -369,7 +371,9 @@ produced by interpolation, that is not of the listed type makes the test undecid
 - **Non-empty `string`** operands are refused when empty as written; an operand that becomes empty only after
   interpolation is undecidable. A NUL byte is refused in a written `starts_with`, `ends_with` or `like` operand, even
   one with a `${...}` reference, and a context value or substituted operand holding one is undecidable for them, since
-  `fnmatch()` cannot test it.
+  `fnmatch()` cannot test it. A `like` value or operand of `PHP_MAXPATHLEN` bytes or more, measured as `fnmatch()`
+  receives it with its backslashes escaped, is undecidable for the same reason, so a deny with it applies and an allow
+  does not match; `starts_with` and `ends_with` test a string of any length.
 - **Boolean forms** are `true`, `false`, `1`, `0`, `'1'`, `'0'`, `'true'` and `'false'`, on both sides.
 - **`null`** takes strictly `true` or `false`, and decides a missing key rather than finding it undecidable:
   `{"null": {"input.post.deleted_at": true}}` holds when the context lacks `input.post.deleted_at` or carries it as
