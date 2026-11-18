@@ -23,12 +23,12 @@ final class KeyAsTextTest extends TestCase
     use CompilesQueries;
 
     /**
-     * The column is wrapped by the grammar and cast to text on PostgreSQL
-     * alone.
+     * The column is wrapped by the grammar and read as text on PostgreSQL and
+     * MySQL.
      *
      * @return void
      */
-    public function testTheColumnIsCastToTextOnPostgresAlone(): void
+    public function testTheColumnIsReadAsTextOnPostgresAndMySql(): void
     {
         $compiled = [];
 
@@ -39,8 +39,8 @@ final class KeyAsTextTest extends TestCase
         self::assertSame([
             'sqlite'  => '"roles"."id"',
             'pgsql'   => 'cast("roles"."id" as text)',
-            'mysql'   => '`roles`.`id`',
-            'mariadb' => '`roles`.`id`',
+            'mysql'   => 'concat(`roles`.`id`, \'\')',
+            'mariadb' => 'concat(`roles`.`id`, \'\')',
         ], $compiled);
     }
 

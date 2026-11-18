@@ -6,12 +6,15 @@ namespace SineMacula\Laravel\Authorization\Database;
 
 use Illuminate\Contracts\Database\Query\Expression;
 use Illuminate\Database\Grammar;
+use Illuminate\Database\Query\Grammars\MySqlGrammar;
 use Illuminate\Database\Query\Grammars\PostgresGrammar;
 
 /**
  * A key column read as text, so it compares with a key the grant tables store
  * as a string on the driver of the query it is compiled for: PostgreSQL casts
- * its `uuid` or integer, any other database compares the two as they are.
+ * its `uuid` or integer, MySQL concatenates it with an empty string, which an
+ * integer otherwise compares as a double, and SQLite compares the two as they
+ * are.
  *
  * The column is wrapped by the grammar the expression is compiled with, so it
  * goes wherever a query takes a column, such as either side of `whereColumn()`,
@@ -36,7 +39,8 @@ final readonly class KeyAsText implements Expression
     ) {}
 
     /**
-     * Return the column as the grammar wraps it, cast to text on PostgreSQL.
+     * Return the column as the grammar wraps it, read as text on PostgreSQL and
+     * MySQL.
      *
      * @param  \Illuminate\Database\Grammar  $grammar
      * @return string
@@ -46,6 +50,12 @@ final readonly class KeyAsText implements Expression
     {
         $wrapped = $grammar->wrap($this->column);
 
-        return $grammar instanceof PostgresGrammar ? "cast({$wrapped} as text)" : $wrapped;
+        // concat() keeps the compared column's collation; a cast would take the
+        // connection's.
+        return match (true) {
+            $grammar instanceof PostgresGrammar => "cast({$wrapped} as text)",
+            $grammar instanceof MySqlGrammar    => "concat({$wrapped}, '')",
+            default                             => $wrapped,
+        };
     }
 }

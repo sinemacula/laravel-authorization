@@ -76,10 +76,13 @@ final class DefinitionsTest extends TestCase
 
         $role->forceFill(['name' => 'keyed'])->save();
 
-        $isPostgres = AuthorizationConnection::connection()->getDriverName() === 'pgsql';
-        $texts      = AuthorizationConnection::connection()->table('roles')->select(new ComposedExpression($read . ' as id_text'))->pluck('id_text')->all();
+        $texts    = AuthorizationConnection::connection()->table('roles')->select(new ComposedExpression($read . ' as id_text'))->pluck('id_text')->all();
+        $expected = [
+            'pgsql' => 'cast("roles"."id" as text)',
+            'mysql' => 'concat(`roles`.`id`, \'\')',
+        ][AuthorizationConnection::connection()->getDriverName()] ?? '"roles"."id"';
 
-        self::assertSame($isPostgres ? 'cast("roles"."id" as text)' : $query->getGrammar()->wrap('roles.id'), $read);
+        self::assertSame($expected, $read);
         self::assertSame([$role->getKey()], $texts);
     }
 }

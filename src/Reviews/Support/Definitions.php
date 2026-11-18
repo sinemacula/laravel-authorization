@@ -84,8 +84,7 @@ final class Definitions
     /**
      * Return the expression that reads the definition key column of the query's
      * table as text, so it compares with a grantee key column on the query's
-     * driver: PostgreSQL casts its `uuid`, any other database stores the key as
-     * text already.
+     * driver (see `KeyAsText`).
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $column
