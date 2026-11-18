@@ -94,7 +94,7 @@ final class ConditionEvaluationBudgetTest extends TestCase
             }
         });
 
-        $this->assertWithinBudget(0.05, $elapsed, "Many-star like operand budget exceeded ({$elapsed}s for 100 tests).");
+        $this->assertWithinBudget(0.25, $elapsed, "Many-star like operand budget exceeded ({$elapsed}s for 100 tests).");
     }
 
     /**

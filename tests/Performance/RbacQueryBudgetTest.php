@@ -276,7 +276,8 @@ final class RbacQueryBudgetTest extends TestCase
     /**
      * A check in a fresh request, after a warm one wrote the persistent store,
      * runs no query, and reads the store as often for four roles four levels
-     * deep as for one role one level deep.
+     * deep as for one role one level deep, as does a cold check once the
+     * entries expire and their version tokens remain.
      *
      * @return void
      *
@@ -291,7 +292,8 @@ final class RbacQueryBudgetTest extends TestCase
             $reads[] = $event;
         });
 
-        $roundTrips = [];
+        $warm = [];
+        $cold = [];
 
         foreach ([[1, 1], [4, 4]] as [$roles, $depth]) {
             $user = self::identityHolding($roles, $depth);
@@ -302,11 +304,19 @@ final class RbacQueryBudgetTest extends TestCase
 
             self::assertSame([], $this->freshRequestQueries($user, $this->checkChain(...)), 'A check served by the warm store hit the database.');
 
-            $roundTrips[] = \count($reads);
+            $warm[] = \count($reads);
+
+            $this->travel(301)->seconds();
+            $reads->exchangeArray([]);
+
+            self::assertNotSame([], $this->freshRequestQueries($user, $this->checkChain(...)), 'An expired entry was served.');
+
+            $cold[] = \count($reads);
         }
 
-        self::assertGreaterThan(0, $roundTrips[0], 'The fresh request did not read the store.');
-        self::assertSame($roundTrips[0], $roundTrips[1], 'Store round trips grew with the number of roles or the depth of the hierarchy.');
+        self::assertGreaterThan(0, $warm[0], 'The fresh request did not read the store.');
+        self::assertSame($warm[0], $warm[1], 'Warm store round trips grew with the number of roles or the depth of the hierarchy.');
+        self::assertSame($cold[0], $cold[1], 'Cold store round trips grew with the number of roles or the depth of the hierarchy.');
     }
 
     /**

@@ -60,8 +60,8 @@ final class QueryScopeBudgetTest extends TestCase
     /**
      * Compiling the scope runs as many queries, for the same classes of rows,
      * when each team within the active one holds four times the grants, roles,
-     * policies and attached records, has grantless teams below it, and twelve
-     * teams elsewhere carry grants, as with one of each.
+     * policies, denied records and grantless teams below it, and twelve teams
+     * elsewhere carry grants, as with one of each.
      *
      * @return void
      *
@@ -71,11 +71,11 @@ final class QueryScopeBudgetTest extends TestCase
     {
         $this->grantAcross('small', within: 3, each: 1, elsewhere: 1);
 
-        $small = $this->compileQueries(3);
+        $small = $this->compileQueries(6);
 
         $this->grantAcross('large', within: 3, each: 4, elsewhere: 12);
 
-        $large = $this->compileQueries(12);
+        $large = $this->compileQueries(24);
 
         self::assertCount(\count($small), $large, "Compiling the scope grew with the grants:\n" . \implode("\n", $large));
     }
@@ -92,7 +92,7 @@ final class QueryScopeBudgetTest extends TestCase
     {
         $this->grantAcross('limits', within: 6, each: 1, elsewhere: 57);
 
-        self::assertSame(6, GuardedPost::query()->count());
+        self::assertSame(12, GuardedPost::query()->count());
 
         $elapsed = $this->fastestOf(3, static function (): void {
             GuardedPost::query()->count();
@@ -103,10 +103,11 @@ final class QueryScopeBudgetTest extends TestCase
 
     /**
      * Grant the user `posts:view` across teams below a root of its own, with
-     * the given number of further permissions, roles, policies and attached
-     * records, and of grantless teams below, at each team within, with a post
-     * at each team elsewhere, which the root's queries leave out, and resolve
-     * the user in its root.
+     * the given number of further permissions, roles and policies at each team
+     * within, each with a post at the team, a post in a grantless team below
+     * and a post an attached policy denies the view of, and a post at each team
+     * elsewhere, which the root's queries leave out, and resolve the user in
+     * its root.
      *
      * @param  string  $root
      * @param  int  $within
@@ -136,16 +137,22 @@ final class QueryScopeBudgetTest extends TestCase
                 $name = "{$root}-{$i}-{$k}";
                 $role = Role::create(['name' => $name]);
 
+                $below = new Reference(self::TEAMS, "{$name}-below");
+
                 $role->permissions()->attach(Permission::create(['name' => "{$name}:view"])->getKey());
-                $tree->put(new Reference(self::TEAMS, "{$name}-below"), $team);
+                $tree->put($below, $team);
 
                 $user->givePermission(Permission::create(['name' => "{$name}:edit"]), null, $team);
                 $user->assignRole($role, null, $team);
                 $user->attachPolicy(self::storedPolicy($name, [['effect' => 'allow', 'actions' => ["{$name}:edit"]]]), null, $team);
 
-                $post = GuardedPost::query()->withoutGlobalScopes()->create(['tenant_type' => self::TEAMS, 'tenant_id' => $team->id]);
+                foreach ([$team, $below] as $tenant) {
+                    GuardedPost::query()->withoutGlobalScopes()->create(['tenant_type' => self::TEAMS, 'tenant_id' => $tenant->id]);
+                }
 
-                self::attachToResource($post, [['effect' => 'deny', 'actions' => ['posts:edit']]]);
+                $denied = GuardedPost::query()->withoutGlobalScopes()->create(['tenant_type' => self::TEAMS, 'tenant_id' => $team->id]);
+
+                self::attachToResource($denied, [['effect' => 'deny', 'actions' => [GuardedPost::ACTION]]]);
             }
         }
 
