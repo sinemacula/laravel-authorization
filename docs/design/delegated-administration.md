@@ -21,7 +21,8 @@ administration never grants anything it cannot justify.
    `administration.unbounded`, `role-exclusion.declare` and `role-exclusion.remove`, these two weighed by the owner rule
    and by `Administration\ExcludedRoles` (see [Separation of duties](separation-of-duties.md)), and
    `break-glass.activate`, `break-glass.grant` and `break-glass.revoke`, weighed by the scope rule alone (see
-   [Break-glass](break-glass.md)). The read actions are declared, but no service decides them.
+   [Break-glass](break-glass.md)). `policy.read` is decided when the policy service lists policies for an actor; the
+   other read actions are declared, but no service decides them.
 
 2. **Trusted or delegated, never in between.** A management service call without an acting context is trusted system
    work: nothing is decided, and its operation is marked trusted, with no actor unless a console command names one for
