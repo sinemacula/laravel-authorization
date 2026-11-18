@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\PreviewsSubjects;
 use Tests\Feature\Stubs\StubTenant;
-use Tests\Feature\Stubs\StubTenantTree;
+use Tests\Fixtures\QueryScoping\ClosureTenantTree;
 use Tests\TestCase;
 
 /**
@@ -46,7 +46,10 @@ final class PreviewQueryBudgetTest extends TestCase
         $parent = StubTenant::query()->create(['id' => 'parent', 'name' => 'parent']);
         $child  = StubTenant::query()->create(['id' => 'child', 'name' => 'child']);
 
-        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent)));
+        $this->app?->instance(TenantTree::class, new ClosureTenantTree);
+
+        ClosureTenantTree::add(Reference::of($parent));
+        ClosureTenantTree::add(Reference::of($child), Reference::of($parent));
 
         $preview = $this->signIn(self::previewer(), 'session-1', $parent)->previewFor(self::target());
         $tenants = [Reference::of($parent), Reference::of($child)];

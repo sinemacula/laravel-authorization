@@ -167,8 +167,8 @@ final class AuthorizedQueryTest extends TestCase
 
     /**
      * On PostgreSQL, the one driver with `updateFrom()`, a read-only scope
-     * refuses an update-from of its own query or of one it is nested in, and
-     * the row is left as it was.
+     * refuses an update-from of its own query or of a joined one it is nested
+     * in, and the row is left as it was.
      *
      * @return void
      */
@@ -191,7 +191,10 @@ final class AuthorizedQueryTest extends TestCase
 
         $writes = [
             static fn (): mixed => $scoped()->toBase()->updateFrom(['title' => 'changed']),
-            static fn (): mixed => DB::table('scoped_posts')->whereExists($scoped()->toBase())->updateFrom(['title' => 'changed']),
+            static fn (): mixed => DB::table('scoped_posts')
+                ->join('scoped_posts as source', 'source.id', '=', 'scoped_posts.id')
+                ->whereExists($scoped()->toBase())
+                ->updateFrom(['title' => 'changed']),
         ];
 
         foreach ($writes as $write) {

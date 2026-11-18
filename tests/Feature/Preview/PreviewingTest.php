@@ -200,7 +200,7 @@ final class PreviewingTest extends TestCase
             }
 
             $seen['nested']     = $manager->previewFor($other)->can('posts:read');
-            $seen['senior']     = self::reasonOf(static fn (): bool => $manager->previewFor($senior)->can('posts:read'));
+            $seen['senior']     = self::reasonOf(static fn (): mixed => $manager->previewFor($senior));
             $seen['after']      = self::reasonOf($grant);
             $seen['evaluating'] = Previewing::current()->isEvaluating();
         });

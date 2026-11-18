@@ -26,9 +26,9 @@ use Tests\TestCase;
 /**
  * The preview parity property over one seeded scenario: with tenants, a role
  * hierarchy, resource policies and a boundary combined, and the previewer
- * holding an action the target lacks in tenants only it anchors, a preview
- * decides every check, batch and scoped query as `for()` does under the same
- * scope.
+ * holding an action the target lacks in other tenants than the target's grants,
+ * a preview decides every check, batch and scoped query as `for()` does under
+ * the same scope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,7 +75,7 @@ final class ParityPropertyTest extends TestCase
         }
 
         self::assertSame(['child', 'parent', 'shared', 'team'], self::titles($preview, 'posts:view'));
-        self::assertSame(['child', 'parent', 'team'], self::titles($preview, 'posts:edit'));
+        self::assertSame(['team'], self::titles($preview, 'posts:edit'));
         self::assertSame([], self::titles($preview, 'posts:publish'));
         self::assertSame([], self::titles($preview, 'posts:delete'));
     }
@@ -108,7 +108,7 @@ final class ParityPropertyTest extends TestCase
         self::assertInstanceOf(GrantService::class, $grants);
         self::assertInstanceOf(RoleService::class, $roles);
 
-        $grants->grantPermission($caller, self::permission('posts:publish'), tenant: $team);
+        $grants->grantPermission($caller, self::permission('posts:publish'), tenant: $child);
         $grants->grantPermission($caller, self::permission('posts:publish'), tenant: $sibling);
 
         $viewer = Role::query()->create(['name' => 'viewer']);
@@ -117,7 +117,7 @@ final class ParityPropertyTest extends TestCase
         $roles->grantPermission($viewer, self::permission('posts:edit'));
         $roles->grantPermission($editor, self::permission('posts:delete'));
         $roles->setParent($editor, $viewer);
-        $grants->grantRole($target, $editor, tenant: $parent);
+        $grants->grantRole($target, $editor, tenant: $team);
 
         BoundaryService::instance()?->set($target, self::policy('no-deletes', [['effect' => 'allow', 'actions' => ['posts:view', 'posts:edit', 'posts:publish']]]));
 
