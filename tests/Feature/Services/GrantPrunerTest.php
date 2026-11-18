@@ -13,6 +13,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Events\Grantee\BoundaryRemoved;
 use SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassExpired;
+use SineMacula\Laravel\Authorization\Events\Grantee\BreakGlassRevoked;
 use SineMacula\Laravel\Authorization\Events\Grantee\PermissionExpired;
 use SineMacula\Laravel\Authorization\Events\Grantee\PolicyExpired;
 use SineMacula\Laravel\Authorization\Events\Grantee\RoleExpired;
@@ -640,9 +641,9 @@ final class GrantPrunerTest extends TestCase
 
     /**
      * The activations of a grantee that no longer exists are never removed: a
-     * live one is ended as revoked with the grantee's role grant and counted
-     * among its grants, pretending too, and one that expired has its expiry
-     * recorded on its row.
+     * live one is ended as revoked with the grantee's grants and counted among
+     * them, pretending too, also for a grantee whose only live row is the
+     * activation, and one that expired has its expiry recorded on its row.
      *
      * @return void
      *
@@ -650,27 +651,43 @@ final class GrantPrunerTest extends TestCase
      */
     public function testKeepsTheActivationsOfGranteesThatAreGone(): void
     {
-        $role = self::emergencyRole();
-        $gone = StubGrantee::create(['id' => 'user-gone']);
+        $role   = self::emergencyRole();
+        $gone   = StubGrantee::create(['id' => 'user-gone']);
+        $lapsed = StubGrantee::create(['id' => 'user-lapsed']);
 
         $gone->assignRole($role);
+        $lapsed->assignRole($role);
 
         $live    = self::activate($gone, $role);
         $expired = self::activate($gone, $role, ['expires_at' => Carbon::now()->subMinute()]);
+        $alone   = self::activate($lapsed, $role);
+        $ended   = static fn (BreakGlassActivation $activation): array => [
+            BreakGlassActivation::query()->findOrFail($activation->id)->ended_at?->toDateTimeString(),
+            BreakGlassActivation::query()->findOrFail($activation->id)->end_reason,
+        ];
 
-        DB::table('stub_grantees')->where('id', 'user-gone')->delete();
+        DB::table('authorizable_roles')->where('authorizable_id', 'user-lapsed')->update(['expires_at' => '2026-07-01 11:00:00']);
+        DB::table('stub_grantees')->whereIn('id', ['user-gone', 'user-lapsed'])->delete();
 
         Event::fake();
 
-        self::assertSame([2, 1], [self::pruner()->prune(1000, true)->orphaned, self::pruner()->prune(1000, true)->activations]);
+        $pretended = self::pruner()->prune(1000, true);
+
+        self::assertSame([3, 1, 1], [$pretended->orphaned, $pretended->activations, $pretended->expired]);
+        self::assertSame([null, null], $ended($live));
 
         $result = self::pruner()->prune(1000);
 
-        self::assertSame([2, 1], [$result->orphaned, $result->activations]);
+        self::assertSame([3, 1, 1], [$result->orphaned, $result->activations, $result->expired]);
         self::assertSame(0, DB::table('authorizable_roles')->count());
-        self::assertSame(2, BreakGlassActivation::query()->count());
-        self::assertSame('revoked', BreakGlassActivation::query()->findOrFail($live->id)->end_reason);
-        self::assertSame('expired', BreakGlassActivation::query()->findOrFail($expired->id)->end_reason);
+        self::assertSame(3, BreakGlassActivation::query()->count());
+        self::assertSame(['2026-07-01 12:00:00', 'revoked'], $ended($live));
+        self::assertSame(['2026-07-01 12:00:00', 'revoked'], $ended($alone));
+        self::assertSame('expired', $ended($expired)[1]);
+
+        $revoked = \array_map(static fn (BreakGlassRevoked $event): string => $event->activation, self::dispatchedEvents(BreakGlassRevoked::class));
+
+        self::assertEqualsCanonicalizing([$live->id, $alone->id], $revoked);
     }
 
     /**

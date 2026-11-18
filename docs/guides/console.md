@@ -54,9 +54,10 @@ soft-deleted grantee keeps its grants, its boundaries and its inline policies, a
 attachments. Expired grants stop counting at their expiry with or without it, so pruning keeps the tables small rather
 than making checks correct. It never removes a break-glass activation: one that expired without ending has its expiry
 recorded on its row and is reported as `Grantee\BreakGlassExpired`, counted apart, and an unexpired one of a grantee
-that is gone is ended with its grants, reported as `Grantee\BreakGlassRevoked` and counted among them. Like
-`model:prune`, it takes `--pretend`, which counts exactly what a run would remove or record, the boundaries apart from
-the grants as a run does, and `--chunk`, and is scheduled like any command:
+that is gone, a grantee whose only live row it is included, is ended with its grants, reported as
+`Grantee\BreakGlassRevoked` and counted among them. Like `model:prune`, it takes `--pretend`, which counts exactly what
+a run would remove or record, the boundaries apart from the grants as a run does, and `--chunk`, and is scheduled like
+any command:
 
 ```php
 use SineMacula\Laravel\Authorization\Console\PruneGrantsCommand;

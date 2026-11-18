@@ -197,8 +197,8 @@ This note records the invariants they fix.
     activations not ended or expired, which the deletion deletes, beside its grantees, each once, so
     `Role\Deleted::grantees()` names them. `Services\GrantPruner` never deletes an activation, a grantee that no
     longer exists included: it records an expiry (invariant 15), and its `revokeAll()` of a grantee that is gone, found
-    by its grant rows and boundaries, ends the grantee's unexpired activations (invariant 11), counted among its grants,
-    pretending too.
+    by its grant rows, boundaries or unexpired activations, ends the grantee's unexpired activations (invariant 11),
+    counted among its grants, pretending too.
 
 ## Success Path
 
@@ -290,9 +290,9 @@ This note records the invariants they fix.
   the pair.
 - `Services\GrantServiceTest`, `Services\ActivationEndsTest` (Feature) -- `revokeAll()` ending each unexpired
   activation, while break-glass is off too, locked, counted and reported in the call's operation, an expired, an ended
-  and another grantee's left alone; a delegated call refused without the revoke right in the activation's scope, with
-  nothing changed, and the right decided when the grantee holds nothing; the end recorded once, to the second, by the
-  operation's actor.
+  and another grantee's left alone, a cached allow dropped, and a failed end rolling back the grants with it; a
+  delegated call refused without the revoke right in the activation's scope, with nothing changed, and the right decided
+  when the grantee holds nothing; the end recorded once, to the second, by the operation's actor.
 - `Services\BreakGlassServiceTest` (Feature) -- each lifecycle event once, with its fields and actor, a surrender's
   actor the grantee; none for a refusal, a rollback, an end that changed nothing; a revocation reported while
   disabled. `Events\Grantee\BreakGlass{Activated,Ended,Surrendered,Revoked,Expired}Test` (Unit) -- the identifiers,
