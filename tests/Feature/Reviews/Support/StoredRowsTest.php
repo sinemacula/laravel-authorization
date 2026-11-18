@@ -227,6 +227,32 @@ final class StoredRowsTest extends TestCase
     }
 
     /**
+     * A review of unused grants in a tenant lists the platform's, the tenant's
+     * and an ancestor's reaching below, never a child's or a sibling's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testUnusedGrantsFollowTheScope(): void
+    {
+        $this->tree();
+
+        $read = self::permission('posts:read');
+
+        self::grants()->grantPermission(self::identity('platform'), $read);
+        self::grants()->grantPermission(self::identity('node'), $read, tenant: self::tenant('org1'), includeSubtree: false);
+
+        foreach (['parent' => 'org1', 'own' => 'acct1', 'child' => 'team1', 'sibling' => 'acct2'] as $id => $tenant) {
+            self::grants()->grantPermission(self::identity($id), $read, tenant: self::tenant($tenant));
+        }
+
+        $query = ReviewQuery::unused(ReviewScope::appliesIn(self::tenant('acct1'), ApplicationSelector::none()), new Carbon('2029-01-01 00:00:00', 'UTC'));
+
+        self::assertSame(['permission_grant own posts:read', 'permission_grant parent posts:read', 'permission_grant platform posts:read'], self::described(self::trusted($query)));
+    }
+
+    /**
      * Unused grants are read on past a whole chunk the filter keeps none of,
      * from the row after the chunk's last, until the rows are full.
      *

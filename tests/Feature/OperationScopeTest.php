@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Grantee\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
@@ -32,6 +33,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\FailingCacheStore;
 use Tests\Feature\Stubs\RecordingLogger;
@@ -54,7 +56,7 @@ use Tests\TestCase;
 #[CoversClass(OperationScope::class)]
 final class OperationScopeTest extends TestCase
 {
-    use UsesAnAuthorizationConnection;
+    use ActsAsAdministrator, UsesAnAuthorizationConnection;
 
     /**
      * Fake the event the tests dispatch.
@@ -166,6 +168,53 @@ final class OperationScopeTest extends TestCase
         OperationScope::beginWrite($record);
 
         self::assertNotSame($first->id, OperationScope::current($record)->id);
+    }
+
+    /**
+     * A listener that writes after a delegated grant commits runs as an
+     * operation of its own, with its own id, no actor and none of the pins.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAListenerThatWritesRunsAsAnOperationOfItsOwn(): void
+    {
+        $actor    = self::administrator();
+        $user     = StubGrantee::query()->create(['id' => 'user-1']);
+        $assigned = null;
+        $current  = null;
+        $pins     = false;
+        $granted  = null;
+
+        Permission::query()->create(['name' => 'posts:edit']);
+
+        Event::listen(RoleAssigned::class, static function (RoleAssigned $event) use ($user, &$assigned, &$current, &$pins): void {
+            $assigned = $event->operation;
+            $current  = OperationScope::current(new Role);
+            $pins     = OperationScope::pins();
+
+            $user->givePermission('posts:edit');
+        });
+
+        Event::listen(PermissionGranted::class, static function (PermissionGranted $event) use (&$granted): void {
+            $granted = $event->operation;
+        });
+
+        $user->assignRole(Role::query()->create(['name' => 'editor']), actor: $actor);
+
+        self::assertInstanceOf(Operation::class, $assigned);
+        self::assertInstanceOf(Operation::class, $current);
+        self::assertInstanceOf(Operation::class, $granted);
+        self::assertFalse($assigned->isTrusted);
+        self::assertEquals($actor->principal(), $assigned->actor);
+        self::assertNotSame($assigned->id, $current->id);
+        self::assertNull($current->actor);
+        self::assertNull($pins);
+        self::assertNotSame($assigned->id, $granted->id);
+        self::assertNull($granted->actor);
+        self::assertTrue($granted->isTrusted);
+        self::assertTrue($user->hasPermission('posts:edit'));
     }
 
     /**

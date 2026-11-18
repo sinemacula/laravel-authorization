@@ -6,6 +6,7 @@ namespace Tests\Unit\Support;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
 use SineMacula\Laravel\Authorization\Support\PrefetchedResourceTenants;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -13,6 +14,7 @@ use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\BulkChecks\CountingBulkTenants;
 use Tests\Fixtures\QueryScoping\SealedModels;
+use Tests\Fixtures\QueryScoping\TenantScopedPost;
 
 /**
  * Unit tests for `PrefetchedResourceTenants`, the tenants of a bulk check's
@@ -133,6 +135,29 @@ final class PrefetchedResourceTenantsTest extends TestCase
         self::assertSame($tenant, $tenants->tenantOf($first));
         self::assertSame($tenant, $tenants->tenantOfRecord('posts', '2'));
         self::assertSame(['1', '2'], $resolver->calls);
+    }
+
+    /**
+     * Two instances of one record, one moved to another tenant in hand and not
+     * saved, are each answered with the tenant read for that instance when the
+     * check began.
+     *
+     * @return void
+     */
+    public function testInstancesSharingAKeyAreEachAnsweredWithTheirOwnTenant(): void
+    {
+        $stored = (new TenantScopedPost)->newFromBuilder(['id' => 1, 'tenant_type' => 'teams', 'tenant_id' => '5']);
+        $moved  = (new TenantScopedPost)->newFromBuilder(['id' => 1, 'tenant_type' => 'teams', 'tenant_id' => '5']);
+
+        $moved->setAttribute('tenant_id', '6');
+
+        $tenants = PrefetchedResourceTenants::of([$stored, $moved], new DeclaredResourceTenant(new FixedResourceTenantResolver(null)));
+
+        $stored->setAttribute('tenant_id', '9');
+        $moved->setAttribute('tenant_id', '9');
+
+        self::assertEquals(new Reference('teams', '5'), $tenants->tenantOf($stored));
+        self::assertEquals(new Reference('teams', '6'), $tenants->tenantOf($moved));
     }
 
     /**
