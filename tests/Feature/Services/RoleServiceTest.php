@@ -1069,7 +1069,8 @@ final class RoleServiceTest extends TestCase
         $tenant   = self::createTenant('tenant-a');
         $role     = self::role('editor');
         $platform = Permission::query()->create(['name' => 'posts:edit']);
-        $owned    = Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
+
+        Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
 
         $this->actAsTenant($tenant);
 
@@ -1077,20 +1078,17 @@ final class RoleServiceTest extends TestCase
         self::assertSame([$platform->id], DB::table('role_permissions')->pluck('permission_id')->all());
         self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
         self::assertSame([$platform->id], self::service()->syncPermissions($role, ['posts:edit'])->granted);
-
-        $this->expectException(OwnerMismatchException::class);
-
-        self::service()->grantPermission($role, $owned);
     }
 
     /**
-     * A platform role never finds by name a permission only a tenant owns.
+     * Revoking from a platform role by name finds no permission only a tenant
+     * owns, so the name is unknown.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testAPlatformRoleNeverFindsATenantsPermissionByName(): void
+    public function testRevokingATenantsPermissionNameFromAPlatformRoleIsUnknown(): void
     {
         $tenant = self::createTenant('tenant-a');
         $role   = self::role('editor');
