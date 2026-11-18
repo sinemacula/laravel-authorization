@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 /**
  * An authentication context that contributes the namespaces it is given beside
  * `authentication`, as `laravel-authentication`'s contributes `mfa` and `sso`,
- * and declares the assurance key names it is given.
+ * and declares the assurance key names and supplies the values it is given.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -23,6 +23,7 @@ final readonly class ContributingAuthenticationContext implements Authentication
      *
      * @param  list<string>  $contributed
      * @param  array<array-key, mixed>  $assuranceKeys
+     * @param  array<string, array<string, mixed>>  $values
      */
     public function __construct(
 
@@ -31,6 +32,9 @@ final readonly class ContributingAuthenticationContext implements Authentication
 
         /** The assurance key names the context declares, malformed ones included. */
         private array $assuranceKeys = [],
+
+        /** The values the context supplies, keyed by namespace. */
+        private array $values = [],
     ) {}
 
     /**
@@ -57,13 +61,13 @@ final readonly class ContributingAuthenticationContext implements Authentication
     }
 
     /**
-     * Return no values.
+     * Return the values the context was given.
      *
      * @return array<string, array<string, mixed>>
      */
     #[\Override]
     public function values(): array
     {
-        return [];
+        return $this->values;
     }
 }
