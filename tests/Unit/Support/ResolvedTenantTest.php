@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Unit\Support;
 
 use Illuminate\Container\Container;
+use Illuminate\Database\DatabaseTransactionsManager;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
@@ -172,20 +173,33 @@ final class ResolvedTenantTest extends TestCase
      */
     public function testTheChainIsReadAgainOnceATreeChangeIsReported(): void
     {
-        $tree = $this->createMock(TenantTree::class);
+        [$first, $moved, $refreshed] = \array_map(static fn (string $id): array => [new Reference('stub_tenant', $id)], ['first', 'moved', 'refreshed']);
+        $tree                        = $this->createMock(TenantTree::class);
 
-        $tree->expects(self::exactly(3))->method('ancestors')->willReturn([]);
+        $tree->expects(self::exactly(3))->method('ancestors')->willReturnOnConsecutiveCalls($first, $moved, $refreshed);
 
-        $resolved = new ResolvedTenant(self::createStub(SubjectResolver::class), new Reference('stub_tenant', 'org'));
+        $resolved  = new ResolvedTenant(self::createStub(SubjectResolver::class), new Reference('stub_tenant', 'org'));
+        $parent    = static fn (): array => \array_slice($resolved->chain($tree)->tenants, 1);
+        $container = new Container;
 
-        $resolved->chain($tree);
-        $resolved->chain($tree);
+        $container->instance('db.transactions', new DatabaseTransactionsManager);
 
-        TenantScope::treeChanged();
+        Container::setInstance($container);
 
-        $resolved->chain($tree);
-        $resolved->refreshChain($tree);
-        $resolved->chain($tree);
+        try {
+            self::assertEquals($first, $parent());
+            self::assertEquals($first, $parent());
+
+            TenantScope::treeChanged();
+
+            self::assertEquals($moved, $parent());
+
+            $resolved->refreshChain($tree);
+
+            self::assertEquals($refreshed, $parent());
+        } finally {
+            Container::setInstance(null);
+        }
     }
 
     /**
