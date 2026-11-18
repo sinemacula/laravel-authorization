@@ -249,8 +249,8 @@ A namespace is built the first time a statement under evaluation reads any of it
 once a check, so a provider is asked at most once a check, and not at all by a check whose policies read nothing of
 its namespace. Nothing is kept for the next check. The resource provider is asked only about a record: a type alone,
 an opaque identifier, no resource and a type with no provider leave only the built-ins that apply, so an attribute key
-is missing. A missing key makes its test undecidable, so an allow on it does not apply and a deny does, unless it is
-tested with `null` or an `_if_exists` operator.
+is missing. A missing key makes its test undecidable, so an allow on it does not apply and a deny does. `null` decides
+a missing key instead, and an `_if_exists` operator passes it, so a deny written that way applies too.
 
 A provider that throws aborts the check rather than letting it be decided with the attribute missing: `check()`,
 `can()`, `authorize()`, the Gate and every other entry point throw

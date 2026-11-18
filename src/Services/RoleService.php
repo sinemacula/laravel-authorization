@@ -50,9 +50,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * `SystemOverrideUsed`, as a change to its columns is; a delegated call works
  * on the role as stored, which carries no unlock. A role named by a string is
  * looked up under the package's default guard; a permission named by a string
- * under the role's own guard, else the default. A role model that has not been
- * saved, as the role or as the parent, is refused with
- * `UnsavedRecordException`.
+ * under the role's own guard, else the default, among the permissions visible
+ * in the tenant that owns the role, or in the current tenant for a platform
+ * role. A role model that has not been saved, as the role or as the parent, is
+ * refused with `UnsavedRecordException`.
  *
  * Setting a parent locks the role and the parent, and the observer walks the
  * parent's ancestors under the same lock and outside the tenant scope, so two
@@ -362,9 +363,11 @@ final class RoleService
             $held = self::heldPermissionIds($model);
 
             /** @var non-empty-list<\SineMacula\Laravel\Authorization\Models\Permission> $candidates */
-            $candidates = \is_string($permission) ? GrantTarget::PERMISSION->named($permission, $model->guard) : [self::permissionFor($model, $permission, $actor)];
-            $revoked    = \array_values(\array_filter($candidates, static fn (Permission $target): bool => \in_array($target->id, $held, true)));
-            $checked    = $revoked === [] ? [$candidates[0]] : $revoked;
+            $candidates = \is_string($permission)
+                ? GrantTarget::PERMISSION->named($permission, $model->guard, Reference::tenantOf($model))
+                : [self::permissionFor($model, $permission, $actor)];
+            $revoked = \array_values(\array_filter($candidates, static fn (Permission $target): bool => \in_array($target->id, $held, true)));
+            $checked = $revoked === [] ? [$candidates[0]] : $revoked;
 
             $scope = self::scopeOf($model);
 
@@ -537,7 +540,9 @@ final class RoleService
 
         foreach ($permissions as $permission) {
             /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $targets */
-            $targets = \is_string($permission) ? GrantTarget::PERMISSION->heldOrFirst($permission, $role->guard, $held) : [self::permissionFor($role, $permission, $actor)];
+            $targets = \is_string($permission)
+                ? GrantTarget::PERMISSION->heldOrFirst($permission, $role->guard, $held, Reference::tenantOf($role))
+                : [self::permissionFor($role, $permission, $actor)];
 
             foreach ($targets as $target) {
                 DeclaredPermissions::assertStored($target);
@@ -568,9 +573,9 @@ final class RoleService
 
     /**
      * Resolve a permission for the role: a name under the role's guard, else
-     * the package default; a model once it is known to be a saved permission,
-     * its row as stored for a delegated change (see `StoredRecords`), so the
-     * change is weighed on the name the row holds.
+     * the package default, in the tenant that owns the role; a model once it is
+     * known to be a saved permission, its row as stored for a delegated change
+     * (see `StoredRecords`), so the change is weighed on the stored name.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  mixed  $permission
@@ -583,7 +588,7 @@ final class RoleService
     private static function permissionFor(Role $role, mixed $permission, ?ActingContext $actor = null): Permission
     {
         /** @var \SineMacula\Laravel\Authorization\Models\Permission $resolved */
-        $resolved = GrantTarget::PERMISSION->resolve($permission, $role->guard);
+        $resolved = GrantTarget::PERMISSION->resolve($permission, $role->guard, Reference::tenantOf($role));
 
         return $actor === null || \is_string($permission) ? $resolved : StoredRecords::of('permission', $resolved);
     }
