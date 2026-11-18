@@ -53,7 +53,7 @@ final class EscalationScenario
     /** @var list<string> The application's actions, as the catalogue declares them. */
     public const array ACTIONS = ['posts:read', 'posts:edit', 'posts:delete', 'comments:read', 'comments:write', 'reports:view'];
 
-    /** @var string An action of the catalogue no grant, role or policy of the scenario names, but the resource policy naming the role `named`, so the actor never holds it. */
+    /** @var string An action of the catalogue no grant, role or policy of the scenario names, but the resource policy naming the role `named`, so the actor holds it only once a rename hands it out. */
     private const string SHARED = 'files:share';
 
     /** @var list<string> The patterns a grant or a statement may name beside the actions. */

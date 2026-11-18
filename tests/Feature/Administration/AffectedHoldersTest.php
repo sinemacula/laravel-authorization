@@ -124,15 +124,21 @@ final class AffectedHoldersTest extends TestCase
 
         $this->travel(2)->hours();
 
-        $add = static fn (): mixed => RoleService::instance()?->grantPermission($role, $edit, actor: ActingContext::for($admin));
+        $reason = static function () use ($role, $edit, $admin): DecisionReason {
+            $refusal = self::refusalOf(static fn (): mixed => RoleService::instance()?->grantPermission($role, $edit, actor: ActingContext::for($admin)));
+
+            self::assertInstanceOf(AuthorizationException::class, $refusal);
+
+            return $refusal->getReason();
+        };
 
         self::assertSame(['live', 'senior'], self::ids(self::holdersOf($role)));
-        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::reasonOf($add));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $reason());
 
         config(['authorization.administration.max_impact' => 1]);
 
         self::assertNull(self::holdersOf($role));
-        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::reasonOf($add));
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $reason());
 
         config(['authorization.administration.max_impact' => 2]);
 
@@ -141,7 +147,7 @@ final class AffectedHoldersTest extends TestCase
 
         $this->travel(2)->hours();
 
-        self::assertSame(DecisionReason::ADMINISTRATION_SELF, self::reasonOf($add));
+        self::assertSame(DecisionReason::ADMINISTRATION_SELF, $reason());
     }
 
     /**
@@ -644,22 +650,6 @@ final class AffectedHoldersTest extends TestCase
     private static function holdersOf(Role $role): ?array
     {
         return AffectedHolders::none()->ofRoles([$role->id])->holders();
-    }
-
-    /**
-     * Return the reason the call is refused with, failing the test when it is
-     * not refused.
-     *
-     * @param  \Closure(): mixed  $call
-     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason
-     */
-    private static function reasonOf(\Closure $call): DecisionReason
-    {
-        $refusal = self::refusalOf($call);
-
-        self::assertInstanceOf(AuthorizationException::class, $refusal);
-
-        return $refusal->getReason();
     }
 
     /**

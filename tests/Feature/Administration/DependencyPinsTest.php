@@ -430,8 +430,9 @@ final class DependencyPinsTest extends TestCase
     }
 
     /**
-     * Locking the actor empties the memo, so what the request memoised before
-     * the lock is read again from the rows.
+     * Locking the actor empties the memo, even inside a batch that keeps each
+     * scope's entries, so what the request memoised before the lock is read
+     * again from the rows.
      *
      * @return void
      *
@@ -443,15 +444,17 @@ final class DependencyPinsTest extends TestCase
 
         GrantService::instance()?->grantPermission($actor, Permission::query()->create(['name' => 'posts:read']));
 
-        self::assertTrue($actor->hasPermission('posts:read'));
+        ResolutionCache::instance()?->batch(static function () use ($actor): void {
+            self::assertTrue($actor->hasPermission('posts:read'));
 
-        DB::table('authorizable_permissions')->delete();
+            DB::table('authorizable_permissions')->delete();
 
-        self::assertTrue($actor->hasPermission('posts:read'));
+            self::assertTrue($actor->hasPermission('posts:read'));
 
-        self::pins()->lockActor();
+            self::pins()->lockActor();
 
-        self::assertFalse($actor->hasPermission('posts:read'));
+            self::assertFalse($actor->hasPermission('posts:read'));
+        });
     }
 
     /**

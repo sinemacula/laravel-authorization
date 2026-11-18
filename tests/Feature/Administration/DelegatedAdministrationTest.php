@@ -766,8 +766,10 @@ final class DelegatedAdministrationTest extends TestCase
         $refusal = self::refusalOf(static fn (): mixed => self::grants()->grantPermission(self::user(), 'posts:edit', actor: $named));
 
         self::assertInstanceOf(InsufficientAuthenticationException::class, $refusal);
-        self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', 'user-1')->count());
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $refusal->getDecision()?->reason);
+        self::assertFalse(self::user()->hasPermission('posts:edit'));
         self::assertSame(GrantOutcome::GRANTED, self::grants()->grantPermission(self::user(), 'posts:edit', actor: $current));
+        self::assertTrue(self::user()->hasPermission('posts:edit'));
     }
 
     /**
@@ -803,6 +805,7 @@ final class DelegatedAdministrationTest extends TestCase
         self::assertRefusedWithNothingWritten($grant($senior, 'posts:edit'), $actor, DecisionReason::ADMINISTRATION_RANK, Actions::PERMISSION_GRANT);
         self::assertRefusedWithNothingWritten($grant(self::user(), 'posts:read'), $actor, DecisionReason::ADMINISTRATION_UNPROVABLE, Actions::PERMISSION_GRANT);
         self::assertSame(GrantOutcome::GRANTED, $grant(self::user(), 'posts:edit')($actor));
+        self::assertTrue(self::user()->hasPermission('posts:edit'));
     }
 
     /**
