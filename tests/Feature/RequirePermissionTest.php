@@ -8,9 +8,12 @@ use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\TestWith;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
@@ -26,6 +29,8 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ChecksAccess;
 use Tests\Concerns\ReportsEveryDecision;
+use Tests\Feature\Stubs\AuthenticatableGrantee;
+use Tests\Feature\Stubs\CredentialScopesSource;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
@@ -359,6 +364,35 @@ final class RequirePermissionTest extends TestCase
         }
 
         self::assertTrue($identity->hasPermission('posts:archive'));
+    }
+
+    /**
+     * A credential's scopes cap the request whatever the signed-in user holds:
+     * a route requiring a permission the scopes leave out is forbidden.
+     *
+     * @return void
+     */
+    public function testACredentialsScopesCapTheSignedInUsersRoutes(): void
+    {
+        $user = AuthenticatableGrantee::create(['id' => 'token-user']);
+
+        foreach (['posts:read', 'posts:edit'] as $name) {
+            $user->givePermission(Permission::create(['name' => $name, 'guard' => 'web']));
+        }
+
+        $this->app?->instance(SessionPolicySource::class, new CredentialScopesSource(['guard:web' => ['posts:read']]));
+        $this->app?->forgetInstance('authorization');
+        $this->app?->forgetInstance(AuthorizationManager::class);
+
+        Route::middleware('permission:posts:read')->get('/posts', static fn (): string => 'ok');
+        Route::middleware('permission:posts:edit')->get('/posts/edit', static fn (): string => 'ok');
+
+        $this->actingAs($user);
+
+        $this->get('/posts')->assertOk();
+        $this->get('/posts/edit')->assertForbidden();
+        self::assertSame(DecisionReason::SESSION_POLICY, Authorization::lastDecision()?->reason);
+        self::assertTrue($user->hasPermission('posts:edit'));
     }
 
     /**

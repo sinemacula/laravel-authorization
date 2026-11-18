@@ -234,7 +234,8 @@ administration never grants anything it cannot justify.
       activations, permissions, policies, boundaries), the guardrails on the platform and on the chain of the request's
       tenant, the resource policies of the type `authorization:operation`, the roles held and every role above them with
       the permissions and policies they carry, then the permission and policy rows all of these name
-      (`Administration\AuthorityRows`);
+      (`Administration\AuthorityRows`); the request's memo is then emptied, so no decision reads authority it memoised
+      before the lock;
     - **the target**, before the service reads it: the grantee's grant rows, or a role grantee's chain and what it
       carries (`DependencyPins::lockGrantees()`, the first step of every grant, revocation, sync, `revokeAll()` and
       boundary change), then, before the first change is decided (`ActingContext::authorizeIn()`), for each change the

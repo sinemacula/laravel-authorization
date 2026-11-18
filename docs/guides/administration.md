@@ -586,15 +586,16 @@ wraps nothing twice.
 nothing is written, no change event is dispatched and the call is not tried again. A hook's refusal is never reported as
 a denial of the package's: it is thrown on as the hook threw it. The one exception is a database concurrency error
 raised by the hook's own preparation, a deadlock or a serialisation failure, say: it is handled as any concurrency error
-is (see [Delegated administration](#delegated-administration)), so a call that opened the transaction tries it again,
-hook included, and once no tries are left refuses it as `administration.conflict`, and inside your own transaction it is
-thrown as `TransactionConflictException`. Returning lets the call go on and decides nothing: a delegated call is still
-decided after the hook, and refused when it should be. A hook never changes the grant. While a hook runs, every
-management service of the package refuses with `GrantHookRecursionException`, so a hook cannot grant, revoke or edit
-anything through the package's services, trusted or delegated; read-only queries, `GrantScopeQuery` among them, stay
-allowed. A raw Eloquent write on the package's models, pivots or tables is not refused: it stays the unguarded trusted
-surface it always is (see **Raw writes** below), and belongs in no hook. A hook may do the application's own
-transactional preparation on the package's connection, which rolls back with the grant.
+is (see [Delegated administration](#delegated-administration)), so a delegated call that opened the transaction tries it
+again, hook included, and once no tries are left refuses it as `administration.conflict`, and inside your own
+transaction it is thrown as `TransactionConflictException`; a trusted call throws it on for you to retry. Returning lets
+the call go on and decides nothing: a delegated call is still decided after the hook, and refused when it should be. A
+hook never changes the grant. While a hook runs, every management service of the package refuses with
+`GrantHookRecursionException`, so a hook cannot grant, revoke or edit anything through the package's services, trusted
+or delegated; read-only queries, `GrantScopeQuery` among them, stay allowed. A raw Eloquent write on the package's
+models, pivots or tables is not refused: it stays the unguarded trusted surface it always is (see **Raw writes** below),
+and belongs in no hook. A hook may do the application's own transactional preparation on the package's connection, which
+rolls back with the grant.
 
 **Before any lock, and again on a retry.** The hook runs for trusted and delegated calls alike, before the package takes
 any lock for the call. A batch, a sync, calls it once with every widening grant, before any lock and any write. Only
