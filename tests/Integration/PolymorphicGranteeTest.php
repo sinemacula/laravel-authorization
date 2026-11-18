@@ -16,6 +16,8 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\RequestState;
+use Tests\Feature\Stubs\FoundationUser;
 use Tests\Feature\Stubs\NumberedGrantee;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubSecondGrantee;
@@ -74,8 +76,9 @@ final class PolymorphicGranteeTest extends TestCase
      */
     public function testAGrantNeverAllowsAnotherTypeWithTheSameKey(): void
     {
-        $user   = NumberedGrantee::query()->forceCreate(['id' => 5]);
-        $client = StubGrantee::create(['id' => '5']);
+        // Two integer-keyed types; that they read one table is incidental.
+        $user   = FoundationUser::query()->forceCreate(['id' => 5]);
+        $client = NumberedGrantee::query()->findOrFail(5);
 
         Role::create(['name' => 'writer', 'guard' => 'web'])->givePermission(Permission::create(['name' => 'posts:create', 'guard' => 'web']));
 
@@ -138,7 +141,7 @@ final class PolymorphicGranteeTest extends TestCase
             Cache::store('array')->clear();
         }
 
-        $this->container()->forgetScopedInstances();
+        RequestState::forget($this->container());
     }
 
     /**
