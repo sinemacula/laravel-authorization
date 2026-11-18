@@ -783,7 +783,7 @@ final class AuthorizationManagerTest extends TestCase
 
             $identity->attachPolicy($policy);
 
-            DB::table('policies')->where('id', $policy->getKey())->update(['document' => '{"statements":[{"effect":"deny"}]}']);
+            DB::table('policies')->where('id', $policy->getKey())->update(['document' => '{"statements":[{"effect":"allow"}]}']);
 
             $decision = Authorization::check('posts:create');
 
