@@ -19,6 +19,7 @@ use Illuminate\Routing\Router;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
@@ -63,6 +64,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -107,6 +109,7 @@ use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
+use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\AuthenticatableGrantee;
 use Tests\Feature\Stubs\CatalogueReadingProvider;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
@@ -158,6 +161,8 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationManager::class)]
 final class AuthorizationServiceProviderTest extends TestCase
 {
+    use ReadsDispatchedEvents;
+
     /** @var list<class-string> Each seam the package gives a default for. */
     private const array DEFAULT_SEAMS = [
         SubjectResolver::class,
@@ -1312,7 +1317,8 @@ final class AuthorizationServiceProviderTest extends TestCase
 
     /**
      * A configuration cached without the package's defaults, and without whole
-     * blocks, boots, registers the Gate hook and decides with every default.
+     * blocks, boots, registers the Gate hook and decides with every default,
+     * reporting the denial and not the allow.
      *
      * @return void
      */
@@ -1335,10 +1341,12 @@ final class AuthorizationServiceProviderTest extends TestCase
         $user->givePermission(Permission::create(['name' => 'posts:create']));
 
         Gate::define('posts:delete', static fn (): bool => true);
+        Event::fake([DecisionEvaluated::class]);
 
         self::assertSame($config, $this->authorizationConfig());
         self::assertTrue(Gate::forUser($user)->allows('posts:create'));
         self::assertFalse(Gate::forUser($user)->allows('posts:delete'));
+        self::assertSame(['posts:delete'], \array_map(static fn (DecisionEvaluated $decision): string => $decision->action, self::dispatchedEvents(DecisionEvaluated::class)));
     }
 
     /**

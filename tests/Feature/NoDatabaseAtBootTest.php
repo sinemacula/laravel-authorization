@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\Attributes\DefineEnvironment;
@@ -17,7 +18,6 @@ use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\RecordingPermissionProvider;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
-use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\Feature\Stubs\StubSessionPolicySource;
 
 /**
@@ -51,22 +51,27 @@ final class NoDatabaseAtBootTest extends OrchestraTestCase
 
     /**
      * Booting with every optional feature configured, on a connection of its
-     * own, and no tables, runs no query.
+     * own, and no package tables, runs no query, the database cache included.
      *
      * @return void
      */
     #[DefineEnvironment('configureEveryFeature')]
     public function testBootWithEveryFeatureConfiguredRunsNoQuery(): void
     {
+        Schema::create('cache', static function (Blueprint $table): void {
+            $table->string('key')->primary();
+            $table->mediumText('value');
+            $table->integer('expiration');
+        });
+
         self::assertSame([], $this->queriesRegisteringThePackage());
         self::assertFalse(Schema::hasTable('permissions'));
-        self::assertFalse(Schema::connection('authorization')->hasTable('permissions'));
     }
 
     /**
-     * Configure usage tracking, break-glass, a persistent cache and policy
-     * store, session scopes, sensitive actions, attribute providers, a context
-     * source and a connection of the package's own.
+     * Configure usage tracking, break-glass, a database cache, session scopes,
+     * sensitive actions, attribute providers, a context source and a connection
+     * of the package's own.
      *
      * @param  mixed  $app
      * @return void
@@ -78,8 +83,7 @@ final class NoDatabaseAtBootTest extends OrchestraTestCase
 
         $config->set('database.connections.authorization', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
         $config->set('authorization.connection', 'authorization');
-        $config->set('authorization.policy_store', StubPolicyStore::class);
-        $config->set('authorization.cache.store', 'array');
+        $config->set('authorization.cache.store', 'database');
         $config->set('authorization.usage', ['enabled' => true, 'connection' => 'sync', 'queue' => 'usage']);
         $config->set('authorization.break_glass', ['enabled' => true, 'roles' => ['responder' => ['max_minutes' => 30]], 'justifications' => ['incident'], 'notes' => true]);
         $config->set('authorization.session', ['source' => StubSessionPolicySource::class, 'scopes' => ['editor' => ['posts:create']]]);

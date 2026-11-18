@@ -15,7 +15,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use Tests\Concerns\ActsAsTenant;
-use Tests\Feature\Stubs\Enums\PermissionEnum;
+use Tests\Concerns\DeclaresPermissions;
 use Tests\Feature\Stubs\NumberedGrantee;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -44,7 +44,7 @@ use Tests\TestCase;
 #[CoversClass(MigrateSpatieCommand::class)]
 final class SpatieMigrationTest extends TestCase
 {
-    use ActsAsTenant;
+    use ActsAsTenant, DeclaresPermissions;
 
     /** Name of the Artisan command under test. */
     private const string MIGRATION_COMMAND = 'authorization:migrate-spatie';
@@ -265,7 +265,7 @@ final class SpatieMigrationTest extends TestCase
 
         self::assertSame(0, Artisan::call(self::MIGRATION_COMMAND, ['--team-tenant-type' => $team->getMorphClass()]));
 
-        $this->container()->make(ConfigRepository::class)->set('authorization.permission_enums', [PermissionEnum::class]);
+        $this->declarePermissions('posts:create', 'posts:edit', 'posts:delete');
         $this->actAsTenant(null);
 
         self::assertTrue($user->hasRole('admin'));
@@ -273,15 +273,18 @@ final class SpatieMigrationTest extends TestCase
         self::assertTrue(Authorization::forUser($user)->can('posts:create'));
         self::assertTrue(Gate::forUser($user)->allows('posts:create'));
         self::assertFalse(Authorization::forUser($user)->can('posts:edit'));
+        self::assertFalse(Gate::forUser($user)->allows('posts:edit'));
 
         $this->actAsTenant($team);
 
         self::assertTrue($user->hasPermission('posts:edit'));
         self::assertTrue(Authorization::forUser($user)->can('posts:edit'));
+        self::assertTrue(Gate::forUser($user)->allows('posts:edit'));
 
         $this->actAsTenant(StubTenant::query()->create(['id' => '6', 'name' => 'Team 6']));
 
         self::assertFalse(Authorization::forUser($user)->can('posts:edit'));
+        self::assertFalse(Gate::forUser($user)->allows('posts:edit'));
     }
 
     /**
