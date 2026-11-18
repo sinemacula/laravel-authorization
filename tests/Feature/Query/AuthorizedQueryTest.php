@@ -166,6 +166,42 @@ final class AuthorizedQueryTest extends TestCase
     }
 
     /**
+     * On PostgreSQL, the one driver with `updateFrom()`, a read-only scope
+     * refuses an update-from of its own query or of one it is nested in, and
+     * the row is left as it was.
+     *
+     * @return void
+     */
+    public function testAReadOnlyScopeRefusesAnUpdateFromWithItsQuery(): void
+    {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            self::markTestSkipped('Only PostgreSQL supports updateFrom().');
+        }
+
+        ScopedPost::query()->create(['title' => 'kept']);
+
+        $readOnly = AuthorizedQuery::compiled(new ScopedPost, 'posts:view', static fn (): string => '1 = 1', true);
+        $scoped   = static function () use ($readOnly): EloquentBuilder {
+            $builder = ScopedPost::query();
+
+            $readOnly->holdPlaceOn($builder->getQuery());
+
+            return $builder->withGlobalScope($readOnly->identifier, $readOnly);
+        };
+
+        $writes = [
+            static fn (): mixed => $scoped()->toBase()->updateFrom(['title' => 'changed']),
+            static fn (): mixed => DB::table('scoped_posts')->whereExists($scoped()->toBase())->updateFrom(['title' => 'changed']),
+        ];
+
+        foreach ($writes as $write) {
+            self::assertSame([RefusalReason::PREVIEW_WRITE], self::refusalOf($write)->reasons());
+        }
+
+        self::assertSame(['kept'], ScopedPost::query()->pluck('title')->all());
+    }
+
+    /**
      * Applying the scope takes its place out, puts every other constraint in
      * one nested group with the bindings, in order, and adds the condition
      * after it; another scope's place stays at the top, and a query whose one
