@@ -73,10 +73,12 @@ final class ParityPropertyTest extends TestCase
         $compared      = 0;
 
         for ($run = 0; $run < $runs; $run++) {
-            $compared += $this->inScenario($seed + $run, function (ParityScenario $scenario): int {
+            $isWarm = \intdiv($seed + $run, 2) % 2 === 0;
+
+            $compared += $this->inScenario($seed + $run, function (ParityScenario $scenario) use ($isWarm): int {
                 $scenario->build();
 
-                return $this->assertParity($scenario);
+                return $this->assertParity($scenario, $isWarm);
             });
         }
 
@@ -115,7 +117,8 @@ final class ParityPropertyTest extends TestCase
 
     /**
      * Run the scenario of the seed in a transaction of its own, rolled back
-     * after it, with the state the package keeps for a request forgotten.
+     * after it, with the state the package keeps for a request forgotten, and a
+     * persistent store for every other scenario.
      *
      * @param  int  $seed
      * @param  \Closure(\Tests\Integration\QueryScoping\ParityScenario): int  $run
@@ -128,6 +131,10 @@ final class ParityPropertyTest extends TestCase
     {
         /** @var \Illuminate\Foundation\Application $app */
         $app = $this->app;
+
+        $app->make(ConfigRepository::class)->set('authorization.cache.store', $seed % 2 === 0 ? 'array' : null);
+        $app->make('cache')->store('array')->clear();
+        $app->forgetInstance(ResolutionCache::class);
 
         DB::beginTransaction();
 
@@ -153,18 +160,32 @@ final class ParityPropertyTest extends TestCase
 
     /**
      * Assert that the scoped query keeps exactly the candidates `check()`
-     * allows, and that it is not refused, and return 1.
+     * allows, and that it is not refused, and return 1. Warm, the checks run
+     * first and the query is compiled in a request of its own, after a check
+     * there has warmed the memo, from the store when there is one; cold, the
+     * query is compiled first.
      *
      * @param  \Tests\Integration\QueryScoping\ParityScenario  $scenario
+     * @param  bool  $isWarm
      * @return int
      *
      * @throws \Throwable
      */
-    private function assertParity(ParityScenario $scenario): int
+    private function assertParity(ParityScenario $scenario, bool $isWarm): int
     {
         $constraints = $scenario->constraints();
         $after       = $scenario->after();
         $identity    = $scenario->identity();
+        $candidates  = fn (): array => self::identities($after($constraints(self::unscoped($scenario))), $identity);
+        $checked     = fn (): array => \array_values(\array_filter($candidates(), fn (string $row): bool => $this->isAllowed($scenario, $identity, $row)));
+        $allowed     = null;
+
+        if ($isWarm) {
+            $allowed = $checked();
+
+            $this->app?->forgetInstance(ResolutionCache::class);
+            $this->isAllowed($scenario, $identity, (string) self::unscoped($scenario)->firstOrFail()->getAttribute($identity)); // @phpstan-ignore cast.string
+        }
 
         try {
             $query  = $constraints($scenario->model::query());
@@ -175,10 +196,7 @@ final class ParityPropertyTest extends TestCase
             self::fail("The scope was refused: {$exception->getMessage()}\n{$scenario->replay()}");
         }
 
-        $candidates = self::identities($after($constraints(self::unscoped($scenario))), $identity);
-        $allowed    = \array_values(\array_filter($candidates, fn (string $row): bool => $this->isAllowed($scenario, $identity, $row)));
-
-        self::assertSame($allowed, $kept, "The scope kept other rows than check() allows.\nSQL: {$scoped->toRawSql()}\n{$scenario->replay()}");
+        self::assertSame($allowed ?? $checked(), $kept, "The scope kept other rows than check() allows.\nSQL: {$scoped->toRawSql()}\n{$scenario->replay()}");
 
         return 1;
     }
