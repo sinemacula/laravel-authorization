@@ -149,6 +149,8 @@ Conditions name the operator first, then each context key it tests, as a dot pat
 - A NUL byte is refused in a `starts_with`, `ends_with`, `like` or time operand and in a resource pattern, and a
   context value holding one is undecidable for them and for `ip_in` and `ip_not_in`. A `${...}` value holding one leaves
   a resource pattern unresolved.
+- A `like` context value or operand of `PHP_MAXPATHLEN` bytes or more (1024 on macOS, 4096 on Linux) is undecidable,
+  since `fnmatch()` cannot test it, so a deny on a long `input.*` value applies.
 - `any_value_in` and `all_values_in` need the context value to be a list, such as a token's scopes. An empty list never
   passes `all_values_in`.
 - `eq` and `neq` never take a list: use `in` or `not_in`. String operands may use `${...}` interpolation; list operands

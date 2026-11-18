@@ -44,14 +44,14 @@ final class LongLikeConditionsTest extends TestCase
     }
 
     /**
-     * A deny whose substituted `like` operand is too long applies over a held
-     * permission.
+     * A deny whose substituted `like` operand is too long once escaped applies
+     * over a held permission.
      *
      * @return void
      */
     public function testADenyOnALongSubstitutedOperandApplies(): void
     {
-        $input = ['agent' => 'a bot', 'pattern' => \str_repeat('a', \PHP_MAXPATHLEN)];
+        $input = ['agent' => 'a bot', 'pattern' => \str_repeat('*', \intdiv(\PHP_MAXPATHLEN, 2))];
 
         self::assertSame(DecisionReason::EXPLICIT_DENY, self::decide('deny', '${input.pattern}', $input)->reason);
         self::assertSame(DecisionReason::EXPLICIT_DENY, self::silenced(static fn (): Decision => self::decide('deny', '${input.pattern}', $input))->reason);
