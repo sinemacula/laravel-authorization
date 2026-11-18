@@ -545,8 +545,8 @@ final class GrantService
 
         $revoked = OperationScope::run($operation, static function (Operation $operation) use ($actor, $grantee, $reference): int {
             if ($actor === null) {
-                $activations          = ActivationEnds::unexpiredOf($reference);
                 [$events, $malformed] = GrantChanges::revokeEverywhere($reference, $operation);
+                $activations          = ActivationEnds::unexpiredOf($reference);
             } else {
                 // The grantee's rows are locked before they are read, so what
                 // is revoked is exactly what was decided, never a row granted

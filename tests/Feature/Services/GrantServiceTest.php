@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\Repository as CacheRepository;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -17,6 +19,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\GrantHook;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
@@ -469,8 +472,7 @@ final class GrantServiceTest extends TestCase
 
     /**
      * Revoking everything ends an activation while break-glass is switched off,
-     * which counts for nothing then but would once it is switched on, and a
-     * check cached before then no longer reads the role.
+     * which counts for nothing then but would once it is switched on.
      *
      * @return void
      *
@@ -494,6 +496,68 @@ final class GrantServiceTest extends TestCase
         self::switchBreakGlass(true);
 
         self::assertFalse(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:create'));
+    }
+
+    /**
+     * Revoking everything from a grantee whose only access is an activation
+     * drops a check the shared cache stored on it, from the next request.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingEverythingDropsACheckCachedOnAnActivation(): void
+    {
+        $user    = self::user();
+        $store   = new CacheRepository(new ArrayStore);
+        $request = fn () => $this->app?->instance(ResolutionCache::class, new ResolutionCache($store, 300, 'revoke-all'));
+        $check   = static fn (): bool => StubGrantee::query()->findOrFail('user-1')->hasPermission('posts:create');
+
+        self::activate($user, self::emergencyRole());
+
+        $request();
+
+        self::assertTrue($check());
+
+        $request();
+
+        self::assertSame(1, self::service()->revokeAll($user));
+
+        $request();
+
+        self::assertFalse($check());
+    }
+
+    /**
+     * Revoking everything that fails while ending an activation keeps the
+     * grants it revoked and the activation, and reports nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingEverythingThatFailsEndingAnActivationRollsBack(): void
+    {
+        $user       = self::user();
+        $editor     = self::role('editor');
+        $activation = self::activate($user, self::emergencyRole());
+
+        self::service()->grantRole($user, $editor);
+
+        Event::fake([RoleRevoked::class, BreakGlassRevoked::class]);
+
+        DB::listen(static function (QueryExecuted $query): void {
+            if (!\str_starts_with(\strtolower($query->sql), 'update') || !\str_contains($query->sql, 'break_glass_activations')) {
+                return;
+            }
+
+            throw new \RuntimeException('Write failed.');
+        });
+
+        self::assertSame('Write failed.', self::refusalOf(static fn (): int => self::service()->revokeAll($user))->getMessage());
+        self::assertSame([$editor->id], DB::table('authorizable_roles')->pluck('role_id')->all());
+        self::assertSame([null, null, null, null], self::endedOf($activation));
+        Event::assertNothingDispatched();
     }
 
     /**
