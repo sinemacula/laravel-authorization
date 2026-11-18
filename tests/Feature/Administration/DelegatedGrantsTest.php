@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Administration;
 
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -35,6 +36,7 @@ use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenantTree;
+use Tests\Fixtures\QueryScoping\SubtreeQueryTree;
 use Tests\TestCase;
 
 /**
@@ -361,6 +363,32 @@ final class DelegatedGrantsTest extends TestCase
 
         self::assertGrant(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $actor, $user, 'posts:edit', ['tenant' => $parent]);
         self::assertGrant(null, $actor, $user, 'posts:edit', ['tenant' => $parent, 'subtree' => false]);
+    }
+
+    /**
+     * A grant reaching below a tenant whose tree's subtree query fails as it
+     * runs is refused as outside the actor's scope, the screen deciding as the
+     * service does, and the transaction it runs in stays usable.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASubtreeQueryThatFailsAsItRunsIsRefused(): void
+    {
+        $tenant = self::createTenant('parent');
+
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static fn (Reference $root): QueryBuilder => DB::table('missing_closure')
+            ->select(['descendant_type as tenant_type', 'descendant_id as tenant_id'])
+            ->where('ancestor_id', $root->id)));
+
+        $actor = self::actor('admin', [...self::granting(), 'posts:edit' => ['tenant' => $tenant]]);
+        $user  = self::user('user');
+
+        $this->actAsTenant($tenant);
+
+        self::assertGrant(DecisionReason::ADMINISTRATION_SCOPE, $actor, $user, 'posts:edit', ['tenant' => $tenant]);
+        self::assertGrant(null, $actor, $user, 'posts:edit', ['tenant' => $tenant, 'subtree' => false]);
     }
 
     /**
