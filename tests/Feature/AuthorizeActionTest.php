@@ -24,7 +24,9 @@ use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksAccess;
 use Tests\Feature\Stubs\FailingResourceAttributes;
@@ -32,6 +34,7 @@ use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubTenant;
+use Tests\Fixtures\QueryScoping\TenantScopedPost;
 use Tests\TestCase;
 
 /**
@@ -577,6 +580,36 @@ final class AuthorizeActionTest extends TestCase
         foreach ($resolver->asked as $model) {
             self::assertTrue($model->is($post));
         }
+    }
+
+    /**
+     * A subject acting in one tenant, holding the action there, reaches a bound
+     * model of that tenant and is denied one of another as `tenant_scope`.
+     *
+     * @return void
+     */
+    public function testABoundModelOfAnotherTenantIsDenied(): void
+    {
+        Route::middleware([SubstituteBindings::class, 'authorize:' . self::ACTION . ',post'])
+            ->get('/tenant-posts/{post}', static fn (TenantScopedPost $post): string => 'ok');
+
+        $tenantA  = StubTenant::create(['id' => 'tenant-a']);
+        $tenantB  = StubTenant::create(['id' => 'tenant-b']);
+        $identity = StubGrantee::create(['id' => 'member']);
+
+        TenantScopedPost::query()->create(['id' => 1, 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => 'tenant-a']);
+        TenantScopedPost::query()->create(['id' => 2, 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => 'tenant-b']);
+
+        $identity->givePermission(Permission::create(['name' => self::ACTION]), null, $tenantA);
+
+        $this->actingAsSubject(new Subject($identity, $identity, $tenantA));
+
+        $this->getJson('/tenant-posts/1')->assertOk();
+        $this->getJson('/tenant-posts/2')->assertForbidden();
+
+        $this->withoutExceptionHandling();
+
+        self::assertSame(DecisionReason::TENANT_SCOPE, self::denialOf(fn () => $this->get('/tenant-posts/2'))->getReason());
     }
 
     /**

@@ -5,12 +5,18 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\HasAuthorization;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Events\Grantee\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Grantee\PolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\NumberedGrantee;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
@@ -28,6 +34,8 @@ use Tests\TestCase;
 #[CoversTrait(HasAuthorization::class)]
 final class HasAuthorizationTest extends TestCase
 {
+    use ActsAsTenant, ReadsDispatchedEvents;
+
     /**
      * A grantee is active unless the model says otherwise.
      *
@@ -57,6 +65,50 @@ final class HasAuthorizationTest extends TestCase
 
         self::assertSame(['user-2'], DB::table('authorizable_roles')->pluck('authorizable_id')->all());
         self::assertSame(0, DB::table('authorizable_permissions')->count());
+    }
+
+    /**
+     * Deleting a grantee while scoped to one tenant revokes its grants in every
+     * tenant and application, a role another tenant owns among them, and
+     * reports each.
+     *
+     * @return void
+     */
+    public function testDeletingAGranteeInATenantRevokesItsGrantsEverywhere(): void
+    {
+        $tenantA = self::createTenant('tenant-a');
+        $tenantB = self::createTenant('tenant-b');
+        $user    = StubGrantee::create(['id' => 'user-1']);
+        $editor  = Role::create(['name' => 'editor']);
+
+        $user->assignRole($editor, tenant: $tenantA);
+        StubGrantee::create(['id' => 'user-2'])->assignRole($editor, tenant: $tenantA);
+        $user->assignRole(Role::create(['name' => 'b-role'] + self::ownedBy($tenantB)), tenant: $tenantB);
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+        $user->attachPolicy(Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]), application: 'admin');
+
+        $this->actAsTenant($tenantA);
+
+        Event::fake([RoleRevoked::class, PermissionRevoked::class, PolicyDetached::class]);
+
+        $user->delete();
+
+        $events  = [...self::dispatchedEvents(RoleRevoked::class), ...self::dispatchedEvents(PermissionRevoked::class), ...self::dispatchedEvents(PolicyDetached::class)];
+        $revoked = \array_map(
+            static fn (PermissionRevoked|PolicyDetached|RoleRevoked $event): array => [
+                $event::class, $event->grantee->getKey(), $event->name, $event->scope->tenant?->getKey(), $event->scope->application,
+            ],
+            $events,
+        );
+
+        self::assertEqualsCanonicalizing([
+            [RoleRevoked::class, 'user-1', 'editor', 'tenant-a', null],
+            [RoleRevoked::class, 'user-1', 'b-role', 'tenant-b', null],
+            [PermissionRevoked::class, 'user-1', 'posts:edit', null, null],
+            [PolicyDetached::class, 'user-1', 'readers', null, 'admin'],
+        ], $revoked);
+        self::assertSame(['user-2'], DB::table('authorizable_roles')->pluck('authorizable_id')->all());
+        self::assertSame(0, DB::table('authorizable_permissions')->count() + DB::table('authorizable_policies')->count());
     }
 
     /**

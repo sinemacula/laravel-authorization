@@ -79,6 +79,33 @@ final class DecisionRoutesTest extends TestCase
     }
 
     /**
+     * An allow that only a wildcard permission covers rests on every route
+     * behind the wildcard, directly and through a role.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAllowByAWildcardAloneRestsOnItsRoutes(): void
+    {
+        $ann      = self::identity('ann');
+        $editor   = self::role('editor');
+        $wildcard = self::permission('posts:*');
+
+        $editor->givePermissionTo($wildcard);
+
+        self::grants()->grantPermission($ann, $wildcard);
+        self::grants()->grantRole($ann, $editor);
+
+        $decision = $this->actAs($ann)->check('posts:read');
+        $expected = self::keysHeld($ann, null, self::targeting('posts:*', 'editor'));
+
+        self::assertTrue($decision->isAllowed());
+        self::assertCount(3, $expected);
+        self::assertSame($expected, $this->keysObserved());
+    }
+
+    /**
      * An allow by the identity's permission, asked for only because the
      * subject's own did not match, rests on the identity's routes alone.
      *

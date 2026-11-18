@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Registrars;
 
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
@@ -14,20 +15,25 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Registrars\QueryScopeRegistrar;
+use SineMacula\Laravel\Authorization\Scopes\AuthorizedScope;
+use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Concerns\RefusesThePackage;
 use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubSessionPolicySource;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\PostOwner;
 use Tests\Fixtures\QueryScoping\ScopedDocument;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\Fixtures\QueryScoping\SealedModels;
 use Tests\Fixtures\QueryScoping\TenantScopedPost;
+use Tests\Fixtures\QueryScoping\TrashablePost;
 use Tests\TestCase;
 
 /**
@@ -288,6 +294,130 @@ final class QueryScopeRegistrarTest extends TestCase
         self::assertSame(['edited', 'draft', 'edited'], ScopedDocument::query()->orderBy('row_id')->pluck('title')->all());
         self::assertSame(0, self::authorized(ScopedDocument::query(), 'posts:delete', $manager)->delete());
         self::assertSame(3, ScopedDocument::query()->count());
+    }
+
+    /**
+     * A scoped update or deletion of the rows asked for writes only those the
+     * subject may act on, leaving another tenant's rows and a record whose
+     * attached policy denies it, and counts only the rows it wrote.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAScopedWriteLeavesTheRowsDeniedByTenantOrAttachment(): void
+    {
+        [$t1, $t2] = [StubTenant::query()->create(['id' => 't1']), StubTenant::query()->create(['id' => 't2'])];
+        $user      = StubGrantee::create(['id' => 'u1']);
+        $manager   = $this->resolveRequest($user, $t1);
+        $ids       = [1, 2, 3, 4];
+
+        foreach (['posts:edit', 'posts:delete'] as $action) {
+            $user->givePermission(Permission::create(['name' => $action]), null, $t1);
+        }
+
+        foreach ([$t1, $t2, null, $t1] as $index => $tenant) {
+            TenantScopedPost::query()->create(['id' => $ids[$index], 'title' => 'draft', 'tenant_type' => $tenant?->getMorphClass(), 'tenant_id' => $tenant?->getKey()]);
+        }
+
+        self::attachToResource([TenantScopedPost::class, '4'], [['effect' => 'deny', 'actions' => ['posts:*']]]);
+
+        $titles  = static fn (): array => TenantScopedPost::query()->orderBy('id')->pluck('title', 'id')->all();
+        $allowed = \array_values(\array_filter($ids, static fn (int $id): bool => $manager->can('posts:edit', TenantScopedPost::query()->find($id))));
+
+        self::assertSame([1, 3], $allowed);
+        self::assertSame(2, self::authorized(TenantScopedPost::query(), 'posts:edit', $manager)->whereIn('id', $ids)->update(['title' => 'edited']));
+        self::assertSame([1 => 'edited', 2 => 'draft', 3 => 'edited', 4 => 'draft'], $titles());
+        self::assertSame(2, self::authorized(TenantScopedPost::query(), 'posts:delete', $manager)->whereIn('id', $ids)->delete());
+        self::assertSame([2 => 'draft', 4 => 'draft'], $titles());
+    }
+
+    /**
+     * The scopes of the subject's credential, from the bound session policy
+     * source, cap the rows the macro and the model-level scope keep, as they
+     * cap `check()`.
+     *
+     * @return void
+     */
+    public function testTheCredentialsScopesCapTheRowsKept(): void
+    {
+        $user = StubGrantee::create(['id' => 'u1']);
+
+        foreach (['posts:view', 'posts:edit'] as $action) {
+            $user->givePermission(Permission::create(['name' => $action]));
+        }
+
+        self::createPosts(2);
+
+        $this->app?->instance(SessionPolicySource::class, new StubSessionPolicySource(['posts:read']));
+        $this->container()->make(ConfigRepository::class)->set('authorization.session.scopes', ['posts:read' => ['posts:view']]);
+        $this->app?->forgetInstance(SessionScopes::class);
+
+        $manager = $this->resolveRequest($user);
+        $post    = ScopedPost::query()->firstOrFail();
+        $scoped  = static fn (string $action): int => ScopedPost::query()->withGlobalScope($action, new AuthorizedScope($action))->count();
+
+        self::assertSame([true, false], [$manager->can('posts:view', $post), $manager->can('posts:edit', $post)]);
+        self::assertCount(2, self::authorized(ScopedPost::query(), 'posts:view', $manager)->get());
+        self::assertCount(0, self::authorized(ScopedPost::query(), 'posts:edit', $manager)->get());
+        self::assertSame([2, 0], [$scoped('posts:view'), $scoped('posts:edit')]);
+    }
+
+    /**
+     * A soft-deleting model's query stays scoped with its trashed rows and with
+     * them alone, and a scoped deletion trashes only the rows the subject may
+     * delete.
+     *
+     * @return void
+     */
+    public function testASoftDeletingModelsQueryStaysScoped(): void
+    {
+        $user    = StubGrantee::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user);
+        $type    = (new TrashablePost)->getMorphClass();
+
+        foreach ([1, 2, 3, 4] as $id) {
+            TrashablePost::query()->create(['id' => $id, 'title' => 'post']);
+        }
+
+        TrashablePost::query()->whereKey([3, 4])->delete();
+
+        $user->givePermission(Permission::create(['name' => 'posts:delete']));
+        $user->attachPolicy(self::storedPolicy('not-even', [['effect' => 'deny', 'actions' => ['posts:delete'], 'resources' => [$type . ':2', $type . ':4']]]));
+
+        $scoped = static fn (): Builder => self::authorized(TrashablePost::query(), 'posts:delete', $manager);
+
+        self::assertSame([1], $scoped()->orderBy('id')->pluck('id')->all());
+        self::assertSame([1, 3], $scoped()->withTrashed()->orderBy('id')->pluck('id')->all()); // @phpstan-ignore method.notFound
+        self::assertSame([3], $scoped()->onlyTrashed()->orderBy('id')->pluck('id')->all()); // @phpstan-ignore method.notFound
+        self::assertSame(1, $scoped()->delete());
+        self::assertSame([2], TrashablePost::query()->orderBy('id')->pluck('id')->all());
+        self::assertSame(4, TrashablePost::query()->withTrashed()->count());
+    }
+
+    /**
+     * A page of a grouped query holds and counts only the groups of the rows
+     * the scope keeps.
+     *
+     * @return void
+     */
+    public function testAPageOfAGroupedQueryCountsOnlyTheKeptGroups(): void
+    {
+        $user    = StubGrantee::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user);
+        $type    = (new ScopedPost)->getMorphClass();
+
+        foreach (['live', 'archived', 'draft', 'draft'] as $index => $status) {
+            ScopedPost::query()->create(['id' => $index + 1, 'title' => 'post', 'status' => $status]);
+        }
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+        $user->attachPolicy(self::storedPolicy('no-drafts', [['effect' => 'deny', 'actions' => ['posts:view'], 'resources' => [$type . ':3', $type . ':4']]]));
+
+        $page = self::authorized(ScopedPost::query(), 'posts:view', $manager)->select('status')->groupBy('status')->orderBy('status')->paginate(1, ['*'], 'page', 2);
+
+        self::assertSame(2, $page->total());
+        self::assertSame(['live'], $page->getCollection()->pluck('status')->all());
     }
 
     /**
