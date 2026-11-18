@@ -74,6 +74,18 @@ final class GrantExpiryTest extends TestCase
     }
 
     /**
+     * An expiry at or before now leaves zero or negative seconds, however far
+     * off the known one is.
+     *
+     * @return void
+     */
+    public function testAnExpiryAtOrBeforeNowLeavesNoTime(): void
+    {
+        self::assertSame(0, GrantExpiry::nearest(null, ['2026-07-01 12:00:00', '2026-07-01 12:05:00']));
+        self::assertSame(-30, GrantExpiry::nearest(600, ['2026-07-01 11:59:30']));
+    }
+
+    /**
      * Without any expiry nothing expires.
      *
      * @return void

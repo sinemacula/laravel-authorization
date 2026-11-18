@@ -13,10 +13,12 @@ use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
+use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
@@ -205,6 +207,22 @@ final class WildcardPermissionTest extends TestCase
         self::assertTrue($fresh->hasPermission('posts.edit'));
         self::assertTrue($fresh->hasPermission('sso.connection.trust'));
         self::assertTrue($fresh->hasPermission('platform-admin'));
+    }
+
+    /**
+     * A deny on `posts:delete` does not cover an asked `posts:*`, so a subject
+     * holding `*` is allowed it.
+     *
+     * @return void
+     */
+    public function testANarrowDenyDoesNotCoverAnAskedWildcard(): void
+    {
+        $scope = Authorization::for($this->userHolding('*'))->withPolicies([EvaluationPolicy::fromArray(['name' => 'no-deletes', 'statements' => [
+            ['effect' => 'deny', 'actions' => ['posts:delete']],
+        ]])]);
+
+        self::assertTrue($scope->can('posts:*'));
+        self::assertFalse($scope->can('posts:delete'));
     }
 
     /**

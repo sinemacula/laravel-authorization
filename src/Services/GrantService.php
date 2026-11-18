@@ -266,7 +266,9 @@ final class GrantService
      * none when the grantee held none.
      *
      * A name revokes every held role of that name under the grantee's guard, or
-     * guard-agnostic, whichever tenant or the platform owns it.
+     * guard-agnostic, whichever tenant or the platform owns it, among the roles
+     * visible in the tenant named, else the current tenant: a role only another
+     * tenant owns is revoked by naming that tenant.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
@@ -365,7 +367,8 @@ final class GrantService
      * permissions were revoked: none when the grantee held none.
      *
      * A name revokes every held permission of that name under the grantee's
-     * guard, or guard-agnostic, whichever tenant or the platform owns it.
+     * guard, or guard-agnostic, whichever tenant or the platform owns it, among
+     * the permissions visible in the tenant named, else the current tenant.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
