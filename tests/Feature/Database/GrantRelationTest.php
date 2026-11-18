@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Database\GrantRelation;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use Tests\Concerns\ActivatesBreakGlass;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\NumberedGrantee;
@@ -157,7 +158,7 @@ final class GrantRelationTest extends TestCase
         };
         $users = [];
 
-        foreach (['live', 'expired', 'elsewhere', 'platform', 'mobile'] as $name) {
+        foreach (['live', 'expired', 'elsewhere', 'platform', 'mobile', 'expiring'] as $name) {
             $users[$name] = NumberedGrantee::create(['name' => $name]);
         }
 
@@ -166,6 +167,7 @@ final class GrantRelationTest extends TestCase
         $grant($users['elsewhere'], $tenantB);
         $grant($users['platform'], null);
         $grant($users['mobile'], $tenantA, app: 'mobile');
+        $grant($users['expiring'], $tenantA, Carbon::now()->addHours(3));
         $grant(StubGrantee::create(['id' => (string) $users['elsewhere']->id]), $tenantA);
 
         $this->travel(2)->hours();
@@ -174,9 +176,11 @@ final class GrantRelationTest extends TestCase
         $named   = static fn (Builder $query): Builder => $query->where($query->qualifyColumn('name'), 'granted');
         $holders = NumberedGrantee::query()->whereHas($relation, $named)->orderBy('id')->pluck('name')->all();
         $counts  = NumberedGrantee::query()->withCount($relation)->orderBy('id')->pluck($relation . '_count', 'name')->all();
+        $inApp   = TenantScope::within($tenantA, 'mobile', static fn (): array => NumberedGrantee::query()->has($relation)->orderBy('id')->pluck('name')->all());
 
-        self::assertSame(['live', 'platform'], $holders);
-        self::assertEquals(['live' => 1, 'expired' => 0, 'elsewhere' => 0, 'platform' => 1, 'mobile' => 0], $counts);
+        self::assertSame(['live', 'platform', 'expiring'], $holders);
+        self::assertSame(['live' => 1, 'expired' => 0, 'elsewhere' => 0, 'platform' => 1, 'mobile' => 0, 'expiring' => 1], $counts);
+        self::assertSame(['live', 'platform', 'mobile', 'expiring'], $inApp);
     }
 
     /**
@@ -204,6 +208,7 @@ final class GrantRelationTest extends TestCase
 
         self::activate($second, self::emergencyRole(), $inA);
         self::activate($second, self::emergencyRole(name: 'ended'), [...$inA, 'ended_at' => Carbon::now(), 'end_reason' => 'revoked']);
+        self::activate($second, self::emergencyRole(name: 'lapsed'), [...$inA, 'activated_at' => Carbon::now()->subHour(), 'expires_at' => Carbon::now()->subMinute()]);
         self::activate($third, self::emergencyRole(name: 'b-responder'), ['tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => 'tenant-b']);
 
         $this->actAsTenant($tenantA);

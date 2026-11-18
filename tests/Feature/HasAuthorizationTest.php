@@ -79,8 +79,10 @@ final class HasAuthorizationTest extends TestCase
         $tenantA = self::createTenant('tenant-a');
         $tenantB = self::createTenant('tenant-b');
         $user    = StubGrantee::create(['id' => 'user-1']);
+        $editor  = Role::create(['name' => 'editor']);
 
-        $user->assignRole(Role::create(['name' => 'editor']), tenant: $tenantA);
+        $user->assignRole($editor, tenant: $tenantA);
+        StubGrantee::create(['id' => 'user-2'])->assignRole($editor, tenant: $tenantA);
         $user->assignRole(Role::create(['name' => 'b-role'] + self::ownedBy($tenantB)), tenant: $tenantB);
         $user->givePermission(Permission::create(['name' => 'posts:edit']));
         $user->attachPolicy(Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]), application: 'admin');
@@ -93,15 +95,20 @@ final class HasAuthorizationTest extends TestCase
 
         $events  = [...self::dispatchedEvents(RoleRevoked::class), ...self::dispatchedEvents(PermissionRevoked::class), ...self::dispatchedEvents(PolicyDetached::class)];
         $revoked = \array_map(
-            static fn (PermissionRevoked|PolicyDetached|RoleRevoked $event): array => [$event->name, $event->scope->tenant?->id, $event->scope->application],
+            static fn (PermissionRevoked|PolicyDetached|RoleRevoked $event): array => [
+                $event::class, $event->grantee->getKey(), $event->name, $event->scope->tenant?->getKey(), $event->scope->application,
+            ],
             $events,
         );
 
-        self::assertEqualsCanonicalizing([['editor', 'tenant-a', null], ['b-role', 'tenant-b', null], ['posts:edit', null, null], ['readers', null, 'admin']], $revoked);
-
-        foreach (['authorizable_roles', 'authorizable_permissions', 'authorizable_policies'] as $table) {
-            self::assertSame(0, DB::table($table)->count(), $table);
-        }
+        self::assertEqualsCanonicalizing([
+            [RoleRevoked::class, 'user-1', 'editor', 'tenant-a', null],
+            [RoleRevoked::class, 'user-1', 'b-role', 'tenant-b', null],
+            [PermissionRevoked::class, 'user-1', 'posts:edit', null, null],
+            [PolicyDetached::class, 'user-1', 'readers', null, 'admin'],
+        ], $revoked);
+        self::assertSame(['user-2'], DB::table('authorizable_roles')->pluck('authorizable_id')->all());
+        self::assertSame(0, DB::table('authorizable_permissions')->count() + DB::table('authorizable_policies')->count());
     }
 
     /**

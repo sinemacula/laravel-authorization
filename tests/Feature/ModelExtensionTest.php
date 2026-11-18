@@ -126,6 +126,8 @@ final class ModelExtensionTest extends TestCase
         $role->givePermission(CustomPermission::query()->create(['name' => 'posts:edit']));
         StubGrantee::query()->create(['id' => 'user-1'])->assignRole($role);
 
+        self::assertTrue(Authorization::for(StubGrantee::query()->findOrFail('user-1'))->can('posts:edit'));
+
         $role->delete();
 
         $user = StubGrantee::query()->findOrFail('user-1');
@@ -138,9 +140,10 @@ final class ModelExtensionTest extends TestCase
     }
 
     /**
-     * A role with children cannot be trashed, and a trashed role made a parent
-     * afterwards passes neither its permissions nor its policies to the holders
-     * of its child, as the hierarchy reads roles through the subclass.
+     * A parent passes its permissions and policies to the holders of its child
+     * until it is trashed. A role with children cannot be trashed, and one set
+     * as a parent once trashed passes nothing, as the hierarchy reads roles
+     * through the subclass.
      *
      * @return void
      */
@@ -151,15 +154,19 @@ final class ModelExtensionTest extends TestCase
         $parent = SoftDeletingRole::query()->create(['name' => 'reader']);
         $child  = SoftDeletingRole::query()->create(['name' => 'writer', 'parent_id' => $parent->id]);
 
+        $parent->givePermission(CustomPermission::query()->create(['name' => 'posts:read']));
+        $parent->attachPolicy(Policy::query()->create(['name' => 'publishers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:publish']]]]]));
         StubGrantee::query()->create(['id' => 'user-1'])->assignRole($child);
 
+        $holder = StubGrantee::query()->findOrFail('user-1');
+
+        self::assertTrue(Authorization::for($holder)->can('posts:read'));
+        self::assertTrue(Authorization::for($holder)->can('posts:publish'));
         self::assertInstanceOf(RoleHasChildrenException::class, self::refusalOf($parent->delete(...)));
 
         $child->update(['parent_id' => null]);
         $parent->delete();
         $child->update(['parent_id' => $parent->id]);
-        $parent->givePermission(CustomPermission::query()->create(['name' => 'posts:read']));
-        $parent->attachPolicy(Policy::query()->create(['name' => 'publishers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:publish']]]]]));
 
         $user = StubGrantee::query()->findOrFail('user-1');
 

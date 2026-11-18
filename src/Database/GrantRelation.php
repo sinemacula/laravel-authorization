@@ -17,8 +17,8 @@ use Illuminate\Database\Query\Builder;
  * comparing a string column with an integer, so a stock relation over an
  * integer-keyed grantee fails there, and Laravel inlines integer keys into an
  * eager load as raw integers. This relation binds the key as a string, alone
- * and eager-loaded, and reads the grantee's key column as text in an existence
- * query or count, on every database.
+ * and eager-loaded, on every database, and reads the grantee's key column
+ * through `KeyAsText` in an existence query or count.
  *
  * Given the query of the rows to read in place of the grant table, the relation
  * joins those rows under the table's name, so every constraint on the table's
