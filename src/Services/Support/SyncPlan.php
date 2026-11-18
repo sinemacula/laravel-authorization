@@ -132,10 +132,11 @@ final readonly class SyncPlan
      * each in the scope written and a changed reach with the expiry kept, and
      * the keys of each outcome, keyed by outcome. A row decided as held live
      * (the keys given) that the write changes throws
-     * `DependencyChangedException`, so the call is tried again. The pairs of
-     * mutually exclusive roles touching the targets are read before the first
-     * is written, and once every target is written the roles granted, re-armed
-     * or widened are weighed against them (see `ExclusionGuard`).
+     * `DependencyChangedException`, so the call is tried again, and one whose
+     * row could not be written is refused (see `StoredRecords::written()`). The
+     * pairs of mutually exclusive roles touching the targets are read before
+     * the first is written, and once every target is written the roles granted,
+     * re-armed or widened are weighed against them (see `ExclusionGuard`).
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
@@ -145,8 +146,10 @@ final readonly class SyncPlan
      * @return array{list<\SineMacula\Laravel\Authorization\Contracts\GranteeEvent>, array<string, list<string>>}
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\DependencyChangedException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleExclusionConflictException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException
      * @throws \UnexpectedValueException
      */
     public function write(Operation $operation, Reference $grantee, ?\DateTimeInterface $expiresAt, Carbon $now, array $live): array
@@ -158,7 +161,7 @@ final readonly class SyncPlan
 
         foreach ($this->keep as $model) {
             $id     = GrantChanges::key($model);
-            $change = $this->rearm($id, $expiresAt, $now);
+            $change = StoredRecords::written($this->rearm($id, $expiresAt, $now), $this->kind->value, $model, $grantee);
             $events = [...$events, ...$this->kind->changeEvents($operation, $grantee, $model, $this->scopeOf($id), $change, $change->expiryAfter($expiresAt))];
 
             // A row decided as held live is never written back: one gone by the
@@ -200,14 +203,14 @@ final readonly class SyncPlan
     /**
      * Re-arm the kept row of the key as of the instant given: with the reach
      * its entry names, changing that of a live row held with the other, else
-     * leaving a live row as it is.
+     * leaving a live row as it is; null when no row could be written.
      *
      * @param  string  $id
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Support\Carbon  $now
-     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange|null
      */
-    private function rearm(string $id, ?\DateTimeInterface $expiresAt, Carbon $now): GrantChange
+    private function rearm(string $id, ?\DateTimeInterface $expiresAt, Carbon $now): ?GrantChange
     {
         $reach = $this->reaches[$id] ?? null;
 

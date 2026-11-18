@@ -142,7 +142,10 @@ use SineMacula\Laravel\Authorization\Support\RoleReach;
  * anything is read. A role or permission name that answers no row throws
  * `UnknownRoleException` or `UnknownPermissionException`; a target that is not
  * a saved model of the kind granted, such as a policy sync handed another
- * model, throws `InvalidGrantTargetException`.
+ * model, or one whose row is gone, deleted before or while it is granted,
+ * throws `InvalidGrantTargetException` on every driver, and a grant whose row a
+ * concurrent change kept from being written throws `UnwrittenGrantException`;
+ * either rolls the call back.
  *
  * Before a grant, a sync's additions, re-arms and changed reaches, an extension
  * or a wider reach that widens an identity's scope is written, trusted or
@@ -625,7 +628,8 @@ final class GrantService
 
             foreach ($grants as [$model, $scope]) {
                 $key           = GrantChanges::key($model);
-                $change        = GrantChanges::table($kind, $reference, $operation->actor, $scope)->grant($key, $expiresAt);
+                $table         = GrantChanges::table($kind, $reference, $operation->actor, $scope);
+                $change        = StoredRecords::written($table->grant($key, $expiresAt), $kind->value, $model, $reference);
                 $events        = [...$events, ...$kind->changeEvents($operation, $reference, $model, $scope, $change, $expiresAt)];
                 $changed[$key] = $change->outcome;
                 $written[]     = [$key, $scope, $change, $expiresAt];

@@ -827,6 +827,46 @@ final class RoleServiceTest extends TestCase
     }
 
     /**
+     * Granting or syncing a permission whose row is gone, or granting one to a
+     * role whose row is gone, each a model read before it was deleted, is
+     * refused as gone on every driver, with nothing written and nothing
+     * dispatched.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPermissionOrRoleWhoseRowIsGoneIsRefused(): void
+    {
+        $role       = self::role('editor');
+        $gone       = self::role('gone');
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+        $deleted    = Permission::query()->create(['name' => 'posts:read']);
+
+        DB::table('roles')->where('id', $gone->id)->delete();
+        DB::table('permissions')->where('id', $deleted->id)->delete();
+
+        Event::fake([PermissionGranted::class]);
+
+        $calls = [
+            'permission' => [static fn () => self::service()->grantPermission($role, $deleted), static fn () => self::service()->syncPermissions($role, [$deleted])],
+            'role'       => [static fn () => self::service()->grantPermission($gone, $permission)],
+        ];
+
+        foreach ($calls as $kind => $refused) {
+            foreach ($refused as $call) {
+                $exception = self::refusalOf($call);
+
+                self::assertInstanceOf(InvalidGrantTargetException::class, $exception);
+                self::assertSame($kind, $exception->getKind());
+            }
+        }
+
+        Event::assertNotDispatched(PermissionGranted::class);
+        self::assertSame(0, DB::table('role_permissions')->count());
+    }
+
+    /**
      * A permission is granted until an expiry, stored in UTC: the same expiry
      * changes nothing, another changes it, and an expired grant is re-armed,
      * each change reported with the expiry before and after.

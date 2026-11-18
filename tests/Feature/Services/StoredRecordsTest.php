@@ -4,14 +4,20 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
+use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\StoredRecords;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\CatchesRefusals;
 use Tests\TestCase;
 
 /**
@@ -26,6 +32,8 @@ use Tests\TestCase;
 #[CoversClass(StoredRecords::class)]
 final class StoredRecordsTest extends TestCase
 {
+    use CatchesRefusals;
+
     /**
      * The row is read again by its key, as a new instance, discarding what the
      * model in hand changed and did not save, whatever tenant scope is in
@@ -94,5 +102,50 @@ final class StoredRecordsTest extends TestCase
         } catch (InvalidGrantTargetException $exception) {
             self::assertSame('policy', $exception->getKind());
         }
+    }
+
+    /**
+     * A change that wrote a row is returned as it is, and a grant that wrote
+     * none is refused as its target's, when the target's row is gone, else as
+     * the role's it is granted to, when that row is gone, else as not written.
+     *
+     * @return void
+     */
+    public function testAGrantThatWroteNoRowIsRefusedAsWhatIsGone(): void
+    {
+        $role       = Role::query()->create(['name' => 'editor']);
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+        $change     = new GrantChange(GrantOutcome::GRANTED);
+        $written    = static fn (Model|Reference $grantee): GrantChange => StoredRecords::written(null, 'permission', $permission, $grantee);
+        $refusal    = static fn (Model|Reference $grantee): \Throwable => self::refusalOf(static fn (): GrantChange => $written($grantee));
+
+        self::assertSame($change, StoredRecords::written($change, 'permission', $permission, $role));
+
+        $unwritten = $refusal(new Reference('user', '1'));
+
+        self::assertInstanceOf(UnwrittenGrantException::class, $unwritten);
+        self::assertSame('grant of permission \'posts:edit\' to user:1', $unwritten->getGrant());
+        self::assertInstanceOf(UnwrittenGrantException::class, $refusal($role));
+
+        DB::table('roles')->where('id', $role->id)->delete();
+
+        self::assertSame('role', self::kindOf($refusal($role)));
+
+        DB::table('permissions')->where('id', $permission->id)->delete();
+
+        self::assertSame('permission', self::kindOf($refusal($role)));
+    }
+
+    /**
+     * Return the kind of grant the refusal refused the target of.
+     *
+     * @param  \Throwable  $refusal
+     * @return string
+     */
+    private static function kindOf(\Throwable $refusal): string
+    {
+        self::assertInstanceOf(InvalidGrantTargetException::class, $refusal);
+
+        return $refusal->getKind();
     }
 }
