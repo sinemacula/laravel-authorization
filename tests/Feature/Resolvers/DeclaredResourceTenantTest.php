@@ -96,7 +96,7 @@ final class DeclaredResourceTenantTest extends TestCase
         self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, '999'));
         self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, 'abc'));
         self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, '0' . $ticket->getKey())); // @phpstan-ignore binaryOp.invalid
-        self::assertFalse($resolver->tenantOfRecord(ScopedTicket::class, '-0'));
+        self::assertFalse($resolver->tenantOfRecord(ScopedPost::class, '-0'));
         self::assertFalse($resolver->tenantOfRecord(ScopedPost::class, '01'));
         self::assertNull($resolver->tenantOfRecord(ScopedPost::class, '0'));
         self::assertNull($resolver->tenantOfRecord(ScopedPost::class, '-1'));
@@ -133,16 +133,21 @@ final class DeclaredResourceTenantTest extends TestCase
         }
 
         $manager = $this->resolveRequest($user);
-        $pairs   = ['seven' => [TenantScopedPost::class, '7'], 'padded' => [TenantScopedPost::class, '07'], 'tenantless' => [ScopedPost::class, '07']];
-        $checks  = \array_map(static fn (array $pair): CheckInput => new CheckInput('posts:view', $pair), $pairs);
-        $reason  = static fn (array $pair): ?DecisionReason => $manager->check('posts:view', $pair)->reason;
-        $denied  = ['seven' => DecisionReason::EXPLICIT_DENY, 'padded' => DecisionReason::RESOURCE_UNRESOLVED, 'tenantless' => DecisionReason::RESOURCE_UNRESOLVED];
+        $pairs   = [
+            'seven'      => [TenantScopedPost::class, '7'],
+            'padded'     => [TenantScopedPost::class, '07'],
+            'tenantless' => [ScopedPost::class, '07'],
+            'signed'     => [ScopedPost::class, '-0'],
+        ];
+        $checks = \array_map(static fn (array $pair): CheckInput => new CheckInput('posts:view', $pair), $pairs);
+        $reason = static fn (array $pair): ?DecisionReason => $manager->check('posts:view', $pair)->reason;
+        $denied = ['seven' => DecisionReason::EXPLICIT_DENY, ...\array_fill_keys(['padded', 'tenantless', 'signed'], DecisionReason::RESOURCE_UNRESOLVED)];
 
         self::assertSame($denied, \array_map($reason, $pairs));
         self::assertSame($denied, \array_map(static fn (Decision $decision): ?DecisionReason => $decision->reason, $manager->checkMany($checks)));
         $allowed = $manager->canEach('posts:view', [...$pairs, 'eight' => [TenantScopedPost::class, '8']]);
 
-        self::assertSame(['seven' => false, 'padded' => false, 'tenantless' => false, 'eight' => true], $allowed);
+        self::assertSame(['seven' => false, 'padded' => false, 'tenantless' => false, 'signed' => false, 'eight' => true], $allowed);
         self::assertSame([8], TenantScopedPost::query()->whereAuthorized('posts:view', [], $manager)->pluck('id')->all()); // @phpstan-ignore method.notFound
     }
 
@@ -335,9 +340,10 @@ final class DeclaredResourceTenantTest extends TestCase
 
         self::assertCount(1, $lookups);
         self::assertTrue($lookups[0]->useWritePdo);
-        $expected = ['a' => new Reference('teams', '5'), 'b' => new Reference('teams', '6'), 'c' => false, 'd' => false, 'e' => false, 'f' => false];
+        $isTenant = static fn (mixed $tenant): bool => $tenant instanceof Reference;
 
-        self::assertEquals($expected, $tenants);
+        self::assertEquals(['a' => new Reference('teams', '5'), 'b' => new Reference('teams', '6')], \array_filter($tenants, $isTenant));
+        self::assertSame(['c' => false, 'd' => false, 'e' => false, 'f' => false], \array_filter($tenants, static fn (mixed $tenant): bool => !$isTenant($tenant)));
         self::assertSame(\array_keys($ids), \array_keys($tenants));
 
         foreach ($ids as $key => $id) {
