@@ -55,6 +55,9 @@ final class TenantScope implements Scope
     /** @var string The container key holding the tenant and application `within()` put in place, so a nested call restores them. */
     private const string WITHIN = 'authorization.tenant_scope.within';
 
+    /** @var string The container key holding a token replaced whenever a change to the tenant tree is reported, which what was read under the tree is held with. */
+    private const string TREE_VERSION = 'authorization.tenant_scope.tree_version';
+
     /**
      * Apply the tenant scope to the given Eloquent builder.
      *
@@ -124,7 +127,8 @@ final class TenantScope implements Scope
      * platform scope for every application.
      *
      * The resolution cache keys its entries by it, so two scopes never share
-     * one.
+     * one: each value has its '%' and ':' escaped, and the application is a
+     * single segment, so the number of segments tells the parts apart.
      *
      * @return string
      *
@@ -133,7 +137,8 @@ final class TenantScope implements Scope
     public static function scopeKey(): string
     {
         $scope = self::whileResolving(static function (ResolvedTenant $resolved): string {
-            $application = $resolved->application === null ? 'every' : 'app:' . $resolved->application;
+            $escape      = static fn (string $value): string => \strtr($value, ['%' => '%25', ':' => '%3A']);
+            $application = $resolved->application === null ? 'every' : 'app=' . $escape($resolved->application);
 
             if ($resolved->tenant === null) {
                 return 'platform:' . $application;
@@ -141,7 +146,7 @@ final class TenantScope implements Scope
 
             $below = $resolved->isBelow ? ':below' : '';
 
-            return \implode(':', self::extractTenantPair($resolved->tenant)) . $below . ':' . $application;
+            return \implode(':', \array_map($escape, self::extractTenantPair($resolved->tenant))) . $below . ':' . $application;
         });
 
         return $scope ?? 'platform:every';
@@ -223,6 +228,32 @@ final class TenantScope implements Scope
         Container::getInstance()->forgetInstance(ResolvedTenant::class);
 
         ResolutionCache::instance()?->tenantChanged();
+    }
+
+    /**
+     * Note a reported change to the tenant tree, so every chain held, by the
+     * request or a `within()`, and the grants an instance read for a role
+     * check, are read again.
+     *
+     * @return void
+     */
+    public static function treeChanged(): void
+    {
+        Container::getInstance()->instance(self::TREE_VERSION, new \stdClass);
+    }
+
+    /**
+     * Return the token of the tenant tree as last reported changed, which a
+     * chain or grants read under it are held with.
+     *
+     * @return object
+     */
+    public static function treeVersion(): object
+    {
+        $container = Container::getInstance();
+
+        /** @var object */
+        return $container->bound(self::TREE_VERSION) ? $container->make(self::TREE_VERSION) : $container->instance(self::TREE_VERSION, new \stdClass);
     }
 
     /**

@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Diagnostics\ConfigIssue;
 use SineMacula\Laravel\Authorization\Diagnostics\Enums\IssueCode;
 use SineMacula\Laravel\Authorization\Diagnostics\PackageState;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
@@ -161,6 +162,30 @@ final class ResolvedTenantTest extends TestCase
         self::assertSame([], (new ResolvedTenant($resolver, null))->chain($unused)->tenants);
         self::assertFalse($resolved->isBelow);
         self::assertFalse($resolved->chain($first)->isBelow);
+    }
+
+    /**
+     * The chain held is read again once a change to the tree is reported, and a
+     * refreshed one is held as read under the tree as it stands.
+     *
+     * @return void
+     */
+    public function testTheChainIsReadAgainOnceATreeChangeIsReported(): void
+    {
+        $tree = $this->createMock(TenantTree::class);
+
+        $tree->expects(self::exactly(3))->method('ancestors')->willReturn([]);
+
+        $resolved = new ResolvedTenant(self::createStub(SubjectResolver::class), new Reference('stub_tenant', 'org'));
+
+        $resolved->chain($tree);
+        $resolved->chain($tree);
+
+        TenantScope::treeChanged();
+
+        $resolved->chain($tree);
+        $resolved->refreshChain($tree);
+        $resolved->chain($tree);
     }
 
     /**

@@ -55,7 +55,8 @@ An entry's key names its kind, its grantee and the scope it was built in:
 ```
 
 The scope is `platform:{application}`, or `{tenant type}:{tenant key}:{application}` with `:below` after the tenant when
-checks are decided just below it; the application is `app:{name}`, or `every` for none. The kinds are:
+checks are decided just below it; the application is `app={name}`, or `every` for none. A `%` or `:` in the tenant type,
+tenant key or application name is written `%25` or `%3A`, so no two scopes share a key. The kinds are:
 
 | Kind                                                          | Holds                                                           |
 |---------------------------------------------------------------|-----------------------------------------------------------------|
@@ -130,13 +131,13 @@ Authorization::treeChanged($account);
 
 It takes the tenant as a model, an `AuthorizableTenant` or a `Reference`. It empties the memo and bumps the tenant's
 version, which every entry built in the tenant or below it records, so the move takes effect on the next check in the
-worker that reports it, and from the next request or job in every other. It also drops the tenant resolved for the
-request, so its ancestors are read again, and a delegated administration call running meanwhile is tried again rather
-than written on the chains its decisions read (see [Delegated
-administration](administration.md#delegated-administration)). Like a write, the version is bumped again once an open
-transaction commits or rolls back. A change not reported is seen only by a later request or job, once the entries built
-under the old tree have lapsed. Reporting runs no grant hook: an integration that widens a scope on a move asks the
-[grant scope query](administration.md#grant-scope-query) whose grants the move concerns.
+worker that reports it, and from the next request or job in every other. In that worker, the ancestors held for the
+request and for a `within()` running, and the roles a model instance read for `hasRole()`, are read again, and a
+delegated administration call running meanwhile is tried again rather than written on the chains its decisions read (see
+[Delegated administration](administration.md#delegated-administration)). Like a write, the version is bumped again once
+an open transaction commits or rolls back. A change not reported is seen only by a later request or job, once the
+entries built under the old tree have lapsed. Reporting runs no grant hook: an integration that widens a scope on a move
+asks the [grant scope query](administration.md#grant-scope-query) whose grants the move concerns.
 
 ## A failing store
 
@@ -166,7 +167,7 @@ on the `web` application. Its first check in worker A misses both tiers, reads t
 permissions entry recording the versions of the user and of each role it reaches:
 
 ```php
-Authorization::can('posts:update'); // worker A: admin-authorization:permissions:user:42:platform:app:web stored
+Authorization::can('posts:update'); // worker A: admin-authorization:permissions:user:42:platform:app=web stored
 Authorization::can('posts:update'); // worker A, same request: read from the memo
 Authorization::can('posts:update'); // worker B, next request: read from the store, versions compared
 ```
