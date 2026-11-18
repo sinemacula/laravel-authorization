@@ -10,13 +10,21 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Events\Grantee\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\Grantee\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -27,14 +35,20 @@ use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions as Actions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ReportsEveryDecision;
+use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubGrantee;
+use Tests\Feature\Stubs\StubMachine;
+use Tests\Feature\Stubs\StubRequirementChecker;
+use Tests\Feature\Stubs\StubSessionPolicySource;
 use Tests\TestCase;
 
 /**
@@ -716,6 +730,85 @@ final class DelegatedAdministrationTest extends TestCase
     }
 
     /**
+     * A call whose action needs a step-up the session has not met is refused
+     * with `InsufficientAuthenticationException`, carrying the decision, and
+     * writes nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnUnmetStepUpRefusesTheCallWithNothingWritten(): void
+    {
+        $actor   = $this->steppingUp(RequirementResult::unmet(['multifactor']));
+        $before  = self::snapshot();
+        $changes = \count(self::changes());
+        $refusal = self::refusalOf(static fn (): mixed => self::grants()->grantPermission(self::user(), 'posts:edit', actor: $actor));
+
+        self::assertInstanceOf(InsufficientAuthenticationException::class, $refusal);
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $refusal->getDecision()?->reason);
+        self::assertSame($before, self::snapshot());
+        self::assertCount($changes, self::changes());
+    }
+
+    /**
+     * A step-up met in the session counts for the request's acting context
+     * alone: one naming the same model has no session, so it is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAMetStepUpCountsOnlyThroughTheCurrentContext(): void
+    {
+        $current = $this->steppingUp(RequirementResult::met());
+        $named   = ActingContext::for(StubGrantee::query()->findOrFail('admin-1'));
+        $refusal = self::refusalOf(static fn (): mixed => self::grants()->grantPermission(self::user(), 'posts:edit', actor: $named));
+
+        self::assertInstanceOf(InsufficientAuthenticationException::class, $refusal);
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $refusal->getDecision()?->reason);
+        self::assertFalse(self::user()->hasPermission('posts:edit'));
+        self::assertSame(GrantOutcome::GRANTED, self::grants()->grantPermission(self::user(), 'posts:edit', actor: $current));
+        self::assertTrue(self::user()->hasPermission('posts:edit'));
+    }
+
+    /**
+     * A machine actor grants through the service ranked by its roles and capped
+     * by its credential's scopes: a senior grantee is refused, a permission the
+     * scopes do not cover is unprovable, and neither writes anything.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAMachineActorIsRankedAndCappedByItsCredential(): void
+    {
+        $machine = StubMachine::create(['id' => 'svc-1']);
+        $senior  = StubGrantee::query()->create(['id' => 'senior']);
+
+        self::grants()->grantRole($machine, Role::query()->create(['name' => 'integration', 'rank' => 2]));
+        self::grants()->grantRole($senior, Role::query()->create(['name' => 'chief', 'rank' => 1]));
+
+        foreach ([Actions::PERMISSION_GRANT, 'posts:edit', 'posts:read'] as $name) {
+            self::grants()->grantPermission($machine, self::permission($name));
+        }
+
+        $this->app?->instance(SessionPolicySource::class, new StubSessionPolicySource([Actions::PERMISSION_GRANT, 'posts:edit']));
+
+        config(['authorization.session.scopes' => []]);
+
+        $this->app?->forgetInstance(SessionScopes::class);
+
+        $actor = ActingContext::for($machine);
+        $grant = static fn (StubGrantee $user, string $name): \Closure => static fn (ActingContext $actor): mixed => self::grants()->grantPermission($user, $name, actor: $actor);
+
+        self::assertRefusedWithNothingWritten($grant($senior, 'posts:edit'), $actor, DecisionReason::ADMINISTRATION_RANK, Actions::PERMISSION_GRANT);
+        self::assertRefusedWithNothingWritten($grant(self::user(), 'posts:read'), $actor, DecisionReason::ADMINISTRATION_UNPROVABLE, Actions::PERMISSION_GRANT);
+        self::assertSame(GrantOutcome::GRANTED, $grant(self::user(), 'posts:edit')($actor));
+        self::assertTrue(self::user()->hasPermission('posts:edit'));
+    }
+
+    /**
      * Assert the call, made as the actor, is refused for the reason, after the
      * action is decided when one is named, and leaves every table as it was and
      * dispatches no change event.
@@ -743,6 +836,38 @@ final class DelegatedAdministrationTest extends TestCase
         }
 
         self::assertSame($action, \array_reverse(self::dispatched(DecisionEvaluated::class))[0]->action);
+    }
+
+    /**
+     * Return the request's acting context, in a session the checker answers
+     * with the result: an administrator holding `posts:edit`, allowed to grant
+     * permissions by a policy needing a step-up alone.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\RequirementResult  $result
+     * @return \SineMacula\Laravel\Authorization\Administration\ActingContext
+     *
+     * @throws \Throwable
+     */
+    private function steppingUp(RequirementResult $result): ActingContext
+    {
+        self::administrator(['posts:edit']);
+
+        $admin     = StubGrantee::query()->findOrFail('admin-1');
+        $condition = ['authentication_requirement' => ['authentication' => ['multifactor' => ['max_age' => 900]]]];
+        $statement = ['effect' => 'allow', 'actions' => [Actions::PERMISSION_GRANT], 'conditions' => $condition];
+
+        self::grants()->attachPolicy($admin, Policy::create(['name' => 'step-up', 'document' => ['statements' => [$statement]]]));
+
+        $this->app?->instance(AuthenticationRequirementChecker::class, new StubRequirementChecker($result));
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($admin, $admin, session: 'session-1')));
+
+        foreach (['authorization', AuthorizationManager::class, CheckContextFactory::class] as $abstract) {
+            $this->app?->forgetInstance($abstract);
+        }
+
+        Authorization::clearResolvedInstance('authorization');
+
+        return ActingContext::current();
     }
 
     /**
