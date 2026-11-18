@@ -1030,7 +1030,7 @@ final class RoleServiceTest extends TestCase
     /**
      * A permission name is looked up in the tenant that owns the role, so with
      * no tenant current, or another, the role's grant, sync and revocation by
-     * name still reach the tenant's own permission of that name.
+     * name reach the tenant's own permission of that name over the platform's.
      *
      * @return void
      *
@@ -1042,16 +1042,16 @@ final class RoleServiceTest extends TestCase
         $role   = self::role('editor', self::ownedBy($tenant));
         $owned  = Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
 
-        self::assertSame(GrantOutcome::GRANTED, self::service()->grantPermission($role, 'posts:edit'));
-        self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
-
         Permission::query()->create(['name' => 'posts:edit']);
 
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantPermission($role, 'posts:edit'));
+        self::assertSame([$owned->id], DB::table('role_permissions')->pluck('permission_id')->all());
+        self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
         self::assertSame([$owned->id], self::service()->syncPermissions($role, ['posts:edit'])->granted);
-        self::assertFalse(self::service()->syncPermissions($role, ['posts:edit'])->isChange());
 
         $this->actAsTenant(self::createTenant('tenant-b'));
 
+        self::assertFalse(self::service()->syncPermissions($role, ['posts:edit'])->isChange());
         self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
         self::assertSame(0, DB::table('role_permissions')->count());
     }

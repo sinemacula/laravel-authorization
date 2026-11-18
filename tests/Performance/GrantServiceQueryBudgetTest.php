@@ -16,7 +16,8 @@ use Tests\TestCase;
 /**
  * Query budget of trusted bulk grant changes: revoking everything a grantee
  * holds reads and writes each grant table at once, and a sync reads what it
- * drops at once, so neither costs more as the grantee's rows grow.
+ * drops at once, so neither costs more as the grantee's rows grow, and a sync
+ * costs the same more for each target it lists.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,6 +40,8 @@ final class GrantServiceQueryBudgetTest extends TestCase
         $few  = self::holding('few', 2);
         $many = self::holding('many', 12);
 
+        self::grants()->revokeAll(self::holding('warm', 1));
+
         self::assertSame(
             self::queriesOf(static fn (): int => self::grants()->revokeAll($few)),
             self::queriesOf(static fn (): int => self::grants()->revokeAll($many)),
@@ -51,24 +54,32 @@ final class GrantServiceQueryBudgetTest extends TestCase
 
     /**
      * A sync of the same two roles costs as many queries whether it drops two
-     * held roles or twelve.
+     * held roles or twelve, and each further role it lists costs the same.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testASyncCostsTheSameWhateverItDrops(): void
+    public function testASyncCostsOnlyWhatItLists(): void
     {
         $few  = self::holding('few', 2);
         $many = self::holding('many', 12);
 
-        Role::query()->create(['name' => 'kept-a']);
-        Role::query()->create(['name' => 'kept-b']);
+        foreach (['kept-a', 'kept-b', 'kept-c', 'kept-d'] as $name) {
+            Role::query()->create(['name' => $name]);
+        }
 
-        $sync = static fn (StubGrantee $user): \Closure => static fn (): mixed => self::grants()->syncRoles($user, ['kept-a', 'kept-b']);
+        $sync = static fn (StubGrantee $user, string ...$names): \Closure => static fn (): mixed => self::grants()->syncRoles($user, \array_values($names));
 
-        self::assertSame(self::queriesOf($sync($few)), self::queriesOf($sync($many)));
-        self::assertSame(4, DB::table('authorizable_roles')->count());
+        self::grants()->syncRoles(self::holding('warm', 2), ['kept-a']);
+
+        $one  = self::queriesOf($sync(self::holding('one', 2), 'kept-a'));
+        $two  = self::queriesOf($sync($few, 'kept-a', 'kept-b'));
+        $four = self::queriesOf($sync(self::holding('four', 2), 'kept-a', 'kept-b', 'kept-c', 'kept-d'));
+
+        self::assertSame($two, self::queriesOf($sync($many, 'kept-a', 'kept-b')));
+        self::assertSame(2 * ($two - $one), $four - $two);
+        self::assertSame(10, DB::table('authorizable_roles')->count());
     }
 
     /**

@@ -98,7 +98,7 @@ final class GrantServiceEdgeCasesTest extends TestCase
 
         Event::fake([RoleAssigned::class]);
 
-        self::service()->grantRole($user, 'editor');
+        $user->assignRole('editor');
 
         $row = DB::table('authorizable_roles')->sole(['tenant_type', 'tenant_id']);
 
@@ -162,12 +162,13 @@ final class GrantServiceEdgeCasesTest extends TestCase
         Carbon::setTestNow('2026-07-01 12:00:00');
 
         $admin  = self::administrator();
+        $first  = self::administrator(id: 'admin-0');
         $user   = self::user();
         $kept   = self::role('kept');
         $lapsed = self::role('lapsed');
         $added  = self::role('added');
 
-        self::service()->grantRole($user, $kept);
+        self::service()->grantRole($user, $kept, actor: $first);
         self::service()->grantRole($user, $lapsed, Carbon::parse('2026-07-01 13:00:00', 'UTC'));
 
         Carbon::setTestNow('2026-07-01 14:00:00');
@@ -178,7 +179,7 @@ final class GrantServiceEdgeCasesTest extends TestCase
 
         self::assertSame([[$added->id], [$lapsed->id]], [$result->granted, $result->rearmed]);
         self::assertEqualsCanonicalizing(
-            [[$kept->id, null, null], [$lapsed->id, ...$actor], [$added->id, ...$actor]],
+            [[$kept->id, $user->getMorphClass(), 'admin-0'], [$lapsed->id, ...$actor], [$added->id, ...$actor]],
             $rows->map(static fn (object $row): array => \array_values((array) $row))->all(),
         );
     }
