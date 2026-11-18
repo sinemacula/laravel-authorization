@@ -6,19 +6,24 @@ namespace Tests\Feature;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
+use Tests\Concerns\CatchesRefusals;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\TestCase;
 
@@ -47,6 +52,8 @@ use Tests\TestCase;
 #[CoversTrait(ManagesPermissions::class)]
 final class RoleHierarchyTest extends TestCase
 {
+    use CatchesRefusals;
+
     /**
      * A child role inherits its parent's permissions via `getPermissions()`.
      *
@@ -356,6 +363,48 @@ final class RoleHierarchyTest extends TestCase
         $this->expectException(RoleHierarchyCycleException::class);
 
         $root->fresh()->isAncestorOf($child->fresh()); // @phpstan-ignore method.nonObject
+    }
+
+    /**
+     * A cycle written past the observer makes a holder's check(), can() and the
+     * Gate throw, on every check once its cached grant is invalidated.
+     *
+     * @return void
+     */
+    public function testAStoredCycleFailsAHoldersCheckClosed(): void
+    {
+        $config = $this->container()->make(ConfigRepository::class);
+
+        $config->set('authorization.cache.store', 'array');
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        (new AuthorizationServiceProvider($this->container()))->register();
+
+        $root  = $this->makeRole('admin');
+        $child = $this->makeRole('editor', parentId: $root->id);
+        $user  = StubGrantee::create(['id' => (string) Str::uuid()]);
+
+        $this->makePermission('posts:delete');
+        $root->givePermission('posts:delete');
+        $user->assignRole('editor');
+
+        self::assertTrue(Authorization::for($user)->can('posts:delete'));
+
+        DB::table('roles')->where('id', $root->id)->update(['parent_id' => $child->id]);
+
+        $child->givePermission($this->makePermission('posts:edit'));
+
+        $calls = [
+            static fn () => Authorization::for($user)->check('posts:delete'),
+            static fn () => Authorization::for($user)->can('posts:delete'),
+            static fn () => Gate::forUser($user)->allows('posts:delete'),
+        ];
+
+        foreach (['first', 'again'] as $pass) {
+            foreach ($calls as $call) {
+                self::assertInstanceOf(RoleHierarchyCycleException::class, self::refusalOf($call), $pass);
+            }
+        }
     }
 
     /**

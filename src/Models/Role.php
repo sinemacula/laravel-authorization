@@ -5,13 +5,13 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Models;
 
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
-use Illuminate\Database\Eloquent\Attributes\ScopedBy;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
+use SineMacula\Laravel\Authorization\Concerns\HasTenantScope;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 use SineMacula\Laravel\Authorization\Config\TableNames;
@@ -19,7 +19,6 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
-use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
  * Eloquent model for role rows — named buckets of permissions shared across
@@ -49,10 +48,9 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * @copyright   2026 Sine Macula Limited
  */
 #[ObservedBy(RoleObserver::class)]
-#[ScopedBy(TenantScope::class)]
 class Role extends Model implements SupportsPolicies
 {
-    use HasPolicies, HasRoleHierarchy, HasSystemProtection, HasUuids, ManagesPermissions, ValidatesAuthorizationName;
+    use HasPolicies, HasRoleHierarchy, HasSystemProtection, HasTenantScope, HasUuids, ManagesPermissions, ValidatesAuthorizationName;
 
     /** @var list<string> Attributes that are mass assignable. */
     protected $fillable = [

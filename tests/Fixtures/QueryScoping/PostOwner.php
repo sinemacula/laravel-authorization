@@ -9,7 +9,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * A model owning the posts that share its title, one of its relations scoped in
- * its definition, for query scoping tests.
+ * its definition and one to posts that scope themselves, for query scoping
+ * tests.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,6 +36,17 @@ final class PostOwner extends Model
     public function posts(): HasMany
     {
         return $this->hasMany(ScopedPost::class, 'title', 'title');
+    }
+
+    /**
+     * Return the posts that share the owner's title, each query of them scoped
+     * by the posts' own model-level scope.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\Tests\Fixtures\QueryScoping\GuardedPost, $this>
+     */
+    public function guardedPosts(): HasMany
+    {
+        return $this->hasMany(GuardedPost::class, 'title', 'title');
     }
 
     /**
