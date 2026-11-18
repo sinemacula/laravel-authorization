@@ -1058,6 +1058,35 @@ final class RoleServiceTest extends TestCase
     }
 
     /**
+     * A permission name is looked up in the tenant that owns the role, so with
+     * no tenant current, or another, the role's grant, sync and revocation by
+     * name reach the tenant's own permission of that name over the platform's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPermissionNameIsLookedUpInTheRolesTenant(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $role   = self::role('editor', self::ownedBy($tenant));
+        $owned  = Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
+
+        Permission::query()->create(['name' => 'posts:edit']);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantPermission($role, 'posts:edit'));
+        self::assertSame([$owned->id], DB::table('role_permissions')->pluck('permission_id')->all());
+        self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
+        self::assertSame([$owned->id], self::service()->syncPermissions($role, ['posts:edit'])->granted);
+
+        $this->actAsTenant(self::createTenant('tenant-b'));
+
+        self::assertFalse(self::service()->syncPermissions($role, ['posts:edit'])->isChange());
+        self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
+        self::assertSame(0, DB::table('role_permissions')->count());
+    }
+
+    /**
      * Granting and revoking a role's permission each run in one transaction on
      * the package's connection: the lookups as well as the write.
      *

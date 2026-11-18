@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Scopes;
 
 use Illuminate\Container\Container;
+use Illuminate\Database\Eloquent\Builder;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
@@ -20,6 +21,7 @@ use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubGrantee;
 use Tests\Fixtures\QueryScoping\GuardedPost;
+use Tests\Fixtures\QueryScoping\PostOwner;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
@@ -70,6 +72,71 @@ final class AuthorizedScopeTest extends TestCase
         $user->revokePermission($permission);
 
         self::assertSame(0, $query->count());
+    }
+
+    /**
+     * A relation to the model keeps only the posts the subject may view, loaded
+     * lazily or eagerly, and an existence or a count query weighs those alone.
+     *
+     * @return void
+     */
+    public function testARelationToTheModelKeepsOnlyTheViewableRows(): void
+    {
+        $user = StubGrantee::create(['id' => 'u1']);
+
+        $this->resolveRequest($user);
+
+        $owner = PostOwner::query()->create(['title' => 'post']);
+
+        foreach ([1, 2, 3] as $id) {
+            GuardedPost::query()->create(['id' => $id, 'title' => 'post']);
+        }
+
+        $user->givePermission(Permission::create(['name' => GuardedPost::ACTION]));
+        $user->attachPolicy(self::storedPolicy('not-two', [['effect' => 'deny', 'actions' => [GuardedPost::ACTION], 'resources' => [(new GuardedPost)->getMorphClass() . ':2']]]));
+
+        $ids   = static fn (PostOwner $owner): array => $owner->guardedPosts->sortBy('id')->pluck('id')->values()->all();
+        $eager = PostOwner::query()->with('guardedPosts')->firstOrFail();
+
+        self::assertSame([1, 3], $ids($owner));
+        self::assertTrue($eager->relationLoaded('guardedPosts'));
+        self::assertSame([1, 3], $ids($eager));
+
+        $holding = static fn (int $id): int => PostOwner::query()->whereHas('guardedPosts', static fn (Builder $posts): Builder => $posts->whereKey($id))->count();
+
+        self::assertSame([1, 0], [$holding(1), $holding(2)]);
+        self::assertSame([1, 0], [PostOwner::query()->has('guardedPosts', '>=', 2)->count(), PostOwner::query()->has('guardedPosts', '>=', 3)->count()]);
+        self::assertEquals(2, PostOwner::query()->withCount('guardedPosts')->firstOrFail()->getAttribute('guarded_posts_count'));
+    }
+
+    /**
+     * The scope's own context is given to every compile, so a policy reading
+     * `input` keeps the rows `check()` keeps with that context.
+     *
+     * @return void
+     */
+    public function testTheScopesContextIsGivenToEveryCompile(): void
+    {
+        $user    = StubGrantee::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user);
+        $record  = (new ScopedPost)->getMorphClass() . ':2';
+        $deny    = ['effect' => 'deny', 'actions' => ['posts:view'], 'resources' => [$record], 'conditions' => ['eq' => ['input.channel' => 'web']]];
+
+        foreach ([1, 2] as $id) {
+            ScopedPost::query()->create(['id' => $id, 'title' => 'post']);
+        }
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+        $user->attachPolicy(self::storedPolicy('not-two-on-web', [$deny]));
+
+        foreach (['web' => [1], 'api' => [1, 2]] as $channel => $expected) {
+            $context = ['channel' => $channel];
+            $checked = \array_values(\array_filter([1, 2], static fn (int $id): bool => $manager->can('posts:view', ScopedPost::query()->find($id), $context)));
+            $kept    = ScopedPost::query()->withGlobalScope('channel', new AuthorizedScope('posts:view', $context))->orderBy('id')->pluck('id')->all();
+
+            self::assertSame($expected, $checked, $channel);
+            self::assertSame($checked, $kept, $channel);
+        }
     }
 
     /**

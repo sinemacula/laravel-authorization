@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
@@ -23,6 +24,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
+use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
@@ -101,6 +103,7 @@ use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Feature\Stubs\SuspendableGrantee;
 use Tests\Fixtures\QueryScoping\ScopedPost;
+use Tests\Fixtures\QueryScoping\TenantScopedPost;
 use Tests\TestCase;
 
 /**
@@ -1215,6 +1218,43 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * An allow comparing `resource.tenant.id` with `${subject.tenant.id}`
+     * admits a record of the subject's tenant alone: one of a tenant below it
+     * is refused by the condition, and a tenantless record or a type alone
+     * leaves the key missing, so the allow does not apply.
+     *
+     * @return void
+     */
+    public function testATenantGuardAdmitsOnlyTheSubjectsTenantsRecords(): void
+    {
+        $org     = StubTenant::query()->create(['id' => 'org', 'name' => 'org']);
+        $account = StubTenant::query()->create(['id' => 'account', 'name' => 'account']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org)));
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(StubGrantee::create(['id' => 'member']), $org));
+
+        $post = static fn (?StubTenant $tenant): TenantScopedPost => TenantScopedPost::query()->create([
+            'title'       => 'post',
+            'tenant_type' => $tenant?->getMorphClass(),
+            'tenant_id'   => $tenant?->getKey(),
+        ]);
+
+        $scope = Authorization::withPolicies([EvaluationPolicy::fromArray(['name' => 'same-tenant', 'statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['resource.tenant.id' => '${subject.tenant.id}']]],
+            ['effect' => 'allow', 'actions' => ['posts:list'], 'conditions' => ['null' => ['resource.tenant.id' => true]]],
+        ]])]);
+
+        self::assertTrue($scope->can('posts:read', $post($org)));
+        self::assertFalse($scope->can('posts:list', $post($org)));
+        self::assertSame(DecisionReason::CONDITION_FAILED, $scope->check('posts:read', $post($account))->reason);
+
+        foreach ([$post(null), TenantScopedPost::class] as $resource) {
+            self::assertFalse($scope->can('posts:read', $resource));
+            self::assertTrue($scope->can('posts:list', $resource));
+        }
+    }
+
+    /**
      * Spatie aliases mirror the canonical trait methods.
      *
      * @return void
@@ -1565,6 +1605,42 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * The owner rule compares a provider's `resource.owner.id` with the
+     * interpolated `${subject.id}`: its allow admits the owner alone, and its
+     * `neq` deny refuses a non-owner and, with the owner id missing, everyone.
+     *
+     * @return void
+     */
+    public function testTheOwnerRuleAdmitsOnlyTheOwner(): void
+    {
+        $owner = StubGrantee::create(['id' => '7']);
+        $other = StubGrantee::create(['id' => '8']);
+        $post  = StubGrantee::create(['id' => 'post-1']);
+
+        $this->container()->make(ConfigRepository::class)->set('authorization.attributes.resources', [$post->getMorphClass() => RecordingResourceAttributes::class]);
+
+        $policies = [
+            EvaluationPolicy::fromArray(['name' => 'owner-edits', 'statements' => [
+                ['effect' => 'allow', 'actions' => ['posts:edit'], 'conditions' => ['eq' => ['resource.owner.id' => '${subject.id}']]],
+                ['effect' => 'allow', 'actions' => ['posts:update']],
+            ]]),
+            EvaluationPolicy::fromArray(['name' => 'own-posts-only', 'statements' => [
+                ['effect' => 'deny', 'actions' => ['posts:update'], 'conditions' => ['neq' => ['resource.owner.id' => '${subject.id}']]],
+            ]]),
+        ];
+
+        $owners = Authorization::for($owner)->withPolicies($policies);
+        $others = Authorization::for($other)->withPolicies($policies);
+
+        self::assertTrue($owners->can('posts:edit', $post));
+        self::assertSame(DecisionReason::CONDITION_FAILED, $others->check('posts:edit', $post)->reason);
+        self::assertTrue($owners->can('posts:update', $post));
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $others->check('posts:update', $post)->reason);
+        self::assertFalse($owners->can('posts:edit', $post->getMorphClass()));
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $owners->check('posts:update', $post->getMorphClass())->reason);
+    }
+
+    /**
      * A resource attribute provider that throws aborts the check with
      * `AttributeProviderFailed`, wrapping its failure: no decision is made,
      * recorded or reported, so nothing of the provider's message or values
@@ -1616,6 +1692,119 @@ final class AuthorizationManagerTest extends TestCase
         $this->expectException(AttributeProviderFailed::class);
 
         $scope->authorize('posts:read', $post);
+    }
+
+    /**
+     * A session policy source and a policy resolver that each fail with an
+     * outage, with the exception each throws.
+     *
+     * @return iterable<string, array{class-string, object, \RuntimeException}>
+     */
+    public static function failingCheckSources(): iterable
+    {
+        $outage = new \RuntimeException('Token introspection is unavailable.');
+
+        yield 'a session policy source' => [SessionPolicySource::class, new class ($outage) implements SessionPolicySource {
+            /**
+             * @param  \RuntimeException  $outage
+             */
+            public function __construct(
+
+                /** The exception every answer throws. */
+                private readonly \RuntimeException $outage,
+            ) {}
+
+            /**
+             * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+             * @return list<string>|null
+             *
+             * @throws \RuntimeException
+             */
+            #[\Override]
+            public function scopesFor(Subject $subject): ?array
+            {
+                throw $this->outage;
+            }
+        }, $outage];
+
+        $lost = new \RuntimeException('The grants connection was lost.');
+
+        yield 'a policy resolver' => [PolicyResolver::class, new class ($lost) implements PolicyResolver {
+            /**
+             * @param  \RuntimeException  $lost
+             */
+            public function __construct(
+
+                /** The exception every answer throws. */
+                private readonly \RuntimeException $lost,
+            ) {}
+
+            /**
+             * @param  object  $principal
+             * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+             *
+             * @throws \RuntimeException
+             */
+            #[\Override]
+            public function policiesFor(object $principal): array
+            {
+                throw $this->lost;
+            }
+        }, $lost];
+    }
+
+    /**
+     * A source of the check that throws aborts `check()`, `can()` and
+     * `authorize()` with its exception, rather than reading as no cap or no
+     * policy beside a held permission, and no decision is recorded or
+     * dispatched.
+     *
+     * @param  class-string  $abstract
+     * @param  object  $failing
+     * @param  \RuntimeException  $failure
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    #[DataProvider('failingCheckSources')]
+    public function testAFailingCheckSourceAbortsTheCheck(string $abstract, object $failing, \RuntimeException $failure): void
+    {
+        $user = StubGrantee::create(['id' => 'reader-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        $this->reportEveryDecision();
+        $this->app?->instance($abstract, $failing);
+
+        foreach (['authorization', AuthorizationManager::class] as $instance) {
+            $this->app?->forgetInstance($instance);
+        }
+
+        Authorization::clearResolvedInstance('authorization');
+        Event::fake();
+
+        $scope = Authorization::for($user);
+        $calls = [
+            static fn (): Decision => $scope->check('posts:read'),
+            static fn (): bool => $scope->can('posts:read'),
+            static function () use ($scope): void {
+                $scope->authorize('posts:read');
+            },
+        ];
+
+        $thrown = [];
+
+        foreach ($calls as $call) {
+            try {
+                $call();
+            } catch (\RuntimeException $exception) {
+                $thrown[] = $exception;
+            }
+        }
+
+        self::assertSame([$failure, $failure, $failure], $thrown);
+        self::assertNull($scope->lastDecision());
+        Event::assertNotDispatched(DecisionEvaluated::class);
+        Event::assertNotDispatched(AuthorizationFailed::class);
     }
 
     /**

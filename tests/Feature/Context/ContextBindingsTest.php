@@ -7,18 +7,23 @@ namespace Tests\Feature\Context;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Foundation\Application;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Context\ClockEnvironmentContext;
 use SineMacula\Laravel\Authorization\Context\ContextBindings;
 use SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext;
 use SineMacula\Laravel\Authorization\Context\RoutedRequestContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\ContributingAuthenticationContext;
@@ -27,6 +32,7 @@ use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
 use Tests\Feature\Stubs\ReservedContextSource;
 use Tests\Feature\Stubs\SiblingAuthenticationContext;
+use Tests\Feature\Stubs\StubGrantee;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\TestCase;
 
@@ -329,6 +335,36 @@ final class ContextBindingsTest extends TestCase
 
         self::assertSame(MatchOutcome::MATCHES, $context->assessRequirement(new AuthenticationRequirement(['multifactor' => null]))->outcome);
         self::assertCount(1, $checker->calls);
+    }
+
+    /**
+     * A declared key of a namespace the bound authentication context
+     * contributes decides saved policies through `can()`, from the values the
+     * context supplies.
+     *
+     * @return void
+     */
+    public function testAContributedNamespaceDecidesSavedPolicies(): void
+    {
+        $this->config()->set('authorization.context.keys', ['mfa' => ['enrolled' => 'bool']]);
+        $this->application()->instance(AuthenticationContext::class, new ContributingAuthenticationContext(['mfa'], values: ['mfa' => ['enrolled' => true]]));
+        $this->application()->instance(ContextKeyCatalogue::class, ContextBindings::catalogue($this->application()));
+
+        foreach (['authorization', AuthorizationManager::class, CheckContextFactory::class] as $abstract) {
+            $this->application()->forgetInstance($abstract);
+        }
+
+        Authorization::clearResolvedInstance('authorization');
+
+        $user = StubGrantee::create(['id' => 'user-1']);
+
+        $user->attachPolicy(Policy::create(['name' => 'enrolment', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => ['reports:export'], 'conditions' => ['bool' => ['mfa.enrolled' => true]]],
+            ['effect' => 'allow', 'actions' => ['reports:enrol'], 'conditions' => ['bool' => ['mfa.enrolled' => false]]],
+        ]]]));
+
+        self::assertTrue(Authorization::for($user)->can('reports:export'));
+        self::assertFalse(Authorization::for($user)->can('reports:enrol'));
     }
 
     /**

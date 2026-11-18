@@ -363,6 +363,24 @@ final class StatementTest extends TestCase
     }
 
     /**
+     * A `*` in the asked action is literal, so a deny on one action does not
+     * cover a client-supplied `posts:*`, while a `*` in a pattern spans further
+     * `:` segments.
+     *
+     * @return void
+     */
+    public function testAnAskedWildcardIsLiteralAndAPatternWildcardSpansSegments(): void
+    {
+        $delete  = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:delete']]);
+        $billing = Statement::fromArray(['effect' => 'deny', 'actions' => ['billing:*']]);
+
+        self::assertFalse($delete->coversAction('posts:*'));
+        self::assertFalse($delete->matches('posts:*'));
+        self::assertTrue($billing->coversAction('billing:invoices:refund'));
+        self::assertTrue($billing->coversAction('billing:*'));
+    }
+
+    /**
      * not_actions names every action matching none of its patterns.
      *
      * @return void
