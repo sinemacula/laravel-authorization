@@ -399,6 +399,28 @@ final class RankComparisonTest extends TestCase
     }
 
     /**
+     * The actor's own live break-glass activation of a ranked role counts
+     * toward its rank in the activation's scope alone; an ended one never
+     * counts.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheActorsLiveActivationCountsInItsScopeAlone(): void
+    {
+        $actor   = self::holding('actor', 6);
+        $subject = new Subject($actor, $actor);
+
+        self::activate($actor, Role::create(['name' => 'responder', 'rank' => 2]), ['tenant_type' => 'tenant', 'tenant_id' => 'a']);
+        self::activate($actor, Role::create(['name' => 'ended', 'rank' => 1]), ['ended_at' => Carbon::now()]);
+
+        self::assertSame(2, RankComparison::rankIn($subject, new Reference('tenant', 'a'), null));
+        self::assertSame(6, RankComparison::rankIn($subject, new Reference('tenant', 'b'), null));
+        self::assertSame(6, RankComparison::rankIn($subject, null, null));
+    }
+
+    /**
      * Across a reach, the most senior rank any of several holders holds counts,
      * read in one query whatever their types; none for no holders, or holders
      * with no ranked role there.

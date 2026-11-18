@@ -78,6 +78,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
+use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\LagsTheReadConnection;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RefusesThePackage;
@@ -123,7 +124,7 @@ use Tests\TestCase;
 #[CoversTrait(HasPolicies::class)]
 final class AuthorizationManagerTest extends TestCase
 {
-    use LagsTheReadConnection, ReadsDispatchedEvents, RefusesThePackage, ReportsEveryDecision;
+    use CatchesRefusals, LagsTheReadConnection, ReadsDispatchedEvents, RefusesThePackage, ReportsEveryDecision;
 
     /**
      * A role granted in an organisation allows in an account below it and not
@@ -811,6 +812,36 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * An identity's unreadable policy denies the principal as invalid_policy,
+     * whether the identity is a person or a machine.
+     *
+     * @return void
+     */
+    public function testAnIdentitysUnreadablePolicyDeniesWhateverItsKind(): void
+    {
+        $principal = StubGrantee::create(['id' => 'user-1']);
+
+        $principal->givePermission(Permission::create(['name' => 'posts:create']));
+
+        foreach (['person' => StubSecondGrantee::create(['id' => 'person-1']), 'machine' => StubMachine::create(['id' => 'svc-1'])] as $kind => $identity) {
+            $this->resolveSubject(new Subject($principal, $identity));
+
+            self::assertTrue(Authorization::can('posts:create'));
+
+            $policy = self::resourcePolicy($kind, [['effect' => 'allow', 'actions' => ['posts:read']]]);
+
+            $identity->attachPolicy($policy);
+
+            DB::table('policies')->where('id', $policy->getKey())->update(['document' => '{"statements":[{"effect":"allow"}]}']);
+
+            $decision = Authorization::check('posts:create');
+
+            self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason, $kind);
+            self::assertSame(DecisionStage::DENY, $decision->stage);
+        }
+    }
+
+    /**
      * RBAC still applies when no policy decides the check: a `no_match` denial
      * falls back to the held permission, allowing at the allow stage, and keeps
      * the evaluator's trace with the permission step after it.
@@ -1215,6 +1246,46 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertTrue($allowed->isAllowed());
         self::assertSame(DecisionStage::ALLOW, $allowed->stage);
+    }
+
+    /**
+     * A tenant-owned record loaded without a tenant column throws through
+     * check(), can(), authorize() and the Gate rather than count as tenantless.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARecordLoadedWithoutATenantColumnCannotBeChecked(): void
+    {
+        $this->container()->make(ConfigRepository::class)->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        [, $account, , $sibling] = $this->tenantTree();
+
+        $user = StubGrantee::create(['id' => 'user-1']);
+        $post = TenantScopedPost::query()->create(['title' => 'a', 'tenant_type' => $sibling->getMorphClass(), 'tenant_id' => 'sibling']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:delete']), null, $account);
+        $this->resolveInTenant($user, $account);
+
+        self::assertSame(DecisionReason::TENANT_SCOPE, Authorization::check('posts:delete', $post)->reason);
+
+        foreach ([['tenant_id', ['id', 'tenant_type']], ['tenant_type', ['id', 'tenant_id']], ['tenant_id', ['id']]] as [$missing, $loaded]) {
+            $narrow = TenantScopedPost::query()->select($loaded)->findOrFail($post->getKey());
+            $calls  = [
+                static fn (): Decision => Authorization::check('posts:delete', $narrow),
+                static fn (): bool => Authorization::can('posts:delete', $narrow),
+                static fn () => Authorization::authorize('posts:delete', $narrow),
+                static fn (): bool => Gate::forUser($user)->allows('posts:delete', $narrow),
+            ];
+
+            foreach ($calls as $call) {
+                $refusal = self::refusalOf($call);
+
+                self::assertInstanceOf(\UnexpectedValueException::class, $refusal);
+                self::assertSame("The tenant column '{$missing}' was not loaded, so the record's tenant cannot be read.", $refusal->getMessage());
+            }
+        }
     }
 
     /**
@@ -2615,6 +2686,44 @@ final class AuthorizationManagerTest extends TestCase
         self::assertTrue(Authorization::can('posts:read'));
         self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:edit')->reason);
         self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:publish')->reason);
+    }
+
+    /**
+     * A resource is capped by the boundaries of the tenant it is decided in: a
+     * child tenant's for its own resources, and the platform-wide ones alone
+     * once a check falls back to platform scope.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testBoundariesFollowTheTenantTheCheckIsDecidedIn(): void
+    {
+        [$org, $account, , $sibling] = $this->tenantTree();
+
+        $user = StubGrantee::create(['id' => 'user-1']);
+
+        foreach (['posts:read', 'posts:edit', 'posts:delete'] as $action) {
+            $user->givePermission(Permission::create(['name' => $action]));
+        }
+
+        $readOnly = [['effect' => 'allow', 'actions' => ['posts:read']]];
+
+        self::boundaries()->set($user, self::resourcePolicy('platform-cap', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit']]]));
+        self::boundaries()->set($user, self::resourcePolicy('account-cap', $readOnly), $account);
+        self::boundaries()->set($user, self::resourcePolicy('sibling-cap', $readOnly), $sibling);
+
+        $this->resolveInTenant($user, $org);
+
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:edit', self::postIn($account))->reason);
+        self::assertTrue(Authorization::can('posts:read', self::postIn($account)));
+        self::assertTrue(Authorization::can('posts:edit', self::postIn($org)));
+
+        $this->resolveInTenant($user, $account);
+
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:edit')->reason);
+        self::assertTrue(Authorization::can('posts:edit', self::postIn($sibling)));
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:delete', self::postIn($sibling))->reason);
     }
 
     /**

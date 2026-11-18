@@ -5,12 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Models;
 
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
-use Illuminate\Database\Eloquent\Attributes\ScopedBy;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
+use SineMacula\Laravel\Authorization\Concerns\HasTenantScope;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 use SineMacula\Laravel\Authorization\Config\ModelClasses;
 use SineMacula\Laravel\Authorization\Config\TableNames;
@@ -19,7 +19,6 @@ use SineMacula\Laravel\Authorization\Database\RolePermissionRelation;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
-use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
  * Eloquent model for permission rows.
@@ -48,10 +47,9 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * @copyright   2026 Sine Macula Limited
  */
 #[ObservedBy(PermissionObserver::class)]
-#[ScopedBy(TenantScope::class)]
 class Permission extends Model
 {
-    use HasSystemProtection, HasUuids, ValidatesAuthorizationName;
+    use HasSystemProtection, HasTenantScope, HasUuids, ValidatesAuthorizationName;
 
     /** @var list<string> Attributes that are mass assignable. */
     protected $fillable = [

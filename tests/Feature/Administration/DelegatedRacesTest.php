@@ -27,6 +27,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions as Actions;
@@ -111,6 +112,57 @@ final class DelegatedRacesTest extends TestCase
         self::assertSame([true, false], $decisions->getArrayCopy());
         self::assertFalse(self::holds($user, 'posts:edit'));
         self::assertNotContains(PermissionGranted::class, $changes->getArrayCopy());
+    }
+
+    /**
+     * The actor's right removed by another worker after this one memoised it
+     * refuses the grant, decided on what is stored.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARightRemovedElsewhereAfterTheMemoIsWarmIsRefused(): void
+    {
+        $actor = self::actor('admin', [Actions::PERMISSION_GRANT, 'posts:edit']);
+        $user  = self::user('user');
+
+        self::assertTrue($actor->decide(Actions::PERMISSION_GRANT)->isAllowed());
+
+        self::removeElsewhere(Actions::PERMISSION_GRANT);
+
+        $refusal = self::refusalOf(static fn (): GrantOutcome => self::grants()->grantPermission($user, 'posts:edit', actor: $actor));
+
+        self::assertSame(DecisionReason::NO_MATCH, $refusal->getReason());
+        self::assertFalse(self::holds($user, 'posts:edit'));
+    }
+
+    /**
+     * Inside a scope that keeps the memo of each tenant apart, the actor's
+     * right removed by another worker after this one memoised it still refuses
+     * the grant.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARightRemovedElsewhereInsideAScopeIsRefused(): void
+    {
+        $actor = self::actor('admin', [Actions::PERMISSION_GRANT, 'posts:edit']);
+        $user  = self::user('user');
+
+        $this->actAsTenant(self::createTenant('team'));
+
+        $refusal = AuthorizationScope::platform()->within(static function () use ($actor, $user): AuthorizationException {
+            self::assertTrue($actor->decide(Actions::PERMISSION_GRANT)->isAllowed());
+
+            self::removeElsewhere(Actions::PERMISSION_GRANT);
+
+            return self::refusalOf(static fn (): GrantOutcome => self::grants()->grantPermission($user, 'posts:edit', actor: $actor));
+        });
+
+        self::assertSame(DecisionReason::NO_MATCH, $refusal->getReason());
+        self::assertFalse(self::holds($user, 'posts:edit'));
     }
 
     /**
@@ -612,6 +664,21 @@ final class DelegatedRacesTest extends TestCase
             ->where('authorizable_id', $user->getKey())
             ->where('permissions.name', $permission)
             ->exists();
+    }
+
+    /**
+     * Remove the actor's direct grant of the permission as another worker
+     * would, with nothing in this one told.
+     *
+     * @param  string  $permission
+     * @return void
+     */
+    private static function removeElsewhere(string $permission): void
+    {
+        DB::table('authorizable_permissions')
+            ->where('authorizable_id', 'admin')
+            ->where('permission_id', self::permission($permission)->getKey())
+            ->delete();
     }
 
     /**

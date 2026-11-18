@@ -373,6 +373,24 @@ final class DelegatedGrantsTest extends TestCase
     }
 
     /**
+     * A permission the actor is allowed through an attached policy alone is not
+     * held, so granting it is refused as not grantable.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPermissionAllowedOnlyByAPolicyIsNotGrantable(): void
+    {
+        $actor = self::actor('admin', self::granting());
+
+        StubGrantee::query()->findOrFail('admin')->attachPolicy(self::document('editors', [['effect' => 'allow', 'actions' => ['posts:*']]]));
+
+        self::assertTrue($actor->decide('posts:edit')->isAllowed());
+        self::assertGrant(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, $actor, self::user('user'), 'posts:edit');
+    }
+
+    /**
      * A grant reaching the tenants below its tenant needs the permission held
      * there by a grant that reaches below too.
      *

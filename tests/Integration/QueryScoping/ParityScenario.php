@@ -459,8 +459,8 @@ final class ParityScenario
     }
 
     /**
-     * Attach the subject's policies, and set a boundary, a guardrail and the
-     * type's resource policies, each sometimes.
+     * Attach the subject's policies, and set boundaries in the platform or a
+     * tenant, a guardrail and the type's resource policies, each sometimes.
      *
      * @return void
      *
@@ -477,8 +477,13 @@ final class ParityScenario
             $this->user->attachPolicy($this->policy('identity-' . $index, $this->statements(false)), null, self::scopeOf($tenant), $isSubtree);
         }
 
-        if ($this->random->getInt(0, 3) === 0) {
-            self::service(BoundaryService::class)->set($this->user, $this->policy('boundary', $this->capStatements()));
+        for ($index = $this->random->getInt(0, 3) - 1; $index > 0; $index--) {
+            $tenant    = $this->pick($this->tenants);
+            $isSubtree = $this->random->getInt(0, 2) > 0;
+
+            $this->log[] = 'boundary in ' . self::nameOf($tenant) . ($isSubtree ? ' and below' : ' alone');
+
+            self::service(BoundaryService::class)->set($this->user, $this->policy('boundary-' . $index, $this->capStatements()), self::scopeOf($tenant), $isSubtree);
         }
 
         if ($this->random->getInt(0, 3) === 0) {
