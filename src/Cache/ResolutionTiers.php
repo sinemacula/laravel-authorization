@@ -143,9 +143,10 @@ final readonly class ResolutionTiers
 
     /**
      * Return the stored entry's value, memoised for the rest of its life, or
-     * null when there is none, a version it recorded has changed, or it cannot
-     * be read back. Given the entries a bulk read found, whose versions it has
-     * checked, the entry is taken from those, without reading the store again.
+     * null when there is none, it has lapsed, a version it recorded has
+     * changed, or it cannot be read back. Given the entries a bulk read found,
+     * whose versions it has checked, the entry is taken from those, without
+     * reading the store again.
      *
      * @param  string  $memoKey
      * @param  string  $key
@@ -161,7 +162,7 @@ final readonly class ResolutionTiers
 
         $entry = $entries === null ? $this->store->get($key) : $entries[$key] ?? null;
 
-        if (!ResolutionCodec::isEntry($entry) || ($entries === null && $this->store->tokens(\array_keys($entry['versions'])) !== $entry['versions'])) {
+        if (!self::isServable($this->store, $entry, $entries !== null)) {
             return null;
         }
 
@@ -208,5 +209,25 @@ final readonly class ResolutionTiers
         }
 
         $this->memo->put(self::ACTIVATIONS . $memoKey, [$activations], null);
+    }
+
+    /**
+     * Determine whether a stored entry may be served: well formed, not yet
+     * lapsed, and holding every version it recorded unless those are checked.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Cache\VersionedStore  $store
+     * @param  mixed  $entry
+     * @param  bool  $isChecked
+     * @return bool
+     *
+     * @phpstan-assert-if-true array{versions: non-empty-array<string, string>, value: array<mixed>, until: int, routes?: mixed, activations?: mixed} $entry
+     */
+    private static function isServable(VersionedStore $store, mixed $entry, bool $isChecked): bool
+    {
+        if (!ResolutionCodec::isEntry($entry) || $entry['until'] <= Carbon::now()->getTimestamp()) {
+            return false;
+        }
+
+        return $isChecked || $store->tokens(\array_keys($entry['versions'])) === $entry['versions'];
     }
 }
