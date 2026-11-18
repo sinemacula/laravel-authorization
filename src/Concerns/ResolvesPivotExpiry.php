@@ -32,7 +32,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
  */
 trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 {
-    /** @var \WeakMap<\Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>, true>|null The grants a check read on the write connection. */
+    /** @var \WeakMap<\Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>, string>|null Grants a check read on the write connection, by scope key. */
     private static ?\WeakMap $authorizationWriterReads = null;
 
     /**
@@ -89,8 +89,9 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 
     /**
      * Return the grants of the given relation, read on the write connection
-     * first when the relation is not loaded or was loaded other than here, as
-     * one the application loaded may have come from a read replica that lags.
+     * first when the relation is not loaded, was loaded other than here, as one
+     * the application loaded may have come from a read replica that lags, or
+     * was read here in another tenant or application.
      *
      * Loading is explicit, never lazy, so a grantee hydrated from a query of
      * several rows resolves under `Model::preventLazyLoading()` as well.
@@ -101,9 +102,10 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     private function authorizationLoadedGrants(string $relation): EloquentCollection
     {
         $read   = self::$authorizationWriterReads ??= new \WeakMap;
+        $scope  = TenantScope::scopeKey();
         $loaded = $this->relationLoaded($relation) ? $this->getRelation($relation) : null;
 
-        if ($loaded instanceof EloquentCollection && isset($read[$loaded])) {
+        if ($loaded instanceof EloquentCollection && ($read[$loaded] ?? null) === $scope) {
             return $loaded;
         }
 
@@ -111,7 +113,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 
         /** @var \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model> $grants */
         $grants        = $this->getRelation($relation);
-        $read[$grants] = true;
+        $read[$grants] = $scope;
 
         return $grants;
     }
