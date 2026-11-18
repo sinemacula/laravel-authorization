@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Reviews\Support\Definitions;
+use Tests\Concerns\CompilesQueries;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\TestCase;
 
@@ -28,6 +29,8 @@ use Tests\TestCase;
 #[CoversClass(Definitions::class)]
 final class DefinitionsTest extends TestCase
 {
+    use CompilesQueries;
+
     /**
      * Each kind of grant is named by its configured model's morph type, its
      * table and key, and a type that is none of theirs is no kind.
@@ -76,13 +79,11 @@ final class DefinitionsTest extends TestCase
 
         $role->forceFill(['name' => 'keyed'])->save();
 
-        $texts    = AuthorizationConnection::connection()->table('roles')->select(new ComposedExpression($read . ' as id_text'))->pluck('id_text')->all();
-        $expected = [
-            'pgsql' => 'cast("roles"."id" as text)',
-            'mysql' => 'concat(`roles`.`id`, \'\')',
-        ][AuthorizationConnection::connection()->getDriverName()] ?? '"roles"."id"';
+        $isPostgres = AuthorizationConnection::connection()->getDriverName() === 'pgsql';
+        $texts      = AuthorizationConnection::connection()->table('roles')->select(new ComposedExpression($read . ' as id_text'))->pluck('id_text')->all();
 
-        self::assertSame($expected, $read);
+        self::assertSame($isPostgres ? 'cast("roles"."id" as text)' : $query->getGrammar()->wrap('roles.id'), $read);
+        self::assertSame('`roles`.`id`', Definitions::keyAsText(self::queryOn('mysql', 'roles'), 'roles.id'));
         self::assertSame([$role->getKey()], $texts);
     }
 }

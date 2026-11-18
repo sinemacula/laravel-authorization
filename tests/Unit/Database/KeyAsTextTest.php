@@ -23,24 +23,26 @@ final class KeyAsTextTest extends TestCase
     use CompilesQueries;
 
     /**
-     * The column is wrapped by the grammar and read as text on PostgreSQL and
-     * MySQL.
+     * The column is wrapped by the grammar and read as text on PostgreSQL, and
+     * on MySQL unless it holds a UUID.
      *
      * @return void
      */
-    public function testTheColumnIsReadAsTextOnPostgresAndMySql(): void
+    public function testTheColumnIsReadAsTextWhereItsDriverNeedsIt(): void
     {
         $compiled = [];
 
         foreach (self::drivers() as $driver) {
-            $compiled[$driver] = (new KeyAsText('roles.id'))->getValue(self::queryOn($driver, 'roles')->getGrammar());
+            $grammar = self::queryOn($driver, 'users')->getGrammar();
+
+            $compiled[$driver] = [(new KeyAsText('users.id'))->getValue($grammar), (new KeyAsText('roles.id', uuid: true))->getValue($grammar)];
         }
 
         self::assertSame([
-            'sqlite'  => '"roles"."id"',
-            'pgsql'   => 'cast("roles"."id" as text)',
-            'mysql'   => 'concat(`roles`.`id`, \'\')',
-            'mariadb' => 'concat(`roles`.`id`, \'\')',
+            'sqlite'  => ['"users"."id"', '"roles"."id"'],
+            'pgsql'   => ['cast("users"."id" as text)', 'cast("roles"."id" as text)'],
+            'mysql'   => ['concat(`users`.`id`, \'\')', '`roles`.`id`'],
+            'mariadb' => ['concat(`users`.`id`, \'\')', '`roles`.`id`'],
         ], $compiled);
     }
 

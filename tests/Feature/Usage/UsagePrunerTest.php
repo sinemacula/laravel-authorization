@@ -138,8 +138,8 @@ final class UsagePrunerTest extends TestCase
 
     /**
      * A usage row's grant key is compared with each grant table's key as text,
-     * which PostgreSQL casts from its `uuid`, MySQL concatenates and SQLite
-     * stores already, on each driver's grammar.
+     * which PostgreSQL casts from its `uuid` and every other database stores
+     * already, on each driver's grammar.
      *
      * @return void
      */
@@ -148,8 +148,7 @@ final class UsagePrunerTest extends TestCase
         foreach (self::drivers() as $driver) {
             foreach (GrantTarget::cases() as $kind) {
                 $key      = self::wrappedOn($driver, $kind->table() . '.' . $kind->column());
-                $text     = ['pgsql' => "cast({$key} as text)", 'mysql' => "concat({$key}, '')", 'mariadb' => "concat({$key}, '')"][$driver] ?? $key;
-                $expected = $text . ' = ' . self::wrappedOn($driver, 'grant_usage.grant_id');
+                $expected = ($driver === 'pgsql' ? "cast({$key} as text)" : $key) . ' = ' . self::wrappedOn($driver, 'grant_usage.grant_id');
                 $sql      = UsagePruner::orphansOf(self::queryOn($driver, 'grant_usage'), $kind)->toSql();
 
                 self::assertStringContainsString($expected, $sql, $driver);

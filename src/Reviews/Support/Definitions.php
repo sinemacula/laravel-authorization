@@ -84,7 +84,8 @@ final class Definitions
     /**
      * Return the expression that reads the definition key column of the query's
      * table as text, so it compares with a grantee key column on the query's
-     * driver (see `KeyAsText`).
+     * driver: PostgreSQL casts its `uuid`, any other database stores the key as
+     * text already.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $column
@@ -92,7 +93,7 @@ final class Definitions
      */
     public static function keyAsText(Builder $query, string $column): string
     {
-        return (new KeyAsText($column))->getValue($query->getGrammar());
+        return (new KeyAsText($column, uuid: true))->getValue($query->getGrammar());
     }
 
     /**
